@@ -1,4 +1,4 @@
-module github.com/Stevy2191/sentinel/backend
+module github.com/Stevy2191/Sentinel/backend
 
 go 1.25
 
