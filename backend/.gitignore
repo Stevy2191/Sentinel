@@ -1,0 +1,12 @@
+# Environment files
+.env
+
+# Build artifacts
+/bin/
+/sentinel
+
+# Air hot-reload
+/tmp/
+
+# Test / coverage output
+*.out
