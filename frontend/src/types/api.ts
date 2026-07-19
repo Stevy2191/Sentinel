@@ -250,15 +250,19 @@ export interface PublicStatusData {
 export interface NotificationChannel {
   name: string
   enabled: boolean
-  settings: Record<string, string>
+  description?: string
+  settings?: Record<string, string>
 }
+
+export type NotificationStatus = 'pending' | 'sent' | 'failed'
 
 export interface NotificationHistoryItem {
   id: string
   monitor_id: string
+  monitor_name?: string
   channel: string
-  status: string
-  error_message?: string
-  sent_at?: string
+  status: NotificationStatus
+  error_message?: string | null
+  sent_at?: string | null
   created_at: string
 }
