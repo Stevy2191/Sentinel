@@ -9,6 +9,7 @@ import {
   useDeleteStatusPage,
   useAddMonitorToPage,
   useRemoveMonitorFromPage,
+  useUpdateMonitorPosition,
 } from '@/hooks/useStatusPages'
 import { useMonitors } from '@/hooks/useMonitors'
 import { useToasts, Toaster } from '@/components/Toast'
@@ -241,6 +242,7 @@ function StatusPageDetailView() {
   const { monitors: allMonitors } = useMonitors({ limit: 500 })
   const { add } = useAddMonitorToPage()
   const { remove } = useRemoveMonitorFromPage()
+  const { update: updatePosition } = useUpdateMonitorPosition(slug)
 
   const [showAdd, setShowAdd] = useState(false)
   const [selMonitor, setSelMonitor] = useState('')
@@ -277,6 +279,16 @@ function StatusPageDetailView() {
       await refetch()
     } catch {
       push('Failed to remove monitor', 'error')
+    }
+  }
+
+  const handleUpdatePosition = async (monitorId: string, position: number) => {
+    try {
+      await updatePosition(monitorId, position)
+      push('Position updated', 'success')
+      await refetch()
+    } catch (err) {
+      push((err as { message?: string }).message || 'Failed to update position', 'error')
     }
   }
 
@@ -352,7 +364,11 @@ function StatusPageDetailView() {
             <Plus className="h-4 w-4" /> Add Monitor
           </button>
         </div>
-        <MonitorList monitors={monitors} onRemove={(id) => void handleRemove(id)} />
+        <MonitorList
+          monitors={monitors}
+          onRemove={(id) => void handleRemove(id)}
+          onUpdatePosition={handleUpdatePosition}
+        />
       </div>
 
       {showAdd && (

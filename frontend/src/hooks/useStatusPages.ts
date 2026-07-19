@@ -142,6 +142,21 @@ export function useAddMonitorToPage(slug?: string) {
   return { add, loading, error }
 }
 
+/** useUpdateMonitorPosition returns an update(monitorId, position) action. */
+export function useUpdateMonitorPosition(slug?: string) {
+  const { loading, error, wrap } = useMutationState()
+  const update = useCallback(
+    (monitorId: string, position: number, overrideSlug?: string) =>
+      wrap(async () => {
+        const target = overrideSlug ?? slug
+        if (!target) throw { status: 0, message: 'slug is required' } as ApiError
+        await api.patch(`/status-pages/${target}/monitors/${monitorId}/position`, { position })
+      }),
+    [wrap, slug]
+  )
+  return { update, loading, error }
+}
+
 /** useRemoveMonitorFromPage returns a remove() action. */
 export function useRemoveMonitorFromPage(slug?: string, monitorId?: string) {
   const { loading, error, wrap } = useMutationState()
