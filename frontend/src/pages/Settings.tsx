@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { format } from 'date-fns'
 import { Upload, Trash2, Volume2, ExternalLink } from 'lucide-react'
 import { useTheme, type ThemeMode } from '@/context/ThemeContext'
@@ -6,6 +6,7 @@ import { useToasts, Toaster } from '@/components/Toast'
 import SettingsCard from '@/components/SettingsCard'
 import ColorPicker from '@/components/ColorPicker'
 import TimezoneSelector from '@/components/TimezoneSelector'
+import Security from '@/pages/Security'
 import {
   PREF,
   DEFAULTS,
@@ -23,7 +24,7 @@ import {
   type ReportRange,
 } from '@/utils/preferences'
 
-type Tab = 'appearance' | 'preferences' | 'about'
+type Tab = 'appearance' | 'preferences' | 'security' | 'about'
 
 const GITHUB_URL = 'https://github.com/Stevy2191/Sentinel'
 
@@ -96,7 +97,18 @@ function RadioRow<T extends string>({
 export default function Settings() {
   const { mode, setMode } = useTheme()
   const { toasts, push } = useToasts()
-  const [tab, setTab] = useState<Tab>('appearance')
+  const [tab, setTab] = useState<Tab>(
+    () => (window.location.hash === '#security' ? 'security' : 'appearance')
+  )
+
+  // Respond to hash changes (e.g. navigating to /settings#security).
+  useEffect(() => {
+    const onHash = () => {
+      if (window.location.hash === '#security') setTab('security')
+    }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
 
   // Appearance
   const [logo, setLogo] = useState(() => getString(PREF.logo, ''))
@@ -240,7 +252,7 @@ export default function Settings() {
 
       {/* Tabs */}
       <div className="flex gap-2">
-        {(['appearance', 'preferences', 'about'] as Tab[]).map((t) => (
+        {(['appearance', 'preferences', 'security', 'about'] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -425,6 +437,8 @@ export default function Settings() {
           </SettingsCard>
         </div>
       )}
+
+      {tab === 'security' && <Security />}
 
       {tab === 'about' && (
         <div className="space-y-6">

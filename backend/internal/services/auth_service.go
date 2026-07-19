@@ -293,6 +293,32 @@ func (s *AuthService) DisableMFA(ctx context.Context, userID uuid.UUID) error {
 	return nil
 }
 
+// ChangePassword verifies the current password and sets a new one (after
+// validating its strength).
+func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, currentPassword, newPassword string) error {
+	user, err := s.GetUserByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(currentPassword)); err != nil {
+		return errors.New("current password is incorrect")
+	}
+	if err := models.ValidatePassword(newPassword); err != nil {
+		return err
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hashing new password: %w", err)
+	}
+	if err := s.db.WithContext(ctx).Model(&models.User{}).
+		Where("id = ?", userID).
+		Updates(map[string]interface{}{"password_hash": string(hash), "updated_at": time.Now()}).Error; err != nil {
+		return fmt.Errorf("updating password: %w", err)
+	}
+	s.logger.Printf("[auth] password changed for user %s", userID)
+	return nil
+}
+
 // GenerateMFAToken issues a short-lived (5-minute) token used to complete an
 // MFA challenge after a correct password. It carries an mfa_pending claim and
 // grants no API access on its own.

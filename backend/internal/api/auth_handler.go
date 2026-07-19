@@ -41,6 +41,11 @@ type totpRequest struct {
 	TOTPCode string `json:"totp_code"`
 }
 
+type changePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
 // RegisterHandler handles POST /api/v1/auth/register. The first account created
 // becomes an admin.
 func RegisterHandler(authService *services.AuthService) gin.HandlerFunc {
@@ -303,6 +308,28 @@ func GetCurrentUserHandler(authService *services.AuthService) gin.HandlerFunc {
 	}
 }
 
+// ChangePasswordHandler handles POST /api/v1/auth/password (protected).
+func ChangePasswordHandler(authService *services.AuthService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID, _, _, ok := GetUserFromContext(c)
+		if !ok {
+			respondAuthError(c, http.StatusUnauthorized, "authentication required")
+			return
+		}
+		var req changePasswordRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			respondAuthError(c, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if err := authService.ChangePassword(c.Request.Context(), userID, req.CurrentPassword, req.NewPassword); err != nil {
+			respondAuthError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		log.Printf("Password changed for: %s", userID)
+		respondSuccess(c, http.StatusOK, gin.H{"message": "Password updated successfully"})
+	}
+}
+
 // AuthMiddleware validates the Bearer JWT and stores the user in the context.
 func AuthMiddleware(authService *services.AuthService) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -371,6 +398,7 @@ func RegisterAuthRoutes(router *gin.Engine, authService *services.AuthService) {
 	protected.POST("/mfa/setup", SetupMFAHandler(authService))
 	protected.POST("/mfa/confirm", ConfirmMFAHandler(authService))
 	protected.POST("/mfa/disable", DisableMFAHandler(authService))
+	protected.POST("/password", ChangePasswordHandler(authService))
 	protected.POST("/logout", LogoutHandler())
 	protected.GET("/me", GetCurrentUserHandler(authService))
 }
