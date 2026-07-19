@@ -18,9 +18,9 @@ func round2(f float64) float64 {
 // GetMonitorReportHandler handles GET /api/v1/monitors/:id/report, producing an
 // uptime/SLA report over a date range (default: last 30 days).
 //
-// Note: check-derived stats are computed over the most recent maxCheckFetch
-// checks within the range, not the full history. For long ranges on
-// high-frequency monitors, add DB-level aggregation to CheckService.
+// Note: the status breakdown and average response time load all checks in the
+// range via GetChecksInRange. For very long ranges on high-frequency monitors,
+// add DB-level status aggregation (GROUP BY status, AVG) to CheckService.
 func GetMonitorReportHandler(
 	monitorService *services.MonitorService,
 	checkService *services.CheckService,
