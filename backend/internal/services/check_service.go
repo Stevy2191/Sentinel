@@ -384,6 +384,47 @@ func (s *CheckService) GetRecentChecks(ctx context.Context, monitorID uuid.UUID,
 	return checks, nil
 }
 
+// GetChecksInRange returns a monitor's checks whose timestamp falls within
+// [start, end] (inclusive), newest first, applying limit and offset for
+// pagination. A non-positive limit or offset is treated as unset. An empty
+// result set is returned as an empty slice with a nil error.
+func (s *CheckService) GetChecksInRange(ctx context.Context, monitorID uuid.UUID, start, end time.Time, limit, offset int) ([]models.Check, error) {
+	query := s.db.WithContext(ctx).
+		Where("monitor_id = ? AND timestamp >= ? AND timestamp <= ?", monitorID, start, end).
+		Order("timestamp DESC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if offset > 0 {
+		query = query.Offset(offset)
+	}
+
+	var checks []models.Check
+	if err := query.Find(&checks).Error; err != nil {
+		return nil, fmt.Errorf("querying checks in range for monitor %s: %w", monitorID, err)
+	}
+
+	s.logger.Printf("[check] retrieved %d checks for monitor %s from %s to %s",
+		len(checks), monitorID, start.Format(time.RFC3339), end.Format(time.RFC3339))
+	return checks, nil
+}
+
+// CountChecks returns the number of checks for a monitor whose timestamp falls
+// within [start, end] (inclusive). Zero matches is reported as 0, not an error.
+func (s *CheckService) CountChecks(ctx context.Context, monitorID uuid.UUID, start, end time.Time) (int64, error) {
+	var count int64
+	err := s.db.WithContext(ctx).
+		Model(&models.Check{}).
+		Where("monitor_id = ? AND timestamp >= ? AND timestamp <= ?", monitorID, start, end).
+		Count(&count).Error
+	if err != nil {
+		return 0, fmt.Errorf("counting checks for monitor %s: %w", monitorID, err)
+	}
+
+	s.logger.Printf("[check] total checks for monitor %s in range: %d", monitorID, count)
+	return count, nil
+}
+
 // checkTimeout returns the effective per-check timeout for a monitor.
 func (s *CheckService) checkTimeout(m *models.Monitor) time.Duration {
 	if m.TimeoutSeconds <= 0 {
