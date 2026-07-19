@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowUpDown, Info, RotateCcw } from 'lucide-react'
+import { ArrowUpDown, Info, RotateCcw, Loader2 } from 'lucide-react'
 import type { NotificationHistoryItem, NotificationStatus } from '@/types'
 import { formatDatetime } from '@/utils/formatters'
 
@@ -17,10 +17,18 @@ interface Props {
   loading: boolean
   error?: string | null
   onRetry?: (item: NotificationHistoryItem) => void
+  retryingId?: string | null
   onReload?: () => void
 }
 
-export default function NotificationHistoryTable({ items, loading, error, onRetry, onReload }: Props) {
+export default function NotificationHistoryTable({
+  items,
+  loading,
+  error,
+  onRetry,
+  retryingId,
+  onReload,
+}: Props) {
   const [sortKey, setSortKey] = useState<SortKey>('created_at')
   const [sortAsc, setSortAsc] = useState(false)
   const [details, setDetails] = useState<NotificationHistoryItem | null>(null)
@@ -127,11 +135,16 @@ export default function NotificationHistoryTable({ items, loading, error, onRetr
                       </button>
                       {n.status === 'failed' && onRetry && (
                         <button
-                          className="btn-secondary !px-2 !py-1"
+                          className="btn !px-2 !py-1 border border-amber-300 text-amber-600 hover:bg-amber-50 disabled:opacity-50 dark:border-amber-800 dark:hover:bg-amber-900/20"
                           title="Retry"
+                          disabled={retryingId === n.id}
                           onClick={() => onRetry(n)}
                         >
-                          <RotateCcw className="h-4 w-4" />
+                          {retryingId === n.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <RotateCcw className="h-4 w-4" />
+                          )}
                         </button>
                       )}
                     </div>

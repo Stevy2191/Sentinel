@@ -2,7 +2,11 @@ import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Bell, CheckCircle2, XCircle } from 'lucide-react'
 import api, { type ApiError } from '@/services/api'
-import { useNotificationChannels, useNotificationHistory } from '@/hooks/useNotifications'
+import {
+  useNotificationChannels,
+  useNotificationHistory,
+  useRetryNotification,
+} from '@/hooks/useNotifications'
 import { useToasts, Toaster } from '@/components/Toast'
 import NotificationChannelCard from '@/components/NotificationChannelCard'
 import NotificationHistoryTable from '@/components/NotificationHistoryTable'
@@ -67,8 +71,20 @@ export default function Notifications() {
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
-  const handleRetry = (_item: NotificationHistoryItem) => {
-    push('Retry is not available yet', 'info')
+  const { retry } = useRetryNotification()
+  const [retryingId, setRetryingId] = useState<string | null>(null)
+
+  const handleRetry = async (item: NotificationHistoryItem) => {
+    setRetryingId(item.id)
+    try {
+      await retry(item.id)
+      push('Notification retry sent', 'success')
+      await refetch()
+    } catch (err) {
+      push((err as ApiError).message || 'Retry failed', 'error')
+    } finally {
+      setRetryingId(null)
+    }
   }
 
   return (
@@ -181,7 +197,8 @@ export default function Notifications() {
           items={history}
           loading={loading}
           error={error?.message ?? null}
-          onRetry={handleRetry}
+          onRetry={(item) => void handleRetry(item)}
+          retryingId={retryingId}
           onReload={() => void refetch()}
         />
 
