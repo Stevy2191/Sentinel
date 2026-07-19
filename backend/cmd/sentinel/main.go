@@ -1,124 +1,377 @@
-// Command sentinel starts the Sentinel uptime monitoring HTTP server.
+// Command sentinel starts the Sentinel uptime monitoring server: it connects to
+// the database, runs migrations, wires up services and the REST API, launches
+// the monitoring loop, and serves HTTP with graceful shutdown.
 package main
 
 import (
 	"context"
 	"errors"
-	"log/slog"
+	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"sort"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/joho/godotenv"
+	"gorm.io/gorm"
+
+	"github.com/Stevy2191/Sentinel/backend/internal/api"
+	"github.com/Stevy2191/Sentinel/backend/internal/database"
+	"github.com/Stevy2191/Sentinel/backend/internal/models"
+	"github.com/Stevy2191/Sentinel/backend/internal/notifications"
+	"github.com/Stevy2191/Sentinel/backend/internal/services"
 )
 
-const (
-	defaultPort         = "3000"
-	defaultEnvironment  = "development"
-	shutdownGracePeriod = 10 * time.Second
-	readHeaderTimeout   = 5 * time.Second
-)
+const shutdownTimeout = 30 * time.Second
 
-func main() {
-	logger := newLogger()
-	slog.SetDefault(logger)
+// config holds runtime configuration read from the environment.
+type config struct {
+	Port          string
+	Environment   string
+	CheckInterval time.Duration
+	MigrationsDir string
+}
 
-	if err := run(logger); err != nil {
-		logger.Error("server terminated with error", slog.Any("error", err))
-		os.Exit(1)
+func loadConfig() config {
+	return config{
+		Port:          getenv("PORT", "3000"),
+		Environment:   getenv("ENVIRONMENT", "development"),
+		CheckInterval: time.Duration(getenvInt("DEFAULT_CHECK_INTERVAL", 30)) * time.Second,
+		MigrationsDir: getenv("MIGRATIONS_DIR", "migrations"),
 	}
 }
 
-// run wires up configuration, the HTTP server, and graceful shutdown. It returns
-// an error rather than calling os.Exit so that deferred cleanup runs correctly.
-func run(logger *slog.Logger) error {
-	// Load .env if present. A missing file is not fatal: in production,
-	// configuration typically comes from real environment variables.
-	if err := godotenv.Load(); err != nil {
-		logger.Info("no .env file loaded; relying on process environment", slog.Any("reason", err))
+func main() {
+	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
+	log.SetPrefix("[sentinel] ")
+
+	if err := run(); err != nil {
+		log.Fatalf("fatal: %v", err)
+	}
+}
+
+// run wires the application together and blocks until shutdown.
+func run() error {
+	cfg := loadConfig()
+	log.Printf("starting Sentinel (env=%s)", cfg.Environment)
+
+	// 1. Database.
+	db, err := database.NewDB(nil)
+	if err != nil {
+		return fmt.Errorf("connecting to database: %w", err)
 	}
 
-	environment := getenv("ENVIRONMENT", defaultEnvironment)
-	port := getenv("PORT", defaultPort)
+	// 2. Migrations.
+	if err := runMigrations(db, cfg.MigrationsDir); err != nil {
+		return fmt.Errorf("running migrations: %w", err)
+	}
 
-	if environment == "production" {
+	// 3. Services.
+	monitorService := services.NewMonitorService(db)
+	checkService := services.NewCheckService(db)
+	incidentService := services.NewIncidentService(db)
+	statusPageService := services.NewStatusPageService(db)
+	notificationManager := notifications.NewNotificationManager(db)
+
+	// 4. Notification plugins (each is optional; unconfigured channels are skipped).
+	registerNotificationPlugins(notificationManager)
+
+	// 5. HTTP router + routes.
+	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
+	router := gin.New()
+	router.Use(gin.Logger(), gin.Recovery())
+	router.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"status":    "healthy",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		})
+	})
+	v1 := router.Group("/api/v1")
+	api.RegisterMonitorRoutes(v1, monitorService, checkService)
+	api.RegisterCheckRoutes(v1, checkService, incidentService, monitorService)
+	api.RegisterReportRoutes(v1, monitorService, checkService, incidentService)
+	api.RegisterStatusPageRoutes(router, statusPageService, incidentService)
 
-	router := newRouter()
+	// 6. Monitoring loop.
+	loopCtx, cancelLoop := context.WithCancel(context.Background())
+	go StartMonitoringLoop(loopCtx, db, monitorService, checkService, incidentService, notificationManager, cfg.CheckInterval)
 
-	srv := &http.Server{
-		Addr:              ":" + port,
+	// 7. HTTP server.
+	server := &http.Server{
+		Addr:              ":" + cfg.Port,
 		Handler:           router,
-		ReadHeaderTimeout: readHeaderTimeout,
+		ReadHeaderTimeout: 5 * time.Second,
 	}
-
-	// Start the server in a goroutine so that it does not block graceful
-	// shutdown handling below.
 	serverErr := make(chan error, 1)
 	go func() {
-		logger.Info("starting Sentinel server",
-			slog.String("environment", environment),
-			slog.String("addr", srv.Addr),
-		)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Printf("HTTP server listening on %s", server.Addr)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErr <- err
-			return
 		}
-		serverErr <- nil
 	}()
 
-	// Wait for either a fatal server error or an OS interrupt/termination signal.
+	// 8. Graceful shutdown.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	select {
 	case err := <-serverErr:
-		return err
+		cancelLoop()
+		return fmt.Errorf("http server: %w", err)
 	case sig := <-quit:
-		logger.Info("shutdown signal received", slog.String("signal", sig.String()))
+		log.Printf("shutdown signal received: %s", sig)
 	}
 
-	// Attempt a graceful shutdown, allowing in-flight requests to complete.
-	ctx, cancel := context.WithTimeout(context.Background(), shutdownGracePeriod)
+	// Stop the monitoring loop, then the HTTP server, then the database.
+	cancelLoop()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
-
-	if err := srv.Shutdown(ctx); err != nil {
-		return err
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("http shutdown error: %v", err)
+	}
+	if sqlDB, err := db.DB(); err == nil {
+		_ = sqlDB.Close()
 	}
 
-	logger.Info("server stopped cleanly")
+	log.Println("stopped cleanly")
 	return nil
 }
 
-// newRouter builds the Gin engine and registers baseline routes.
-func newRouter() *gin.Engine {
-	router := gin.New()
-	router.Use(gin.Logger(), gin.Recovery())
+// registerNotificationPlugins builds each plugin from the environment and
+// registers those that are configured. A plugin whose environment is not set
+// returns an error from its constructor and is skipped rather than fatal.
+func registerNotificationPlugins(manager *notifications.NotificationManager) {
+	register := func(name string, plugin notifications.NotificationPlugin, err error) {
+		if err != nil {
+			log.Printf("notification plugin %q not configured: %v", name, err)
+			return
+		}
+		if err := manager.RegisterPlugin(plugin); err != nil {
+			log.Printf("failed to register %q plugin: %v", name, err)
+			return
+		}
+		log.Printf("%s notification plugin registered", name)
+	}
 
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
-
-	return router
+	email, err := notifications.NewEmailPlugin()
+	register("email", email, err)
+	ntfy, err := notifications.NewNtfyPlugin()
+	register("ntfy", ntfy, err)
+	slack, err := notifications.NewSlackPlugin()
+	register("slack", slack, err)
+	discord, err := notifications.NewDiscordPlugin()
+	register("discord", discord, err)
+	telegram, err := notifications.NewTelegramPlugin()
+	register("telegram", telegram, err)
+	webhook, err := notifications.NewWebhookPlugin()
+	register("webhook", webhook, err)
 }
 
-// newLogger returns a structured JSON logger writing to stdout.
-func newLogger() *slog.Logger {
-	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	})
-	return slog.New(handler)
+// runMigrations applies any *.sql files in dir that have not yet been recorded
+// in the schema_migrations table, in filename order.
+func runMigrations(db *gorm.DB, dir string) error {
+	if err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+		filename   TEXT PRIMARY KEY,
+		applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`).Error; err != nil {
+		return fmt.Errorf("creating schema_migrations table: %w", err)
+	}
+
+	files, err := filepath.Glob(filepath.Join(dir, "*.sql"))
+	if err != nil {
+		return fmt.Errorf("listing migrations in %q: %w", dir, err)
+	}
+	sort.Strings(files)
+
+	for _, path := range files {
+		name := filepath.Base(path)
+
+		var applied int64
+		if err := db.Raw("SELECT count(*) FROM schema_migrations WHERE filename = ?", name).Scan(&applied).Error; err != nil {
+			return fmt.Errorf("checking migration %q: %w", name, err)
+		}
+		if applied > 0 {
+			continue
+		}
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("reading migration %q: %w", name, err)
+		}
+		log.Printf("applying migration %s", name)
+		if err := db.Exec(string(content)).Error; err != nil {
+			return fmt.Errorf("applying migration %q: %w", name, err)
+		}
+		if err := db.Exec("INSERT INTO schema_migrations (filename) VALUES (?)", name).Error; err != nil {
+			return fmt.Errorf("recording migration %q: %w", name, err)
+		}
+	}
+	return nil
 }
 
-// getenv returns the value of the environment variable named by key, or
-// fallback if the variable is unset or empty.
+// StartMonitoringLoop periodically checks all enabled monitors until the context
+// is cancelled.
+func StartMonitoringLoop(
+	ctx context.Context,
+	db *gorm.DB,
+	monitorService *services.MonitorService,
+	checkService *services.CheckService,
+	incidentService *services.IncidentService,
+	notificationManager *notifications.NotificationManager,
+	interval time.Duration,
+) {
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	log.Printf("monitoring loop started (interval=%s)", interval)
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("monitoring loop stopped")
+			return
+		case <-ticker.C:
+			runMonitoringCycle(ctx, db, monitorService, checkService, incidentService, notificationManager)
+		}
+	}
+}
+
+// runMonitoringCycle checks every enabled monitor once. It recovers from panics
+// so a single bad cycle cannot crash the loop.
+func runMonitoringCycle(
+	ctx context.Context,
+	db *gorm.DB,
+	monitorService *services.MonitorService,
+	checkService *services.CheckService,
+	incidentService *services.IncidentService,
+	notificationManager *notifications.NotificationManager,
+) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("monitoring cycle panic recovered: %v", r)
+		}
+	}()
+
+	monitors, err := monitorService.ListMonitors(ctx, map[string]interface{}{"enabled": true})
+	if err != nil {
+		log.Printf("monitoring cycle: listing monitors: %v", err)
+		return
+	}
+
+	failures := 0
+	for i := range monitors {
+		monitor := monitors[i]
+
+		check, err := checkService.ExecuteCheck(ctx, &monitor)
+		if err != nil {
+			log.Printf("monitoring cycle: check monitor %s: %v", monitor.ID, err)
+			failures++
+			continue
+		}
+		if err := checkService.StoreCheck(ctx, monitor.ID, check); err != nil {
+			log.Printf("monitoring cycle: store check for %s: %v", monitor.ID, err)
+		}
+
+		newStatus := models.StatusOnline
+		if check.Status != "success" {
+			newStatus = models.StatusOffline
+			failures++
+		}
+
+		handleStatusChange(ctx, incidentService, notificationManager, &monitor, check, newStatus)
+
+		// Persist the latest status snapshot on the monitor row.
+		if err := db.WithContext(ctx).Model(&models.Monitor{}).
+			Where("id = ?", monitor.ID).
+			Updates(map[string]interface{}{
+				"current_status":        newStatus,
+				"last_check_at":         time.Now(),
+				"last_response_time_ms": check.ResponseTimeMs,
+			}).Error; err != nil {
+			log.Printf("monitoring cycle: update monitor %s: %v", monitor.ID, err)
+		}
+	}
+
+	log.Printf("%d monitors checked, %d failed", len(monitors), failures)
+}
+
+// handleStatusChange opens/closes incidents and sends notifications when a
+// monitor transitions between online and offline.
+func handleStatusChange(
+	ctx context.Context,
+	incidentService *services.IncidentService,
+	notificationManager *notifications.NotificationManager,
+	monitor *models.Monitor,
+	check *models.Check,
+	newStatus string,
+) {
+	previous := monitor.CurrentStatus
+	if newStatus == previous {
+		return
+	}
+
+	message := &notifications.NotificationMessage{
+		MonitorID:      monitor.ID,
+		MonitorName:    monitor.Name,
+		MonitorURL:     monitor.URL,
+		PreviousStatus: previous,
+		Timestamp:      time.Now(),
+		ResponseTimeMs: check.ResponseTimeMs,
+	}
+
+	switch {
+	case newStatus == models.StatusOffline && previous != models.StatusOffline:
+		// Newly offline: open an incident and alert.
+		if incident, err := incidentService.CreateIncident(ctx, monitor.ID, time.Now()); err != nil {
+			log.Printf("opening incident for %s: %v", monitor.ID, err)
+		} else {
+			message.IncidentID = &incident.ID
+		}
+		message.Status = "down"
+		if err := notificationManager.SendNotification(ctx, message); err != nil {
+			log.Printf("sending down notification for %s: %v", monitor.ID, err)
+		}
+
+	case newStatus == models.StatusOnline && previous == models.StatusOffline:
+		// Recovered: close the active incident and alert.
+		if active, err := incidentService.GetActiveIncident(ctx, monitor.ID); err == nil && active != nil {
+			if closed, err := incidentService.CloseIncident(ctx, active.ID, time.Now()); err != nil {
+				log.Printf("closing incident for %s: %v", monitor.ID, err)
+			} else {
+				message.IncidentID = &closed.ID
+				message.DowntimeDuration = time.Duration(closed.DurationSeconds) * time.Second
+			}
+		}
+		message.Status = "recovered"
+		if err := notificationManager.SendNotification(ctx, message); err != nil {
+			log.Printf("sending recovery notification for %s: %v", monitor.ID, err)
+		}
+	}
+	// Other transitions (e.g. unknown->online on first check) update status only.
+}
+
 func getenv(key, fallback string) string {
-	if value, ok := os.LookupEnv(key); ok && value != "" {
-		return value
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		return v
+	}
+	return fallback
+}
+
+func getenvInt(key string, fallback int) int {
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
 	}
 	return fallback
 }
