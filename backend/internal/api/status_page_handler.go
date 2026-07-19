@@ -62,15 +62,34 @@ func CreateStatusPageHandler(statusPageService *services.StatusPageService) gin.
 	}
 }
 
+// statusPageWithCount embeds a StatusPage and adds the number of monitors
+// associated with it for the list response.
+type statusPageWithCount struct {
+	models.StatusPage
+	MonitorCount int `json:"monitor_count"`
+}
+
 // GetStatusPagesHandler handles GET /api/v1/status-pages.
 func GetStatusPagesHandler(statusPageService *services.StatusPageService) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		pages, err := statusPageService.ListStatusPages(c.Request.Context())
+		ctx := c.Request.Context()
+		pages, err := statusPageService.ListStatusPages(ctx)
 		if err != nil {
 			respondError(c, http.StatusInternalServerError, err.Error())
 			return
 		}
-		respondSuccess(c, http.StatusOK, gin.H{"pages": pages})
+
+		// Enrich each page with its monitor count.
+		out := make([]statusPageWithCount, 0, len(pages))
+		for i := range pages {
+			count := 0
+			if entries, _, err := statusPageService.GetPageMonitors(ctx, pages[i].Slug); err == nil {
+				count = len(entries)
+			}
+			out = append(out, statusPageWithCount{StatusPage: pages[i], MonitorCount: count})
+		}
+
+		respondSuccess(c, http.StatusOK, gin.H{"pages": out})
 	}
 }
 
