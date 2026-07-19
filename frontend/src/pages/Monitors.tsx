@@ -7,7 +7,7 @@ const PAGE_SIZE = 10
 
 export default function Monitors() {
   const { monitors, loading, error, refetch } = useMonitors()
-  const { remove } = useDeleteMonitor()
+  const { delete: deleteMonitor } = useDeleteMonitor()
   const { test } = useTestMonitor()
   const [page, setPage] = useState(1)
 
@@ -16,7 +16,7 @@ export default function Monitors() {
 
   async function handleDelete(id: string) {
     if (!window.confirm('Delete this monitor?')) return
-    await remove(id)
+    await deleteMonitor(id)
     await refetch()
   }
 
