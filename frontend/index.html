@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Sentinel — Advanced Uptime Monitoring with Reporting" />
+    <meta name="theme-color" content="#10b981" />
+    <title>Sentinel</title>
+    <script>
+      // Apply the persisted theme before first paint to avoid a flash.
+      try {
+        var saved = localStorage.getItem('sentinel-theme')
+        var isDark =
+          saved === 'dark' ||
+          ((saved === 'auto' || saved === null) &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.classList.toggle('dark', isDark)
+      } catch (e) {
+        /* ignore */
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/index.tsx"></script>
+  </body>
+</html>

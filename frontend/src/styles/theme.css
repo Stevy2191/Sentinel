@@ -1,0 +1,28 @@
+/* Sentinel theme CSS variables. Consumed by index.css and components that need
+   raw color values (charts, inline styles). Mirrors the Tailwind palette. */
+
+:root {
+  --color-bg: 248 250 252; /* slate-50 */
+  --color-surface: 255 255 255;
+  --color-border: 226 232 240; /* slate-200 */
+  --color-text: 15 23 42; /* slate-900 */
+  --color-text-muted: 100 116 139; /* slate-500 */
+
+  --color-primary: 16 185 129; /* emerald-500 */
+  --color-warning: 245 158 11; /* amber-500 */
+  --color-error: 239 68 68; /* red-500 */
+  --color-info: 59 130 246; /* blue-500 */
+}
+
+.dark {
+  --color-bg: 2 6 23; /* slate-950 */
+  --color-surface: 15 23 42; /* slate-900 */
+  --color-border: 30 41 59; /* slate-800 */
+  --color-text: 241 245 249; /* slate-100 */
+  --color-text-muted: 148 163 184; /* slate-400 */
+
+  --color-primary: 16 185 129;
+  --color-warning: 245 158 11;
+  --color-error: 248 113 113; /* red-400 */
+  --color-info: 96 165 250; /* blue-400 */
+}
