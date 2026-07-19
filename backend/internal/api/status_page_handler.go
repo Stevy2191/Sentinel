@@ -231,6 +231,42 @@ func RemoveMonitorFromPageHandler(statusPageService *services.StatusPageService)
 	}
 }
 
+// updatePositionRequest is the body for UpdateMonitorPositionHandler.
+type updatePositionRequest struct {
+	Position int `json:"position"`
+}
+
+// UpdateMonitorPositionHandler handles PATCH
+// /api/v1/status-pages/:slug/monitors/:monitor_id/position.
+func UpdateMonitorPositionHandler(statusPageService *services.StatusPageService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		slug := c.Param("slug")
+		monitorID, err := uuid.Parse(c.Param("monitor_id"))
+		if err != nil {
+			respondError(c, http.StatusBadRequest, "invalid monitor_id: must be a UUID")
+			return
+		}
+
+		var req updatePositionRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			respondError(c, http.StatusBadRequest, "invalid request body: "+err.Error())
+			return
+		}
+		if req.Position < 1 {
+			respondError(c, http.StatusBadRequest, "position must be a positive integer")
+			return
+		}
+
+		if err := statusPageService.UpdateMonitorPosition(c.Request.Context(), slug, monitorID, req.Position); err != nil {
+			respondError(c, classifyStatusPageError(err), err.Error())
+			return
+		}
+
+		log.Printf("Monitor position updated on status page %s", slug)
+		respondSuccess(c, http.StatusOK, gin.H{"message": "Monitor position updated"})
+	}
+}
+
 // GetPublicStatusPageHandler handles GET /public/status/:slug. This endpoint is
 // public and requires no authentication. Unpublished pages return 404 so their
 // existence is not leaked.
@@ -342,6 +378,7 @@ func RegisterStatusPageRoutes(router *gin.Engine, statusPageService *services.St
 	pages.DELETE("/:slug", DeleteStatusPageHandler(statusPageService))
 	pages.POST("/:slug/monitors", AddMonitorToPageHandler(statusPageService))
 	pages.DELETE("/:slug/monitors/:monitor_id", RemoveMonitorFromPageHandler(statusPageService))
+	pages.PATCH("/:slug/monitors/:monitor_id/position", UpdateMonitorPositionHandler(statusPageService))
 
 	// Public, no authentication.
 	router.GET("/public/status/:slug", GetPublicStatusPageHandler(statusPageService, incidentService))

@@ -209,6 +209,30 @@ func (s *StatusPageService) RemoveMonitorFromPage(ctx context.Context, slug stri
 	return nil
 }
 
+// UpdateMonitorPosition sets the display position of a monitor on a status page.
+// It returns a wrapped gorm.ErrRecordNotFound if the page does not exist or the
+// monitor is not associated with it.
+func (s *StatusPageService) UpdateMonitorPosition(ctx context.Context, slug string, monitorID uuid.UUID, newPosition int) error {
+	page, err := s.GetStatusPageBySlug(ctx, slug)
+	if err != nil {
+		return err
+	}
+
+	result := s.db.WithContext(ctx).
+		Model(&models.StatusPageMonitor{}).
+		Where("status_page_id = ? AND monitor_id = ?", page.ID, monitorID).
+		Update("position", newPosition)
+	if result.Error != nil {
+		return fmt.Errorf("updating position for monitor %s on status page %q: %w", monitorID, slug, result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("monitor %s not on status page %q: %w", monitorID, slug, gorm.ErrRecordNotFound)
+	}
+
+	s.logger.Printf("[statuspage] updated monitor %s position to %d on slug=%q", monitorID, newPosition, slug)
+	return nil
+}
+
 // GetPageMonitors returns a status page's monitor associations ordered by
 // position, alongside the corresponding Monitor records aligned by index.
 func (s *StatusPageService) GetPageMonitors(ctx context.Context, slug string) ([]models.StatusPageMonitor, []models.Monitor, error) {
