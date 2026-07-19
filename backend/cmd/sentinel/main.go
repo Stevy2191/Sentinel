@@ -98,6 +98,7 @@ func run() error {
 	api.RegisterCheckRoutes(v1, checkService, incidentService, monitorService)
 	api.RegisterReportRoutes(v1, monitorService, checkService, incidentService)
 	api.RegisterStatusPageRoutes(router, statusPageService, incidentService)
+	api.RegisterNotificationRoutes(router, notificationManager, monitorService)
 
 	// 6. Monitoring loop.
 	loopCtx, cancelLoop := context.WithCancel(context.Background())

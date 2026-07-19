@@ -210,3 +210,85 @@ func (m *NotificationManager) GetFailedNotifications(ctx context.Context) ([]mod
 	}
 	return records, nil
 }
+
+// Channels returns the names of all registered notification plugins.
+func (m *NotificationManager) Channels() []string {
+	names := make([]string, 0, len(m.plugins))
+	for name := range m.plugins {
+		names = append(names, name)
+	}
+	return names
+}
+
+// IsRegistered reports whether a plugin with the given name is registered.
+func (m *NotificationManager) IsRegistered(name string) bool {
+	_, ok := m.plugins[name]
+	return ok
+}
+
+// SendToChannel delivers a message through a single named channel (used by the
+// per-channel test endpoint). Unlike SendNotification it does not persist a
+// record, so it is safe to call with a synthetic (non-persisted) monitor. It
+// returns an error if the channel is not registered or the send fails.
+func (m *NotificationManager) SendToChannel(ctx context.Context, name string, message *NotificationMessage) error {
+	plugin, ok := m.plugins[name]
+	if !ok {
+		return fmt.Errorf("notification channel %q is not registered", name)
+	}
+	if err := plugin.Send(ctx, message); err != nil {
+		return fmt.Errorf("sending via %q: %w", name, err)
+	}
+	m.logger.Printf("[notify] test message sent via %s", name)
+	return nil
+}
+
+// ListNotificationsOptions filters and paginates a notification history query.
+type ListNotificationsOptions struct {
+	Limit  int
+	Offset int
+	Status string // optional: pending | sent | failed
+	Start  *time.Time
+	End    *time.Time
+}
+
+// ListNotifications returns notification records across all monitors, filtered
+// and paginated, newest first, along with the total matching count.
+func (m *NotificationManager) ListNotifications(ctx context.Context, opts ListNotificationsOptions) ([]models.Notification, int64, error) {
+	apply := func(q *gorm.DB) *gorm.DB {
+		if opts.Status != "" {
+			q = q.Where("status = ?", opts.Status)
+		}
+		if opts.Start != nil {
+			q = q.Where("created_at >= ?", *opts.Start)
+		}
+		if opts.End != nil {
+			q = q.Where("created_at <= ?", *opts.End)
+		}
+		return q
+	}
+
+	var total int64
+	if err := apply(m.db.WithContext(ctx).Model(&models.Notification{})).Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("counting notifications: %w", err)
+	}
+
+	limit := opts.Limit
+	if limit <= 0 || limit > maxHistoryLimit {
+		limit = maxHistoryLimit
+	}
+	offset := opts.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	var records []models.Notification
+	err := apply(m.db.WithContext(ctx).Model(&models.Notification{})).
+		Order("created_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&records).Error
+	if err != nil {
+		return nil, 0, fmt.Errorf("querying notifications: %w", err)
+	}
+	return records, total, nil
+}
