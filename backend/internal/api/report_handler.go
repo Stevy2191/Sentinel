@@ -66,18 +66,25 @@ func GetMonitorReportHandler(
 			return
 		}
 
-		checks, err := checkService.GetRecentChecks(ctx, id, maxCheckFetch)
+		// Total count comes straight from the database for the exact range, so
+		// it is accurate regardless of how many checks exist (not capped).
+		totalChecks, err := checkService.CountChecks(ctx, id, start, end)
 		if err != nil {
 			respondError(c, http.StatusInternalServerError, err.Error())
 			return
 		}
 
-		var total, success, failed, timeout, sumResponse int
-		for _, ch := range checks {
-			if ch.Timestamp.Before(start) || ch.Timestamp.After(end) {
-				continue
-			}
-			total++
+		// Pull every check within the range (limit 0 = no limit) to compute the
+		// status breakdown and average response time accurately over the full
+		// range rather than only the most recent checks.
+		rangeChecks, err := checkService.GetChecksInRange(ctx, id, start, end, 0, 0)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		var success, failed, timeout, sumResponse int
+		for _, ch := range rangeChecks {
 			switch ch.Status {
 			case "success":
 				success++
@@ -111,7 +118,7 @@ func GetMonitorReportHandler(
 				"incident_count":         incidentCount,
 			},
 			"checks": gin.H{
-				"total":                total,
+				"total":                totalChecks,
 				"success":              success,
 				"failed":               failed,
 				"timeout":              timeout,
