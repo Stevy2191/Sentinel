@@ -1,12 +1,14 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/notifications"
 	"github.com/Stevy2191/Sentinel/backend/internal/services"
@@ -176,6 +178,32 @@ func SendTestNotificationHandler(manager *notifications.NotificationManager) gin
 	}
 }
 
+// RetryFailedNotificationHandler handles POST
+// /api/v1/notifications/retry/:notification_id.
+func RetryFailedNotificationHandler(manager *notifications.NotificationManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := uuid.Parse(c.Param("notification_id"))
+		if err != nil {
+			respondError(c, http.StatusBadRequest, "invalid notification_id: must be a UUID")
+			return
+		}
+
+		if err := manager.RetryNotification(c.Request.Context(), id); err != nil {
+			switch {
+			case errors.Is(err, gorm.ErrRecordNotFound):
+				respondError(c, http.StatusNotFound, err.Error())
+			case errors.Is(err, notifications.ErrNotificationNotFailed):
+				respondError(c, http.StatusBadRequest, err.Error())
+			default:
+				respondError(c, http.StatusInternalServerError, err.Error())
+			}
+			return
+		}
+
+		respondSuccess(c, http.StatusOK, gin.H{"message": "Notification retry sent"})
+	}
+}
+
 // RegisterNotificationRoutes mounts the notification endpoints under
 // /api/v1/notifications.
 func RegisterNotificationRoutes(
@@ -187,4 +215,5 @@ func RegisterNotificationRoutes(
 	group.GET("/channels", GetNotificationChannelsHandler(manager))
 	group.GET("/history", GetNotificationHistoryHandler(manager, monitorService))
 	group.POST("/test/:channel", SendTestNotificationHandler(manager))
+	group.POST("/retry/:notification_id", RetryFailedNotificationHandler(manager))
 }

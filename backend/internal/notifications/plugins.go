@@ -292,3 +292,71 @@ func (m *NotificationManager) ListNotifications(ctx context.Context, opts ListNo
 	}
 	return records, total, nil
 }
+
+// ErrNotificationNotFailed is returned when retrying a notification that is not
+// in the failed state.
+var ErrNotificationNotFailed = errors.New("notification not in failed state")
+
+// RetryNotification re-sends a previously failed notification through its
+// original channel and updates the stored record with the new outcome. It
+// returns a wrapped gorm.ErrRecordNotFound if the notification does not exist,
+// ErrNotificationNotFailed if it is not in the failed state, or the send error
+// if the retry itself fails.
+func (m *NotificationManager) RetryNotification(ctx context.Context, notificationID uuid.UUID) error {
+	var record models.Notification
+	if err := m.db.WithContext(ctx).First(&record, "id = ?", notificationID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("notification %s not found: %w", notificationID, err)
+		}
+		return fmt.Errorf("fetching notification %s: %w", notificationID, err)
+	}
+	if record.Status != statusFailed {
+		return ErrNotificationNotFailed
+	}
+
+	// Reconstruct a message from the stored record and current monitor state.
+	// The original alert text is not persisted, so this is a best-effort rebuild.
+	var monitor models.Monitor
+	if err := m.db.WithContext(ctx).First(&monitor, "id = ?", record.MonitorID).Error; err != nil {
+		return fmt.Errorf("loading monitor for notification %s: %w", notificationID, err)
+	}
+	status := "down"
+	if monitor.CurrentStatus == models.StatusOnline {
+		status = "recovered"
+	}
+	message := &NotificationMessage{
+		MonitorID:      monitor.ID,
+		MonitorName:    monitor.Name,
+		MonitorURL:     monitor.URL,
+		Status:         status,
+		Message:        "Retry of a previously failed notification",
+		Timestamp:      time.Now(),
+		IncidentID:     record.IncidentID,
+		ResponseTimeMs: monitor.LastResponseTimeMs,
+	}
+
+	// Retry through the original channel only (not a full fan-out) so we can
+	// update this specific record with the outcome.
+	sendErr := m.SendToChannel(ctx, record.Channel, message)
+
+	updates := map[string]interface{}{}
+	if sendErr != nil {
+		updates["status"] = statusFailed
+		updates["error_message"] = sendErr.Error()
+	} else {
+		updates["status"] = statusSent
+		updates["sent_at"] = time.Now().UTC()
+		updates["error_message"] = ""
+	}
+	if err := m.db.WithContext(ctx).Model(&models.Notification{}).
+		Where("id = ?", notificationID).
+		Updates(updates).Error; err != nil {
+		return fmt.Errorf("updating notification %s after retry: %w", notificationID, err)
+	}
+
+	m.logger.Printf("[notify] retried notification %s via %s (ok=%t)", notificationID, record.Channel, sendErr == nil)
+	if sendErr != nil {
+		return fmt.Errorf("retry failed: %w", sendErr)
+	}
+	return nil
+}
