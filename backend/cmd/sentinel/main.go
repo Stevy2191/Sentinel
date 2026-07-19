@@ -5,6 +5,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log"
@@ -77,6 +79,7 @@ func run() error {
 	incidentService := services.NewIncidentService(db)
 	statusPageService := services.NewStatusPageService(db)
 	notificationManager := notifications.NewNotificationManager(db)
+	authService := services.NewAuthService(db, resolveJWTSecret())
 
 	// 4. Notification plugins (each is optional; unconfigured channels are skipped).
 	registerNotificationPlugins(notificationManager)
@@ -93,12 +96,18 @@ func run() error {
 			"timestamp": time.Now().UTC().Format(time.RFC3339),
 		})
 	})
+	// Public auth endpoints (register/login/mfa-verify) + public status pages.
+	api.RegisterAuthRoutes(router, authService)
+	api.RegisterPublicStatusRoutes(router, statusPageService, incidentService)
+
+	// All other /api/v1 routes require a valid JWT.
 	v1 := router.Group("/api/v1")
+	v1.Use(api.AuthMiddleware(authService))
 	api.RegisterMonitorRoutes(v1, monitorService, checkService)
 	api.RegisterCheckRoutes(v1, checkService, incidentService, monitorService)
 	api.RegisterReportRoutes(v1, monitorService, checkService, incidentService)
-	api.RegisterStatusPageRoutes(router, statusPageService, incidentService)
-	api.RegisterNotificationRoutes(router, notificationManager, monitorService)
+	api.RegisterStatusPageRoutes(v1, statusPageService, incidentService)
+	api.RegisterNotificationRoutes(v1, notificationManager, monitorService)
 
 	// 6. Monitoring loop.
 	loopCtx, cancelLoop := context.WithCancel(context.Background())
@@ -366,6 +375,20 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// resolveJWTSecret returns JWT_SECRET, or a random per-process secret (with a
+// warning) if it is unset so the server still runs in development.
+func resolveJWTSecret() string {
+	if s := os.Getenv("JWT_SECRET"); s != "" {
+		return s
+	}
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "sentinel-insecure-default-change-me"
+	}
+	log.Printf("WARNING: JWT_SECRET is not set; using a random per-process secret (all sessions reset on restart). Set JWT_SECRET in production.")
+	return base64.StdEncoding.EncodeToString(b)
 }
 
 func getenvInt(key string, fallback int) int {

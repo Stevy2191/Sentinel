@@ -19,6 +19,7 @@ import (
 
 const (
 	defaultJWTExpiry = 24 * time.Hour
+	mfaTokenExpiry   = 5 * time.Minute
 	minJWTSecretLen  = 32
 	backupCodeCount  = 10
 	backupCodeLen    = 8
@@ -290,6 +291,64 @@ func (s *AuthService) DisableMFA(ctx context.Context, userID uuid.UUID) error {
 	}
 	s.logger.Printf("[auth] MFA disabled for: %s", user.Username)
 	return nil
+}
+
+// GenerateMFAToken issues a short-lived (5-minute) token used to complete an
+// MFA challenge after a correct password. It carries an mfa_pending claim and
+// grants no API access on its own.
+func (s *AuthService) GenerateMFAToken(userID uuid.UUID, username string) (string, error) {
+	now := time.Now()
+	claims := jwt.MapClaims{
+		"user_id":     userID.String(),
+		"username":    username,
+		"mfa_pending": true,
+		"iat":         now.Unix(),
+		"exp":         now.Add(mfaTokenExpiry).Unix(),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := token.SignedString([]byte(s.jwtSecret))
+	if err != nil {
+		return "", fmt.Errorf("signing MFA token: %w", err)
+	}
+	return signed, nil
+}
+
+// VerifyMFAToken validates an MFA-pending token and returns its user ID and
+// username. It rejects ordinary access tokens (mfa_pending must be true).
+func (s *AuthService) VerifyMFAToken(tokenString string) (uuid.UUID, string, error) {
+	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
+		return []byte(s.jwtSecret), nil
+	})
+	if err != nil {
+		return uuid.Nil, "", fmt.Errorf("invalid MFA token: %w", err)
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok || !token.Valid {
+		return uuid.Nil, "", errors.New("invalid MFA token")
+	}
+	if pending, _ := claims["mfa_pending"].(bool); !pending {
+		return uuid.Nil, "", errors.New("token is not an MFA token")
+	}
+	userIDStr, _ := claims["user_id"].(string)
+	username, _ := claims["username"].(string)
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return uuid.Nil, "", fmt.Errorf("invalid user_id in MFA token: %w", err)
+	}
+	return userID, username, nil
+}
+
+// HasAnyUser reports whether any user accounts exist (used to make the first
+// registered account an admin).
+func (s *AuthService) HasAnyUser(ctx context.Context) (bool, error) {
+	var count int64
+	if err := s.db.WithContext(ctx).Model(&models.User{}).Count(&count).Error; err != nil {
+		return false, fmt.Errorf("counting users: %w", err)
+	}
+	return count > 0, nil
 }
 
 // UpdateLastLogin records the current time as a user's last login.

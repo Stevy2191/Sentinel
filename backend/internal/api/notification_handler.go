@@ -204,14 +204,14 @@ func RetryFailedNotificationHandler(manager *notifications.NotificationManager) 
 	}
 }
 
-// RegisterNotificationRoutes mounts the notification endpoints under
-// /api/v1/notifications.
+// RegisterNotificationRoutes mounts the notification endpoints under the given
+// group's /notifications path.
 func RegisterNotificationRoutes(
-	router *gin.Engine,
+	rg *gin.RouterGroup,
 	manager *notifications.NotificationManager,
 	monitorService *services.MonitorService,
 ) {
-	group := router.Group("/api/v1/notifications")
+	group := rg.Group("/notifications")
 	group.GET("/channels", GetNotificationChannelsHandler(manager))
 	group.GET("/history", GetNotificationHistoryHandler(manager, monitorService))
 	group.POST("/test/:channel", SendTestNotificationHandler(manager))
