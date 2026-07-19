@@ -7,16 +7,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/Stevy2191/Sentinel/backend/internal/models"
 	"github.com/Stevy2191/Sentinel/backend/internal/services"
 )
 
 const (
-	defaultCheckLimit = 100
-	maxCheckLimit     = 1000
-	// maxCheckFetch bounds how many recent checks are pulled from the store
-	// before in-memory date filtering and pagination are applied.
-	maxCheckFetch      = 1000
+	defaultCheckLimit  = 100
+	maxCheckLimit      = 1000
 	defaultReportRange = 30 * 24 * time.Hour
 )
 
@@ -86,50 +82,51 @@ func GetMonitorChecksHandler(checkService *services.CheckService, monitorService
 			offset = 0
 		}
 
-		start, hasStart, err := parseOptionalTime(c, "start_time")
-		if err != nil {
+		// Default to the last 24 hours when the range is not fully specified.
+		end := time.Now().UTC()
+		start := end.Add(-24 * time.Hour)
+		if t, ok, err := parseOptionalTime(c, "start_time"); err != nil {
 			respondError(c, http.StatusBadRequest, "invalid start_time: must be RFC3339")
 			return
+		} else if ok {
+			start = t
 		}
-		end, hasEnd, err := parseOptionalTime(c, "end_time")
-		if err != nil {
+		if t, ok, err := parseOptionalTime(c, "end_time"); err != nil {
 			respondError(c, http.StatusBadRequest, "invalid end_time: must be RFC3339")
+			return
+		} else if ok {
+			end = t
+		}
+		if end.Before(start) {
+			respondError(c, http.StatusBadRequest, "end_time must be after start_time")
 			return
 		}
 
-		checks, err := checkService.GetRecentChecks(c.Request.Context(), id, maxCheckFetch)
+		ctx := c.Request.Context()
+
+		// Total and page both come from the database for the exact range, so
+		// results are accurate regardless of how many checks exist.
+		total, err := checkService.CountChecks(ctx, id, start, end)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		checks, err := checkService.GetChecksInRange(ctx, id, start, end, limit, offset)
 		if err != nil {
 			respondError(c, http.StatusInternalServerError, err.Error())
 			return
 		}
 
-		// Apply an optional date-range filter when both bounds are provided.
-		if hasStart && hasEnd {
-			filtered := make([]models.Check, 0, len(checks))
-			for _, ch := range checks {
-				if !ch.Timestamp.Before(start) && !ch.Timestamp.After(end) {
-					filtered = append(filtered, ch)
-				}
-			}
-			checks = filtered
-		}
-
-		total := len(checks)
-		pageChecks := []models.Check{}
-		if offset < total {
-			endIdx := offset + limit
-			if endIdx > total {
-				endIdx = total
-			}
-			pageChecks = checks[offset:endIdx]
-		}
-
 		respondSuccess(c, http.StatusOK, gin.H{
-			"checks": pageChecks,
+			"checks": checks,
 			"pagination": gin.H{
 				"limit":  limit,
 				"offset": offset,
 				"total":  total,
+			},
+			"range": gin.H{
+				"start_time": start.UTC().Format(time.RFC3339),
+				"end_time":   end.UTC().Format(time.RFC3339),
 			},
 		})
 	}
