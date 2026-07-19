@@ -21,9 +21,9 @@ export interface ApiError {
   code?: string
 }
 
-// Request interceptor: attach an auth token if present (placeholder for later).
+// Request interceptor: attach the auth token if present.
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('sentinel-token')
+  const token = localStorage.getItem('sentinel:token')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
