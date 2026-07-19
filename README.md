@@ -94,6 +94,75 @@ _Screenshots coming soon._
 
 ---
 
+## Deployment (Docker Compose)
+
+### Prerequisites
+
+- Docker Engine 20.10+
+- Docker Compose v2+
+
+### Local deployment
+
+```bash
+git clone https://github.com/Stevy2191/Sentinel.git
+cd Sentinel
+
+# Configure environment
+cp .env.example .env
+# Edit .env (at minimum set DB_PASSWORD; add SMTP/Slack/etc. as needed)
+
+# Build and start all services
+docker compose up -d --build
+```
+
+Services:
+
+| Service  | URL                              | Notes                          |
+| -------- | -------------------------------- | ------------------------------ |
+| Web UI   | http://localhost:3000            | Frontend (nginx)               |
+| Backend  | http://localhost:3001/api/v1     | REST API                       |
+| Adminer  | http://localhost:8080            | Database admin (server: `postgres`) |
+
+The frontend reaches the API through nginx (relative `/api`), which proxies to
+the backend container — no CORS or API URL configuration needed.
+
+> **Ports:** the frontend is published on host port `3000` (override with
+> `PORT` in `.env`) and the backend on `3001`. If `3000` is already in use on
+> your machine, set e.g. `PORT=3005` in `.env`.
+
+### Using published images
+
+Once the CI has pushed images to GHCR, you can pull instead of building:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+Images are published to:
+
+- `ghcr.io/stevy2191/sentinel-backend:latest`
+- `ghcr.io/stevy2191/sentinel-frontend:latest`
+
+For private images, authenticate first: `docker login ghcr.io` (GitHub username +
+a personal access token with `read:packages`).
+
+### Logs, update, teardown
+
+```bash
+docker compose logs -f backend      # follow logs
+docker compose pull && docker compose up -d   # update to latest images
+docker compose down                 # stop
+docker compose down -v              # stop and DELETE the database volume
+```
+
+### CI/CD
+
+`.github/workflows/docker-build.yml` builds and pushes both images to GHCR on
+every push to `main` and on `v*` tags. Pull requests build but do not push.
+
+---
+
 ## Contributing
 
 Contributions are welcome! Please read **[CONTRIBUTING.md](CONTRIBUTING.md)**
