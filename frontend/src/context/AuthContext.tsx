@@ -25,6 +25,7 @@ interface AuthContextValue {
   isAuthenticated: boolean
   setToken: (token: string | null) => void
   setCurrentUser: (user: CurrentUser | null) => void
+  getCurrentUser: () => Promise<CurrentUser | null>
   logout: () => void
 }
 
@@ -47,6 +48,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null)
     setCurrentUser(null)
   }, [setToken])
+
+  // Fetch (and refresh) the current user from /auth/me.
+  const getCurrentUser = useCallback(async (): Promise<CurrentUser | null> => {
+    try {
+      const res = await api.get<{ data: CurrentUser }>('/auth/me')
+      setCurrentUser(res.data.data)
+      return res.data.data
+    } catch {
+      return null
+    }
+  }, [])
 
   // Load the current user whenever we have a token. If it's invalid, clear it.
   useEffect(() => {
@@ -77,9 +89,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated: !!token,
       setToken,
       setCurrentUser,
+      getCurrentUser,
       logout,
     }),
-    [token, currentUser, setToken, logout]
+    [token, currentUser, setToken, getCurrentUser, logout]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
