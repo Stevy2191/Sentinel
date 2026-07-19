@@ -133,21 +133,40 @@ export type TimelineGranularity = 'hourly' | 'daily'
 
 export interface TimelineBucket {
   timestamp: string
-  uptime_percentage: number
+  uptime_percent: number
   avg_response_time_ms: number
-  checks: number
-  failures: number
+  checks_total: number
+  checks_failed: number
 }
 
 export interface TimelineReport {
   monitor_id: string
+  monitor_name: string
   granularity: TimelineGranularity
-  buckets: TimelineBucket[]
+  period: { start: string; end: string }
+  timeline: TimelineBucket[]
+}
+
+export interface SummaryMonitor {
+  monitor_id: string
+  monitor_name: string
+  uptime_percent: number
+  downtime_minutes: number
+  status: MonitorStatus
+}
+
+export interface SummaryAggregate {
+  avg_uptime: number
+  best_uptime: number
+  worst_uptime: number
+  total_incidents: number
+  total_downtime_minutes: number
 }
 
 export interface SummaryReport {
-  period: { start_time: string; end_time: string }
-  monitors: UptimeReport[]
+  period: { start: string; end: string }
+  monitors: SummaryMonitor[]
+  aggregate: SummaryAggregate
 }
 
 // ---- Status pages ----------------------------------------------------------
