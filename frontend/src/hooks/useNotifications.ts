@@ -85,6 +85,32 @@ export function useNotificationHistory(filters?: NotificationHistoryFilters) {
   return { history, total, loading, error, refetch }
 }
 
+/** useRetryNotification re-sends a failed notification by id. */
+export function useRetryNotification(id?: string) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<ApiError | null>(null)
+
+  const retry = useCallback(
+    async (overrideId?: string) => {
+      const target = overrideId ?? id
+      if (!target) throw { status: 0, message: 'notification id is required' } as ApiError
+      setLoading(true)
+      setError(null)
+      try {
+        await api.post(`/notifications/retry/${target}`)
+      } catch (err) {
+        setError(err as ApiError)
+        throw err
+      } finally {
+        setLoading(false)
+      }
+    },
+    [id]
+  )
+
+  return { retry, loading, error }
+}
+
 /** useSendTestNotification sends a test notification through one channel. */
 export function useSendTestNotification(channel: string) {
   const [loading, setLoading] = useState(false)
