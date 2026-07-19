@@ -181,6 +181,8 @@ export interface StatusPage {
   published: boolean
   created_at: string
   updated_at: string
+  // Present in the list response (GET /status-pages), not on single-page fetches.
+  monitor_count?: number
 }
 
 export interface StatusPageInput {

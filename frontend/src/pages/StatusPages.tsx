@@ -108,7 +108,11 @@ function StatusPageList() {
                 </p>
               )}
 
-              <div className="mt-2 text-xs text-neutral-400">Created {formatDate(p.created_at)}</div>
+              <div className="mt-2 text-xs text-neutral-400">
+                {p.published ? 'Published' : 'Draft'} • {p.monitor_count ?? 0}{' '}
+                {(p.monitor_count ?? 0) === 1 ? 'monitor' : 'monitors'}
+              </div>
+              <div className="mt-1 text-xs text-neutral-400">Created {formatDate(p.created_at)}</div>
 
               <div className="mt-4 flex gap-2">
                 <a
