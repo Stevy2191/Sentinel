@@ -3,9 +3,12 @@ package api
 import (
 	"math"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/services"
 )
@@ -128,7 +131,238 @@ func GetMonitorReportHandler(
 	}
 }
 
-// RegisterReportRoutes mounts the reporting endpoint under /monitors/:id.
+// parseReportTimeRange parses required RFC3339 "start"/"end" query params.
+func parseReportTimeRange(c *gin.Context) (start, end time.Time, ok bool) {
+	s, err := time.Parse(time.RFC3339, c.Query("start"))
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "invalid or missing 'start': must be RFC3339")
+		return time.Time{}, time.Time{}, false
+	}
+	e, err := time.Parse(time.RFC3339, c.Query("end"))
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "invalid or missing 'end': must be RFC3339")
+		return time.Time{}, time.Time{}, false
+	}
+	if e.Before(s) {
+		respondError(c, http.StatusBadRequest, "'end' must be after 'start'")
+		return time.Time{}, time.Time{}, false
+	}
+	return s, e, true
+}
+
+type timelineBucket struct {
+	total   int
+	failed  int
+	sumResp int
+	respN   int
+}
+
+// GetTimelineReportHandler handles GET /api/v1/reports/timeline, returning a
+// bucketed (hourly/daily) uptime + response-time series for one monitor.
+func GetTimelineReportHandler(
+	checkService *services.CheckService,
+	monitorService *services.MonitorService,
+) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := uuid.Parse(c.Query("monitor_id"))
+		if err != nil {
+			respondError(c, http.StatusBadRequest, "invalid or missing 'monitor_id': must be a UUID")
+			return
+		}
+		start, end, ok := parseReportTimeRange(c)
+		if !ok {
+			return
+		}
+		granularity := c.Query("granularity")
+		if granularity == "" {
+			granularity = "hourly"
+		}
+		if granularity != "hourly" && granularity != "daily" {
+			respondError(c, http.StatusBadRequest, "'granularity' must be 'hourly' or 'daily'")
+			return
+		}
+
+		ctx := c.Request.Context()
+		monitor, err := monitorService.GetMonitor(ctx, id)
+		if err != nil {
+			respondError(c, classifyServiceError(err), err.Error())
+			return
+		}
+
+		checks, err := checkService.GetChecksInRange(ctx, id, start, end, 0, 0)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		// Bucket checks by truncated timestamp (UTC).
+		buckets := make(map[time.Time]*timelineBucket)
+		truncate := func(t time.Time) time.Time {
+			t = t.UTC()
+			if granularity == "daily" {
+				return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+			}
+			return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, time.UTC)
+		}
+		for _, ch := range checks {
+			key := truncate(ch.Timestamp)
+			b := buckets[key]
+			if b == nil {
+				b = &timelineBucket{}
+				buckets[key] = b
+			}
+			b.total++
+			if ch.Status == "success" {
+				b.sumResp += ch.ResponseTimeMs
+				b.respN++
+			} else {
+				b.failed++
+			}
+		}
+
+		keys := make([]time.Time, 0, len(buckets))
+		for k := range buckets {
+			keys = append(keys, k)
+		}
+		sort.Slice(keys, func(i, j int) bool { return keys[i].Before(keys[j]) })
+
+		timeline := make([]gin.H, 0, len(keys))
+		for _, k := range keys {
+			b := buckets[k]
+			uptime := 0.0
+			if b.total > 0 {
+				uptime = round2(float64(b.total-b.failed) / float64(b.total) * 100)
+			}
+			avg := 0
+			if b.respN > 0 {
+				avg = b.sumResp / b.respN
+			}
+			timeline = append(timeline, gin.H{
+				"timestamp":            k.Format(time.RFC3339),
+				"uptime_percent":       uptime,
+				"avg_response_time_ms": avg,
+				"checks_total":         b.total,
+				"checks_failed":        b.failed,
+			})
+		}
+
+		respondSuccess(c, http.StatusOK, gin.H{
+			"monitor_id":   monitor.ID,
+			"monitor_name": monitor.Name,
+			"granularity":  granularity,
+			"period": gin.H{
+				"start": start.UTC().Format(time.RFC3339),
+				"end":   end.UTC().Format(time.RFC3339),
+			},
+			"timeline": timeline,
+		})
+	}
+}
+
+// GetSummaryReportHandler handles GET /api/v1/reports/summary, returning uptime
+// figures for many monitors plus an aggregate.
+func GetSummaryReportHandler(
+	monitorService *services.MonitorService,
+	incidentService *services.IncidentService,
+) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start, end, ok := parseReportTimeRange(c)
+		if !ok {
+			return
+		}
+		ctx := c.Request.Context()
+
+		all, err := monitorService.ListMonitors(ctx, nil)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		// Optional monitor_ids filter.
+		if raw := strings.TrimSpace(c.Query("monitor_ids")); raw != "" {
+			wanted := map[string]bool{}
+			for _, part := range strings.Split(raw, ",") {
+				if p := strings.TrimSpace(part); p != "" {
+					wanted[p] = true
+				}
+			}
+			filtered := all[:0]
+			for _, m := range all {
+				if wanted[m.ID.String()] {
+					filtered = append(filtered, m)
+				}
+			}
+			all = filtered
+		}
+
+		monitorsResp := make([]gin.H, 0, len(all))
+		var sumUptime float64
+		best, worst := 0.0, 100.0
+		var totalIncidents int64
+		var totalDowntimeMinutes float64
+
+		for i := range all {
+			m := all[i]
+			downPct, err := incidentService.GetDowntimePercentage(ctx, m.ID, start, end)
+			if err != nil {
+				downPct = 0
+			}
+			uptime := round2(100 - downPct)
+			downtime, err := incidentService.GetIncidentDuration(ctx, m.ID, start, end)
+			if err != nil {
+				downtime = 0
+			}
+			count, err := incidentService.GetIncidentCount(ctx, m.ID, start, end)
+			if err != nil {
+				count = 0
+			}
+			downtimeMinutes := round2(downtime.Minutes())
+
+			sumUptime += uptime
+			if uptime > best {
+				best = uptime
+			}
+			if uptime < worst {
+				worst = uptime
+			}
+			totalIncidents += count
+			totalDowntimeMinutes += downtimeMinutes
+
+			monitorsResp = append(monitorsResp, gin.H{
+				"monitor_id":       m.ID,
+				"monitor_name":     m.Name,
+				"uptime_percent":   uptime,
+				"downtime_minutes": downtimeMinutes,
+				"status":           m.CurrentStatus,
+			})
+		}
+
+		avgUptime := 0.0
+		if len(all) > 0 {
+			avgUptime = round2(sumUptime / float64(len(all)))
+		} else {
+			worst = 0
+		}
+
+		respondSuccess(c, http.StatusOK, gin.H{
+			"period": gin.H{
+				"start": start.UTC().Format(time.RFC3339),
+				"end":   end.UTC().Format(time.RFC3339),
+			},
+			"monitors": monitorsResp,
+			"aggregate": gin.H{
+				"avg_uptime":             avgUptime,
+				"best_uptime":            best,
+				"worst_uptime":           worst,
+				"total_incidents":        totalIncidents,
+				"total_downtime_minutes": round2(totalDowntimeMinutes),
+			},
+		})
+	}
+}
+
+// RegisterReportRoutes mounts the per-monitor report and the timeline/summary
+// report endpoints.
 func RegisterReportRoutes(
 	rg *gin.RouterGroup,
 	monitorService *services.MonitorService,
@@ -137,4 +371,8 @@ func RegisterReportRoutes(
 ) {
 	monitors := rg.Group("/monitors")
 	monitors.GET("/:id/report", GetMonitorReportHandler(monitorService, checkService, incidentService))
+
+	reports := rg.Group("/reports")
+	reports.GET("/timeline", GetTimelineReportHandler(checkService, monitorService))
+	reports.GET("/summary", GetSummaryReportHandler(monitorService, incidentService))
 }
