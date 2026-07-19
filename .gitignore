@@ -1,0 +1,12 @@
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Env files
+.env
+.env.local
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
