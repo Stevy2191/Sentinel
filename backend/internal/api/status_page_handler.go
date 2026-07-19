@@ -366,11 +366,10 @@ func GetPublicStatusPageHandler(statusPageService *services.StatusPageService, i
 	}
 }
 
-// RegisterStatusPageRoutes mounts the admin status-page routes under
-// /api/v1/status-pages and the unauthenticated public route at
-// /public/status/:slug.
-func RegisterStatusPageRoutes(router *gin.Engine, statusPageService *services.StatusPageService, incidentService *services.IncidentService) {
-	pages := router.Group("/api/v1/status-pages")
+// RegisterStatusPageRoutes mounts the admin status-page routes under the given
+// group's /status-pages path (so auth middleware on the group applies to them).
+func RegisterStatusPageRoutes(rg *gin.RouterGroup, statusPageService *services.StatusPageService, incidentService *services.IncidentService) {
+	pages := rg.Group("/status-pages")
 	pages.POST("", CreateStatusPageHandler(statusPageService))
 	pages.GET("", GetStatusPagesHandler(statusPageService))
 	pages.GET("/:slug", GetStatusPageHandler(statusPageService, incidentService))
@@ -379,7 +378,10 @@ func RegisterStatusPageRoutes(router *gin.Engine, statusPageService *services.St
 	pages.POST("/:slug/monitors", AddMonitorToPageHandler(statusPageService))
 	pages.DELETE("/:slug/monitors/:monitor_id", RemoveMonitorFromPageHandler(statusPageService))
 	pages.PATCH("/:slug/monitors/:monitor_id/position", UpdateMonitorPositionHandler(statusPageService))
+}
 
-	// Public, no authentication.
+// RegisterPublicStatusRoutes mounts the unauthenticated public status page at
+// /public/status/:slug directly on the engine.
+func RegisterPublicStatusRoutes(router *gin.Engine, statusPageService *services.StatusPageService, incidentService *services.IncidentService) {
 	router.GET("/public/status/:slug", GetPublicStatusPageHandler(statusPageService, incidentService))
 }

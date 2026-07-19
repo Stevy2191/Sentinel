@@ -23,7 +23,10 @@ type User struct {
 	MFAEnabled     bool        `json:"mfa_enabled" gorm:"column:mfa_enabled;default:false"`
 	MFASecret      string      `json:"-" gorm:"column:mfa_secret"`
 	MFABackupCodes StringSlice `json:"-" gorm:"column:mfa_backup_codes;type:jsonb"`
-	IsAdmin        bool        `json:"is_admin" gorm:"column:is_admin;default:true"`
+	// No gorm `default` tag: with a bool default, GORM omits the false (zero)
+	// value on insert and the DB default would apply — which would wrongly make
+	// non-admin users admins. IsAdmin is always set explicitly by the caller.
+	IsAdmin bool `json:"is_admin" gorm:"column:is_admin"`
 	LastLogin      *time.Time  `json:"last_login" gorm:"column:last_login"`
 	CreatedAt      time.Time   `json:"created_at" gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt      time.Time   `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`

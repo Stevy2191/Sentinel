@@ -36,6 +36,7 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-production}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       TIMEZONE: ${TIMEZONE:-UTC}
+      JWT_SECRET: ${JWT_SECRET:-}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
