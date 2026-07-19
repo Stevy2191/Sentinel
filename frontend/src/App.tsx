@@ -26,7 +26,10 @@ export default function App() {
             <Route path="/monitors/:id" element={<MonitorDetail mode="view" />} />
             <Route path="/monitors/:id/edit" element={<MonitorDetail mode="edit" />} />
             <Route path="/reports" element={<Reports />} />
-            <Route path="/status-pages" element={<StatusPages />} />
+            <Route path="/status-pages" element={<StatusPages mode="list" />} />
+            <Route path="/status-pages/create" element={<StatusPages mode="create" />} />
+            <Route path="/status-pages/:slug/detail" element={<StatusPages mode="detail" />} />
+            <Route path="/status-pages/:slug/edit" element={<StatusPages mode="edit" />} />
             <Route path="/notifications" element={<Notifications />} />
             <Route path="/settings" element={<Settings />} />
           </Route>
