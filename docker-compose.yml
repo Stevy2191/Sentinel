@@ -1,0 +1,92 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sentinel-postgres
+    environment:
+      POSTGRES_DB: sentinel
+      POSTGRES_USER: sentinel
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentinel"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    # `build` lets `docker compose up` build locally; `image` names the tag that
+    # CI builds/pushes (so `docker compose pull` also works once published).
+    build:
+      context: ./backend
+    image: ${DOCKER_REGISTRY:-ghcr.io}/stevy2191/sentinel-backend:${IMAGE_TAG:-latest}
+    container_name: sentinel-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: sentinel
+      DB_USER: sentinel
+      DB_PASSWORD: ${DB_PASSWORD:-changeme}
+      PORT: 3001
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TIMEZONE: ${TIMEZONE:-UTC}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      NTFY_URL: ${NTFY_URL:-https://ntfy.sh}
+      NTFY_TOPIC: ${NTFY_TOPIC:-}
+      WEBHOOK_URL: ${WEBHOOK_URL:-}
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./backend/migrations:/app/migrations
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+    image: ${DOCKER_REGISTRY:-ghcr.io}/stevy2191/sentinel-frontend:${IMAGE_TAG:-latest}
+    container_name: sentinel-frontend
+    # The browser reaches the API through nginx (relative /api), which proxies to
+    # the backend service — so no build-time API URL is needed here.
+    depends_on:
+      - backend
+    ports:
+      - "${PORT:-3000}:80"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  adminer:
+    image: adminer:latest
+    container_name: sentinel-adminer
+    depends_on:
+      - postgres
+    ports:
+      - "8080:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
