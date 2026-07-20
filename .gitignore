@@ -6,6 +6,10 @@ frontend/dist/
 .env
 .env.local
 
+# repair.sh runtime artifacts
+repair.log
+backup-*.sql
+
 # OS / editor
 .DS_Store
 .vscode/
