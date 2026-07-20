@@ -17,6 +17,8 @@ interface BackendReport {
     downtime_percentage: number
     total_downtime_seconds: number
     incident_count: number
+    ongoing_incident: boolean
+    current_downtime_minutes: number
   }
   checks: {
     total: number
@@ -67,6 +69,9 @@ export function useUptimeReport(
           total_checks: r.checks.total,
           failed_checks: r.checks.failed + r.checks.timeout,
           avg_response_time_ms: r.checks.avg_response_time_ms,
+          // Default to false/0 for resilience if an older backend omits them.
+          ongoing_incident: r.uptime.ongoing_incident ?? false,
+          current_downtime_minutes: r.uptime.current_downtime_minutes ?? 0,
         },
         sla: {
           target: slaTarget,

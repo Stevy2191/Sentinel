@@ -140,6 +140,8 @@ export interface UptimeReport {
     total_checks: number
     failed_checks: number
     avg_response_time_ms: number
+    ongoing_incident: boolean
+    current_downtime_minutes: number
   }
   sla: { target: number; met: boolean }
 }
