@@ -52,6 +52,7 @@ export interface Monitor {
   last_response_time_ms: number
   enabled: boolean
   tags: string[] | null
+  group_id?: string | null
   created_at: string
   updated_at: string
   // Maintenance mode (present in monitor list/detail responses).
@@ -127,6 +128,19 @@ export interface Incident {
 }
 
 // ---- Reports ---------------------------------------------------------------
+
+export interface MonitorGroup {
+  id: string
+  name: string
+  description: string | null
+  color: string | null
+  position: number
+  monitors: Monitor[]
+  monitor_count: number
+  group_uptime: number
+  created_at: string
+  updated_at: string
+}
 
 export interface UptimeReport {
   monitor_id: string
