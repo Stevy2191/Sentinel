@@ -41,8 +41,9 @@ type NotificationConfig struct {
 	TelegramChatID   *string `json:"telegram_chat_id" gorm:"column:telegram_chat_id"`
 
 	// Ntfy
-	NtfyURL   *string `json:"ntfy_url" gorm:"column:ntfy_url"`
-	NtfyTopic *string `json:"ntfy_topic" gorm:"column:ntfy_topic"`
+	NtfyURL       *string `json:"ntfy_url" gorm:"column:ntfy_url"`
+	NtfyTopic     *string `json:"ntfy_topic" gorm:"column:ntfy_topic"`
+	NtfyAuthToken *string `json:"ntfy_auth_token,omitempty" gorm:"column:ntfy_auth_token"` // never returned in list responses
 
 	// Custom headers applied to outgoing webhook requests.
 	CustomHeaders StringMap `json:"custom_headers,omitempty" gorm:"column:custom_headers;type:jsonb"`
@@ -105,6 +106,10 @@ func (nc *NotificationConfig) Validate() error {
 		if nc.NtfyTopic == nil || *nc.NtfyTopic == "" {
 			return errors.New("Ntfy topic is required")
 		}
+		// The auth token is optional, but if the field is present it must not be blank.
+		if nc.NtfyAuthToken != nil && *nc.NtfyAuthToken == "" {
+			return errors.New("Ntfy auth token cannot be empty if provided")
+		}
 	}
 
 	return nil
@@ -116,4 +121,5 @@ func (nc *NotificationConfig) HideSecrets() {
 	nc.SMTPPassword = nil
 	nc.TelegramBotToken = nil
 	nc.WebhookURL = nil
+	nc.NtfyAuthToken = nil
 }

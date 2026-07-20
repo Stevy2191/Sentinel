@@ -78,8 +78,9 @@ func NewTelegramPluginFromConfig(botToken, chatID string) *TelegramPlugin {
 	}
 }
 
-// NewNtfyPluginFromConfig builds an NtfyPlugin from an explicit server + topic.
-func NewNtfyPluginFromConfig(serverURL, topic string) *NtfyPlugin {
+// NewNtfyPluginFromConfig builds an NtfyPlugin from an explicit server, topic,
+// and optional auth token.
+func NewNtfyPluginFromConfig(serverURL, topic, authToken string) *NtfyPlugin {
 	serverURL = strings.TrimRight(strings.TrimSpace(serverURL), "/")
 	if serverURL == "" {
 		serverURL = defaultNtfyURL
@@ -87,6 +88,7 @@ func NewNtfyPluginFromConfig(serverURL, topic string) *NtfyPlugin {
 	return &NtfyPlugin{
 		url:        serverURL,
 		topic:      topic,
+		authToken:  strings.TrimSpace(authToken),
 		httpClient: &http.Client{Timeout: defaultNtfyTimeout},
 		logger:     log.Default(),
 	}
@@ -137,7 +139,7 @@ func BuildPluginFromConfig(cfg models.NotificationConfig) (NotificationPlugin, e
 	case "telegram":
 		return NewTelegramPluginFromConfig(deref(cfg.TelegramBotToken), deref(cfg.TelegramChatID)), nil
 	case "ntfy":
-		return NewNtfyPluginFromConfig(deref(cfg.NtfyURL), deref(cfg.NtfyTopic)), nil
+		return NewNtfyPluginFromConfig(deref(cfg.NtfyURL), deref(cfg.NtfyTopic), deref(cfg.NtfyAuthToken)), nil
 	case "webhook":
 		return NewWebhookPluginFromConfig(deref(cfg.WebhookURL), cfg.CustomHeaders)
 	default:

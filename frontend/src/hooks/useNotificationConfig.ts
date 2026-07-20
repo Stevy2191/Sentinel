@@ -25,6 +25,7 @@ export interface NotificationConfig {
   // Ntfy
   ntfy_url?: string | null
   ntfy_topic?: string | null
+  ntfy_auth_token?: string | null
   // Webhook custom headers
   custom_headers?: Record<string, string> | null
   // Test status

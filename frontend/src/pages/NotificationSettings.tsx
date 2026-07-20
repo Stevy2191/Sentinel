@@ -52,6 +52,7 @@ interface FormState {
   telegram_chat_id: string
   ntfy_url: string
   ntfy_topic: string
+  ntfy_auth_token: string
   custom_headers: string
 }
 
@@ -67,6 +68,7 @@ const emptyForm: FormState = {
   telegram_chat_id: '',
   ntfy_url: '',
   ntfy_topic: '',
+  ntfy_auth_token: '',
   custom_headers: '',
 }
 
@@ -84,6 +86,7 @@ function formFromConfig(cfg: NotificationConfig | null): FormState {
     telegram_chat_id: cfg.telegram_chat_id ?? '',
     ntfy_url: cfg.ntfy_url ?? '',
     ntfy_topic: cfg.ntfy_topic ?? '',
+    ntfy_auth_token: cfg.ntfy_auth_token ?? '',
     custom_headers: cfg.custom_headers ? JSON.stringify(cfg.custom_headers, null, 2) : '',
   }
 }
@@ -151,6 +154,8 @@ function buildPayload(channel: ChannelName, f: FormState): Partial<NotificationC
     case 'ntfy':
       p.ntfy_topic = f.ntfy_topic.trim()
       p.ntfy_url = f.ntfy_url.trim() || null
+      // Send null (not "") when blank — the backend rejects an empty token.
+      p.ntfy_auth_token = f.ntfy_auth_token.trim() || null
       break
   }
   return p
@@ -484,6 +489,20 @@ function ConfigModal({
                   <FieldError msg={errFor('ntfy_url')} />
                   <Helper>Pick a hard-to-guess topic name — anyone who knows it can read your alerts.</Helper>
                   <ExtLink href="https://docs.ntfy.sh/">Learn about Ntfy</ExtLink>
+                </div>
+                <div>
+                  <Label>Auth Token</Label>
+                  <SecretInput
+                    value={form.ntfy_auth_token}
+                    onChange={(v) => set('ntfy_auth_token', v)}
+                    onBlur={() => markTouched('ntfy_auth_token')}
+                    placeholder="tk_… (optional)"
+                  />
+                  <Helper>
+                    Optional. Required for protected topics or self-hosted servers with auth. Sent as a
+                    Bearer token.
+                  </Helper>
+                  <ExtLink href="https://docs.ntfy.sh/config/#access-tokens">About access tokens</ExtLink>
                 </div>
               </>
             )}

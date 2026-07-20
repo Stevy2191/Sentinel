@@ -24,12 +24,14 @@ const (
 type NtfyPlugin struct {
 	url        string
 	topic      string
+	authToken  string // optional; sent as "Authorization: Bearer <token>"
 	httpClient *http.Client
 	logger     *log.Logger
 }
 
 // NewNtfyPlugin builds an NtfyPlugin from NTFY_* environment variables.
-// NTFY_TOPIC is required; NTFY_URL defaults to https://ntfy.sh.
+// NTFY_TOPIC is required; NTFY_URL defaults to https://ntfy.sh; NTFY_AUTH_TOKEN
+// is optional (for protected topics).
 func NewNtfyPlugin() (*NtfyPlugin, error) {
 	serverURL := strings.TrimSpace(os.Getenv("NTFY_URL"))
 	if serverURL == "" {
@@ -45,6 +47,7 @@ func NewNtfyPlugin() (*NtfyPlugin, error) {
 	p := &NtfyPlugin{
 		url:        serverURL,
 		topic:      topic,
+		authToken:  strings.TrimSpace(os.Getenv("NTFY_AUTH_TOKEN")),
 		httpClient: &http.Client{Timeout: defaultNtfyTimeout},
 		logger:     log.Default(),
 	}
@@ -158,6 +161,9 @@ func (p *NtfyPlugin) deliver(ctx context.Context, body, title, priority, tags, c
 	}
 	if click != "" {
 		req.Header.Set("Click", click)
+	}
+	if p.authToken != "" {
+		req.Header.Set("Authorization", "Bearer "+p.authToken)
 	}
 
 	resp, err := p.httpClient.Do(req)
