@@ -21,6 +21,99 @@ fatal() { err "$*"; exit 1; }
 # Work from the script's directory (repo root).
 cd "$(dirname "$0")"
 
+# Host ports the stack binds (see docker-compose.yml). Frontend and postgres are
+# env-backed (reassignable); backend and adminer are fixed in compose.
+PORT_FRONTEND=3000
+PORT_BACKEND=3001
+PORT_DB=5432
+PORT_ADMINER=8080
+
+# port_in_use PORT → returns 0 if something is listening on PORT.
+port_in_use() {
+  local p="$1"
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -iTCP:"$p" -sTCP:LISTEN -t >/dev/null 2>&1
+  elif command -v ss >/dev/null 2>&1; then
+    ss -tuln 2>/dev/null | grep -Eq "[:.]$p[[:space:]]"
+  elif command -v netstat >/dev/null 2>&1; then
+    netstat -tuln 2>/dev/null | grep -Eq "[:.]$p[[:space:]]"
+  else
+    return 1 # no tool available; assume free
+  fi
+}
+
+# kill_port PORT → kill the listening process(es); returns 0 if the port is free after.
+kill_port() {
+  local p="$1" pids=""
+  if command -v lsof >/dev/null 2>&1; then
+    pids=$(lsof -tiTCP:"$p" -sTCP:LISTEN 2>/dev/null || true)
+  fi
+  if [ -z "$pids" ]; then
+    warn "Could not identify the process on port $p (lsof needed)."
+    return 1
+  fi
+  # shellcheck disable=SC2086
+  kill -9 $pids 2>/dev/null || true
+  sleep 1
+  ! port_in_use "$p"
+}
+
+# resolve_port VARNAME LABEL REASSIGNABLE(yes|no)
+resolve_port() {
+  local __name="$1" label="$2" reassign="$3"
+  local port="${!__name}"
+  if ! port_in_use "$port"; then
+    ok "Port $port ($label) is available."
+    return
+  fi
+  warn "Port $port ($label) is already in use!"
+  while port_in_use "$port"; do
+    info "  Options:"
+    [ "$reassign" = "yes" ] && info "    ${BOLD}n${RESET}) Use a different port"
+    info "    ${BOLD}k${RESET}) Kill the process using port $port"
+    info "    ${BOLD}s${RESET}) Skip and continue anyway"
+    if ! read -r -p "  Choose [n/k/s]: " CHOICE; then
+      CHOICE="s" # EOF (non-interactive) → skip
+    fi
+    case "$CHOICE" in
+      n|N)
+        if [ "$reassign" != "yes" ]; then
+          err "This port is fixed in docker-compose.yml and can't be reassigned here."
+          continue
+        fi
+        read -r -p "  New port for $label: " NEWPORT || NEWPORT=""
+        if printf '%s' "$NEWPORT" | grep -Eq '^[0-9]+$' && [ "$NEWPORT" -ge 1 ] && [ "$NEWPORT" -le 65535 ]; then
+          port="$NEWPORT"
+          printf -v "$__name" '%s' "$NEWPORT"
+        else
+          err "Invalid port number."
+        fi
+        ;;
+      k|K)
+        if kill_port "$port"; then ok "Freed port $port."; else err "Could not free port $port."; fi
+        ;;
+      s|S)
+        warn "Skipping port $port — startup may fail if it stays occupied."
+        return
+        ;;
+      *) err "Unknown option." ;;
+    esac
+  done
+  ok "Port $port ($label) is now available."
+}
+
+# check_port_conflicts inspects every host port the stack binds and helps the
+# user resolve conflicts before docker-compose starts.
+check_port_conflicts() {
+  info "${BOLD}Checking for port conflicts...${RESET}"
+  resolve_port PORT_FRONTEND "frontend / web UI" yes
+  resolve_port PORT_BACKEND "backend API" no
+  resolve_port PORT_DB "postgres" yes
+  resolve_port PORT_ADMINER "adminer" no
+  ok "Port check complete."
+  echo
+}
+
 # ---- 1. Banner ----
 cat <<BANNER
 ${CYAN}${BOLD}
@@ -83,6 +176,9 @@ TIMEZONE="${TZ_INPUT:-$TZ_DETECTED}"
 ok "Using timezone: ${TIMEZONE}"
 echo
 
+# ---- Port conflict check (before anything is started) ----
+check_port_conflicts
+
 # ---- 4. Database password ----
 info "${BOLD}Database password${RESET} ${DIM}(min 12 characters)${RESET}"
 DB_PASSWORD=""
@@ -138,10 +234,10 @@ cat > .env <<ENV
 
 # Database
 DB_PASSWORD=${DB_PASSWORD}
-DB_PORT=5432
+DB_PORT=${PORT_DB}
 
 # Server
-PORT=3000
+PORT=${PORT_FRONTEND}
 ENVIRONMENT=production
 LOG_LEVEL=info
 TIMEZONE=${TIMEZONE}
