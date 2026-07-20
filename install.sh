@@ -29,14 +29,17 @@ PORT_DB=5432
 PORT_ADMINER=8080
 
 # port_in_use PORT → returns 0 if something is listening on PORT.
+# Prefer ss/netstat (which read /proc/net and see every listener regardless of
+# owner); lsof without root only sees the current user's sockets and would miss
+# a service started by another user.
 port_in_use() {
   local p="$1"
-  if command -v lsof >/dev/null 2>&1; then
-    lsof -iTCP:"$p" -sTCP:LISTEN -t >/dev/null 2>&1
-  elif command -v ss >/dev/null 2>&1; then
-    ss -tuln 2>/dev/null | grep -Eq "[:.]$p[[:space:]]"
+  if command -v ss >/dev/null 2>&1; then
+    ss -tuln 2>/dev/null | grep -Eq ":$p[[:space:]]"
   elif command -v netstat >/dev/null 2>&1; then
-    netstat -tuln 2>/dev/null | grep -Eq "[:.]$p[[:space:]]"
+    netstat -tuln 2>/dev/null | grep -Eq ":$p[[:space:]]"
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -iTCP:"$p" -sTCP:LISTEN -t >/dev/null 2>&1
   else
     return 1 # no tool available; assume free
   fi
@@ -102,11 +105,60 @@ resolve_port() {
   ok "Port $port ($label) is now available."
 }
 
-# check_port_conflicts inspects every host port the stack binds and helps the
-# user resolve conflicts before docker-compose starts.
+# find_free_port START → prints the first free port at/after START (capped).
+find_free_port() {
+  local p="$1" cap=$(( $1 + 100 ))
+  while [ "$p" -le "$cap" ] && port_in_use "$p"; do
+    p=$((p + 1))
+  done
+  echo "$p"
+}
+
+# choose_frontend_port asks the user which port to serve the web UI on, with a
+# smart default that avoids a port already in use.
+choose_frontend_port() {
+  info "${BOLD}What port should the Sentinel web UI run on?${RESET}"
+  local suggestion=3000
+  if port_in_use 3000; then
+    suggestion=$(find_free_port 3002)
+    warn "Port 3000 appears to be in use by another application."
+    info "  Recommended free port: ${BOLD}${suggestion}${RESET}"
+  else
+    info "  Recommended: ${BOLD}3000${RESET}"
+  fi
+
+  while true; do
+    read -r -p "  Enter port (default ${suggestion}): " INPUT || INPUT=""
+    local chosen="${INPUT:-$suggestion}"
+    if ! printf '%s' "$chosen" | grep -Eq '^[0-9]+$' || [ "$chosen" -lt 1 ] || [ "$chosen" -gt 65535 ]; then
+      err "Please enter a valid port number (1-65535)."
+      continue
+    fi
+    if port_in_use "$chosen"; then
+      warn "Port $chosen is already in use."
+      if ! read -r -p "  Try another port? (Y/n) " AGAIN; then AGAIN="n"; fi
+      case "$AGAIN" in
+        n|N|no|NO)
+          warn "Using port $chosen anyway — startup may fail if it stays occupied."
+          PORT_FRONTEND="$chosen"
+          return
+          ;;
+        *) continue ;;
+      esac
+    fi
+    ok "Port $chosen is available."
+    PORT_FRONTEND="$chosen"
+    return
+  done
+}
+
+# check_port_conflicts asks for the web-UI port up front, then verifies the
+# remaining service ports before docker-compose starts.
 check_port_conflicts() {
-  info "${BOLD}Checking for port conflicts...${RESET}"
-  resolve_port PORT_FRONTEND "frontend / web UI" yes
+  info "${BOLD}Configuring ports...${RESET}"
+  choose_frontend_port
+  echo
+  info "Verifying the backing service ports..."
   resolve_port PORT_BACKEND "backend API" no
   resolve_port PORT_DB "postgres" yes
   resolve_port PORT_ADMINER "adminer" no
