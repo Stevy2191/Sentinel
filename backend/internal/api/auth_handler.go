@@ -47,8 +47,10 @@ type changePasswordRequest struct {
 }
 
 // RegisterHandler handles POST /api/v1/auth/register. The first account created
-// becomes an admin.
-func RegisterHandler(authService *services.AuthService) gin.HandlerFunc {
+// becomes an admin. Registration must be enabled (see the settings service),
+// except for that very first account, which is always allowed so a fresh
+// install can bootstrap its admin even when registration defaults to closed.
+func RegisterHandler(authService *services.AuthService, settingsService *services.SettingsService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req registerRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -70,6 +72,12 @@ func RegisterHandler(authService *services.AuthService) gin.HandlerFunc {
 			respondAuthError(c, http.StatusInternalServerError, err.Error())
 			return
 		}
+		// Block self-registration when it's disabled — but always allow the first
+		// account so the instance can bootstrap its admin.
+		if hasUsers && !settingsService.RegistrationEnabled(ctx) {
+			respondAuthError(c, http.StatusForbidden, "User registration is currently disabled")
+			return
+		}
 		isAdmin := !hasUsers
 
 		user, err := authService.CreateUser(ctx, req.Username, req.Password, isAdmin)
@@ -84,6 +92,26 @@ func RegisterHandler(authService *services.AuthService) gin.HandlerFunc {
 			"username": user.Username,
 			"is_admin": user.IsAdmin,
 			"message":  "User created successfully",
+		})
+	}
+}
+
+// AuthStatusHandler handles GET /api/v1/auth/status (public). It exposes the
+// bits a login page needs before authenticating: whether self-registration is
+// open, and whether initial setup is still required (no accounts exist yet). The
+// UI shows the sign-up link when registration is open OR setup is required, so
+// the very first admin can always be created even with registration closed.
+func AuthStatusHandler(authService *services.AuthService, settingsService *services.SettingsService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		hasUsers, err := authService.HasAnyUser(ctx)
+		if err != nil {
+			respondAuthError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		respondSuccess(c, http.StatusOK, gin.H{
+			"registration_enabled": settingsService.RegistrationEnabled(ctx),
+			"setup_required":       !hasUsers,
 		})
 	}
 }
@@ -370,6 +398,21 @@ func AuthMiddleware(authService *services.AuthService) gin.HandlerFunc {
 	}
 }
 
+// RequireAdmin is a middleware that rejects non-admin users with 403. It must be
+// mounted after AuthMiddleware, which populates the is_admin context value.
+func RequireAdmin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if _, _, isAdmin, ok := GetUserFromContext(c); !ok || !isAdmin {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"error":   gin.H{"code": http.StatusForbidden, "message": "administrator access required"},
+			})
+			return
+		}
+		c.Next()
+	}
+}
+
 // GetUserFromContext returns the authenticated user's id, username, and admin
 // flag from the gin context (set by AuthMiddleware).
 func GetUserFromContext(c *gin.Context) (userID uuid.UUID, username string, isAdmin bool, ok bool) {
@@ -387,11 +430,12 @@ func GetUserFromContext(c *gin.Context) (userID uuid.UUID, username string, isAd
 
 // RegisterAuthRoutes mounts the auth endpoints: register/login/mfa-verify are
 // public; the rest require a valid JWT.
-func RegisterAuthRoutes(router *gin.Engine, authService *services.AuthService) {
+func RegisterAuthRoutes(router *gin.Engine, authService *services.AuthService, settingsService *services.SettingsService) {
 	public := router.Group("/api/v1/auth")
-	public.POST("/register", RegisterHandler(authService))
+	public.POST("/register", RegisterHandler(authService, settingsService))
 	public.POST("/login", LoginHandler(authService))
 	public.POST("/mfa/verify", VerifyMFAHandler(authService))
+	public.GET("/status", AuthStatusHandler(authService, settingsService))
 
 	protected := router.Group("/api/v1/auth")
 	protected.Use(AuthMiddleware(authService))

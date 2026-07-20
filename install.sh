@@ -278,6 +278,18 @@ fi
 ok "Generated JWT secret: ••••••••••••••••"
 echo
 
+# ---- 5b. User registration ----
+info "${BOLD}User registration${RESET}"
+info "  Should new users be able to create their own accounts?"
+info "  You can always create the first (admin) account, and change this later"
+info "  under Security. Leaving it closed is recommended for a private instance."
+if ! read -r -p "Allow open user registration? (y/N) " REG_ANSWER; then REG_ANSWER="n"; fi
+case "$REG_ANSWER" in
+  y|Y|yes|YES) REGISTRATION_ENABLED=true;  ok "Registration will be open." ;;
+  *)           REGISTRATION_ENABLED=false; ok "Registration closed (first account still allowed)." ;;
+esac
+echo
+
 # ---- 6. Optional SMTP ----
 SMTP_HOST=""; SMTP_PORT="587"; SMTP_USER=""; SMTP_PASSWORD=""; SMTP_FROM=""
 info "${BOLD}Email alerts (optional)${RESET}"
@@ -325,6 +337,7 @@ TIMEZONE=${TIMEZONE}
 
 # Authentication
 JWT_SECRET=${JWT_SECRET}
+REGISTRATION_ENABLED=${REGISTRATION_ENABLED}
 
 # SMTP (email alerts)
 SMTP_HOST=${SMTP_HOST}

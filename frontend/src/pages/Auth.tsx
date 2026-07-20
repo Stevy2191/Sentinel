@@ -56,6 +56,11 @@ export default function Auth({ mode }: { mode: Mode }) {
   const [useBackup, setUseBackup] = useState(false)
   const [backup, setBackup] = useState('')
 
+  // Whether the sign-up link/form should be offered. Registration may be closed
+  // by an admin; the very first account (setup) is always allowed. null = still
+  // loading, so we don't flash the link before we know.
+  const [signupAllowed, setSignupAllowed] = useState<boolean | null>(null)
+
   useEffect(() => {
     if (mode === 'login') {
       const prefill = new URLSearchParams(window.location.search).get('username')
@@ -65,6 +70,22 @@ export default function Auth({ mode }: { mode: Mode }) {
     setError(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode])
+
+  // Fetch the public auth status to decide whether to offer registration.
+  useEffect(() => {
+    let active = true
+    fetch('/api/v1/auth/status')
+      .then((res) => res.json())
+      .then((body) => {
+        if (!active) return
+        const data = body?.data ?? {}
+        setSignupAllowed(Boolean(data.registration_enabled) || Boolean(data.setup_required))
+      })
+      .catch(() => active && setSignupAllowed(false))
+    return () => {
+      active = false
+    }
+  }, [])
 
   const strength = useMemo(() => validatePassword(password), [password])
   const usernameValid = usernameRe.test(username)
@@ -182,6 +203,22 @@ export default function Auth({ mode }: { mode: Mode }) {
         </Card>
       )
     }
+    // Registration explicitly closed (and setup already done): don't show the form.
+    if (signupAllowed === false) {
+      return (
+        <Card title="Registration disabled">
+          <p className="text-center text-sm text-neutral-500">
+            New account registration is currently disabled. Please contact an
+            administrator for access.
+          </p>
+          <p className="mt-4 text-center text-sm text-neutral-500">
+            <Link to="/login" className="text-primary-600 hover:underline">
+              Back to sign in
+            </Link>
+          </p>
+        </Card>
+      )
+    }
     return (
       <Card title="Create Account">
         <form onSubmit={handleRegister} className="space-y-4">
@@ -273,12 +310,14 @@ export default function Auth({ mode }: { mode: Mode }) {
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Sign In'}
         </button>
       </form>
-      <p className="mt-4 text-center text-sm text-neutral-500">
-        Don't have an account?{' '}
-        <Link to="/register" className="text-primary-600 hover:underline">
-          Sign up
-        </Link>
-      </p>
+      {signupAllowed && (
+        <p className="mt-4 text-center text-sm text-neutral-500">
+          Don't have an account?{' '}
+          <Link to="/register" className="text-primary-600 hover:underline">
+            Sign up
+          </Link>
+        </p>
+      )}
     </Card>
   )
 }
