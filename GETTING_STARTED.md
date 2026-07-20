@@ -33,7 +33,8 @@ nano .env
 Key settings to configure:
 
 - `DB_PASSWORD` — set a strong database password
-- `PORT` — host port for the web UI (default `3000`; change if it's in use)
+- `FRONTEND_PORT` — host port for the web UI (default `3000`; change if it's in use)
+- `BACKEND_PORT` — host port for the API (default `3001`)
 - `TIMEZONE` — your timezone (e.g. `America/Chicago`)
 - `ENVIRONMENT` — `production` or `development`
 - Notification channels (optional): `SMTP_*`, `SLACK_WEBHOOK_URL`, etc. — see

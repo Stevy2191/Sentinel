@@ -127,8 +127,9 @@ The frontend reaches the API through nginx (relative `/api`), which proxies to
 the backend container — no CORS or API URL configuration needed.
 
 > **Ports:** the frontend is published on host port `3000` (override with
-> `PORT` in `.env`) and the backend on `3001`. If `3000` is already in use on
-> your machine, set e.g. `PORT=3005` in `.env`.
+> `FRONTEND_PORT` in `.env`) and the backend on `3001` (`BACKEND_PORT`). If a
+> port is already in use, set e.g. `FRONTEND_PORT=3005` in `.env` (or use
+> `install.sh`, which prompts for both).
 
 ### Using published images
 

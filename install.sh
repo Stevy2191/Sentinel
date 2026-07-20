@@ -21,10 +21,10 @@ fatal() { err "$*"; exit 1; }
 # Work from the script's directory (repo root).
 cd "$(dirname "$0")"
 
-# Host ports the stack binds (see docker-compose.yml). Frontend and postgres are
-# env-backed (reassignable); backend and adminer are fixed in compose.
-PORT_FRONTEND=3000
-PORT_BACKEND=3001
+# Host ports the stack binds (see docker-compose.yml). Frontend, backend, and
+# postgres are env-backed (reassignable); adminer is fixed in compose.
+FRONTEND_PORT=3000
+BACKEND_PORT=3001
 PORT_DB=5432
 PORT_ADMINER=8080
 
@@ -105,61 +105,53 @@ resolve_port() {
   ok "Port $port ($label) is now available."
 }
 
-# find_free_port START → prints the first free port at/after START (capped).
-find_free_port() {
-  local p="$1" cap=$(( $1 + 100 ))
-  while [ "$p" -le "$cap" ] && port_in_use "$p"; do
-    p=$((p + 1))
-  done
-  echo "$p"
-}
-
-# choose_frontend_port asks the user which port to serve the web UI on, with a
-# smart default that avoids a port already in use.
-choose_frontend_port() {
-  info "${BOLD}What port should the Sentinel web UI run on?${RESET}"
-  local suggestion=3000
-  if port_in_use 3000; then
-    suggestion=$(find_free_port 3002)
-    warn "Port 3000 appears to be in use by another application."
-    info "  Recommended free port: ${BOLD}${suggestion}${RESET}"
-  else
-    info "  Recommended: ${BOLD}3000${RESET}"
-  fi
-
+# ask_port VARNAME LABEL DEFAULT [EXCLUDE_PORT]
+# Prompts for a port (1024-65535), optionally requiring it to differ from
+# EXCLUDE_PORT, warns on conflict, and stores the result in VARNAME.
+ask_port() {
+  local __name="$1" label="$2" default="$3" exclude="${4:-}"
+  local chosen
   while true; do
-    read -r -p "  Enter port (default ${suggestion}): " INPUT || INPUT=""
-    local chosen="${INPUT:-$suggestion}"
-    if ! printf '%s' "$chosen" | grep -Eq '^[0-9]+$' || [ "$chosen" -lt 1 ] || [ "$chosen" -gt 65535 ]; then
-      err "Please enter a valid port number (1-65535)."
+    if ! read -r -p "  Enter ${label} port (default ${default}): " INPUT; then INPUT=""; fi
+    chosen="${INPUT:-$default}"
+    if ! printf '%s' "$chosen" | grep -Eq '^[0-9]+$' || [ "$chosen" -lt 1024 ] || [ "$chosen" -gt 65535 ]; then
+      err "Port must be a number between 1024 and 65535."
+      continue
+    fi
+    if [ -n "$exclude" ] && [ "$chosen" = "$exclude" ]; then
+      err "This port must differ from the other chosen port (${exclude})."
       continue
     fi
     if port_in_use "$chosen"; then
       warn "Port $chosen is already in use."
-      if ! read -r -p "  Try another port? (Y/n) " AGAIN; then AGAIN="n"; fi
+      if ! read -r -p "  Use a different port? (Y/n) " AGAIN; then AGAIN="n"; fi
       case "$AGAIN" in
-        n|N|no|NO)
-          warn "Using port $chosen anyway — startup may fail if it stays occupied."
-          PORT_FRONTEND="$chosen"
-          return
-          ;;
+        n|N|no|NO) warn "Continuing with $chosen anyway — startup may fail if it stays occupied." ;;
         *) continue ;;
       esac
+    else
+      ok "Port $chosen is available."
     fi
-    ok "Port $chosen is available."
-    PORT_FRONTEND="$chosen"
+    printf -v "$__name" '%s' "$chosen"
     return
   done
 }
 
-# check_port_conflicts asks for the web-UI port up front, then verifies the
-# remaining service ports before docker-compose starts.
-check_port_conflicts() {
-  info "${BOLD}Configuring ports...${RESET}"
-  choose_frontend_port
+# prompt_for_ports asks for the frontend (web UI) and backend (API) host ports.
+prompt_for_ports() {
+  info "${BOLD}Port Configuration${RESET}"
+  info "What port should the web UI run on?"
+  ask_port FRONTEND_PORT "frontend web UI" 3000 ""
+  info "What port should the API run on?"
+  ask_port BACKEND_PORT "backend API" 3001 "$FRONTEND_PORT"
   echo
+}
+
+# check_port_conflicts asks for the app ports, then verifies the backing
+# service ports before docker-compose starts.
+check_port_conflicts() {
+  prompt_for_ports
   info "Verifying the backing service ports..."
-  resolve_port PORT_BACKEND "backend API" no
   resolve_port PORT_DB "postgres" yes
   resolve_port PORT_ADMINER "adminer" no
   ok "Port check complete."
@@ -289,7 +281,8 @@ DB_PASSWORD=${DB_PASSWORD}
 DB_PORT=${PORT_DB}
 
 # Server
-PORT=${PORT_FRONTEND}
+FRONTEND_PORT=${FRONTEND_PORT}
+BACKEND_PORT=${BACKEND_PORT}
 ENVIRONMENT=production
 LOG_LEVEL=info
 TIMEZONE=${TIMEZONE}
@@ -333,8 +326,8 @@ case "${START_ANSWER:-y}" in
     $COMPOSE up -d --build
     echo
     ok "Sentinel is starting."
-    info "  Web UI:   ${BOLD}http://localhost:3000${RESET}"
-    info "  Backend:  http://localhost:3001/api/v1"
+    info "  Web UI:   ${BOLD}http://localhost:${FRONTEND_PORT}${RESET}"
+    info "  Backend:  http://localhost:${BACKEND_PORT}/api/v1"
     info "  DB admin: http://localhost:8080 (Adminer)"
     echo
     info "First run: open the web UI and register — the first account becomes the admin."
