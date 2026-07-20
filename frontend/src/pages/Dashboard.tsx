@@ -469,6 +469,9 @@ export default function Dashboard() {
           </p>
         </div>
         <div className="flex gap-2">
+          <button className="btn-primary" onClick={() => navigate('/monitors/create')}>
+            <Plus className="h-4 w-4" /> New Monitor
+          </button>
           <button className="btn-secondary" onClick={() => setModal({ mode: 'create' })}>
             <FolderPlus className="h-4 w-4" /> New Group
           </button>
@@ -511,7 +514,7 @@ export default function Dashboard() {
           <p className="text-sm text-neutral-500 dark:text-neutral-400">
             Create your first monitor to start tracking uptime.
           </p>
-          <button className="btn-primary" onClick={() => navigate('/monitors')}>
+          <button className="btn-primary" onClick={() => navigate('/monitors/create')}>
             <Plus className="h-4 w-4" /> Create Your First Monitor
           </button>
         </div>
