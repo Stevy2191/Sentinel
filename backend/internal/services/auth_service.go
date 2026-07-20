@@ -227,9 +227,12 @@ func (s *AuthService) SetupMFA(ctx context.Context, userID uuid.UUID) (string, s
 		codes[i] = generateBackupCode()
 	}
 
+	// Store the secret + backup codes but leave MFA disabled until the user
+	// confirms with a valid TOTP code (see ConfirmMFASetup). This keeps an
+	// abandoned setup from locking the account into MFA.
 	user.MFASecret = key.Secret()
 	user.MFABackupCodes = codes
-	user.MFAEnabled = true
+	user.MFAEnabled = false
 	user.UpdatedAt = time.Now()
 	if err := s.db.WithContext(ctx).Save(user).Error; err != nil {
 		return "", "", fmt.Errorf("saving MFA setup: %w", err)
@@ -237,6 +240,30 @@ func (s *AuthService) SetupMFA(ctx context.Context, userID uuid.UUID) (string, s
 
 	s.logger.Printf("[auth] MFA setup initiated for: %s", user.Username)
 	return key.Secret(), key.URL(), nil
+}
+
+// ConfirmMFASetup verifies a TOTP code against the stored (not-yet-enabled)
+// secret and, on success, enables MFA for the user.
+func (s *AuthService) ConfirmMFASetup(ctx context.Context, userID uuid.UUID, totpCode string) error {
+	user, err := s.GetUserByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if user.MFASecret == "" {
+		return errors.New("MFA is not set up for this user")
+	}
+	if !totp.Validate(totpCode, user.MFASecret) {
+		return errors.New("Invalid TOTP code")
+	}
+
+	user.MFAEnabled = true
+	user.UpdatedAt = time.Now()
+	if err := s.db.WithContext(ctx).Save(user).Error; err != nil {
+		return fmt.Errorf("enabling MFA: %w", err)
+	}
+
+	s.logger.Printf("[auth] MFA confirmed and enabled for: %s", user.Username)
+	return nil
 }
 
 // VerifyMFA validates a 6-digit TOTP code (with the standard 30s window).

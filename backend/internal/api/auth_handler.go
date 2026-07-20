@@ -224,13 +224,13 @@ func ConfirmMFAHandler(authService *services.AuthService) gin.HandlerFunc {
 			return
 		}
 
-		valid, err := authService.VerifyMFA(c.Request.Context(), userID, req.TOTPCode)
-		if err != nil {
-			respondAuthError(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		if !valid {
-			respondAuthError(c, http.StatusUnauthorized, "Invalid TOTP code")
+		if err := authService.ConfirmMFASetup(c.Request.Context(), userID, req.TOTPCode); err != nil {
+			// Invalid code → 401; anything else (e.g. not set up) → 400.
+			if strings.Contains(err.Error(), "Invalid TOTP code") {
+				respondAuthError(c, http.StatusUnauthorized, err.Error())
+			} else {
+				respondAuthError(c, http.StatusBadRequest, err.Error())
+			}
 			return
 		}
 
