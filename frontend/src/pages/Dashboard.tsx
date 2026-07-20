@@ -1,14 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  RadialBarChart,
-  RadialBar,
-  PolarAngleAxis,
-  ResponsiveContainer,
-  LineChart,
-  Line,
-} from 'recharts'
-import {
   Activity,
   CheckCircle2,
   XCircle,
@@ -17,18 +9,29 @@ import {
   Plus,
   Play,
   ExternalLink,
-  AlertTriangle,
+  ChevronDown,
+  ChevronRight,
+  FolderPlus,
+  Pencil,
+  Trash2,
   Wrench,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { useMonitors, useTestMonitor } from '@/hooks/useMonitors'
+import {
+  useMonitorGroups,
+  useCreateMonitorGroup,
+  useUpdateMonitorGroup,
+  useDeleteMonitorGroup,
+  useMoveMonitorToGroup,
+} from '@/hooks/useMonitorGroups'
+import { useToasts, Toaster } from '@/components/Toast'
+import ColorPicker from '@/components/ColorPicker'
 import { formatResponseTime, formatDate } from '@/utils/formatters'
-import type { Monitor } from '@/types'
+import type { Monitor, MonitorGroup } from '@/types'
 
 const REFRESH_MS = 30_000
-
-// Static placeholder sparkline until per-monitor 24h series is available.
-const sparkData = [98, 99, 97, 100, 99, 96, 100, 99].map((v, i) => ({ i, v }))
+const DEFAULT_GROUP_COLOR = '#10b981'
 
 function responseColor(ms: number): string {
   if (ms <= 0) return 'text-neutral-400'
@@ -37,19 +40,14 @@ function responseColor(ms: number): string {
   return 'text-red-500'
 }
 
-function gaugeColor(pct: number): string {
-  if (pct < 90) return '#ef4444'
-  if (pct < 99) return '#f59e0b'
-  return '#10b981'
+function uptimeColor(pct: number): string {
+  if (pct >= 95) return 'text-emerald-500'
+  if (pct >= 80) return 'text-amber-500'
+  return 'text-red-500'
 }
 
-interface Toast {
-  id: number
-  message: string
-  ok: boolean
-}
-
-function StatTile({
+// ---------- compact stat tile ----------
+function CompactStat({
   label,
   value,
   icon: Icon,
@@ -61,54 +59,32 @@ function StatTile({
   tone: string
 }) {
   return (
-    <div className="card flex items-center gap-4 p-5">
-      <div className={`rounded-lg p-3 ${tone}`}>
-        <Icon className="h-6 w-6" />
+    <div className="card flex items-center gap-3 p-3">
+      <div className={`rounded-md p-2 ${tone}`}>
+        <Icon className="h-4 w-4" />
       </div>
-      <div>
-        <div className="text-2xl font-bold">{value}</div>
-        <div className="text-sm text-neutral-500 dark:text-neutral-400">{label}</div>
-      </div>
-    </div>
-  )
-}
-
-function AvailabilityGauge({ pct }: { pct: number }) {
-  const color = gaugeColor(pct)
-  const data = [{ name: 'availability', value: pct, fill: color }]
-  return (
-    <div className="relative h-48">
-      <ResponsiveContainer width="100%" height="100%">
-        <RadialBarChart
-          innerRadius="72%"
-          outerRadius="100%"
-          data={data}
-          startAngle={90}
-          endAngle={-270}
-        >
-          <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
-          <RadialBar background dataKey="value" cornerRadius={8} angleAxisId={0} />
-        </RadialBarChart>
-      </ResponsiveContainer>
-      <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-3xl font-bold" style={{ color }}>
-          {pct.toFixed(1)}%
-        </span>
-        <span className="text-xs text-neutral-500 dark:text-neutral-400">online now</span>
+      <div className="min-w-0">
+        <div className="text-lg font-bold leading-tight">{value}</div>
+        <div className="truncate text-xs text-neutral-500 dark:text-neutral-400">{label}</div>
       </div>
     </div>
   )
 }
 
-function MonitorCard({
+// ---------- horizontal monitor row ----------
+function MonitorRow({
   monitor,
+  groups,
   onDetails,
   onTest,
+  onMove,
   testing,
 }: {
   monitor: Monitor
+  groups: MonitorGroup[]
   onDetails: (id: string) => void
   onTest: (id: string, name: string) => void
+  onMove: (id: string, groupID: string | null) => void
   testing: boolean
 }) {
   const inMaintenance = monitor.is_in_maintenance ?? false
@@ -116,129 +92,303 @@ function MonitorCard({
   const offline = monitor.current_status === 'offline'
 
   return (
-    <div
-      onClick={() => onDetails(monitor.id)}
-      className={`card relative cursor-pointer p-5 transition duration-150 hover:scale-[1.02] hover:shadow-card-hover ${
-        inMaintenance ? 'opacity-90 ring-1 ring-amber-300 dark:ring-amber-700' : ''
-      }`}
-    >
-      {inMaintenance && (
-        <div className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-900/50 dark:text-amber-200">
-          <Wrench className="h-3 w-3" /> In Maintenance ({monitor.time_remaining_minutes ?? 0}m)
-        </div>
-      )}
-      <div className="flex items-start justify-between">
-        <div className="min-w-0">
-          <div className="truncate font-semibold">{monitor.name}</div>
-          <div className="truncate text-sm text-neutral-500 dark:text-neutral-400">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-neutral-200 bg-white px-4 py-3 transition hover:shadow-card-hover dark:border-neutral-800 dark:bg-neutral-900">
+      {/* Status dot + name + url */}
+      <button
+        onClick={() => onDetails(monitor.id)}
+        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+      >
+        <span
+          className={`h-2.5 w-2.5 shrink-0 rounded-full ${
+            inMaintenance
+              ? 'bg-amber-500'
+              : online
+                ? 'bg-emerald-500'
+                : offline
+                  ? 'bg-red-500 animate-pulse'
+                  : 'bg-neutral-400'
+          }`}
+        />
+        <span className="min-w-0">
+          <span className="block truncate font-semibold">{monitor.name}</span>
+          <span className="block truncate text-xs text-neutral-500 dark:text-neutral-400">
             {monitor.url}
-          </div>
-        </div>
-        {!inMaintenance && (
-          <span className="shrink-0 rounded-md bg-neutral-100 px-2 py-1 text-xs font-semibold uppercase text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
-            {monitor.type}
           </span>
-        )}
-      </div>
+        </span>
+      </button>
 
-      <div className="mt-4 flex items-center justify-between">
+      {/* Status label */}
+      <span className="w-24 shrink-0 text-sm font-medium">
         {inMaintenance ? (
-          <span className="flex items-center gap-1.5 text-sm font-medium text-amber-600 dark:text-amber-400">
-            <span className="h-2 w-2 rounded-full bg-amber-500" />
-            Maintenance in progress
+          <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+            <Wrench className="h-3.5 w-3.5" /> Maint.
           </span>
         ) : (
-          <span
-            className={`flex items-center gap-1.5 text-sm font-medium ${
-              online ? 'text-emerald-500' : offline ? 'text-red-500' : 'text-neutral-400'
-            }`}
-          >
-            <span
-              className={`h-2 w-2 rounded-full ${
-                online ? 'bg-emerald-500' : offline ? 'bg-red-500 animate-pulse' : 'bg-neutral-400'
-              }`}
-            />
+          <span className={online ? 'text-emerald-500' : offline ? 'text-red-500' : 'text-neutral-400'}>
             {online ? 'Online' : offline ? 'Offline' : 'Unknown'}
           </span>
         )}
-        <span className={`text-sm font-medium ${responseColor(monitor.last_response_time_ms)}`}>
-          {formatResponseTime(monitor.last_response_time_ms)}
-        </span>
-      </div>
+      </span>
 
-      <div className="mt-3 h-8">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={sparkData}>
-            <Line
-              type="monotone"
-              dataKey="v"
-              stroke={online ? '#10b981' : offline ? '#ef4444' : '#94a3b8'}
-              strokeWidth={2}
-              dot={false}
-            />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
+      {/* Response time */}
+      <span className={`w-16 shrink-0 text-right text-sm font-medium ${responseColor(monitor.last_response_time_ms)}`}>
+        {formatResponseTime(monitor.last_response_time_ms)}
+      </span>
 
-      <div className="mt-3 flex items-center justify-between">
-        <span className="text-xs text-neutral-500 dark:text-neutral-400">
-          {monitor.last_check_at ? formatDate(monitor.last_check_at) : 'Never'}
-        </span>
-        <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-          <button
-            className="btn-secondary !px-2 !py-1"
-            onClick={() => onTest(monitor.id, monitor.name)}
-            disabled={testing}
-            title="Test now"
-          >
-            <Play className="h-4 w-4" />
-          </button>
-          <button
-            className="btn-secondary !px-2 !py-1"
-            onClick={() => onDetails(monitor.id)}
-            title="Details"
-          >
-            <ExternalLink className="h-4 w-4" />
-          </button>
-        </div>
+      {/* Last check */}
+      <span className="hidden w-28 shrink-0 text-right text-xs text-neutral-500 dark:text-neutral-400 sm:block">
+        {monitor.last_check_at ? formatDate(monitor.last_check_at) : 'Never'}
+      </span>
+
+      {/* Move-to-group + actions */}
+      <div className="flex shrink-0 items-center gap-1">
+        <select
+          aria-label="Move to group"
+          className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-800"
+          value={monitor.group_id ?? ''}
+          onChange={(e) => onMove(monitor.id, e.target.value || null)}
+        >
+          <option value="">Ungrouped</option>
+          {groups.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.name}
+            </option>
+          ))}
+        </select>
+        <button
+          className="btn-secondary !px-2 !py-1"
+          onClick={() => onTest(monitor.id, monitor.name)}
+          disabled={testing}
+          title="Test now"
+        >
+          <Play className="h-4 w-4" />
+        </button>
+        <button className="btn-secondary !px-2 !py-1" onClick={() => onDetails(monitor.id)} title="Details">
+          <ExternalLink className="h-4 w-4" />
+        </button>
       </div>
     </div>
   )
 }
 
-function SkeletonCard() {
+// ---------- collapsible group section ----------
+function GroupSection({
+  title,
+  color,
+  uptime,
+  count,
+  expanded,
+  onToggle,
+  onEdit,
+  children,
+}: {
+  title: string
+  color: string | null
+  uptime: number | null
+  count: number
+  expanded: boolean
+  onToggle: () => void
+  onEdit?: () => void
+  children: React.ReactNode
+}) {
   return (
-    <div className="card animate-pulse p-5">
-      <div className="h-4 w-2/3 rounded bg-neutral-200 dark:bg-neutral-800" />
-      <div className="mt-2 h-3 w-1/2 rounded bg-neutral-200 dark:bg-neutral-800" />
-      <div className="mt-6 h-8 rounded bg-neutral-200 dark:bg-neutral-800" />
-      <div className="mt-4 h-3 w-1/3 rounded bg-neutral-200 dark:bg-neutral-800" />
+    <div className="space-y-2">
+      <div
+        className="flex items-center gap-3 rounded-md border-l-4 bg-neutral-50 px-3 py-2 dark:bg-neutral-800/50"
+        style={{ borderLeftColor: color ?? '#94a3b8' }}
+      >
+        <button onClick={onToggle} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+          {expanded ? (
+            <ChevronDown className="h-4 w-4 shrink-0 text-neutral-400" />
+          ) : (
+            <ChevronRight className="h-4 w-4 shrink-0 text-neutral-400" />
+          )}
+          <span
+            className="h-3 w-3 shrink-0 rounded-full"
+            style={{ backgroundColor: color ?? '#94a3b8' }}
+          />
+          <span className="truncate font-semibold">{title}</span>
+          <span className="shrink-0 rounded-full bg-neutral-200 px-2 py-0.5 text-xs text-neutral-600 dark:bg-neutral-700 dark:text-neutral-300">
+            {count}
+          </span>
+        </button>
+        {uptime != null && (
+          <span className={`shrink-0 text-lg font-bold ${uptimeColor(uptime)}`}>{uptime.toFixed(1)}%</span>
+        )}
+        {onEdit && (
+          <button
+            onClick={onEdit}
+            className="shrink-0 rounded p-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700"
+            title="Edit group"
+          >
+            <Pencil className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+      {expanded && <div className="space-y-2 pl-1">{children}</div>}
     </div>
   )
 }
 
+// ---------- group create/edit modal ----------
+function GroupModal({
+  mode,
+  group,
+  onClose,
+  onSaved,
+  push,
+}: {
+  mode: 'create' | 'edit'
+  group?: MonitorGroup
+  onClose: () => void
+  onSaved: () => void
+  push: (msg: string, type?: 'success' | 'error' | 'info') => void
+}) {
+  const { create, loading: creating } = useCreateMonitorGroup()
+  const { update, loading: updating } = useUpdateMonitorGroup()
+  const { delete: remove, loading: deleting } = useDeleteMonitorGroup()
+
+  const [name, setName] = useState(group?.name ?? '')
+  const [description, setDescription] = useState(group?.description ?? '')
+  const [color, setColor] = useState(group?.color ?? DEFAULT_GROUP_COLOR)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const busy = creating || updating || deleting
+  const inputCls =
+    'w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-primary-500'
+
+  const save = async () => {
+    if (!name.trim()) {
+      push('Group name is required', 'error')
+      return
+    }
+    const input = { name: name.trim(), description: description.trim() || null, color }
+    try {
+      if (mode === 'create') {
+        await create(input)
+        push('Group created', 'success')
+      } else if (group) {
+        await update(group.id, input)
+        push('Group updated', 'success')
+      }
+      onSaved()
+      onClose()
+    } catch (err) {
+      push((err as { message?: string }).message ?? 'Failed to save group', 'error')
+    }
+  }
+
+  const del = async () => {
+    if (!group) return
+    try {
+      await remove(group.id)
+      push('Group deleted; its monitors were ungrouped', 'success')
+      onSaved()
+      onClose()
+    } catch (err) {
+      push((err as { message?: string }).message ?? 'Failed to delete group', 'error')
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="card w-full max-w-md space-y-4 p-6" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-lg font-semibold">{mode === 'create' ? 'Create Group' : 'Edit Group'}</h3>
+        <div>
+          <span className="mb-1 block text-sm font-medium">
+            Name <span className="text-red-500">*</span>
+          </span>
+          <input
+            autoFocus
+            className={inputCls}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Internal Servers"
+          />
+        </div>
+        <div>
+          <span className="mb-1 block text-sm font-medium">Description</span>
+          <input
+            className={inputCls}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Optional"
+          />
+        </div>
+        <ColorPicker label="Color" value={color} defaultValue={DEFAULT_GROUP_COLOR} onChange={setColor} />
+
+        <div className="flex items-center justify-between gap-2 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+          {mode === 'edit' ? (
+            <button
+              className="btn border border-error-300 text-error-600 hover:bg-error-50 dark:hover:bg-error-900/20"
+              disabled={busy}
+              onClick={() => setConfirmDelete(true)}
+            >
+              <Trash2 className="h-4 w-4" /> Delete
+            </button>
+          ) : (
+            <span />
+          )}
+          <div className="flex gap-2">
+            <button className="btn-secondary" disabled={busy} onClick={onClose}>
+              Cancel
+            </button>
+            <button className="btn-primary" disabled={busy} onClick={() => void save()}>
+              {busy ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+
+        {confirmDelete && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-900/30">
+            <p className="mb-2 text-amber-800 dark:text-amber-200">
+              Delete this group? Its monitors will be ungrouped (not deleted).
+            </p>
+            <div className="flex justify-end gap-2">
+              <button className="btn-secondary !py-1" onClick={() => setConfirmDelete(false)}>
+                Cancel
+              </button>
+              <button
+                className="btn bg-error-600 !py-1 text-white hover:bg-error-700"
+                disabled={deleting}
+                onClick={() => void del()}
+              >
+                {deleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---------- page ----------
 export default function Dashboard() {
   const navigate = useNavigate()
   const { monitors, loading, error, refetch } = useMonitors()
+  const { groups, refetch: refetchGroups } = useMonitorGroups()
   const { test } = useTestMonitor()
+  const { move } = useMoveMonitorToGroup()
+  const { toasts, push } = useToasts()
+
   const [updatedAt, setUpdatedAt] = useState<Date>(new Date())
   const [, setTick] = useState(0)
-  const [toasts, setToasts] = useState<Toast[]>([])
   const [testingId, setTestingId] = useState<string | null>(null)
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const [modal, setModal] = useState<{ mode: 'create' | 'edit'; group?: MonitorGroup } | null>(null)
 
-  // Refresh timestamp whenever data changes; tick every second for the label.
-  useEffect(() => {
-    setUpdatedAt(new Date())
-  }, [monitors])
+  useEffect(() => setUpdatedAt(new Date()), [monitors])
   useEffect(() => {
     const t = window.setInterval(() => setTick((x) => x + 1), 1000)
     return () => window.clearInterval(t)
   }, [])
-  // Auto-refresh the monitor list.
   useEffect(() => {
-    const t = window.setInterval(() => void refetch(), REFRESH_MS)
+    const t = window.setInterval(() => {
+      void refetch()
+      void refetchGroups()
+    }, REFRESH_MS)
     return () => window.clearInterval(t)
-  }, [refetch])
+  }, [refetch, refetchGroups])
 
   const stats = useMemo(() => {
     const total = monitors.length
@@ -247,42 +397,66 @@ export default function Dashboard() {
     const responders = monitors.filter((m) => m.last_response_time_ms > 0)
     const avg =
       responders.length > 0
-        ? Math.round(
-            responders.reduce((s, m) => s + m.last_response_time_ms, 0) / responders.length
-          )
+        ? Math.round(responders.reduce((s, m) => s + m.last_response_time_ms, 0) / responders.length)
         : 0
-    const availability = total > 0 ? (online / total) * 100 : 100
-    return { total, online, offline, avg, availability }
+    return { total, online, offline, avg }
   }, [monitors])
 
-  const activeIncidents = useMemo(
-    () => monitors.filter((m) => m.current_status === 'offline').slice(0, 5),
-    [monitors]
-  )
+  const ungrouped = useMemo(() => monitors.filter((m) => !m.group_id), [monitors])
+  const monitorsByGroup = useMemo(() => {
+    const map = new Map<string, Monitor[]>()
+    for (const m of monitors) {
+      if (m.group_id) {
+        const list = map.get(m.group_id) ?? []
+        list.push(m)
+        map.set(m.group_id, list)
+      }
+    }
+    return map
+  }, [monitors])
 
-  const pushToast = useCallback((message: string, ok: boolean) => {
-    const id = Date.now() + Math.random()
-    setToasts((t) => [...t, { id, message, ok }])
-    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000)
-  }, [])
+  const refetchAll = useCallback(async () => {
+    await Promise.all([refetch(), refetchGroups()])
+  }, [refetch, refetchGroups])
 
   const handleTest = useCallback(
     async (id: string, name: string) => {
       setTestingId(id)
       try {
         const check = await test(id)
-        pushToast(`${name}: ${check.status} (${check.response_time_ms}ms)`, check.status === 'success')
+        push(`${name}: ${check.status} (${check.response_time_ms}ms)`, check.status === 'success' ? 'success' : 'error')
         await refetch()
       } catch {
-        pushToast(`${name}: test failed`, false)
+        push(`${name}: test failed`, 'error')
       } finally {
         setTestingId(null)
       }
     },
-    [test, pushToast, refetch]
+    [test, push, refetch]
+  )
+
+  const handleMove = useCallback(
+    async (monitorID: string, groupID: string | null) => {
+      try {
+        await move(monitorID, groupID)
+        push(groupID ? 'Monitor moved to group' : 'Monitor ungrouped', 'success')
+        await refetchAll()
+      } catch (err) {
+        push((err as { message?: string }).message ?? 'Failed to move monitor', 'error')
+      }
+    },
+    [move, push, refetchAll]
   )
 
   const goToDetails = useCallback((id: string) => navigate(`/monitors/${id}`), [navigate])
+  const toggle = (id: string) => setCollapsed((c) => ({ ...c, [id]: !c[id] }))
+
+  const rowProps = {
+    groups,
+    onDetails: goToDetails,
+    onTest: handleTest,
+    onMove: handleMove,
+  }
 
   return (
     <div className="space-y-6">
@@ -294,86 +468,42 @@ export default function Dashboard() {
             Last updated: {formatDistanceToNow(updatedAt, { addSuffix: true })}
           </p>
         </div>
-        <button className="btn-secondary" onClick={() => void refetch()} disabled={loading}>
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
+        <div className="flex gap-2">
+          <button className="btn-secondary" onClick={() => setModal({ mode: 'create' })}>
+            <FolderPlus className="h-4 w-4" /> New Group
+          </button>
+          <button className="btn-secondary" onClick={() => void refetchAll()} disabled={loading}>
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
+          </button>
+        </div>
       </div>
 
-      {/* Error state */}
       {error && (
         <div className="card flex items-center justify-between border-error-300 p-4">
-          <span className="text-error-700 dark:text-error-300">
-            Failed to load monitors: {error.message}
-          </span>
+          <span className="text-error-700 dark:text-error-300">Failed to load monitors: {error.message}</span>
           <button className="btn-secondary" onClick={() => void refetch()}>
             Retry
           </button>
         </div>
       )}
 
-      {/* Stat tiles + gauge */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:col-span-2">
-          <StatTile
-            label="Total Monitors"
-            value={stats.total}
-            icon={Activity}
-            tone="bg-info-100 text-info-600 dark:bg-info-900/40 dark:text-info-400"
-          />
-          <StatTile
-            label="Online"
-            value={stats.online}
-            icon={CheckCircle2}
-            tone="bg-primary-100 text-primary-600 dark:bg-primary-900/40 dark:text-primary-400"
-          />
-          <StatTile
-            label="Offline"
-            value={stats.offline}
-            icon={XCircle}
-            tone="bg-error-100 text-error-600 dark:bg-error-900/40 dark:text-error-400"
-          />
-          <StatTile
-            label="Avg Response"
-            value={formatResponseTime(stats.avg)}
-            icon={Gauge}
-            tone="bg-warning-100 text-warning-600 dark:bg-warning-900/40 dark:text-warning-400"
-          />
-        </div>
-        <div className="card p-5">
-          <div className="mb-1 text-sm font-medium text-neutral-500 dark:text-neutral-400">
-            Availability
-          </div>
-          <AvailabilityGauge pct={stats.availability} />
-        </div>
+      {/* Compact stats */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <CompactStat label="Total Monitors" value={stats.total} icon={Activity} tone="bg-info-100 text-info-600 dark:bg-info-900/40 dark:text-info-400" />
+        <CompactStat label="Online" value={stats.online} icon={CheckCircle2} tone="bg-primary-100 text-primary-600 dark:bg-primary-900/40 dark:text-primary-400" />
+        <CompactStat label="Offline" value={stats.offline} icon={XCircle} tone="bg-error-100 text-error-600 dark:bg-error-900/40 dark:text-error-400" />
+        <CompactStat label="Avg Response" value={formatResponseTime(stats.avg)} icon={Gauge} tone="bg-warning-100 text-warning-600 dark:bg-warning-900/40 dark:text-warning-400" />
       </div>
 
-      {/* Active incidents */}
-      {activeIncidents.length > 0 && (
-        <div className="card p-5">
-          <div className="mb-3 flex items-center gap-2 font-semibold">
-            <AlertTriangle className="h-4 w-4 text-error-500" /> Active Incidents
-          </div>
-          <div className="divide-y divide-neutral-100 dark:divide-neutral-800">
-            {activeIncidents.map((m) => (
-              <div key={m.id} className="flex items-center justify-between py-2 text-sm">
-                <span className="font-medium">{m.name}</span>
-                <span className="text-neutral-500">
-                  Down since{' '}
-                  {m.last_check_at ? formatDistanceToNow(new Date(m.last_check_at), { addSuffix: true }) : 'unknown'}
-                </span>
-              </div>
+      {/* Content */}
+      {loading && monitors.length === 0 ? (
+        <div className="card animate-pulse p-6">
+          <div className="h-4 w-1/3 rounded bg-neutral-200 dark:bg-neutral-800" />
+          <div className="mt-4 space-y-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-12 rounded bg-neutral-200 dark:bg-neutral-800" />
             ))}
           </div>
-        </div>
-      )}
-
-      {/* Monitor grid */}
-      {loading && monitors.length === 0 ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <SkeletonCard key={i} />
-          ))}
         </div>
       ) : monitors.length === 0 ? (
         <div className="card flex flex-col items-center gap-3 p-12 text-center">
@@ -382,37 +512,75 @@ export default function Dashboard() {
             Create your first monitor to start tracking uptime.
           </p>
           <button className="btn-primary" onClick={() => navigate('/monitors')}>
-            <Plus className="h-4 w-4" />
-            Create Your First Monitor
+            <Plus className="h-4 w-4" /> Create Your First Monitor
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {monitors.map((m) => (
-            <MonitorCard
-              key={m.id}
-              monitor={m}
-              onDetails={goToDetails}
-              onTest={handleTest}
-              testing={testingId === m.id}
-            />
-          ))}
+        <div className="space-y-6">
+          {/* Groups */}
+          {groups.map((g) => {
+            const members = monitorsByGroup.get(g.id) ?? []
+            const expanded = !collapsed[g.id]
+            return (
+              <GroupSection
+                key={g.id}
+                title={g.name}
+                color={g.color}
+                uptime={g.group_uptime}
+                count={members.length}
+                expanded={expanded}
+                onToggle={() => toggle(g.id)}
+                onEdit={() => setModal({ mode: 'edit', group: g })}
+              >
+                {members.length === 0 ? (
+                  <p className="px-2 py-1 text-sm text-neutral-400">
+                    No monitors in this group yet — assign one from its dropdown below.
+                  </p>
+                ) : (
+                  members.map((m) => (
+                    <MonitorRow key={m.id} monitor={m} testing={testingId === m.id} {...rowProps} />
+                  ))
+                )}
+              </GroupSection>
+            )
+          })}
+
+          {/* Ungrouped (labeled only when groups exist) */}
+          {ungrouped.length > 0 &&
+            (groups.length > 0 ? (
+              <GroupSection
+                title="Ungrouped"
+                color={null}
+                uptime={null}
+                count={ungrouped.length}
+                expanded={!collapsed.__ungrouped}
+                onToggle={() => toggle('__ungrouped')}
+              >
+                {ungrouped.map((m) => (
+                  <MonitorRow key={m.id} monitor={m} testing={testingId === m.id} {...rowProps} />
+                ))}
+              </GroupSection>
+            ) : (
+              <div className="space-y-2">
+                {ungrouped.map((m) => (
+                  <MonitorRow key={m.id} monitor={m} testing={testingId === m.id} {...rowProps} />
+                ))}
+              </div>
+            ))}
         </div>
       )}
 
-      {/* Toasts */}
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            className={`rounded-md px-4 py-2 text-sm text-white shadow-card ${
-              t.ok ? 'bg-emerald-600' : 'bg-red-600'
-            }`}
-          >
-            {t.message}
-          </div>
-        ))}
-      </div>
+      {modal && (
+        <GroupModal
+          mode={modal.mode}
+          group={modal.group}
+          onClose={() => setModal(null)}
+          onSaved={() => void refetchAll()}
+          push={push}
+        />
+      )}
+
+      <Toaster toasts={toasts} />
     </div>
   )
 }

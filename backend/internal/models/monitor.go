@@ -119,6 +119,7 @@ type Monitor struct {
 	LastResponseTimeMs int         `json:"last_response_time_ms" gorm:"column:last_response_time_ms"`
 	Enabled            bool        `json:"enabled" gorm:"column:enabled;default:true"`
 	Tags               StringSlice `json:"tags" gorm:"column:tags;type:jsonb"`
+	GroupID            *uuid.UUID  `json:"group_id" gorm:"column:group_id;type:uuid"`
 	CreatedAt          time.Time   `json:"created_at" gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt          time.Time   `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
 
