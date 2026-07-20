@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { Upload, Trash2, Volume2, ExternalLink } from 'lucide-react'
 import { useTheme, type ThemeMode } from '@/context/ThemeContext'
@@ -7,6 +7,8 @@ import SettingsCard from '@/components/SettingsCard'
 import ColorPicker from '@/components/ColorPicker'
 import TimezoneSelector from '@/components/TimezoneSelector'
 import Security from '@/pages/Security'
+import NotificationSettings from '@/pages/NotificationSettings'
+import { useAuthContext } from '@/context/AuthContext'
 import {
   PREF,
   DEFAULTS,
@@ -24,7 +26,7 @@ import {
   type ReportRange,
 } from '@/utils/preferences'
 
-type Tab = 'appearance' | 'preferences' | 'security' | 'about'
+type Tab = 'appearance' | 'preferences' | 'notifications' | 'security' | 'about'
 
 const GITHUB_URL = 'https://github.com/Stevy2191/Sentinel'
 
@@ -97,6 +99,17 @@ function RadioRow<T extends string>({
 export default function Settings() {
   const { mode, setMode } = useTheme()
   const { toasts, push } = useToasts()
+  const { currentUser } = useAuthContext()
+  const isAdmin = currentUser?.is_admin ?? false
+  // Notification-channel config is admin-only (the API is gated by RequireAdmin),
+  // so only show the tab to admins.
+  const tabs = useMemo<Tab[]>(
+    () =>
+      (['appearance', 'preferences', 'notifications', 'security', 'about'] as Tab[]).filter(
+        (t) => t !== 'notifications' || isAdmin
+      ),
+    [isAdmin]
+  )
   const [tab, setTab] = useState<Tab>(
     () => (window.location.hash === '#security' ? 'security' : 'appearance')
   )
@@ -251,8 +264,8 @@ export default function Settings() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2">
-        {(['appearance', 'preferences', 'security', 'about'] as Tab[]).map((t) => (
+      <div className="flex flex-wrap gap-2">
+        {tabs.map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -437,6 +450,8 @@ export default function Settings() {
           </SettingsCard>
         </div>
       )}
+
+      {tab === 'notifications' && isAdmin && <NotificationSettings />}
 
       {tab === 'security' && <Security />}
 
