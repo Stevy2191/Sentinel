@@ -36,7 +36,7 @@ export default function UserMenu() {
       {open && (
         <div className="absolute bottom-full left-0 mb-2 w-full overflow-hidden rounded-md border border-neutral-200 bg-white shadow-card dark:border-neutral-700 dark:bg-neutral-800">
           <button
-            onClick={() => go('/settings#security')}
+            onClick={() => go('/settings/security')}
             className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700"
           >
             <Shield className="h-4 w-4" /> Security
