@@ -29,7 +29,7 @@ function Req({ ok, label }: { ok: boolean; label: string }) {
   )
 }
 
-export default function Security() {
+export default function SecuritySettings() {
   const { currentUser, getCurrentUser } = useAuthContext()
   const { toasts, push } = useToasts()
   const mfaEnabled = currentUser?.mfa_enabled ?? false

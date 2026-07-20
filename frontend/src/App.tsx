@@ -10,6 +10,7 @@ import Reports from '@/pages/Reports'
 import StatusPages from '@/pages/StatusPages'
 import Notifications from '@/pages/Notifications'
 import Settings from '@/pages/Settings'
+import SecuritySettings from '@/pages/SecuritySettings'
 import PublicStatus from '@/pages/PublicStatus'
 import Auth from '@/pages/Auth'
 
@@ -45,6 +46,7 @@ export default function App() {
               <Route path="/status-pages/:slug/edit" element={<StatusPages mode="edit" />} />
               <Route path="/notifications" element={<Notifications />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/settings/security" element={<SecuritySettings />} />
             </Route>
           </Routes>
         </BrowserRouter>

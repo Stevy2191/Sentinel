@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { Upload, Trash2, Volume2, ExternalLink } from 'lucide-react'
 import { useTheme, type ThemeMode } from '@/context/ThemeContext'
@@ -6,7 +6,6 @@ import { useToasts, Toaster } from '@/components/Toast'
 import SettingsCard from '@/components/SettingsCard'
 import ColorPicker from '@/components/ColorPicker'
 import TimezoneSelector from '@/components/TimezoneSelector'
-import Security from '@/pages/Security'
 import NotificationSettings from '@/pages/NotificationSettings'
 import { useAuthContext } from '@/context/AuthContext'
 import {
@@ -26,7 +25,7 @@ import {
   type ReportRange,
 } from '@/utils/preferences'
 
-type Tab = 'appearance' | 'preferences' | 'notifications' | 'security' | 'about'
+type Tab = 'appearance' | 'preferences' | 'notifications' | 'about'
 
 const GITHUB_URL = 'https://github.com/Stevy2191/Sentinel'
 
@@ -105,23 +104,12 @@ export default function Settings() {
   // so only show the tab to admins.
   const tabs = useMemo<Tab[]>(
     () =>
-      (['appearance', 'preferences', 'notifications', 'security', 'about'] as Tab[]).filter(
+      (['appearance', 'preferences', 'notifications', 'about'] as Tab[]).filter(
         (t) => t !== 'notifications' || isAdmin
       ),
     [isAdmin]
   )
-  const [tab, setTab] = useState<Tab>(
-    () => (window.location.hash === '#security' ? 'security' : 'appearance')
-  )
-
-  // Respond to hash changes (e.g. navigating to /settings#security).
-  useEffect(() => {
-    const onHash = () => {
-      if (window.location.hash === '#security') setTab('security')
-    }
-    window.addEventListener('hashchange', onHash)
-    return () => window.removeEventListener('hashchange', onHash)
-  }, [])
+  const [tab, setTab] = useState<Tab>('appearance')
 
   // Appearance
   const [logo, setLogo] = useState(() => getString(PREF.logo, ''))
@@ -452,8 +440,6 @@ export default function Settings() {
       )}
 
       {tab === 'notifications' && isAdmin && <NotificationSettings />}
-
-      {tab === 'security' && <Security />}
 
       {tab === 'about' && (
         <div className="space-y-6">
