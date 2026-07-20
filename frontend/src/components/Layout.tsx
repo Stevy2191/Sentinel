@@ -4,8 +4,6 @@ import {
   Activity,
   BarChart3,
   Globe,
-  Bell,
-  Settings as SettingsIcon,
   Moon,
   Sun,
   ShieldCheck,
@@ -13,13 +11,13 @@ import {
 import { useTheme } from '@/context/ThemeContext'
 import UserMenu from '@/components/UserMenu'
 
+// Settings (and its Notifications tab) are reached via the user menu, not the
+// sidebar, so the sidebar lists only the primary product areas.
 const nav = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/monitors', label: 'Monitors', icon: Activity },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
   { to: '/status-pages', label: 'Status Pages', icon: Globe },
-  { to: '/notifications', label: 'Notifications', icon: Bell },
-  { to: '/settings', label: 'Settings', icon: SettingsIcon },
 ]
 
 export default function Layout() {
