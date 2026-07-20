@@ -37,6 +37,9 @@ Key settings to configure:
 - `BACKEND_PORT` — host port for the API (default `3001`)
 - `TIMEZONE` — your timezone (e.g. `America/Chicago`)
 - `ENVIRONMENT` — `production` or `development`
+- `ADMINER_PORT` / `COMPOSE_PROFILES` — the optional Adminer database UI. Keep
+  `COMPOSE_PROFILES=adminer` to run it (on `ADMINER_PORT`, default `8080`); set
+  `COMPOSE_PROFILES=` (empty) to skip it. `install.sh` prompts for this.
 - Notification channels (optional): `SMTP_*`, `SLACK_WEBHOOK_URL`, etc. — see
   [Setting Up Notifications](#setting-up-notifications-optional) below
 
