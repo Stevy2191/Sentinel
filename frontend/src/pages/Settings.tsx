@@ -165,15 +165,23 @@ export default function Settings() {
       push('Logo must be a PNG or JPG', 'error')
       return
     }
-    if (file.size > 2 * 1024 * 1024) {
-      push('Logo must be under 2MB', 'error')
+    if (file.size > 6 * 1024 * 1024) {
+      push('Logo must be under 6MB', 'error')
       return
     }
     const reader = new FileReader()
     reader.onload = () => {
       const data = reader.result as string
+      // The logo is stored as a base64 data URL in localStorage, which has a
+      // per-origin quota (~5MB in most browsers). A large image can exceed it,
+      // so persist defensively and surface a clear error instead of throwing.
+      try {
+        setString(PREF.logo, data)
+      } catch {
+        push('Logo is too large for browser storage — try a smaller image', 'error')
+        return
+      }
       setLogo(data)
-      setString(PREF.logo, data)
       push('Logo updated', 'success')
     }
     reader.readAsDataURL(file)
@@ -270,7 +278,7 @@ export default function Settings() {
 
       {tab === 'appearance' && (
         <div className="space-y-6">
-          <SettingsCard title="Logo" description="Shown in the app header. PNG or JPG, max 2MB.">
+          <SettingsCard title="Logo" description="Shown in the app header. PNG or JPG, max 6MB.">
             <div className="flex items-center gap-4">
               {logo ? (
                 <img src={logo} alt="Logo" className="h-14 w-14 rounded-md object-contain" />
