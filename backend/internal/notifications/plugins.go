@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -57,7 +58,10 @@ type NotificationPlugin interface {
 }
 
 // NotificationManager holds the registered plugins and records deliveries.
+// Plugins may be reloaded at runtime (when an admin changes a channel config),
+// so access to the plugins map is guarded by mu.
 type NotificationManager struct {
+	mu      sync.RWMutex
 	plugins map[string]NotificationPlugin
 	db      *gorm.DB
 	logger  *log.Logger
@@ -85,15 +89,18 @@ func (m *NotificationManager) RegisterPlugin(plugin NotificationPlugin) error {
 	if name == "" {
 		return errors.New("plugin name is empty")
 	}
-	if _, exists := m.plugins[name]; exists {
-		return fmt.Errorf("notification plugin %q already registered", name)
-	}
 
 	if err := plugin.ValidateConfig(nil); err != nil {
 		return fmt.Errorf("invalid configuration for %q plugin: %w", name, err)
 	}
 
+	m.mu.Lock()
+	if _, exists := m.plugins[name]; exists {
+		m.mu.Unlock()
+		return fmt.Errorf("notification plugin %q already registered", name)
+	}
 	m.plugins[name] = plugin
+	m.mu.Unlock()
 	m.logger.Printf("[notify] %s notification plugin registered", name)
 	return nil
 }
@@ -114,7 +121,7 @@ func (m *NotificationManager) SendNotification(ctx context.Context, message *Not
 		lastErr   error
 	)
 
-	for name, plugin := range m.plugins {
+	for name, plugin := range m.snapshot() {
 		if err := ctx.Err(); err != nil {
 			m.logger.Printf("[notify] context cancelled before %s: %v", name, err)
 			return fmt.Errorf("notification cancelled: %w", err)
@@ -211,8 +218,38 @@ func (m *NotificationManager) GetFailedNotifications(ctx context.Context) ([]mod
 	return records, nil
 }
 
+// snapshot returns a shallow copy of the plugin map, taken under the read lock,
+// so callers can iterate without holding the lock during slow network sends.
+func (m *NotificationManager) snapshot() map[string]NotificationPlugin {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make(map[string]NotificationPlugin, len(m.plugins))
+	for name, plugin := range m.plugins {
+		out[name] = plugin
+	}
+	return out
+}
+
+// setPlugin registers or replaces a plugin under its name. Unlike RegisterPlugin
+// it overwrites an existing entry (database configs are authoritative over the
+// env-configured plugin they replace).
+func (m *NotificationManager) setPlugin(plugin NotificationPlugin) {
+	m.mu.Lock()
+	m.plugins[plugin.Name()] = plugin
+	m.mu.Unlock()
+}
+
+// removePlugin unregisters a channel if present.
+func (m *NotificationManager) removePlugin(name string) {
+	m.mu.Lock()
+	delete(m.plugins, name)
+	m.mu.Unlock()
+}
+
 // Channels returns the names of all registered notification plugins.
 func (m *NotificationManager) Channels() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	names := make([]string, 0, len(m.plugins))
 	for name := range m.plugins {
 		names = append(names, name)
@@ -222,8 +259,70 @@ func (m *NotificationManager) Channels() []string {
 
 // IsRegistered reports whether a plugin with the given name is registered.
 func (m *NotificationManager) IsRegistered(name string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	_, ok := m.plugins[name]
 	return ok
+}
+
+// LoadFromDatabase (re)builds plugins from the notification_configs table.
+// Database rows are authoritative over env-configured plugins: an enabled row
+// adds or replaces the channel's plugin; a disabled row removes it. Channels
+// with no row keep whatever the environment configured (backward-compatible
+// fallback).
+func (m *NotificationManager) LoadFromDatabase(ctx context.Context) error {
+	var configs []models.NotificationConfig
+	if err := m.db.WithContext(ctx).Find(&configs).Error; err != nil {
+		return fmt.Errorf("loading notification configs: %w", err)
+	}
+	for i := range configs {
+		m.applyConfig(configs[i])
+	}
+	m.logger.Printf("[notify] loaded %d channel config(s) from database", len(configs))
+	return nil
+}
+
+// ReloadChannel refreshes a single channel from the database (used after an
+// admin creates, updates, or deletes a config). A missing row removes the
+// channel's plugin so it stops sending.
+func (m *NotificationManager) ReloadChannel(ctx context.Context, channel string) error {
+	var cfg models.NotificationConfig
+	err := m.db.WithContext(ctx).First(&cfg, "channel = ?", channel).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		m.removePlugin(channel)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("reloading channel %q: %w", channel, err)
+	}
+	m.applyConfig(cfg)
+	return nil
+}
+
+// applyConfig registers/replaces or removes a plugin based on one config row.
+func (m *NotificationManager) applyConfig(cfg models.NotificationConfig) {
+	if !cfg.Enabled {
+		m.removePlugin(cfg.Channel)
+		return
+	}
+	plugin, err := BuildPluginFromConfig(cfg)
+	if err != nil {
+		m.logger.Printf("[notify] channel %q not loaded from database: %v", cfg.Channel, err)
+		m.removePlugin(cfg.Channel)
+		return
+	}
+	m.setPlugin(plugin)
+	m.logger.Printf("[notify] channel %q loaded from database", cfg.Channel)
+}
+
+// TestConfig builds a plugin for the given config and sends a synthetic test
+// message through it, without registering the plugin or persisting a record.
+func (m *NotificationManager) TestConfig(ctx context.Context, cfg models.NotificationConfig) error {
+	plugin, err := BuildPluginFromConfig(cfg)
+	if err != nil {
+		return err
+	}
+	return plugin.Send(ctx, testMessage())
 }
 
 // SendToChannel delivers a message through a single named channel (used by the
@@ -231,7 +330,9 @@ func (m *NotificationManager) IsRegistered(name string) bool {
 // record, so it is safe to call with a synthetic (non-persisted) monitor. It
 // returns an error if the channel is not registered or the send fails.
 func (m *NotificationManager) SendToChannel(ctx context.Context, name string, message *NotificationMessage) error {
+	m.mu.RLock()
 	plugin, ok := m.plugins[name]
+	m.mu.RUnlock()
 	if !ok {
 		return fmt.Errorf("notification channel %q is not registered", name)
 	}

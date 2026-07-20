@@ -92,8 +92,14 @@ func run() error {
 		return fmt.Errorf("seeding settings: %w", err)
 	}
 
-	// 4. Notification plugins (each is optional; unconfigured channels are skipped).
+	// 4. Notification plugins. Env-configured channels register first (backward
+	// compatible); then database-backed channel configs are loaded and take
+	// precedence over env for the same channel.
 	registerNotificationPlugins(notificationManager)
+	notificationConfigService := services.NewNotificationConfigService(db, notificationManager)
+	if err := notificationManager.LoadFromDatabase(context.Background()); err != nil {
+		log.Printf("warning: loading notification configs from database: %v", err)
+	}
 
 	// 5. HTTP router + routes.
 	if cfg.Environment == "production" {
@@ -120,6 +126,7 @@ func run() error {
 	api.RegisterStatusPageRoutes(v1, statusPageService, incidentService)
 	api.RegisterNotificationRoutes(v1, notificationManager, monitorService)
 	api.RegisterSettingsRoutes(v1, settingsService)
+	api.RegisterNotificationConfigRoutes(v1, notificationConfigService)
 
 	// 6. Monitoring loop.
 	loopCtx, cancelLoop := context.WithCancel(context.Background())

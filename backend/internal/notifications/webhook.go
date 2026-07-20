@@ -21,6 +21,7 @@ const defaultWebhookTimeout = 30 * time.Second
 // endpoint.
 type WebhookPlugin struct {
 	webhookURL string
+	headers    map[string]string // optional custom headers applied to each request
 	httpClient *http.Client
 	logger     *log.Logger
 }
@@ -181,6 +182,9 @@ func (p *WebhookPlugin) deliver(ctx context.Context, payload []byte) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "Sentinel/1.0")
+	for k, v := range p.headers {
+		req.Header.Set(k, v)
+	}
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
