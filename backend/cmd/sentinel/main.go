@@ -33,10 +33,11 @@ const shutdownTimeout = 30 * time.Second
 
 // config holds runtime configuration read from the environment.
 type config struct {
-	Port          string
-	Environment   string
-	CheckInterval time.Duration
-	MigrationsDir string
+	Port                string
+	Environment         string
+	CheckInterval       time.Duration
+	MigrationsDir       string
+	RegistrationEnabled bool
 }
 
 func loadConfig() config {
@@ -45,6 +46,9 @@ func loadConfig() config {
 		Environment:   getenv("ENVIRONMENT", "development"),
 		CheckInterval: time.Duration(getenvInt("DEFAULT_CHECK_INTERVAL", 30)) * time.Second,
 		MigrationsDir: getenv("MIGRATIONS_DIR", "migrations"),
+		// Closed by default for security; the first account can always be created
+		// (see RegisterHandler), and an admin can open registration at runtime.
+		RegistrationEnabled: getenvBool("REGISTRATION_ENABLED", false),
 	}
 }
 
@@ -80,6 +84,13 @@ func run() error {
 	statusPageService := services.NewStatusPageService(db)
 	notificationManager := notifications.NewNotificationManager(db)
 	authService := services.NewAuthService(db, resolveJWTSecret())
+	settingsService := services.NewSettingsService(db)
+
+	// Seed the registration setting from the environment on first run only; once
+	// stored, an admin's runtime change is authoritative across restarts.
+	if _, err := settingsService.SeedBool(context.Background(), models.SettingRegistrationEnabled, cfg.RegistrationEnabled); err != nil {
+		return fmt.Errorf("seeding settings: %w", err)
+	}
 
 	// 4. Notification plugins (each is optional; unconfigured channels are skipped).
 	registerNotificationPlugins(notificationManager)
@@ -97,7 +108,7 @@ func run() error {
 		})
 	})
 	// Public auth endpoints (register/login/mfa-verify) + public status pages.
-	api.RegisterAuthRoutes(router, authService)
+	api.RegisterAuthRoutes(router, authService, settingsService)
 	api.RegisterPublicStatusRoutes(router, statusPageService, incidentService)
 
 	// All other /api/v1 routes require a valid JWT.
@@ -108,6 +119,7 @@ func run() error {
 	api.RegisterReportRoutes(v1, monitorService, checkService, incidentService)
 	api.RegisterStatusPageRoutes(v1, statusPageService, incidentService)
 	api.RegisterNotificationRoutes(v1, notificationManager, monitorService)
+	api.RegisterSettingsRoutes(v1, settingsService)
 
 	// 6. Monitoring loop.
 	loopCtx, cancelLoop := context.WithCancel(context.Background())
@@ -402,6 +414,15 @@ func getenvInt(key string, fallback int) int {
 	if v, ok := os.LookupEnv(key); ok && v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
+		}
+	}
+	return fallback
+}
+
+func getenvBool(key string, fallback bool) bool {
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
 		}
 	}
 	return fallback

@@ -37,6 +37,9 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       TIMEZONE: ${TIMEZONE:-UTC}
       JWT_SECRET: ${JWT_SECRET:-}
+      # Initial state of self-registration (seeded on first run; an admin can
+      # change it at runtime and that persists regardless of this value).
+      REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-false}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
