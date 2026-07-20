@@ -54,6 +54,21 @@ export interface Monitor {
   tags: string[] | null
   created_at: string
   updated_at: string
+  // Maintenance mode (present in monitor list/detail responses).
+  maintenance_mode_enabled?: boolean
+  maintenance_start?: string | null
+  maintenance_end?: string | null
+  is_in_maintenance?: boolean
+  time_remaining_minutes?: number
+}
+
+export interface MaintenanceStatus {
+  enabled: boolean
+  start_time: string | null
+  end_time: string | null
+  is_currently_in_maintenance: boolean
+  time_remaining_minutes: number
+  status: 'disabled' | 'scheduled' | 'active' | 'expired'
 }
 
 export interface MonitorInput {

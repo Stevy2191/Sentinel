@@ -18,6 +18,7 @@ import {
   Play,
   ExternalLink,
   AlertTriangle,
+  Wrench,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { useMonitors, useTestMonitor } from '@/hooks/useMonitors'
@@ -110,14 +111,22 @@ function MonitorCard({
   onTest: (id: string, name: string) => void
   testing: boolean
 }) {
+  const inMaintenance = monitor.is_in_maintenance ?? false
   const online = monitor.current_status === 'online'
   const offline = monitor.current_status === 'offline'
 
   return (
     <div
       onClick={() => onDetails(monitor.id)}
-      className="card cursor-pointer p-5 transition duration-150 hover:scale-[1.02] hover:shadow-card-hover"
+      className={`card relative cursor-pointer p-5 transition duration-150 hover:scale-[1.02] hover:shadow-card-hover ${
+        inMaintenance ? 'opacity-90 ring-1 ring-amber-300 dark:ring-amber-700' : ''
+      }`}
     >
+      {inMaintenance && (
+        <div className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-900/50 dark:text-amber-200">
+          <Wrench className="h-3 w-3" /> In Maintenance ({monitor.time_remaining_minutes ?? 0}m)
+        </div>
+      )}
       <div className="flex items-start justify-between">
         <div className="min-w-0">
           <div className="truncate font-semibold">{monitor.name}</div>
@@ -125,28 +134,33 @@ function MonitorCard({
             {monitor.url}
           </div>
         </div>
-        <span className="shrink-0 rounded-md bg-neutral-100 px-2 py-1 text-xs font-semibold uppercase text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
-          {monitor.type}
-        </span>
+        {!inMaintenance && (
+          <span className="shrink-0 rounded-md bg-neutral-100 px-2 py-1 text-xs font-semibold uppercase text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
+            {monitor.type}
+          </span>
+        )}
       </div>
 
       <div className="mt-4 flex items-center justify-between">
-        <span
-          className={`flex items-center gap-1.5 text-sm font-medium ${
-            online
-              ? 'text-emerald-500'
-              : offline
-                ? 'text-red-500'
-                : 'text-neutral-400'
-          }`}
-        >
+        {inMaintenance ? (
+          <span className="flex items-center gap-1.5 text-sm font-medium text-amber-600 dark:text-amber-400">
+            <span className="h-2 w-2 rounded-full bg-amber-500" />
+            Maintenance in progress
+          </span>
+        ) : (
           <span
-            className={`h-2 w-2 rounded-full ${
-              online ? 'bg-emerald-500' : offline ? 'bg-red-500 animate-pulse' : 'bg-neutral-400'
+            className={`flex items-center gap-1.5 text-sm font-medium ${
+              online ? 'text-emerald-500' : offline ? 'text-red-500' : 'text-neutral-400'
             }`}
-          />
-          {online ? 'Online' : offline ? 'Offline' : 'Unknown'}
-        </span>
+          >
+            <span
+              className={`h-2 w-2 rounded-full ${
+                online ? 'bg-emerald-500' : offline ? 'bg-red-500 animate-pulse' : 'bg-neutral-400'
+              }`}
+            />
+            {online ? 'Online' : offline ? 'Offline' : 'Unknown'}
+          </span>
+        )}
         <span className={`text-sm font-medium ${responseColor(monitor.last_response_time_ms)}`}>
           {formatResponseTime(monitor.last_response_time_ms)}
         </span>

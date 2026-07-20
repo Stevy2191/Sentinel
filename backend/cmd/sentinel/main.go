@@ -330,6 +330,13 @@ func handleStatusChange(
 		return
 	}
 
+	// During a maintenance window, record checks but suppress incidents and
+	// notifications entirely.
+	if monitor.IsInMaintenanceWindow(time.Now()) {
+		log.Printf("monitor %s changed state but is in maintenance; skipping incident/notification", monitor.ID)
+		return
+	}
+
 	message := &notifications.NotificationMessage{
 		MonitorID:      monitor.ID,
 		MonitorName:    monitor.Name,

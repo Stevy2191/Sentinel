@@ -231,6 +231,121 @@ func (s *MonitorService) GetMonitorStatus(ctx context.Context, id uuid.UUID) (st
 	return monitor.CurrentStatus, nil
 }
 
+// MaintenanceStatus summarizes a monitor's maintenance configuration.
+type MaintenanceStatus struct {
+	Enabled                  bool       `json:"enabled"`
+	StartTime                *time.Time `json:"start_time"`
+	EndTime                  *time.Time `json:"end_time"`
+	IsCurrentlyInMaintenance bool       `json:"is_currently_in_maintenance"`
+	TimeRemainingMinutes     int        `json:"time_remaining_minutes"`
+	Status                   string     `json:"status"` // disabled | scheduled | active | expired
+}
+
+// validateMaintenanceWindow ensures the window is coherent and not already over.
+func validateMaintenanceWindow(start, end time.Time) error {
+	if !start.Before(end) {
+		return errors.New("invalid maintenance window: start time must be before end time")
+	}
+	if !end.After(time.Now()) {
+		return errors.New("invalid maintenance window: end time must be in the future")
+	}
+	return nil
+}
+
+// EnableMaintenanceMode turns on maintenance mode for a monitor over [start, end].
+func (s *MonitorService) EnableMaintenanceMode(ctx context.Context, monitorID uuid.UUID, startTime, endTime time.Time) error {
+	monitor, err := s.GetMonitor(ctx, monitorID)
+	if err != nil {
+		return err
+	}
+	if err := validateMaintenanceWindow(startTime, endTime); err != nil {
+		return err
+	}
+	if err := s.db.WithContext(ctx).Model(&models.Monitor{}).
+		Where("id = ?", monitorID).
+		Updates(map[string]interface{}{
+			"maintenance_mode_enabled": true,
+			"maintenance_start":        startTime,
+			"maintenance_end":          endTime,
+			"updated_at":               time.Now(),
+		}).Error; err != nil {
+		return fmt.Errorf("enabling maintenance for monitor %s: %w", monitorID, err)
+	}
+	s.logger.Printf("[monitor] maintenance enabled for %q: %s to %s", monitor.Name,
+		startTime.Format(time.RFC3339), endTime.Format(time.RFC3339))
+	return nil
+}
+
+// UpdateMaintenanceWindow changes the maintenance window of a monitor.
+func (s *MonitorService) UpdateMaintenanceWindow(ctx context.Context, monitorID uuid.UUID, startTime, endTime time.Time) error {
+	if _, err := s.GetMonitor(ctx, monitorID); err != nil {
+		return err
+	}
+	if err := validateMaintenanceWindow(startTime, endTime); err != nil {
+		return err
+	}
+	if err := s.db.WithContext(ctx).Model(&models.Monitor{}).
+		Where("id = ?", monitorID).
+		Updates(map[string]interface{}{
+			"maintenance_start": startTime,
+			"maintenance_end":   endTime,
+			"updated_at":        time.Now(),
+		}).Error; err != nil {
+		return fmt.Errorf("updating maintenance window for monitor %s: %w", monitorID, err)
+	}
+	s.logger.Printf("[monitor] maintenance window updated for %s", monitorID)
+	return nil
+}
+
+// DisableMaintenanceMode turns off maintenance mode and clears the window.
+func (s *MonitorService) DisableMaintenanceMode(ctx context.Context, monitorID uuid.UUID) error {
+	monitor, err := s.GetMonitor(ctx, monitorID)
+	if err != nil {
+		return err
+	}
+	if err := s.db.WithContext(ctx).Model(&models.Monitor{}).
+		Where("id = ?", monitorID).
+		Updates(map[string]interface{}{
+			"maintenance_mode_enabled": false,
+			"maintenance_start":        nil,
+			"maintenance_end":          nil,
+			"updated_at":               time.Now(),
+		}).Error; err != nil {
+		return fmt.Errorf("disabling maintenance for monitor %s: %w", monitorID, err)
+	}
+	s.logger.Printf("[monitor] maintenance disabled for %q", monitor.Name)
+	return nil
+}
+
+// GetMaintenanceStatus returns the maintenance state of a monitor.
+func (s *MonitorService) GetMaintenanceStatus(ctx context.Context, monitorID uuid.UUID) (*MaintenanceStatus, error) {
+	monitor, err := s.GetMonitor(ctx, monitorID)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	status := &MaintenanceStatus{
+		Enabled:                  monitor.MaintenanceModeEnabled,
+		StartTime:                monitor.MaintenanceStart,
+		EndTime:                  monitor.MaintenanceEnd,
+		IsCurrentlyInMaintenance: monitor.IsInMaintenanceWindow(now),
+	}
+	switch {
+	case !monitor.MaintenanceModeEnabled:
+		status.Status = "disabled"
+	case monitor.MaintenanceStart != nil && now.Before(*monitor.MaintenanceStart):
+		status.Status = "scheduled"
+	case status.IsCurrentlyInMaintenance:
+		status.Status = "active"
+		if cd := monitor.GetMaintenanceCountdown(now); cd != nil {
+			status.TimeRemainingMinutes = int(cd.Minutes())
+		}
+	default:
+		status.Status = "expired"
+	}
+	return status, nil
+}
+
 // TestMonitor runs an immediate check for a monitor and stores the result. It is
 // intended for manual "test now" actions from the API.
 func (s *MonitorService) TestMonitor(ctx context.Context, id uuid.UUID, checkService *CheckService) (*models.Check, error) {
