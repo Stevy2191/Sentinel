@@ -121,6 +121,34 @@ type Monitor struct {
 	Tags               StringSlice `json:"tags" gorm:"column:tags;type:jsonb"`
 	CreatedAt          time.Time   `json:"created_at" gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt          time.Time   `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
+
+	// Maintenance mode: during an active window, failed checks are recorded but
+	// do not open incidents or fire notifications.
+	MaintenanceModeEnabled bool       `json:"maintenance_mode_enabled" gorm:"column:maintenance_mode_enabled"`
+	MaintenanceStart       *time.Time `json:"maintenance_start" gorm:"column:maintenance_start;type:timestamptz"`
+	MaintenanceEnd         *time.Time `json:"maintenance_end" gorm:"column:maintenance_end;type:timestamptz"`
+}
+
+// IsInMaintenanceWindow reports whether the monitor is currently within an
+// active maintenance window.
+func (m *Monitor) IsInMaintenanceWindow(now time.Time) bool {
+	if !m.MaintenanceModeEnabled || m.MaintenanceStart == nil || m.MaintenanceEnd == nil {
+		return false
+	}
+	return now.After(*m.MaintenanceStart) && now.Before(*m.MaintenanceEnd)
+}
+
+// GetMaintenanceCountdown returns the time remaining in the current maintenance
+// window, or nil if the monitor is not currently in maintenance.
+func (m *Monitor) GetMaintenanceCountdown(now time.Time) *time.Duration {
+	if !m.IsInMaintenanceWindow(now) {
+		return nil
+	}
+	d := m.MaintenanceEnd.Sub(now)
+	if d > 0 {
+		return &d
+	}
+	return nil
 }
 
 // TableName tells GORM which table backs the Monitor model.

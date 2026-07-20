@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -15,6 +16,40 @@ import (
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
 	"github.com/Stevy2191/Sentinel/backend/internal/services"
 )
+
+// monitorResponse embeds a Monitor and adds computed maintenance fields.
+type monitorResponse struct {
+	models.Monitor
+	IsInMaintenance      bool `json:"is_in_maintenance"`
+	TimeRemainingMinutes int  `json:"time_remaining_minutes"`
+}
+
+// toMonitorResponse enriches a monitor with computed maintenance fields.
+func toMonitorResponse(m models.Monitor, now time.Time) monitorResponse {
+	r := monitorResponse{Monitor: m}
+	if m.IsInMaintenanceWindow(now) {
+		r.IsInMaintenance = true
+		if cd := m.GetMaintenanceCountdown(now); cd != nil {
+			r.TimeRemainingMinutes = int(cd.Minutes())
+		}
+	}
+	return r
+}
+
+// classifyMaintenanceError maps a maintenance service error to a status code:
+// 404 for not-found, 400 for validation.
+func classifyMaintenanceError(err error) int {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return http.StatusNotFound
+	}
+	return http.StatusBadRequest
+}
+
+// maintenanceRequest is the body for enabling/updating a maintenance window.
+type maintenanceRequest struct {
+	StartTime string `json:"start_time"`
+	EndTime   string `json:"end_time"`
+}
 
 const (
 	defaultPage  = 1
@@ -146,8 +181,14 @@ func GetMonitorsHandler(monitorService *services.MonitorService) gin.HandlerFunc
 			pages = (total + limit - 1) / limit
 		}
 
+		now := time.Now()
+		enriched := make([]monitorResponse, 0, len(pageItems))
+		for _, m := range pageItems {
+			enriched = append(enriched, toMonitorResponse(m, now))
+		}
+
 		respondSuccess(c, http.StatusOK, gin.H{
-			"monitors": pageItems,
+			"monitors": enriched,
 			"pagination": gin.H{
 				"page":  page,
 				"limit": limit,
@@ -171,7 +212,7 @@ func GetMonitorHandler(monitorService *services.MonitorService) gin.HandlerFunc 
 			respondError(c, classifyServiceError(err), err.Error())
 			return
 		}
-		respondSuccess(c, http.StatusOK, monitor)
+		respondSuccess(c, http.StatusOK, toMonitorResponse(*monitor, time.Now()))
 	}
 }
 
@@ -285,6 +326,109 @@ func TestMonitorHandler(monitorService *services.MonitorService, checkService *s
 	}
 }
 
+// EnableMaintenanceHandler handles POST /api/v1/monitors/:id/maintenance.
+func EnableMaintenanceHandler(monitorService *services.MonitorService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := parseMonitorID(c)
+		if !ok {
+			return
+		}
+		var req maintenanceRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			respondError(c, http.StatusBadRequest, "invalid request body: "+err.Error())
+			return
+		}
+		start, err := time.Parse(time.RFC3339, req.StartTime)
+		if err != nil {
+			respondError(c, http.StatusBadRequest, "invalid start_time: must be RFC3339")
+			return
+		}
+		end, err := time.Parse(time.RFC3339, req.EndTime)
+		if err != nil {
+			respondError(c, http.StatusBadRequest, "invalid end_time: must be RFC3339")
+			return
+		}
+
+		if err := monitorService.EnableMaintenanceMode(c.Request.Context(), id, start, end); err != nil {
+			respondError(c, classifyMaintenanceError(err), err.Error())
+			return
+		}
+		respondSuccess(c, http.StatusOK, gin.H{
+			"monitor_id":          id,
+			"maintenance_enabled": true,
+			"start_time":          start.UTC().Format(time.RFC3339),
+			"end_time":            end.UTC().Format(time.RFC3339),
+		})
+	}
+}
+
+// UpdateMaintenanceHandler handles PATCH /api/v1/monitors/:id/maintenance.
+func UpdateMaintenanceHandler(monitorService *services.MonitorService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := parseMonitorID(c)
+		if !ok {
+			return
+		}
+		var req maintenanceRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			respondError(c, http.StatusBadRequest, "invalid request body: "+err.Error())
+			return
+		}
+		start, err := time.Parse(time.RFC3339, req.StartTime)
+		if err != nil {
+			respondError(c, http.StatusBadRequest, "invalid start_time: must be RFC3339")
+			return
+		}
+		end, err := time.Parse(time.RFC3339, req.EndTime)
+		if err != nil {
+			respondError(c, http.StatusBadRequest, "invalid end_time: must be RFC3339")
+			return
+		}
+
+		if err := monitorService.UpdateMaintenanceWindow(c.Request.Context(), id, start, end); err != nil {
+			respondError(c, classifyMaintenanceError(err), err.Error())
+			return
+		}
+		status, err := monitorService.GetMaintenanceStatus(c.Request.Context(), id)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		respondSuccess(c, http.StatusOK, status)
+	}
+}
+
+// DisableMaintenanceHandler handles DELETE /api/v1/monitors/:id/maintenance.
+func DisableMaintenanceHandler(monitorService *services.MonitorService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := parseMonitorID(c)
+		if !ok {
+			return
+		}
+		if err := monitorService.DisableMaintenanceMode(c.Request.Context(), id); err != nil {
+			respondError(c, classifyMaintenanceError(err), err.Error())
+			return
+		}
+		respondSuccess(c, http.StatusOK, gin.H{"message": "Maintenance mode disabled"})
+	}
+}
+
+// GetMaintenanceStatusHandler handles GET /api/v1/monitors/:id/maintenance.
+func GetMaintenanceStatusHandler(monitorService *services.MonitorService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := parseMonitorID(c)
+		if !ok {
+			return
+		}
+		status, err := monitorService.GetMaintenanceStatus(c.Request.Context(), id)
+		if err != nil {
+			respondError(c, classifyServiceError(err), err.Error())
+			return
+		}
+		respondSuccess(c, http.StatusOK, status)
+	}
+}
+
 // RegisterMonitorRoutes wires the monitor handlers onto a router group at
 // /api/v1/monitors.
 func RegisterMonitorRoutes(rg *gin.RouterGroup, monitorService *services.MonitorService, checkService *services.CheckService) {
@@ -298,4 +442,8 @@ func RegisterMonitorRoutes(rg *gin.RouterGroup, monitorService *services.Monitor
 	monitors.POST("/:id/resume", ResumeMonitorHandler(monitorService))
 	monitors.GET("/:id/status", GetMonitorStatusHandler(monitorService))
 	monitors.POST("/:id/test", TestMonitorHandler(monitorService, checkService))
+	monitors.POST("/:id/maintenance", EnableMaintenanceHandler(monitorService))
+	monitors.PATCH("/:id/maintenance", UpdateMaintenanceHandler(monitorService))
+	monitors.DELETE("/:id/maintenance", DisableMaintenanceHandler(monitorService))
+	monitors.GET("/:id/maintenance", GetMaintenanceStatusHandler(monitorService))
 }
