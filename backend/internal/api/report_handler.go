@@ -69,6 +69,14 @@ func GetMonitorReportHandler(
 			return
 		}
 
+		// Whether the monitor is offline right now, and for how long — so the UI
+		// can flag live downtime instead of only reflecting it in the percentage.
+		ongoing, currentDowntime, err := incidentService.GetCurrentDowntime(ctx, id)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+
 		// Total count comes straight from the database for the exact range, so
 		// it is accurate regardless of how many checks exist (not capped).
 		totalChecks, err := checkService.CountChecks(ctx, id, start, end)
@@ -115,10 +123,12 @@ func GetMonitorReportHandler(
 				"end_time":   end.UTC().Format(time.RFC3339),
 			},
 			"uptime": gin.H{
-				"uptime_percentage":      round2(100 - downtimePct),
-				"downtime_percentage":    round2(downtimePct),
-				"total_downtime_seconds": int(totalDowntime.Seconds()),
-				"incident_count":         incidentCount,
+				"uptime_percentage":        round2(100 - downtimePct),
+				"downtime_percentage":      round2(downtimePct),
+				"total_downtime_seconds":   int(totalDowntime.Seconds()),
+				"incident_count":           incidentCount,
+				"ongoing_incident":         ongoing,
+				"current_downtime_minutes": round2(currentDowntime.Minutes()),
 			},
 			"checks": gin.H{
 				"total":                totalChecks,

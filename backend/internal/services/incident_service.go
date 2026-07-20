@@ -143,8 +143,15 @@ func (s *IncidentService) GetActiveIncident(ctx context.Context, monitorID uuid.
 	return &incident, nil
 }
 
-// GetIncidentDuration returns the total downtime (summed incident durations) for
-// a monitor over [start, end]. Ongoing incidents (duration 0) do not contribute.
+// GetIncidentDuration returns the total downtime for a monitor over [start, end].
+//
+// It sums the portion of each incident that overlaps the window, computed from
+// timestamps rather than the stored duration_seconds. This makes it correct for:
+//   - ongoing incidents (end_time IS NULL), which are counted up to now — so a
+//     monitor that is offline right now contributes live downtime instead of the
+//     0 that its unset duration_seconds would imply;
+//   - incidents that begin before start or extend past end, which are clamped to
+//     the window rather than counted in full or dropped.
 func (s *IncidentService) GetIncidentDuration(ctx context.Context, monitorID uuid.UUID, start time.Time, end time.Time) (time.Duration, error) {
 	if monitorID == uuid.Nil {
 		return 0, errors.New("monitor id is required")
@@ -153,20 +160,59 @@ func (s *IncidentService) GetIncidentDuration(ctx context.Context, monitorID uui
 		return 0, fmt.Errorf("end %s is before start %s", end.Format(time.RFC3339), start.Format(time.RFC3339))
 	}
 
-	// COALESCE so an empty result set yields 0 rather than a NULL scan error.
-	var totalSeconds int64
+	// Any incident overlapping the window: it started at/before end, and either is
+	// still open or ended at/after start.
+	var incidents []models.Incident
 	err := s.db.WithContext(ctx).
-		Model(&models.Incident{}).
-		Where("monitor_id = ? AND start_time >= ? AND start_time <= ?", monitorID, start, end).
-		Select("COALESCE(SUM(duration_seconds), 0)").
-		Scan(&totalSeconds).Error
+		Where("monitor_id = ? AND start_time <= ? AND (end_time IS NULL OR end_time >= ?)", monitorID, end, start).
+		Find(&incidents).Error
 	if err != nil {
-		return 0, fmt.Errorf("summing incident duration for monitor %s: %w", monitorID, err)
+		return 0, fmt.Errorf("querying incidents for downtime of monitor %s: %w", monitorID, err)
 	}
 
-	duration := time.Duration(totalSeconds) * time.Second
-	s.logger.Printf("[incident] downtime monitor=%s range=[%s,%s] total=%s", monitorID, start.Format(time.RFC3339), end.Format(time.RFC3339), duration)
-	return duration, nil
+	now := time.Now()
+	var total time.Duration
+	for i := range incidents {
+		inc := incidents[i]
+
+		segStart := inc.StartTime
+		if segStart.Before(start) {
+			segStart = start
+		}
+
+		// Ongoing incidents run to "now"; closed incidents to their end time.
+		segEnd := now
+		if inc.EndTime != nil {
+			segEnd = *inc.EndTime
+		}
+		if segEnd.After(end) {
+			segEnd = end
+		}
+
+		if segEnd.After(segStart) {
+			total += segEnd.Sub(segStart)
+		}
+	}
+
+	s.logger.Printf("[incident] downtime monitor=%s range=[%s,%s] total=%s", monitorID, start.Format(time.RFC3339), end.Format(time.RFC3339), total)
+	return total, nil
+}
+
+// GetCurrentDowntime reports whether the monitor is offline right now (has an
+// open incident) and, if so, how long it has been down (now - incident start).
+func (s *IncidentService) GetCurrentDowntime(ctx context.Context, monitorID uuid.UUID) (ongoing bool, downtime time.Duration, err error) {
+	active, err := s.GetActiveIncident(ctx, monitorID)
+	if err != nil {
+		return false, 0, err
+	}
+	if active == nil {
+		return false, 0, nil
+	}
+	d := time.Since(active.StartTime)
+	if d < 0 {
+		d = 0
+	}
+	return true, d, nil
 }
 
 // GetDowntimePercentage returns the percentage (0-100, two decimals) of the

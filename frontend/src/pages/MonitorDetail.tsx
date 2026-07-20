@@ -302,12 +302,31 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
 
       {testCheck && <TestResult check={testCheck} onClose={() => setTestCheck(null)} />}
 
+      {/* Ongoing-downtime banner: the monitor is offline right now. */}
+      {report?.metrics.ongoing_incident && (
+        <div className="flex items-center gap-2 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm font-medium text-red-600 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-400">
+          <span aria-hidden>⚠️</span>
+          Currently Offline
+          {report.metrics.current_downtime_minutes > 0 && (
+            <span className="font-normal">
+              — down for {report.metrics.current_downtime_minutes.toFixed(1)} min
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Stats (last 24h) */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatBox
           label="Uptime (24h)"
           value={report ? `${report.metrics.uptime_percentage.toFixed(2)}%` : '—'}
-          tone={report ? uptimeColor(report.metrics.uptime_percentage) : ''}
+          tone={
+            report
+              ? report.metrics.ongoing_incident
+                ? 'text-red-500'
+                : uptimeColor(report.metrics.uptime_percentage)
+              : ''
+          }
         />
         <StatBox
           label="Avg Response (24h)"
