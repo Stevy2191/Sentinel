@@ -29,6 +29,30 @@ function Req({ ok, label }: { ok: boolean; label: string }) {
   )
 }
 
+// legacyCopy copies text using a temporary textarea + document.execCommand, the
+// only clipboard mechanism available outside a secure context (plain HTTP).
+// Returns whether the copy succeeded.
+function legacyCopy(text: string): boolean {
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.setAttribute('readonly', '')
+  ta.style.position = 'fixed'
+  ta.style.top = '0'
+  ta.style.left = '0'
+  ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.focus()
+  ta.select()
+  let ok = false
+  try {
+    ok = document.execCommand('copy')
+  } catch {
+    ok = false
+  }
+  document.body.removeChild(ta)
+  return ok
+}
+
 export default function SecuritySettings() {
   const { currentUser, getCurrentUser } = useAuthContext()
   const { toasts, push } = useToasts()
@@ -135,9 +159,25 @@ export default function SecuritySettings() {
     push('Two-Factor Authentication enabled', 'success')
   }
 
-  const copyCodes = () => {
-    void navigator.clipboard.writeText(backupCodes.join('\n'))
-    push('Backup codes copied', 'info')
+  const copyCodes = async () => {
+    const text = backupCodes.join('\n')
+    // navigator.clipboard is only available in a secure context (HTTPS or
+    // localhost). Self-hosted Sentinel is often served over plain HTTP, where it
+    // is undefined and the old call threw silently — hence "nothing happens".
+    try {
+      if (window.isSecureContext && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text)
+        push('Backup codes copied', 'success')
+        return
+      }
+    } catch {
+      // Fall through to the legacy execCommand path below.
+    }
+    if (legacyCopy(text)) {
+      push('Backup codes copied', 'success')
+    } else {
+      push('Could not copy — select the codes and copy manually', 'error')
+    }
   }
   const downloadCodes = () => {
     const blob = new Blob([backupCodes.join('\n') + '\n'], { type: 'text/plain' })
@@ -378,7 +418,7 @@ export default function SecuritySettings() {
                   ))}
                 </div>
                 <div className="flex gap-2">
-                  <button className="btn-secondary !py-1" onClick={copyCodes}>
+                  <button className="btn-secondary !py-1" onClick={() => void copyCodes()}>
                     <Copy className="h-4 w-4" /> Copy
                   </button>
                   <button className="btn-secondary !py-1" onClick={downloadCodes}>
