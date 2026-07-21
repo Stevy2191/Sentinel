@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"math"
 	"net/http"
 	"sort"
@@ -137,6 +138,107 @@ func GetMonitorReportHandler(
 				"timeout":              timeout,
 				"avg_response_time_ms": avgResponse,
 			},
+		})
+	}
+}
+
+// GetUptimeHistoryHandler handles GET /api/v1/monitors/:id/uptime-history. It
+// returns 24h/7d/30d uptime (incident-based, consistent with the other reports),
+// a 24-bucket hourly uptime series for sparklines, and a 24-hour hourly response
+// time series for the detail chart — all in one request.
+func GetUptimeHistoryHandler(
+	monitorService *services.MonitorService,
+	checkService *services.CheckService,
+	incidentService *services.IncidentService,
+) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := parseMonitorID(c)
+		if !ok {
+			return
+		}
+		if _, err := monitorService.GetMonitor(c.Request.Context(), id); err != nil {
+			respondError(c, classifyServiceError(err), err.Error())
+			return
+		}
+		switch c.DefaultQuery("range", "24h") {
+		case "24h", "7d", "30d":
+		default:
+			respondError(c, http.StatusBadRequest, "range must be 24h, 7d, or 30d")
+			return
+		}
+
+		ctx := c.Request.Context()
+		now := time.Now()
+
+		uptimeOver := func(d time.Duration) float64 {
+			down, err := incidentService.GetDowntimePercentage(ctx, id, now.Add(-d), now)
+			if err != nil {
+				return 100
+			}
+			return round2(100 - down)
+		}
+
+		// Bucket the last 24h of checks by hour (UTC).
+		checks, err := checkService.GetChecksInRange(ctx, id, now.Add(-24*time.Hour), now, 0, 0)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		type bucket struct{ total, failed, sumResp, respN int }
+		buckets := make(map[time.Time]*bucket)
+		truncHour := func(t time.Time) time.Time {
+			t = t.UTC()
+			return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, time.UTC)
+		}
+		for _, ch := range checks {
+			k := truncHour(ch.Timestamp)
+			b := buckets[k]
+			if b == nil {
+				b = &bucket{}
+				buckets[k] = b
+			}
+			b.total++
+			if ch.Status == "success" {
+				b.sumResp += ch.ResponseTimeMs
+				b.respN++
+			} else {
+				b.failed++
+			}
+		}
+
+		hourly := make([]gin.H, 0, 24)
+		responseData := make([]gin.H, 0, 24)
+		curHour := truncHour(now)
+		for i := 23; i >= 0; i-- {
+			k := curHour.Add(time.Duration(-i) * time.Hour)
+			b := buckets[k]
+			status := "nodata"
+			uptime := 0.0
+			avg := 0
+			if b != nil && b.total > 0 {
+				uptime = round2(float64(b.total-b.failed) / float64(b.total) * 100)
+				switch {
+				case b.failed == 0:
+					status = "up"
+				case b.failed == b.total:
+					status = "down"
+				default:
+					status = "partial"
+				}
+				if b.respN > 0 {
+					avg = b.sumResp / b.respN
+				}
+			}
+			hourly = append(hourly, gin.H{"hour": k.Hour(), "uptime": uptime, "status": status})
+			responseData = append(responseData, gin.H{"time": fmt.Sprintf("%02d:00", k.Hour()), "responseTime": avg})
+		}
+
+		respondSuccess(c, http.StatusOK, gin.H{
+			"uptime_24h":         uptimeOver(24 * time.Hour),
+			"uptime_7d":          uptimeOver(7 * 24 * time.Hour),
+			"uptime_30d":         uptimeOver(30 * 24 * time.Hour),
+			"hourly_data":        hourly,
+			"response_time_data": responseData,
 		})
 	}
 }
@@ -381,6 +483,7 @@ func RegisterReportRoutes(
 ) {
 	monitors := rg.Group("/monitors")
 	monitors.GET("/:id/report", GetMonitorReportHandler(monitorService, checkService, incidentService))
+	monitors.GET("/:id/uptime-history", GetUptimeHistoryHandler(monitorService, checkService, incidentService))
 
 	reports := rg.Group("/reports")
 	reports.GET("/timeline", GetTimelineReportHandler(checkService, monitorService))
