@@ -18,6 +18,7 @@ import {
   useTestMonitor,
 } from '@/hooks/useMonitors'
 import { useMoveMonitorToGroup } from '@/hooks/useMonitorGroups'
+import ActionMenu, { type ActionItem } from '@/components/ActionMenu'
 import { formatDatetime } from '@/utils/formatters'
 import type { HourPoint, HourStatus, UptimeHistory } from '@/hooks/useMonitorUptime'
 import type { Monitor, MonitorGroup } from '@/types'
@@ -131,6 +132,17 @@ export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, on
   const offline = monitor.current_status === 'offline'
   const inMaintenance = monitor.is_in_maintenance ?? false
 
+  // Shared action set — rendered as inline buttons on desktop and a dropdown
+  // (ActionMenu) on mobile where they wouldn't fit.
+  const actions: ActionItem[] = [
+    { key: 'test', label: 'Test', icon: Play, disabled: busy, onClick: () => void act(() => test(), 'Test complete') },
+    monitor.enabled
+      ? { key: 'pause', label: 'Pause', icon: Pause, disabled: busy, onClick: () => void act(() => pause(), 'Monitor paused') }
+      : { key: 'resume', label: 'Resume', icon: Play, disabled: busy, onClick: () => void act(() => resume(), 'Monitor resumed') },
+    { key: 'edit', label: 'Edit', icon: Pencil, onClick: () => navigate(`/monitors/${monitor.id}/edit`) },
+    { key: 'delete', label: 'Delete', icon: Trash2, danger: true, disabled: busy, onClick: () => setConfirmDelete(true) },
+  ]
+
   return (
     <div className="space-y-4 border-t border-neutral-200 p-4 dark:border-neutral-800">
       {/* Actions row */}
@@ -151,29 +163,23 @@ export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, on
             {inMaintenance ? 'Maintenance' : online ? 'Online' : offline ? 'Offline' : 'Unknown'}
           </span>
         </div>
-        <div className="flex flex-wrap gap-1.5">
-          <button className="btn-secondary !py-1" disabled={busy} onClick={() => void act(() => test(), 'Test complete')}>
-            <Play className="h-4 w-4" /> Test
-          </button>
-          {monitor.enabled ? (
-            <button className="btn-secondary !py-1" disabled={busy} onClick={() => void act(() => pause(), 'Monitor paused')}>
-              <Pause className="h-4 w-4" /> Pause
+        {/* Desktop: inline buttons. Mobile: dropdown menu. */}
+        <div className="hidden flex-wrap gap-1.5 sm:flex">
+          {actions.map((a) => (
+            <button
+              key={a.key}
+              disabled={a.disabled}
+              onClick={a.onClick}
+              className={`btn-secondary !py-1 ${
+                a.danger ? '!border-error-300 !text-error-600 hover:!bg-error-50 dark:hover:!bg-error-900/20' : ''
+              }`}
+            >
+              <a.icon className="h-4 w-4" /> {a.label}
             </button>
-          ) : (
-            <button className="btn-secondary !py-1" disabled={busy} onClick={() => void act(() => resume(), 'Monitor resumed')}>
-              <Play className="h-4 w-4" /> Resume
-            </button>
-          )}
-          <button className="btn-secondary !py-1" onClick={() => navigate(`/monitors/${monitor.id}/edit`)}>
-            <Pencil className="h-4 w-4" /> Edit
-          </button>
-          <button
-            className="btn !py-1 border border-error-300 text-error-600 hover:bg-error-50 dark:hover:bg-error-900/20"
-            disabled={busy}
-            onClick={() => setConfirmDelete(true)}
-          >
-            <Trash2 className="h-4 w-4" /> Delete
-          </button>
+          ))}
+        </div>
+        <div className="sm:hidden">
+          <ActionMenu items={actions} />
         </div>
       </div>
 

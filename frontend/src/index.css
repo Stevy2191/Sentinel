@@ -7,14 +7,29 @@
 @layer base {
   html {
     font-family: theme('fontFamily.sans');
+    scroll-behavior: smooth;
+    /* Remove the grey tap flash on touch devices. */
+    -webkit-tap-highlight-color: transparent;
   }
 
   body {
     @apply bg-neutral-50 text-neutral-900 antialiased;
+    /* Respect notch/rounded-corner safe areas when installed as a PWA. */
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+      env(safe-area-inset-left);
   }
 
   .dark body {
     @apply bg-neutral-950 text-neutral-100;
+  }
+
+  /* Larger tap targets on touch devices (WCAG 2.5.5) without bloating desktop. */
+  @media (pointer: coarse) {
+    .btn,
+    button,
+    select {
+      min-height: 44px;
+    }
   }
 }
 
