@@ -13,6 +13,7 @@ export interface UserSummary {
  * owner_id to a username. Any authenticated user may call GET /users.
  */
 export function useUsers() {
+  const [users, setUsers] = useState<UserSummary[]>([])
   const [usersById, setUsersById] = useState<Record<string, UserSummary>>({})
 
   useEffect(() => {
@@ -21,8 +22,10 @@ export function useUsers() {
       .get<ApiResponse<UserSummary[]>>('/users')
       .then((res) => {
         if (!active) return
+        const list = res.data.data ?? []
+        setUsers(list)
         const map: Record<string, UserSummary> = {}
-        for (const u of res.data.data ?? []) map[u.id] = u
+        for (const u of list) map[u.id] = u
         setUsersById(map)
       })
       .catch(() => {
@@ -36,5 +39,5 @@ export function useUsers() {
   const usernameFor = (id: string | null | undefined): string | undefined =>
     id ? usersById[id]?.username : undefined
 
-  return { usersById, usernameFor }
+  return { users, usersById, usernameFor }
 }
