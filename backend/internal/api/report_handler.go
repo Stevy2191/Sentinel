@@ -35,6 +35,9 @@ func GetMonitorReportHandler(
 		if !ok {
 			return
 		}
+		if !authorizeMonitor(c, monitorService, id, "view") {
+			return
+		}
 
 		monitor, err := monitorService.GetMonitor(c.Request.Context(), id)
 		if err != nil {
@@ -154,6 +157,9 @@ func GetUptimeHistoryHandler(
 	return func(c *gin.Context) {
 		id, ok := parseMonitorID(c)
 		if !ok {
+			return
+		}
+		if !authorizeMonitor(c, monitorService, id, "view") {
 			return
 		}
 		if _, err := monitorService.GetMonitor(c.Request.Context(), id); err != nil {
@@ -281,6 +287,9 @@ func GetTimelineReportHandler(
 			respondError(c, http.StatusBadRequest, "invalid or missing 'monitor_id': must be a UUID")
 			return
 		}
+		if !authorizeMonitor(c, monitorService, id, "view") {
+			return
+		}
 		start, end, ok := parseReportTimeRange(c)
 		if !ok {
 			return
@@ -384,7 +393,9 @@ func GetSummaryReportHandler(
 		}
 		ctx := c.Request.Context()
 
-		all, err := monitorService.ListMonitors(ctx, nil)
+		// Only summarize monitors the user can access (admins see all).
+		userID, _, isAdmin, _ := GetUserFromContext(c)
+		all, err := monitorService.ListAccessibleMonitors(ctx, userID, isAdmin, nil)
 		if err != nil {
 			respondError(c, http.StatusInternalServerError, err.Error())
 			return
