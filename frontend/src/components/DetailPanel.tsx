@@ -21,6 +21,7 @@ import { useMoveMonitorToGroup } from '@/hooks/useMonitorGroups'
 import ActionMenu, { type ActionItem } from '@/components/ActionMenu'
 import { formatDatetime } from '@/utils/formatters'
 import type { HourPoint, HourStatus, UptimeHistory } from '@/hooks/useMonitorUptime'
+import type { MonitorAccess } from '@/utils/monitorAccess'
 import type { Monitor, MonitorGroup } from '@/types'
 
 export function uptimeColor(pct: number): string {
@@ -87,11 +88,13 @@ interface Props {
   uptime: UptimeHistory | null
   uptimeLoading: boolean
   groups: MonitorGroup[]
+  access: MonitorAccess
+  ownerUsername?: string
   onChanged: () => void
   push: (msg: string, type?: 'success' | 'error' | 'info') => void
 }
 
-export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, onChanged, push }: Props) {
+export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, access, ownerUsername, onChanged, push }: Props) {
   const navigate = useNavigate()
   const { pause, loading: pausing } = usePauseMonitor(monitor.id)
   const { resume, loading: resuming } = useResumeMonitor(monitor.id)
@@ -132,36 +135,51 @@ export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, on
   const offline = monitor.current_status === 'offline'
   const inMaintenance = monitor.is_in_maintenance ?? false
 
-  // Shared action set — rendered as inline buttons on desktop and a dropdown
-  // (ActionMenu) on mobile where they wouldn't fit.
+  // Action set gated by permission: readonly users get Test only; editable/admin
+  // add Pause/Resume + Edit; only owner/admin get Delete (see monitorAccess).
   const actions: ActionItem[] = [
     { key: 'test', label: 'Test', icon: Play, disabled: busy, onClick: () => void act(() => test(), 'Test complete') },
-    monitor.enabled
-      ? { key: 'pause', label: 'Pause', icon: Pause, disabled: busy, onClick: () => void act(() => pause(), 'Monitor paused') }
-      : { key: 'resume', label: 'Resume', icon: Play, disabled: busy, onClick: () => void act(() => resume(), 'Monitor resumed') },
-    { key: 'edit', label: 'Edit', icon: Pencil, onClick: () => navigate(`/monitors/${monitor.id}/edit`) },
-    { key: 'delete', label: 'Delete', icon: Trash2, danger: true, disabled: busy, onClick: () => setConfirmDelete(true) },
   ]
+  if (access.canEdit) {
+    actions.push(
+      monitor.enabled
+        ? { key: 'pause', label: 'Pause', icon: Pause, disabled: busy, onClick: () => void act(() => pause(), 'Monitor paused') }
+        : { key: 'resume', label: 'Resume', icon: Play, disabled: busy, onClick: () => void act(() => resume(), 'Monitor resumed') },
+      { key: 'edit', label: 'Edit', icon: Pencil, onClick: () => navigate(`/monitors/${monitor.id}/edit`) }
+    )
+  }
+  if (access.canDelete) {
+    actions.push({ key: 'delete', label: 'Delete', icon: Trash2, danger: true, disabled: busy, onClick: () => setConfirmDelete(true) })
+  }
 
   return (
     <div className="space-y-4 border-t border-neutral-200 p-4 dark:border-neutral-800">
       {/* Actions row */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="text-lg font-semibold">{monitor.name}</span>
-          <span
-            className={`rounded-md px-2 py-0.5 text-xs font-medium ${
-              inMaintenance
-                ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
-                : online
-                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
-                  : offline
-                    ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
-                    : 'bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
-            }`}
-          >
-            {inMaintenance ? 'Maintenance' : online ? 'Online' : offline ? 'Offline' : 'Unknown'}
-          </span>
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="text-lg font-semibold">{monitor.name}</span>
+            <span
+              className={`rounded-md px-2 py-0.5 text-xs font-medium ${
+                inMaintenance
+                  ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+                  : online
+                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                    : offline
+                      ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                      : 'bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
+              }`}
+            >
+              {inMaintenance ? 'Maintenance' : online ? 'Online' : offline ? 'Offline' : 'Unknown'}
+            </span>
+          </div>
+          <div className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+            {access.isOwner
+              ? 'Your monitor'
+              : access.permission === 'admin'
+                ? `Owned by ${ownerUsername ?? 'another user'} · admin access`
+                : `Shared with you by ${ownerUsername ?? 'another user'} · ${access.permission === 'editable' ? 'can edit' : 'read-only'}`}
+          </div>
         </div>
         {/* Desktop: inline buttons. Mobile: dropdown menu. */}
         <div className="hidden flex-wrap gap-1.5 sm:flex">
@@ -182,6 +200,12 @@ export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, on
           <ActionMenu items={actions} />
         </div>
       </div>
+
+      {!access.canEdit && (
+        <div className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-500 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-400">
+          Read-only access — you can view and test this monitor but not edit it.
+        </div>
+      )}
 
       {confirmDelete && (
         <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-900/30">
@@ -276,21 +300,23 @@ export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, on
             <span className="text-xs text-neutral-400">none</span>
           )}
         </div>
-        <label className="flex items-center gap-2 text-xs">
-          <span className="text-neutral-500 dark:text-neutral-400">Group:</span>
-          <select
-            className="rounded-md border border-neutral-300 bg-white px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
-            value={monitor.group_id ?? ''}
-            onChange={(e) => void act(() => move(monitor.id, e.target.value || null), 'Monitor group updated')}
-          >
-            <option value="">Ungrouped</option>
-            {groups.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        {access.canEdit && (
+          <label className="flex items-center gap-2 text-xs">
+            <span className="text-neutral-500 dark:text-neutral-400">Group:</span>
+            <select
+              className="rounded-md border border-neutral-300 bg-white px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              value={monitor.group_id ?? ''}
+              onChange={(e) => void act(() => move(monitor.id, e.target.value || null), 'Monitor group updated')}
+            >
+              <option value="">Ungrouped</option>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
 
       {/* Incident timeline */}

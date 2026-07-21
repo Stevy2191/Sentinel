@@ -17,7 +17,9 @@ import {
   useResumeMonitor,
 } from '@/hooks/useMonitors'
 import { useToasts, Toaster } from '@/components/Toast'
+import { useUsers } from '@/hooks/useUsers'
 import { formatResponseTime, formatDate, getStatusBgColor } from '@/utils/formatters'
+import { monitorAccess, badgeToneClass } from '@/utils/monitorAccess'
 import type { Monitor, MonitorStatus, MonitorType } from '@/types'
 
 const PAGE_SIZE = 50
@@ -36,6 +38,7 @@ export default function Monitors() {
   const { delete: deleteMonitor } = useDeleteMonitor()
   const { pause } = usePauseMonitor()
   const { resume } = useResumeMonitor()
+  const { usernameFor } = useUsers()
   const { toasts, push } = useToasts()
 
   const [search, setSearch] = useState('')
@@ -219,8 +222,18 @@ export default function Monitors() {
                     onClick={() => navigate(`/monitors/${m.id}`)}
                   >
                     <td className="px-4 py-3">
-                      <div className="font-medium">{m.name}</div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{m.name}</span>
+                        {monitorAccess(m).badge && (
+                          <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${badgeToneClass[monitorAccess(m).badge!.tone]}`}>
+                            {monitorAccess(m).badge!.label}
+                          </span>
+                        )}
+                      </div>
                       {!m.enabled && <span className="text-xs text-neutral-400">paused</span>}
+                      {!monitorAccess(m).isOwner && usernameFor(m.owner_id) && (
+                        <span className="block text-xs text-neutral-400">Owned by {usernameFor(m.owner_id)}</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 uppercase text-neutral-500">{m.type}</td>
                     <td className="max-w-[220px] truncate px-4 py-3 text-neutral-500">{m.url}</td>
@@ -251,27 +264,33 @@ export default function Monitors() {
                         >
                           <ExternalLink className="h-4 w-4" />
                         </button>
-                        <button
-                          className="btn-secondary !px-2 !py-1"
-                          title="Edit"
-                          onClick={() => navigate(`/monitors/${m.id}/edit`)}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
-                          className="btn-secondary !px-2 !py-1"
-                          title={m.enabled ? 'Pause' : 'Resume'}
-                          onClick={() => void handlePauseResume(m)}
-                        >
-                          {m.enabled ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                        </button>
-                        <button
-                          className="btn-secondary !px-2 !py-1 text-error-600"
-                          title="Delete"
-                          onClick={() => setConfirmId(m.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        {monitorAccess(m).canEdit && (
+                          <button
+                            className="btn-secondary !px-2 !py-1"
+                            title="Edit"
+                            onClick={() => navigate(`/monitors/${m.id}/edit`)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                        )}
+                        {monitorAccess(m).canEdit && (
+                          <button
+                            className="btn-secondary !px-2 !py-1"
+                            title={m.enabled ? 'Pause' : 'Resume'}
+                            onClick={() => void handlePauseResume(m)}
+                          >
+                            {m.enabled ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                          </button>
+                        )}
+                        {monitorAccess(m).canDelete && (
+                          <button
+                            className="btn-secondary !px-2 !py-1 text-error-600"
+                            title="Delete"
+                            onClick={() => setConfirmId(m.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

@@ -3,6 +3,7 @@ import { formatDistanceToNow } from 'date-fns'
 import { useMonitorUptime } from '@/hooks/useMonitorUptime'
 import DetailPanel, { Sparkline, uptimeColor } from '@/components/DetailPanel'
 import { formatResponseTime } from '@/utils/formatters'
+import { monitorAccess, badgeToneClass } from '@/utils/monitorAccess'
 import type { Monitor, MonitorGroup } from '@/types'
 
 function responseColor(ms: number): string {
@@ -17,15 +18,17 @@ interface Props {
   uptime24h: number | null // instant value from the summary endpoint (fallback)
   expanded: boolean
   groups: MonitorGroup[]
+  ownerUsername?: string
   onToggle: (id: string) => void
   onChanged: () => void
   push: (msg: string, type?: 'success' | 'error' | 'info') => void
 }
 
-export default function MonitorCard({ monitor, uptime24h, expanded, groups, onToggle, onChanged, push }: Props) {
+export default function MonitorCard({ monitor, uptime24h, expanded, groups, ownerUsername, onToggle, onChanged, push }: Props) {
   // One fetch per card powers both the collapsed sparkline and the detail panel.
   const { data: uptime, loading: uptimeLoading } = useMonitorUptime(monitor.id, '24h')
 
+  const access = monitorAccess(monitor)
   const inMaintenance = monitor.is_in_maintenance ?? false
   const online = monitor.current_status === 'online'
   const offline = monitor.current_status === 'offline'
@@ -51,8 +54,18 @@ export default function MonitorCard({ monitor, uptime24h, expanded, groups, onTo
               <span className="shrink-0 rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
                 {monitor.type}
               </span>
+              {access.badge && (
+                <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${badgeToneClass[access.badge.tone]}`}>
+                  {access.badge.label}
+                </span>
+              )}
             </span>
-            <span className="block truncate text-xs text-neutral-500 dark:text-neutral-400">{monitor.url}</span>
+            <span className="block truncate text-xs text-neutral-500 dark:text-neutral-400">
+              {monitor.url}
+              {!access.isOwner && ownerUsername && (
+                <span className="ml-2 text-neutral-400">· Owned by {ownerUsername}</span>
+              )}
+            </span>
           </span>
         </div>
 
@@ -94,6 +107,8 @@ export default function MonitorCard({ monitor, uptime24h, expanded, groups, onTo
           uptime={uptime}
           uptimeLoading={uptimeLoading}
           groups={groups}
+          access={access}
+          ownerUsername={ownerUsername}
           onChanged={onChanged}
           push={push}
         />
