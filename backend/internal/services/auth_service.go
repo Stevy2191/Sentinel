@@ -54,7 +54,7 @@ func NewAuthService(db *gorm.DB, jwtSecret string) *AuthService {
 
 // CreateUser validates and creates a user with a bcrypt-hashed password.
 func (s *AuthService) CreateUser(ctx context.Context, username, password string, isAdmin bool) (*models.User, error) {
-	user := &models.User{Username: username, IsAdmin: isAdmin}
+	user := &models.User{Username: username, IsAdmin: isAdmin, Role: models.RoleForAdmin(isAdmin)}
 	if err := user.Validate(); err != nil {
 		return nil, err
 	}

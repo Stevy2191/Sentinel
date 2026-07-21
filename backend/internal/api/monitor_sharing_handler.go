@@ -177,7 +177,10 @@ func ListUsersHandler(authService *services.AuthService) gin.HandlerFunc {
 		}
 		out := make([]gin.H, 0, len(users))
 		for _, u := range users {
-			out = append(out, gin.H{"id": u.ID, "username": u.Username, "email": u.Email})
+			out = append(out, gin.H{
+				"id": u.ID, "username": u.Username, "email": u.Email,
+				"role": u.Role, "is_admin": u.IsAdmin, "created_at": u.CreatedAt,
+			})
 		}
 		respondSuccess(c, http.StatusOK, out)
 	}
