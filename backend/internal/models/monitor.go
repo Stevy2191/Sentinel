@@ -120,6 +120,7 @@ type Monitor struct {
 	Enabled            bool        `json:"enabled" gorm:"column:enabled;default:true"`
 	Tags               StringSlice `json:"tags" gorm:"column:tags;type:jsonb"`
 	GroupID            *uuid.UUID  `json:"group_id" gorm:"column:group_id;type:uuid"`
+	OwnerID            *uuid.UUID  `json:"owner_id" gorm:"column:owner_id;type:uuid"`
 	CreatedAt          time.Time   `json:"created_at" gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt          time.Time   `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
 
