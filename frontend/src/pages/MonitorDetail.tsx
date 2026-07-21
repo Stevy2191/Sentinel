@@ -9,6 +9,7 @@ import {
   Trash2,
   ExternalLink,
   Wrench,
+  Share2,
 } from 'lucide-react'
 import {
   useMonitor,
@@ -30,6 +31,7 @@ import {
 } from '@/hooks/useMaintenanceMode'
 import MonitorForm, { monitorToForm } from '@/components/MonitorForm'
 import TestResult from '@/components/TestResult'
+import ShareModal from '@/components/ShareModal'
 import IncidentList from '@/components/IncidentList'
 import { useToasts, Toaster } from '@/components/Toast'
 import {
@@ -105,6 +107,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
 
   const [testCheck, setTestCheck] = useState<Check | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
   const [maintModal, setMaintModal] = useState(false)
   const [maintStart, setMaintStart] = useState('')
   const [maintEnd, setMaintEnd] = useState('')
@@ -293,6 +296,11 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          {(access.isOwner || access.permission === 'admin') && (
+            <button className="btn-primary" onClick={() => setShareOpen(true)}>
+              <Share2 className="h-4 w-4" /> Share
+            </button>
+          )}
           {access.canEdit && (
             <button className="btn-secondary" onClick={() => navigate(`/monitors/${id}/edit`)}>
               <Pencil className="h-4 w-4" /> Edit
@@ -564,6 +572,10 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
             </div>
           </div>
         </div>
+      )}
+
+      {shareOpen && id && (
+        <ShareModal monitorId={id} onClose={() => setShareOpen(false)} push={push} />
       )}
 
       <Toaster toasts={toasts} />
