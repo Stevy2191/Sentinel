@@ -19,6 +19,19 @@ func round2(f float64) float64 {
 	return math.Round(f*100) / 100
 }
 
+// displayUptime prevents a monitor that is offline right now from showing a
+// perfect 100%. Incident-based uptime is historically correct, but a brief
+// ongoing incident can round away over a long window, and a monitor can be
+// offline with no recorded incident (e.g. it went down during a maintenance
+// window, where incidents are suppressed). When the monitor is currently
+// offline, cap the shown uptime just below 100% so active downtime is visible.
+func displayUptime(uptimePct float64, currentlyOffline bool) float64 {
+	if currentlyOffline && uptimePct >= 100 {
+		return 99.99
+	}
+	return uptimePct
+}
+
 // GetMonitorReportHandler handles GET /api/v1/monitors/:id/report, producing an
 // uptime/SLA report over a date range (default: last 30 days).
 //
@@ -80,6 +93,10 @@ func GetMonitorReportHandler(
 			respondError(c, http.StatusInternalServerError, err.Error())
 			return
 		}
+		// A monitor reported offline right now is "down", even if its ongoing
+		// incident hasn't been recorded yet (e.g. suppressed during maintenance).
+		currentlyOffline := monitor.CurrentStatus == "offline"
+		ongoing = ongoing || currentlyOffline
 
 		// Total count comes straight from the database for the exact range, so
 		// it is accurate regardless of how many checks exist (not capped).
@@ -127,7 +144,7 @@ func GetMonitorReportHandler(
 				"end_time":   end.UTC().Format(time.RFC3339),
 			},
 			"uptime": gin.H{
-				"uptime_percentage":        round2(100 - downtimePct),
+				"uptime_percentage":        displayUptime(round2(100-downtimePct), currentlyOffline),
 				"downtime_percentage":      round2(downtimePct),
 				"total_downtime_seconds":   int(totalDowntime.Seconds()),
 				"incident_count":           incidentCount,
@@ -162,10 +179,12 @@ func GetUptimeHistoryHandler(
 		if !authorizeMonitor(c, monitorService, id, "view") {
 			return
 		}
-		if _, err := monitorService.GetMonitor(c.Request.Context(), id); err != nil {
+		monitor, err := monitorService.GetMonitor(c.Request.Context(), id)
+		if err != nil {
 			respondError(c, classifyServiceError(err), err.Error())
 			return
 		}
+		currentlyOffline := monitor.CurrentStatus == "offline"
 		switch c.DefaultQuery("range", "24h") {
 		case "24h", "7d", "30d":
 		default:
@@ -240,9 +259,9 @@ func GetUptimeHistoryHandler(
 		}
 
 		respondSuccess(c, http.StatusOK, gin.H{
-			"uptime_24h":         uptimeOver(24 * time.Hour),
-			"uptime_7d":          uptimeOver(7 * 24 * time.Hour),
-			"uptime_30d":         uptimeOver(30 * 24 * time.Hour),
+			"uptime_24h":         displayUptime(uptimeOver(24*time.Hour), currentlyOffline),
+			"uptime_7d":          displayUptime(uptimeOver(7*24*time.Hour), currentlyOffline),
+			"uptime_30d":         displayUptime(uptimeOver(30*24*time.Hour), currentlyOffline),
 			"hourly_data":        hourly,
 			"response_time_data": responseData,
 		})
@@ -430,7 +449,7 @@ func GetSummaryReportHandler(
 			if err != nil {
 				downPct = 0
 			}
-			uptime := round2(100 - downPct)
+			uptime := displayUptime(round2(100-downPct), m.CurrentStatus == "offline")
 			downtime, err := incidentService.GetIncidentDuration(ctx, m.ID, start, end)
 			if err != nil {
 				downtime = 0

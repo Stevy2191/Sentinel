@@ -33,13 +33,13 @@ func classifyStatusPageError(err error) int {
 // uptimePercent returns the uptime percentage for a monitor over [since, until],
 // degrading to 100 (assume up) if the calculation fails so a single monitor
 // cannot break the whole page.
-func uptimePercent(ctx context.Context, incidentService *services.IncidentService, monitorID uuid.UUID, since, until time.Time) float64 {
+func uptimePercent(ctx context.Context, incidentService *services.IncidentService, monitorID uuid.UUID, currentlyOffline bool, since, until time.Time) float64 {
 	down, err := incidentService.GetDowntimePercentage(ctx, monitorID, since, until)
 	if err != nil {
 		log.Printf("[statuspage] uptime calc failed for monitor %s: %v", monitorID, err)
-		return 100
+		return displayUptime(100, currentlyOffline)
 	}
-	return round2(100 - down)
+	return displayUptime(round2(100-down), currentlyOffline)
 }
 
 // CreateStatusPageHandler handles POST /api/v1/status-pages.
@@ -125,7 +125,7 @@ func GetStatusPageHandler(statusPageService *services.StatusPageService, inciden
 				"group_name":       e.GroupName,
 				"status":           m.CurrentStatus,
 				"response_time_ms": m.LastResponseTimeMs,
-				"uptime_percent":   uptimePercent(ctx, incidentService, m.ID, now.AddDate(0, 0, -30), now),
+				"uptime_percent":   uptimePercent(ctx, incidentService, m.ID, m.CurrentStatus == "offline", now.AddDate(0, 0, -30), now),
 				"position":         e.Position,
 			})
 		}
@@ -338,9 +338,9 @@ func GetPublicStatusPageHandler(statusPageService *services.StatusPageService, i
 				"last_check":       lastCheck,
 				"response_time_ms": m.LastResponseTimeMs,
 				"uptime": gin.H{
-					"last_7_days":  uptimePercent(ctx, incidentService, m.ID, now.AddDate(0, 0, -7), now),
-					"last_30_days": uptimePercent(ctx, incidentService, m.ID, now.AddDate(0, 0, -30), now),
-					"last_90_days": uptimePercent(ctx, incidentService, m.ID, now.AddDate(0, 0, -90), now),
+					"last_7_days":  uptimePercent(ctx, incidentService, m.ID, m.CurrentStatus == "offline", now.AddDate(0, 0, -7), now),
+					"last_30_days": uptimePercent(ctx, incidentService, m.ID, m.CurrentStatus == "offline", now.AddDate(0, 0, -30), now),
+					"last_90_days": uptimePercent(ctx, incidentService, m.ID, m.CurrentStatus == "offline", now.AddDate(0, 0, -90), now),
 				},
 				"recent_incidents": recent,
 			})
