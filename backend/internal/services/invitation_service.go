@@ -147,6 +147,19 @@ func (s *InvitationService) ListPendingInvitations(ctx context.Context) ([]model
 	return invites, nil
 }
 
+// CancelInvitation deletes a pending invitation by id.
+func (s *InvitationService) CancelInvitation(ctx context.Context, id uuid.UUID) error {
+	result := s.db.WithContext(ctx).Delete(&models.Invitation{}, "id = ?", id)
+	if result.Error != nil {
+		return fmt.Errorf("cancelling invitation %s: %w", id, result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("invitation %s not found: %w", id, gorm.ErrRecordNotFound)
+	}
+	s.logger.Printf("[invite] cancelled invitation %s", id)
+	return nil
+}
+
 // SendInvitationEmail emails the invitation link. Returns ErrEmailNotConfigured
 // when SMTP is not set up.
 func (s *InvitationService) SendInvitationEmail(inv *models.Invitation, inviterName string) error {

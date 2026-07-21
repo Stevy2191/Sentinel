@@ -34,6 +34,8 @@ func InviteUserHandler(invitationService *services.InvitationService) gin.Handle
 		resp := gin.H{
 			"id": inv.ID, "email": inv.Email, "role": inv.Role,
 			"accepted": inv.Accepted, "expires_at": inv.ExpiresAt,
+			// Token is returned to the admin (trusted) so they can share a manual link.
+			"token": inv.Token,
 		}
 		if req.SendEmail {
 			if err := invitationService.SendInvitationEmail(inv, username); err != nil {
@@ -94,9 +96,28 @@ func ListPendingInvitationsHandler(invitationService *services.InvitationService
 				"id": inv.ID, "email": inv.Email, "role": inv.Role,
 				"invited_by_user_id": inv.InvitedByUserID,
 				"expires_at":         inv.ExpiresAt, "created_at": inv.CreatedAt,
+				"token":              inv.Token, // for the admin "copy link" action
 			})
 		}
 		respondSuccess(c, http.StatusOK, out)
+	}
+}
+
+// CancelInvitationHandler handles DELETE /api/v1/invitations/cancel/:id (admin).
+// The path uses a static "cancel" segment so its :id param does not collide with
+// the public /invitations/:token param at the same tree level.
+func CancelInvitationHandler(invitationService *services.InvitationService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			respondError(c, http.StatusBadRequest, "invalid invitation id: must be a UUID")
+			return
+		}
+		if err := invitationService.CancelInvitation(c.Request.Context(), id); err != nil {
+			respondError(c, classifyServiceError(err), err.Error())
+			return
+		}
+		respondSuccess(c, http.StatusOK, gin.H{"message": "invitation cancelled"})
 	}
 }
 
@@ -158,6 +179,7 @@ func RegisterInvitationRoutes(admin *gin.RouterGroup, router *gin.Engine, invita
 	inv.POST("", InviteUserHandler(invitationService))
 	inv.GET("/pending", ListPendingInvitationsHandler(invitationService))
 	inv.POST("/resend-email/:id", ResendInvitationEmailHandler(invitationService))
+	inv.DELETE("/cancel/:id", CancelInvitationHandler(invitationService))
 
 	public := router.Group("/api/v1/invitations")
 	public.GET("/:token", GetInvitationDetailsHandler(invitationService))

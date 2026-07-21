@@ -10,8 +10,10 @@ import {
   ShieldCheck,
   Menu,
   X,
+  Users,
 } from 'lucide-react'
 import { useTheme } from '@/context/ThemeContext'
+import { useAuthContext } from '@/context/AuthContext'
 import UserMenu from '@/components/UserMenu'
 
 // Settings (and its Notifications tab) are reached via the user menu, not the
@@ -26,6 +28,13 @@ const nav = [
 // SidebarBody is shared by the persistent desktop sidebar and the mobile drawer.
 // onNavigate lets the mobile drawer close itself when a link is tapped.
 function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
+  const { currentUser } = useAuthContext()
+  const linkClass = ({ isActive }: { isActive: boolean }) =>
+    `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+      isActive
+        ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
+        : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
+    }`
   return (
     <>
       <div className="mb-8 flex items-center gap-2 px-2">
@@ -34,23 +43,20 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
       </div>
       <nav className="flex flex-col gap-1">
         {nav.map(({ to, label, icon: Icon, end }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={end}
-            onClick={onNavigate}
-            className={({ isActive }) =>
-              `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                isActive
-                  ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
-                  : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
-              }`
-            }
-          >
+          <NavLink key={to} to={to} end={end} onClick={onNavigate} className={linkClass}>
             <Icon className="h-4 w-4" />
             {label}
           </NavLink>
         ))}
+        {currentUser?.is_admin && (
+          <>
+            <div className="my-2 border-t border-neutral-200 dark:border-neutral-800" />
+            <NavLink to="/admin/users" onClick={onNavigate} className={linkClass}>
+              <Users className="h-4 w-4" />
+              Users
+            </NavLink>
+          </>
+        )}
       </nav>
       <div className="mt-auto pt-4">
         <UserMenu />
