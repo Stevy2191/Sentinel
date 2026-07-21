@@ -53,6 +53,9 @@ export interface Monitor {
   enabled: boolean
   tags: string[] | null
   group_id?: string | null
+  owner_id?: string | null
+  is_owner?: boolean
+  permission?: 'owner' | 'admin' | 'editable' | 'readonly'
   created_at: string
   updated_at: string
   // Maintenance mode (present in monitor list/detail responses).

@@ -10,6 +10,7 @@ import {
   useDeleteMonitorGroup,
 } from '@/hooks/useMonitorGroups'
 import { useSummaryReport } from '@/hooks/useReports'
+import { useUsers } from '@/hooks/useUsers'
 import { useToasts, Toaster } from '@/components/Toast'
 import ColorPicker from '@/components/ColorPicker'
 import DashboardStats from '@/components/DashboardStats'
@@ -163,6 +164,7 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const { monitors, loading, error, refetch } = useMonitors()
   const { groups, refetch: refetchGroups } = useMonitorGroups()
+  const { usernameFor } = useUsers()
   const { toasts, push } = useToasts()
 
   // 24h uptime for every monitor in one call (summary endpoint). Window is fixed
@@ -469,7 +471,7 @@ export default function Dashboard() {
                   </p>
                 ) : (
                   members.map((m) => (
-                    <MonitorCard key={m.id} monitor={m} uptime24h={uptimeById.get(m.id) ?? null} expanded={expandedId === m.id} {...cardProps} />
+                    <MonitorCard key={m.id} monitor={m} uptime24h={uptimeById.get(m.id) ?? null} expanded={expandedId === m.id} ownerUsername={usernameFor(m.owner_id)} {...cardProps} />
                   ))
                 )}
               </GroupSection>
@@ -487,13 +489,13 @@ export default function Dashboard() {
                 onToggle={() => toggleGroup('__ungrouped')}
               >
                 {ungrouped.map((m) => (
-                  <MonitorCard key={m.id} monitor={m} uptime24h={uptimeById.get(m.id) ?? null} expanded={expandedId === m.id} {...cardProps} />
+                  <MonitorCard key={m.id} monitor={m} uptime24h={uptimeById.get(m.id) ?? null} expanded={expandedId === m.id} ownerUsername={usernameFor(m.owner_id)} {...cardProps} />
                 ))}
               </GroupSection>
             ) : (
               <div className="space-y-2">
                 {ungrouped.map((m) => (
-                  <MonitorCard key={m.id} monitor={m} uptime24h={uptimeById.get(m.id) ?? null} expanded={expandedId === m.id} {...cardProps} />
+                  <MonitorCard key={m.id} monitor={m} uptime24h={uptimeById.get(m.id) ?? null} expanded={expandedId === m.id} ownerUsername={usernameFor(m.owner_id)} {...cardProps} />
                 ))}
               </div>
             ))}

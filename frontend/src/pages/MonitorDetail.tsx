@@ -20,6 +20,8 @@ import {
   useTestMonitor,
 } from '@/hooks/useMonitors'
 import { useUptimeReport } from '@/hooks/useReports'
+import { useUsers } from '@/hooks/useUsers'
+import { monitorAccess } from '@/utils/monitorAccess'
 import {
   useGetMaintenanceStatus,
   useEnableMaintenanceMode,
@@ -92,6 +94,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
   const { delete: deleteMonitor } = useDeleteMonitor(id)
   const { pause } = usePauseMonitor(id)
   const { resume } = useResumeMonitor(id)
+  const { usernameFor } = useUsers()
   const { test } = useTestMonitor(id)
 
   // Maintenance mode.
@@ -176,6 +179,8 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
   const isHttp = monitor.type === 'http'
   const online = monitor.current_status === 'online'
   const offline = monitor.current_status === 'offline'
+  const access = monitorAccess(monitor)
+  const ownerUsername = usernameFor(monitor.owner_id)
 
   const handleTest = async () => {
     try {
@@ -279,26 +284,44 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
             {monitor.current_status}
             {!monitor.enabled && ' · paused'}
           </span>
+          <div className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
+            {access.isOwner
+              ? 'Your monitor'
+              : access.permission === 'admin'
+                ? `Owned by ${ownerUsername ?? 'another user'} · admin access`
+                : `Shared with you by ${ownerUsername ?? 'another user'} · ${access.permission === 'editable' ? 'can edit' : 'read-only'}`}
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button className="btn-secondary" onClick={() => navigate(`/monitors/${id}/edit`)}>
-            <Pencil className="h-4 w-4" /> Edit
-          </button>
+          {access.canEdit && (
+            <button className="btn-secondary" onClick={() => navigate(`/monitors/${id}/edit`)}>
+              <Pencil className="h-4 w-4" /> Edit
+            </button>
+          )}
           <button className="btn-secondary" onClick={() => void handleTest()}>
             <Play className="h-4 w-4" /> Test
           </button>
-          <button className="btn-secondary" onClick={() => void handlePauseResume()}>
-            {monitor.enabled ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-            {monitor.enabled ? 'Pause' : 'Resume'}
-          </button>
-          <button
-            className="btn border border-error-300 text-error-600 hover:bg-error-50 dark:hover:bg-error-900/20"
-            onClick={() => setConfirmDelete(true)}
-          >
-            <Trash2 className="h-4 w-4" /> Delete
-          </button>
+          {access.canEdit && (
+            <button className="btn-secondary" onClick={() => void handlePauseResume()}>
+              {monitor.enabled ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+              {monitor.enabled ? 'Pause' : 'Resume'}
+            </button>
+          )}
+          {access.canDelete && (
+            <button
+              className="btn border border-error-300 text-error-600 hover:bg-error-50 dark:hover:bg-error-900/20"
+              onClick={() => setConfirmDelete(true)}
+            >
+              <Trash2 className="h-4 w-4" /> Delete
+            </button>
+          )}
         </div>
       </div>
+      {!access.canEdit && (
+        <div className="rounded-md border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-500 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-400">
+          Read-only access — you can view and test this monitor but not edit or delete it.
+        </div>
+      )}
 
       {testCheck && <TestResult check={testCheck} onClose={() => setTestCheck(null)} />}
 
