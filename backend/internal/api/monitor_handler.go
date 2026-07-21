@@ -17,11 +17,13 @@ import (
 	"github.com/Stevy2191/Sentinel/backend/internal/services"
 )
 
-// monitorResponse embeds a Monitor and adds computed maintenance fields.
+// monitorResponse embeds a Monitor and adds computed maintenance + access fields.
 type monitorResponse struct {
 	models.Monitor
-	IsInMaintenance      bool `json:"is_in_maintenance"`
-	TimeRemainingMinutes int  `json:"time_remaining_minutes"`
+	IsInMaintenance      bool   `json:"is_in_maintenance"`
+	TimeRemainingMinutes int    `json:"time_remaining_minutes"`
+	IsOwner              bool   `json:"is_owner"`
+	Permission           string `json:"permission"` // owner | admin | editable | readonly
 }
 
 // toMonitorResponse enriches a monitor with computed maintenance fields.
@@ -34,6 +36,39 @@ func toMonitorResponse(m models.Monitor, now time.Time) monitorResponse {
 		}
 	}
 	return r
+}
+
+// authorizeMonitor checks whether the current user may access the monitor at the
+// given level ("view", "edit", or "owner"). Admins bypass all checks. On denial
+// it writes the response (403/404/500) and returns false.
+func authorizeMonitor(c *gin.Context, ms *services.MonitorService, monitorID uuid.UUID, level string) bool {
+	userID, _, isAdmin, ok := GetUserFromContext(c)
+	if !ok {
+		respondAuthError(c, http.StatusUnauthorized, "authentication required")
+		return false
+	}
+	if isAdmin {
+		return true
+	}
+	var allowed bool
+	var err error
+	switch level {
+	case "edit":
+		allowed, err = ms.CanUserEditMonitor(c.Request.Context(), userID, monitorID)
+	case "owner":
+		allowed, err = ms.IsMonitorOwner(c.Request.Context(), userID, monitorID)
+	default:
+		allowed, err = ms.CanUserViewMonitor(c.Request.Context(), userID, monitorID)
+	}
+	if err != nil {
+		respondError(c, classifyServiceError(err), err.Error())
+		return false
+	}
+	if !allowed {
+		respondError(c, http.StatusForbidden, "you do not have permission to access this monitor")
+		return false
+	}
+	return true
 }
 
 // classifyMaintenanceError maps a maintenance service error to a status code:
@@ -116,6 +151,11 @@ func CreateMonitorHandler(monitorService *services.MonitorService) gin.HandlerFu
 			return
 		}
 
+		// The creator owns the monitor.
+		if userID, _, _, ok := GetUserFromContext(c); ok {
+			monitor.OwnerID = &userID
+		}
+
 		created, err := monitorService.CreateMonitor(c.Request.Context(), &monitor)
 		if err != nil {
 			respondError(c, classifyServiceError(err), err.Error())
@@ -158,7 +198,14 @@ func GetMonitorsHandler(monitorService *services.MonitorService) gin.HandlerFunc
 			filters["status"] = v
 		}
 
-		monitors, err := monitorService.ListMonitors(c.Request.Context(), filters)
+		// Only monitors the user owns or has been shared (admins see all).
+		userID, _, isAdmin, _ := GetUserFromContext(c)
+		monitors, err := monitorService.ListAccessibleMonitors(c.Request.Context(), userID, isAdmin, filters)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		shareMap, err := monitorService.GetUserShareMap(c.Request.Context(), userID)
 		if err != nil {
 			respondError(c, http.StatusInternalServerError, err.Error())
 			return
@@ -184,7 +231,19 @@ func GetMonitorsHandler(monitorService *services.MonitorService) gin.HandlerFunc
 		now := time.Now()
 		enriched := make([]monitorResponse, 0, len(pageItems))
 		for _, m := range pageItems {
-			enriched = append(enriched, toMonitorResponse(m, now))
+			r := toMonitorResponse(m, now)
+			r.IsOwner = m.OwnerID != nil && *m.OwnerID == userID
+			switch {
+			case r.IsOwner:
+				r.Permission = "owner"
+			case shareMap[m.ID] != "":
+				r.Permission = shareMap[m.ID]
+			case isAdmin:
+				r.Permission = "admin"
+			default:
+				r.Permission = models.PermissionReadonly
+			}
+			enriched = append(enriched, r)
 		}
 
 		respondSuccess(c, http.StatusOK, gin.H{
@@ -207,12 +266,31 @@ func GetMonitorHandler(monitorService *services.MonitorService) gin.HandlerFunc 
 			return
 		}
 
+		if !authorizeMonitor(c, monitorService, id, "view") {
+			return
+		}
+
 		monitor, err := monitorService.GetMonitor(c.Request.Context(), id)
 		if err != nil {
 			respondError(c, classifyServiceError(err), err.Error())
 			return
 		}
-		respondSuccess(c, http.StatusOK, toMonitorResponse(*monitor, time.Now()))
+		userID, _, isAdmin, _ := GetUserFromContext(c)
+		r := toMonitorResponse(*monitor, time.Now())
+		r.IsOwner = monitor.OwnerID != nil && *monitor.OwnerID == userID
+		switch {
+		case r.IsOwner:
+			r.Permission = "owner"
+		case isAdmin:
+			r.Permission = "admin"
+		default:
+			if canEdit, _ := monitorService.CanUserEditMonitor(c.Request.Context(), userID, id); canEdit {
+				r.Permission = models.PermissionEditable
+			} else {
+				r.Permission = models.PermissionReadonly
+			}
+		}
+		respondSuccess(c, http.StatusOK, r)
 	}
 }
 
@@ -221,6 +299,10 @@ func UpdateMonitorHandler(monitorService *services.MonitorService) gin.HandlerFu
 	return func(c *gin.Context) {
 		id, ok := parseMonitorID(c)
 		if !ok {
+			return
+		}
+
+		if !authorizeMonitor(c, monitorService, id, "edit") {
 			return
 		}
 
@@ -249,6 +331,10 @@ func DeleteMonitorHandler(monitorService *services.MonitorService) gin.HandlerFu
 			return
 		}
 
+		if !authorizeMonitor(c, monitorService, id, "owner") {
+			return
+		}
+
 		if err := monitorService.DeleteMonitor(c.Request.Context(), id); err != nil {
 			respondError(c, classifyServiceError(err), err.Error())
 			return
@@ -264,6 +350,10 @@ func PauseMonitorHandler(monitorService *services.MonitorService) gin.HandlerFun
 	return func(c *gin.Context) {
 		id, ok := parseMonitorID(c)
 		if !ok {
+			return
+		}
+
+		if !authorizeMonitor(c, monitorService, id, "edit") {
 			return
 		}
 
@@ -283,6 +373,10 @@ func ResumeMonitorHandler(monitorService *services.MonitorService) gin.HandlerFu
 			return
 		}
 
+		if !authorizeMonitor(c, monitorService, id, "edit") {
+			return
+		}
+
 		if err := monitorService.ResumeMonitor(c.Request.Context(), id); err != nil {
 			respondError(c, classifyServiceError(err), err.Error())
 			return
@@ -296,6 +390,10 @@ func GetMonitorStatusHandler(monitorService *services.MonitorService) gin.Handle
 	return func(c *gin.Context) {
 		id, ok := parseMonitorID(c)
 		if !ok {
+			return
+		}
+
+		if !authorizeMonitor(c, monitorService, id, "view") {
 			return
 		}
 
@@ -314,6 +412,10 @@ func TestMonitorHandler(monitorService *services.MonitorService, checkService *s
 	return func(c *gin.Context) {
 		id, ok := parseMonitorID(c)
 		if !ok {
+			return
+		}
+
+		if !authorizeMonitor(c, monitorService, id, "view") {
 			return
 		}
 
@@ -349,6 +451,9 @@ func EnableMaintenanceHandler(monitorService *services.MonitorService) gin.Handl
 			return
 		}
 
+		if !authorizeMonitor(c, monitorService, id, "edit") {
+			return
+		}
 		if err := monitorService.EnableMaintenanceMode(c.Request.Context(), id, start, end); err != nil {
 			respondError(c, classifyMaintenanceError(err), err.Error())
 			return
@@ -385,6 +490,9 @@ func UpdateMaintenanceHandler(monitorService *services.MonitorService) gin.Handl
 			return
 		}
 
+		if !authorizeMonitor(c, monitorService, id, "edit") {
+			return
+		}
 		if err := monitorService.UpdateMaintenanceWindow(c.Request.Context(), id, start, end); err != nil {
 			respondError(c, classifyMaintenanceError(err), err.Error())
 			return
@@ -405,6 +513,9 @@ func DisableMaintenanceHandler(monitorService *services.MonitorService) gin.Hand
 		if !ok {
 			return
 		}
+		if !authorizeMonitor(c, monitorService, id, "edit") {
+			return
+		}
 		if err := monitorService.DisableMaintenanceMode(c.Request.Context(), id); err != nil {
 			respondError(c, classifyMaintenanceError(err), err.Error())
 			return
@@ -418,6 +529,9 @@ func GetMaintenanceStatusHandler(monitorService *services.MonitorService) gin.Ha
 	return func(c *gin.Context) {
 		id, ok := parseMonitorID(c)
 		if !ok {
+			return
+		}
+		if !authorizeMonitor(c, monitorService, id, "view") {
 			return
 		}
 		status, err := monitorService.GetMaintenanceStatus(c.Request.Context(), id)

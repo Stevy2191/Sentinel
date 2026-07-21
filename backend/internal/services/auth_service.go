@@ -415,6 +415,16 @@ func (s *AuthService) VerifyMFAToken(tokenString string) (uuid.UUID, string, err
 	return userID, username, nil
 }
 
+// ListUsers returns all users ordered by username (for share pickers). The
+// password hash is never serialized (json:"-").
+func (s *AuthService) ListUsers(ctx context.Context) ([]models.User, error) {
+	var users []models.User
+	if err := s.db.WithContext(ctx).Order("username ASC").Find(&users).Error; err != nil {
+		return nil, fmt.Errorf("listing users: %w", err)
+	}
+	return users, nil
+}
+
 // HasAnyUser reports whether any user accounts exist (used to make the first
 // registered account an admin).
 func (s *AuthService) HasAnyUser(ctx context.Context) (bool, error) {
