@@ -11,12 +11,19 @@ import api from '@/services/api'
 
 export const TOKEN_KEY = 'sentinel:token'
 
+export interface UserTheme {
+  primary_color: string
+  accent_color: string
+  mode: string
+}
+
 export interface CurrentUser {
   user_id: string
   username: string
   is_admin: boolean
   mfa_enabled: boolean
   last_login: string | null
+  theme?: UserTheme
 }
 
 interface AuthContextValue {

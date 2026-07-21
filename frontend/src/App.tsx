@@ -1,6 +1,9 @@
+import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
-import { ThemeProvider } from '@/context/ThemeContext'
-import { AuthProvider } from '@/context/AuthContext'
+import { ThemeProvider, useTheme, type ThemeMode } from '@/context/ThemeContext'
+import { AuthProvider, useAuthContext } from '@/context/AuthContext'
+import { applyThemeColors } from '@/utils/themeUtils'
+import { PREF, setString } from '@/utils/preferences'
 import RequireAuth from '@/components/RequireAuth'
 import Layout from '@/components/Layout'
 import Dashboard from '@/pages/Dashboard'
@@ -14,10 +17,32 @@ import SecuritySettings from '@/pages/SecuritySettings'
 import PublicStatus from '@/pages/PublicStatus'
 import Auth from '@/pages/Auth'
 
+// ThemeSync applies the signed-in user's saved theme (colors + mode) whenever it
+// loads or changes — this is what makes the theme follow the user across devices.
+function ThemeSync() {
+  const { currentUser } = useAuthContext()
+  const { setMode } = useTheme()
+  const theme = currentUser?.theme
+  const primary = theme?.primary_color
+  const accent = theme?.accent_color
+  const mode = theme?.mode
+
+  useEffect(() => {
+    if (!primary || !accent) return
+    applyThemeColors(primary, accent)
+    setString(PREF.primaryColor, primary)
+    setString(PREF.accentColor, accent)
+    if (mode === 'light' || mode === 'dark' || mode === 'auto') setMode(mode as ThemeMode)
+  }, [primary, accent, mode, setMode])
+
+  return null
+}
+
 export default function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
+        <ThemeSync />
         <BrowserRouter>
           <Routes>
             {/* Public routes. */}

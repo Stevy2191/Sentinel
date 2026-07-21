@@ -1,5 +1,6 @@
 // Client-side user preferences persisted to localStorage under 'sentinel:*'.
 // (Theme mode is handled separately by ThemeContext under 'sentinel-theme'.)
+import { applyThemeColors } from '@/utils/themeUtils'
 
 export type FontSize = 'compact' | 'normal' | 'large'
 export type CardLayout = 'compact' | 'normal' | 'spacious'
@@ -69,12 +70,11 @@ export function defaultTimezone(): string {
 export function applyStoredPreferences(): void {
   const font = getString(PREF.fontSize, DEFAULTS.fontSize) as FontSize
   document.documentElement.style.fontSize = FONT_SCALE[font] ?? '100%'
-  document.documentElement.style.setProperty(
-    '--sentinel-primary',
-    getString(PREF.primaryColor, DEFAULTS.primaryColor)
-  )
-  document.documentElement.style.setProperty(
-    '--sentinel-accent',
+  // Recolor the app from the locally-stored theme colors (instant, before the
+  // backend theme loads via /auth/me). applyThemeColors drives the Tailwind
+  // primary-*/accent-* utilities via CSS variables.
+  applyThemeColors(
+    getString(PREF.primaryColor, DEFAULTS.primaryColor),
     getString(PREF.accentColor, DEFAULTS.accentColor)
   )
 }

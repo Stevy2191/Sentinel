@@ -3,11 +3,14 @@ package api
 import (
 	"log"
 	"net/http"
+	"regexp"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/services"
 )
+
+var themeHexPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 
 // updateRegistrationRequest is the body for PATCH /settings/registration.
 type updateRegistrationRequest struct {
@@ -42,6 +45,50 @@ func UpdateRegistrationHandler(settingsService *services.SettingsService) gin.Ha
 		respondSuccess(c, http.StatusOK, gin.H{
 			"registration_enabled": *req.Enabled,
 			"message":              "Registration settings updated",
+		})
+	}
+}
+
+// updateThemeRequest is the body for PATCH /settings/theme.
+type updateThemeRequest struct {
+	PrimaryColor string `json:"primary_color"`
+	AccentColor  string `json:"accent_color"`
+	Mode         string `json:"mode"`
+}
+
+// UpdateUserThemeHandler handles PATCH /api/v1/settings/theme. It saves the
+// authenticated user's theme (per-user, not admin-gated) so it syncs across
+// their devices.
+func UpdateUserThemeHandler(authService *services.AuthService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID, _, _, ok := GetUserFromContext(c)
+		if !ok {
+			respondAuthError(c, http.StatusUnauthorized, "authentication required")
+			return
+		}
+		var req updateThemeRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			respondError(c, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if !themeHexPattern.MatchString(req.PrimaryColor) || !themeHexPattern.MatchString(req.AccentColor) {
+			respondError(c, http.StatusBadRequest, "primary_color and accent_color must be hex like #10b981")
+			return
+		}
+		switch req.Mode {
+		case "", "light", "dark", "auto":
+		default:
+			respondError(c, http.StatusBadRequest, "mode must be light, dark, or auto")
+			return
+		}
+		if err := authService.UpdateUserTheme(c.Request.Context(), userID, req.PrimaryColor, req.AccentColor, req.Mode); err != nil {
+			respondError(c, classifyServiceError(err), err.Error())
+			return
+		}
+		respondSuccess(c, http.StatusOK, gin.H{
+			"primary_color": req.PrimaryColor,
+			"accent_color":  req.AccentColor,
+			"mode":          req.Mode,
 		})
 	}
 }

@@ -346,6 +346,27 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, curr
 	return nil
 }
 
+// UpdateUserTheme persists a user's theme colors and (when provided) mode.
+func (s *AuthService) UpdateUserTheme(ctx context.Context, userID uuid.UUID, primary, accent, mode string) error {
+	updates := map[string]interface{}{
+		"theme_primary_color": primary,
+		"theme_accent_color":  accent,
+		"updated_at":          time.Now(),
+	}
+	if mode != "" {
+		updates["theme_mode"] = mode
+	}
+	result := s.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", userID).Updates(updates)
+	if result.Error != nil {
+		return fmt.Errorf("updating theme for user %s: %w", userID, result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("user %s not found: %w", userID, gorm.ErrRecordNotFound)
+	}
+	s.logger.Printf("[auth] theme updated for user %s", userID)
+	return nil
+}
+
 // GenerateMFAToken issues a short-lived (5-minute) token used to complete an
 // MFA challenge after a correct password. It carries an mfa_pending claim and
 // grants no API access on its own.

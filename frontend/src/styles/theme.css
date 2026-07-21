@@ -2,6 +2,33 @@
    raw color values (charts, inline styles). Mirrors the Tailwind palette. */
 
 :root {
+  /* Theme scales as "R G B" channel triplets, consumed by the Tailwind
+     primary and accent color utilities. Defaults are emerald (primary) and
+     amber (accent); themeUtils overrides these inline for custom colors. */
+  --primary-50: 236 253 245;
+  --primary-100: 209 250 229;
+  --primary-200: 167 243 208;
+  --primary-300: 110 231 183;
+  --primary-400: 52 211 153;
+  --primary-500: 16 185 129;
+  --primary-600: 5 150 105;
+  --primary-700: 4 120 87;
+  --primary-800: 6 95 70;
+  --primary-900: 6 78 59;
+  --primary-950: 2 44 34;
+
+  --accent-50: 255 251 235;
+  --accent-100: 254 243 199;
+  --accent-200: 253 230 138;
+  --accent-300: 252 211 77;
+  --accent-400: 251 191 36;
+  --accent-500: 245 158 11;
+  --accent-600: 217 119 6;
+  --accent-700: 180 83 9;
+  --accent-800: 146 64 14;
+  --accent-900: 120 53 15;
+  --accent-950: 69 26 3;
+
   --color-bg: 248 250 252; /* slate-50 */
   --color-surface: 255 255 255;
   --color-border: 226 232 240; /* slate-200 */
