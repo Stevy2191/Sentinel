@@ -23,12 +23,25 @@
     @apply bg-neutral-950 text-neutral-100;
   }
 
-  /* Larger tap targets on touch devices (WCAG 2.5.5) without bloating desktop. */
+  /* Larger tap targets on touch devices (WCAG 2.5.5) without bloating desktop.
+     Checkboxes/radios are excluded so they keep their intended small size. */
   @media (pointer: coarse) {
     .btn,
     button,
-    select {
+    select,
+    textarea,
+    input:not([type='checkbox']):not([type='radio']) {
       min-height: 44px;
+    }
+  }
+
+  /* On small screens, form controls use a 16px font so iOS Safari does not
+     zoom in when they gain focus. */
+  @media (max-width: 767px) {
+    select,
+    textarea,
+    input:not([type='checkbox']):not([type='radio']) {
+      font-size: 16px;
     }
   }
 }
