@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { RefreshCw, Plus, FolderPlus, Search, Trash2 } from 'lucide-react'
+import { RefreshCw, Plus, FolderPlus, Search, Trash2, Filter, X } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { useMonitors } from '@/hooks/useMonitors'
 import {
@@ -19,6 +19,33 @@ import type { Monitor, MonitorGroup } from '@/types'
 
 const REFRESH_MS = 30_000
 const DEFAULT_GROUP_COLOR = '#10b981'
+
+// useDebounced returns a value that only updates after `ms` of no changes.
+function useDebounced<T>(value: T, ms: number): T {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebounced(value), ms)
+    return () => window.clearTimeout(t)
+  }, [value, ms])
+  return debounced
+}
+
+const STATUS_OPTIONS = ['all', 'online', 'offline', 'maintenance', 'unknown'] as const
+type StatusFilter = (typeof STATUS_OPTIONS)[number]
+
+const selectCls =
+  'rounded-md border border-neutral-300 bg-white px-2.5 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-primary-500'
+
+function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-primary-100 px-2 py-0.5 text-xs font-medium text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">
+      {label}
+      <button onClick={onRemove} className="rounded-full hover:bg-primary-200 dark:hover:bg-primary-800" aria-label={`Remove ${label}`}>
+        <X className="h-3 w-3" />
+      </button>
+    </span>
+  )
+}
 
 // ---------- group create/edit modal ----------
 function GroupModal({
@@ -157,7 +184,12 @@ export default function Dashboard() {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [modal, setModal] = useState<{ mode: 'create' | 'edit'; group?: MonitorGroup } | null>(null)
   const [search, setSearch] = useState('')
+  const debouncedSearch = useDebounced(search, 300)
   const [selectedTags, setSelectedTags] = useState<string[]>([])
+  const [typeFilter, setTypeFilter] = useState<string>('all')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [groupFilter, setGroupFilter] = useState<string>('all') // 'all' | 'ungrouped' | groupId
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
 
   useEffect(() => setUpdatedAt(new Date()), [monitors])
   useEffect(() => {
@@ -190,16 +222,46 @@ export default function Dashboard() {
     for (const m of monitors) (m.tags ?? []).forEach((t) => s.add(t))
     return Array.from(s).sort()
   }, [monitors])
+  const allTypes = useMemo(() => {
+    const s = new Set<string>()
+    for (const m of monitors) s.add(m.type)
+    return Array.from(s).sort()
+  }, [monitors])
 
-  const filterActive = search.trim() !== '' || selectedTags.length > 0
+  const activeFilterCount =
+    (typeFilter !== 'all' ? 1 : 0) +
+    (statusFilter !== 'all' ? 1 : 0) +
+    (groupFilter !== 'all' ? 1 : 0) +
+    selectedTags.length
+  const filterActive = debouncedSearch.trim() !== '' || activeFilterCount > 0
+
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
+    const q = debouncedSearch.trim().toLowerCase()
     return monitors.filter((m) => {
-      const matchQ = !q || m.name.toLowerCase().includes(q) || m.url.toLowerCase().includes(q)
+      const matchQ =
+        !q ||
+        m.name.toLowerCase().includes(q) ||
+        m.url.toLowerCase().includes(q) ||
+        (m.tags ?? []).some((t) => t.toLowerCase().includes(q))
+      const matchType = typeFilter === 'all' || m.type === typeFilter
+      const matchStatus =
+        statusFilter === 'all' ||
+        (statusFilter === 'maintenance' ? !!m.is_in_maintenance : m.current_status === statusFilter)
+      const matchGroup =
+        groupFilter === 'all' ||
+        (groupFilter === 'ungrouped' ? !m.group_id : m.group_id === groupFilter)
       const matchTags = selectedTags.length === 0 || (m.tags ?? []).some((t) => selectedTags.includes(t))
-      return matchQ && matchTags
+      return matchQ && matchType && matchStatus && matchGroup && matchTags
     })
-  }, [monitors, search, selectedTags])
+  }, [monitors, debouncedSearch, typeFilter, statusFilter, groupFilter, selectedTags])
+
+  const clearAllFilters = () => {
+    setSearch('')
+    setTypeFilter('all')
+    setStatusFilter('all')
+    setGroupFilter('all')
+    setSelectedTags([])
+  }
 
   const ungrouped = useMemo(() => filtered.filter((m) => !m.group_id), [filtered])
   const monitorsByGroup = useMemo(() => {
@@ -256,42 +318,108 @@ export default function Dashboard() {
       {/* Always-visible stats */}
       <DashboardStats total={stats.total} online={stats.online} offline={stats.offline} avgResponseMs={stats.avg} />
 
-      {/* Search + tag filter */}
+      {/* Search + dual filters */}
       {monitors.length > 0 && (
-        <div className="space-y-2">
-          <div className="relative max-w-sm">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search monitors…"
-              className="w-full rounded-md border border-neutral-300 bg-white py-2 pl-9 pr-3 text-sm dark:border-neutral-700 dark:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-primary-500"
-            />
-          </div>
-          {allTags.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-xs text-neutral-500 dark:text-neutral-400">Tags:</span>
-              {allTags.map((t) => {
-                const on = selectedTags.includes(t)
-                return (
-                  <button
-                    key={t}
-                    onClick={() => toggleTag(t)}
-                    className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition ${
-                      on
-                        ? 'bg-primary-600 text-white'
-                        : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700'
-                    }`}
-                  >
-                    {t}
-                  </button>
-                )
-              })}
-              {selectedTags.length > 0 && (
-                <button onClick={() => setSelectedTags([])} className="text-xs text-primary-600 hover:underline">
-                  clear
-                </button>
+        <div className="space-y-3">
+          {/* Search (full width on mobile, ~70% on desktop) + mobile Filters toggle */}
+          <div className="flex items-center gap-2">
+            <div className="relative w-full md:max-w-2xl">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search monitors…"
+                className="w-full rounded-md border border-neutral-300 bg-white py-2 pl-9 pr-3 text-sm dark:border-neutral-700 dark:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+            <button
+              className="btn-secondary shrink-0 md:hidden"
+              onClick={() => setMobileFiltersOpen((o) => !o)}
+              aria-expanded={mobileFiltersOpen}
+            >
+              <Filter className="h-4 w-4" /> Filters
+              {activeFilterCount > 0 && (
+                <span className="ml-1 rounded-full bg-primary-600 px-1.5 text-xs text-white">{activeFilterCount}</span>
               )}
+            </button>
+          </div>
+
+          {/* Filter controls: inline on md+, collapsible on mobile */}
+          <div className={`${mobileFiltersOpen ? 'flex' : 'hidden'} flex-wrap items-center gap-2 md:flex`}>
+            <select className={selectCls} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} aria-label="Filter by type">
+              <option value="all">Type: All</option>
+              {allTypes.map((t) => (
+                <option key={t} value={t}>
+                  {t.toUpperCase()}
+                </option>
+              ))}
+            </select>
+            <select className={selectCls} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)} aria-label="Filter by status">
+              <option value="all">Status: All</option>
+              <option value="online">Online</option>
+              <option value="offline">Offline</option>
+              <option value="maintenance">Maintenance</option>
+              <option value="unknown">Unknown</option>
+            </select>
+            <select className={selectCls} value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)} aria-label="Filter by group">
+              <option value="all">Group: All</option>
+              <option value="ungrouped">Ungrouped</option>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+
+            {allTags.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {allTags.map((t) => {
+                  const on = selectedTags.includes(t)
+                  return (
+                    <button
+                      key={t}
+                      onClick={() => toggleTag(t)}
+                      className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
+                        on
+                          ? 'bg-primary-600 text-white'
+                          : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700'
+                      }`}
+                    >
+                      {t}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            {mobileFiltersOpen && (
+              <button className="btn-primary md:hidden" onClick={() => setMobileFiltersOpen(false)}>
+                Done
+              </button>
+            )}
+          </div>
+
+          {/* Active filter chips */}
+          {activeFilterCount > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {typeFilter !== 'all' && (
+                <FilterChip label={`Type: ${typeFilter.toUpperCase()}`} onRemove={() => setTypeFilter('all')} />
+              )}
+              {statusFilter !== 'all' && (
+                <FilterChip label={`Status: ${statusFilter}`} onRemove={() => setStatusFilter('all')} />
+              )}
+              {groupFilter !== 'all' && (
+                <FilterChip
+                  label={`Group: ${groupFilter === 'ungrouped' ? 'Ungrouped' : groups.find((g) => g.id === groupFilter)?.name ?? groupFilter}`}
+                  onRemove={() => setGroupFilter('all')}
+                />
+              )}
+              {selectedTags.map((t) => (
+                <FilterChip key={t} label={`Tag: ${t}`} onRemove={() => toggleTag(t)} />
+              ))}
+              <button onClick={clearAllFilters} className="text-xs text-primary-600 hover:underline">
+                Clear all
+              </button>
             </div>
           )}
         </div>

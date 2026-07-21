@@ -35,7 +35,7 @@ function Stat({
 /** Compact, always-visible top stats row. */
 export default function DashboardStats({ total, online, offline, avgResponseMs }: Props) {
   return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <Stat label="Total Monitors" value={total} icon={Activity} tone="bg-info-100 text-info-600 dark:bg-info-900/40 dark:text-info-400" />
       <Stat label="Online" value={online} icon={CheckCircle2} tone="bg-primary-100 text-primary-600 dark:bg-primary-900/40 dark:text-primary-400" />
       <Stat label="Offline" value={offline} icon={XCircle} tone="bg-error-100 text-error-600 dark:bg-error-900/40 dark:text-error-400" />

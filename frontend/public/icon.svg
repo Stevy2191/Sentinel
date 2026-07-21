@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Full-bleed background so maskable crops (circle/rounded) look clean. -->
+  <rect width="512" height="512" fill="#10b981"/>
+  <!-- Shield centered within the maskable safe zone. -->
+  <path d="M256 104l128 56v88c0 88-61 158-128 184-67-26-128-96-128-184v-88l128-56z" fill="#ffffff" opacity="0.96"/>
+  <circle cx="256" cy="240" r="44" fill="#10b981"/>
+</svg>
