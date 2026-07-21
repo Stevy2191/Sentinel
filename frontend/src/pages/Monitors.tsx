@@ -184,6 +184,8 @@ export default function Monitors() {
                   </button>
                 </th>
                 <th className="px-4 py-3 font-medium">Type</th>
+                <th className="px-4 py-3 font-medium">Owner</th>
+                <th className="px-4 py-3 font-medium">Permission</th>
                 <th className="px-4 py-3 font-medium">URL</th>
                 <th className="px-4 py-3 font-medium">
                   <button className="flex items-center gap-1" onClick={() => toggleSort('status')}>
@@ -203,14 +205,14 @@ export default function Monitors() {
               {loading && monitors.length === 0 ? (
                 Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i} className="animate-pulse">
-                    <td colSpan={7} className="px-4 py-4">
+                    <td colSpan={9} className="px-4 py-4">
                       <div className="h-4 rounded bg-neutral-200 dark:bg-neutral-800" />
                     </td>
                   </tr>
                 ))
               ) : pageItems.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-neutral-500">
+                  <td colSpan={9} className="px-4 py-10 text-center text-neutral-500">
                     No monitors. Create your first one.
                   </td>
                 </tr>
@@ -222,20 +224,26 @@ export default function Monitors() {
                     onClick={() => navigate(`/monitors/${m.id}`)}
                   >
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{m.name}</span>
-                        {monitorAccess(m).badge && (
-                          <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${badgeToneClass[monitorAccess(m).badge!.tone]}`}>
-                            {monitorAccess(m).badge!.label}
-                          </span>
-                        )}
-                      </div>
-                      {!m.enabled && <span className="text-xs text-neutral-400">paused</span>}
-                      {!monitorAccess(m).isOwner && usernameFor(m.owner_id) && (
-                        <span className="block text-xs text-neutral-400">Owned by {usernameFor(m.owner_id)}</span>
-                      )}
+                      <span className="font-medium">{m.name}</span>
+                      {!m.enabled && <span className="ml-2 text-xs text-neutral-400">paused</span>}
                     </td>
                     <td className="px-4 py-3 uppercase text-neutral-500">{m.type}</td>
+                    <td className="px-4 py-3 text-neutral-500">
+                      {monitorAccess(m).isOwner ? (
+                        <span className="font-medium text-emerald-600 dark:text-emerald-400">You</span>
+                      ) : (
+                        usernameFor(m.owner_id) ?? '—'
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {monitorAccess(m).badge ? (
+                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${badgeToneClass[monitorAccess(m).badge!.tone]}`}>
+                          {monitorAccess(m).badge!.label}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-neutral-400">Owner</span>
+                      )}
+                    </td>
                     <td className="max-w-[220px] truncate px-4 py-3 text-neutral-500">{m.url}</td>
                     <td className="px-4 py-3">
                       <span
