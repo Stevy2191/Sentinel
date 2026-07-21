@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/services"
 )
@@ -15,16 +14,6 @@ const (
 	maxCheckLimit      = 1000
 	defaultReportRange = 30 * 24 * time.Hour
 )
-
-// verifyMonitorExists returns true if the monitor exists; otherwise it writes an
-// appropriate error response (404 when not found) and returns false.
-func verifyMonitorExists(c *gin.Context, monitorService *services.MonitorService, id uuid.UUID) bool {
-	if _, err := monitorService.GetMonitor(c.Request.Context(), id); err != nil {
-		respondError(c, classifyServiceError(err), err.Error())
-		return false
-	}
-	return true
-}
 
 // parseOptionalTime parses an RFC3339 query parameter. It returns ok=false when
 // the parameter is absent, and an error when present but unparseable.
@@ -66,7 +55,7 @@ func GetMonitorChecksHandler(checkService *services.CheckService, monitorService
 		if !ok {
 			return
 		}
-		if !verifyMonitorExists(c, monitorService, id) {
+		if !authorizeMonitor(c, monitorService, id, "view") {
 			return
 		}
 
@@ -139,7 +128,7 @@ func GetMonitorIncidentsHandler(incidentService *services.IncidentService, monit
 		if !ok {
 			return
 		}
-		if !verifyMonitorExists(c, monitorService, id) {
+		if !authorizeMonitor(c, monitorService, id, "view") {
 			return
 		}
 
