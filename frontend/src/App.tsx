@@ -16,6 +16,7 @@ import Settings from '@/pages/Settings'
 import SecuritySettings from '@/pages/SecuritySettings'
 import AdminUsers from '@/pages/AdminUsers'
 import PublicStatus from '@/pages/PublicStatus'
+import InvitationAccept from '@/pages/InvitationAccept'
 import Auth from '@/pages/Auth'
 
 // ThemeSync applies the signed-in user's saved theme (colors + mode) whenever it
@@ -49,6 +50,7 @@ export default function App() {
             {/* Public routes. */}
             <Route path="/login" element={<Auth mode="login" />} />
             <Route path="/register" element={<Auth mode="register" />} />
+            <Route path="/invitation/:token" element={<InvitationAccept />} />
             <Route path="/public/status/:slug" element={<PublicStatus />} />
 
             {/* Admin app — requires authentication. */}
