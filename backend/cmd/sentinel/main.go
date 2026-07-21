@@ -84,6 +84,7 @@ func run() error {
 	statusPageService := services.NewStatusPageService(db)
 	notificationManager := notifications.NewNotificationManager(db)
 	authService := services.NewAuthService(db, resolveJWTSecret())
+	invitationService := services.NewInvitationService(db, authService)
 	settingsService := services.NewSettingsService(db)
 
 	// Seed the registration setting from the environment on first run only; once
@@ -130,6 +131,15 @@ func run() error {
 	api.RegisterSettingsRoutes(v1, settingsService)
 	// Per-user theme (not admin-gated): only AuthMiddleware applies.
 	v1.PATCH("/settings/theme", api.UpdateUserThemeHandler(authService))
+	// Self password change (any authenticated user).
+	v1.POST("/auth/change-password", api.ChangeOwnPasswordHandler(authService))
+
+	// Admin-only user management + invitations (admin invitation routes here,
+	// public accept/details routes registered on the router).
+	admin := v1.Group("")
+	admin.Use(api.RequireAdmin())
+	api.RegisterUserManagementRoutes(admin, authService)
+	api.RegisterInvitationRoutes(admin, router, invitationService, authService)
 	api.RegisterNotificationConfigRoutes(v1, notificationConfigService)
 
 	// 6. Monitoring loop.

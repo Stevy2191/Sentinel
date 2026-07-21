@@ -27,6 +27,9 @@ type User struct {
 	// value on insert and the DB default would apply — which would wrongly make
 	// non-admin users admins. IsAdmin is always set explicitly by the caller.
 	IsAdmin bool `json:"is_admin" gorm:"column:is_admin"`
+	// Role mirrors IsAdmin ('admin' | 'user'). IsAdmin remains the authority for
+	// JWT/authorization; Role is the human-facing value for user management.
+	Role           string      `json:"role" gorm:"column:role;default:user"`
 	LastLogin      *time.Time  `json:"last_login" gorm:"column:last_login"`
 	// Per-user theme, synced across devices. Serialized as a nested object by the
 	// /auth/me handler rather than these flat fields.
@@ -40,6 +43,25 @@ type User struct {
 // TableName tells GORM which table backs the User model.
 func (User) TableName() string {
 	return "users"
+}
+
+// User roles.
+const (
+	RoleAdmin = "admin"
+	RoleUser  = "user"
+)
+
+// RoleForAdmin maps the is_admin flag to a role string.
+func RoleForAdmin(isAdmin bool) string {
+	if isAdmin {
+		return RoleAdmin
+	}
+	return RoleUser
+}
+
+// ValidRole reports whether r is an accepted role.
+func ValidRole(r string) bool {
+	return r == RoleAdmin || r == RoleUser
 }
 
 // Validate checks the user's stored fields (username and, if set, email). The
