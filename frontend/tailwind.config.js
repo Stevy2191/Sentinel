@@ -1,5 +1,12 @@
 import colors from 'tailwindcss/colors'
 
+// primary/accent are driven by CSS variables (RGB channel triplets) so the
+// user's saved theme colors recolor every `primary-*`/`accent-*` utility at
+// runtime. Defaults (emerald/amber) live in src/styles/theme.css.
+const SHADES = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950]
+const cssVarScale = (name) =>
+  Object.fromEntries(SHADES.map((s) => [s, `rgb(var(--${name}-${s}) / <alpha-value>)`]))
+
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: 'class',
@@ -8,7 +15,8 @@ export default {
     extend: {
       colors: {
         // Sentinel design system semantic palette.
-        primary: colors.emerald,
+        primary: cssVarScale('primary'),
+        accent: cssVarScale('accent'),
         neutral: colors.slate,
         warning: colors.amber,
         error: colors.red,

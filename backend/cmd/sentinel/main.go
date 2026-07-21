@@ -127,6 +127,8 @@ func run() error {
 	api.RegisterStatusPageRoutes(v1, statusPageService, incidentService)
 	api.RegisterNotificationRoutes(v1, notificationManager, monitorService)
 	api.RegisterSettingsRoutes(v1, settingsService)
+	// Per-user theme (not admin-gated): only AuthMiddleware applies.
+	v1.PATCH("/settings/theme", api.UpdateUserThemeHandler(authService))
 	api.RegisterNotificationConfigRoutes(v1, notificationConfigService)
 
 	// 6. Monitoring loop.

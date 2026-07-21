@@ -8,6 +8,7 @@ import ColorPicker from '@/components/ColorPicker'
 import TimezoneSelector from '@/components/TimezoneSelector'
 import NotificationSettings from '@/pages/NotificationSettings'
 import { useAuthContext } from '@/context/AuthContext'
+import { useThemeColors } from '@/hooks/useThemeColors'
 import {
   PREF,
   DEFAULTS,
@@ -99,6 +100,7 @@ export default function Settings() {
   const { mode, setMode } = useTheme()
   const { toasts, push } = useToasts()
   const { currentUser } = useAuthContext()
+  const { saveTheme } = useThemeColors()
   const isAdmin = currentUser?.is_admin ?? false
   // Notification-channel config is admin-only (the API is gated by RequireAdmin),
   // so only show the tab to admins.
@@ -212,7 +214,7 @@ export default function Settings() {
     setBool(PREF.desktopNotifications, v)
   }
 
-  const saveAll = () => {
+  const saveAll = async () => {
     setString(PREF.primaryColor, primary)
     setString(PREF.accentColor, accent)
     setString(PREF.fontSize, fontSize)
@@ -225,7 +227,13 @@ export default function Settings() {
     setString(PREF.dateFormat, dateFormat)
     setString(PREF.reportRange, reportRange)
     applyStoredPreferences()
-    push('Settings saved successfully', 'success')
+    // Sync theme colors + mode to the backend so they follow the user across devices.
+    try {
+      await saveTheme(primary, accent, mode)
+      push('Settings saved successfully', 'success')
+    } catch {
+      push('Settings saved on this device, but theme sync to the server failed', 'error')
+    }
   }
 
   const doReset = () => {
@@ -483,7 +491,7 @@ export default function Settings() {
         <button className="btn-secondary text-error-600" onClick={() => setConfirmReset(true)}>
           Reset All to Defaults
         </button>
-        <button className="btn-primary" onClick={saveAll}>
+        <button className="btn-primary" onClick={() => void saveAll()}>
           Save Settings
         </button>
       </div>

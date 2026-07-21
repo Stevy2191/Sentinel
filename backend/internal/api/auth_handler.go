@@ -332,8 +332,21 @@ func GetCurrentUserHandler(authService *services.AuthService) gin.HandlerFunc {
 			"is_admin":    user.IsAdmin,
 			"mfa_enabled": user.MFAEnabled,
 			"last_login":  user.LastLogin,
+			"theme": gin.H{
+				"primary_color": defaultStr(user.ThemePrimaryColor, "#10b981"),
+				"accent_color":  defaultStr(user.ThemeAccentColor, "#f59e0b"),
+				"mode":          defaultStr(user.ThemeMode, "auto"),
+			},
 		})
 	}
+}
+
+// defaultStr returns v, or fallback when v is empty.
+func defaultStr(v, fallback string) string {
+	if v == "" {
+		return fallback
+	}
+	return v
 }
 
 // ChangePasswordHandler handles POST /api/v1/auth/password (protected).
