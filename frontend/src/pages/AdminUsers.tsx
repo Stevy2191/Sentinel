@@ -152,7 +152,7 @@ export default function AdminUsers() {
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">User Management</h1>
+        <h1 className="text-3xl font-black" style={{ color: 'var(--rd-text)' }}>USER MANAGEMENT</h1>
         <p className="text-sm text-neutral-500 dark:text-neutral-400">Create, invite, and manage users</p>
       </div>
 

@@ -178,7 +178,7 @@ export default function Reports() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Reports</h1>
+          <h1 className="text-3xl font-black" style={{ color: 'var(--rd-text)' }}>REPORTS</h1>
           <p className="text-sm text-neutral-500 dark:text-neutral-400">
             View uptime trends and performance analytics
           </p>

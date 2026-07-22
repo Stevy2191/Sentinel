@@ -261,7 +261,7 @@ export default function Settings() {
   return (
     <div className="max-w-3xl space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Settings</h1>
+        <h1 className="text-3xl font-black" style={{ color: 'var(--rd-text)' }}>SETTINGS</h1>
         <p className="text-sm text-neutral-500 dark:text-neutral-400">
           Customize Sentinel to your preferences
         </p>
