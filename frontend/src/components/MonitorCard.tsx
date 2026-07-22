@@ -1,5 +1,4 @@
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import { formatDistanceToNow } from 'date-fns'
 import { useMonitorUptime } from '@/hooks/useMonitorUptime'
 import DetailPanel, { Sparkline, uptimeColor } from '@/components/DetailPanel'
 import { formatResponseTime } from '@/utils/formatters'
@@ -33,25 +32,40 @@ export default function MonitorCard({ monitor, uptime24h, expanded, groups, owne
   const online = monitor.current_status === 'online'
   const offline = monitor.current_status === 'offline'
   const pct = uptime?.uptime_24h ?? uptime24h
+  // Status drives the row's left border + fade accent.
+  const statusColor = inMaintenance
+    ? 'var(--color-accent-warning)'
+    : online
+      ? 'var(--color-accent-online)'
+      : offline
+        ? 'var(--color-accent-offline)'
+        : 'var(--rd-text-muted)'
 
   return (
-    <div className="overflow-hidden rounded-md border border-neutral-200 bg-white transition hover:shadow-card-hover dark:border-neutral-800 dark:bg-neutral-900">
+    <div
+      className="rd-card overflow-hidden transition hover:shadow-card-hover"
+      style={{ borderRadius: '28px', ['--rd-accent' as string]: statusColor }}
+    >
       {/* Collapsed row (click to expand) */}
       <button
         onClick={() => onToggle(monitor.id)}
-        className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-left transition hover:bg-neutral-50 dark:hover:bg-neutral-800/40"
+        className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4 text-left"
       >
         {/* LEFT: status + identity */}
-        <div className="flex min-w-0 flex-1 items-center gap-3">
+        <div className="relative z-10 flex min-w-0 flex-1 items-center gap-3">
           <span
-            className={`h-2.5 w-2.5 shrink-0 rounded-full ${
-              inMaintenance ? 'bg-amber-500' : online ? 'bg-emerald-500' : offline ? 'bg-red-500 animate-pulse' : 'bg-neutral-400'
-            }`}
+            className={`h-3 w-3 shrink-0 rounded-full ${offline ? 'animate-pulse' : ''}`}
+            style={{ backgroundColor: statusColor }}
           />
           <span className="min-w-0">
             <span className="flex items-center gap-2">
-              <span className="truncate font-semibold">{monitor.name}</span>
-              <span className="shrink-0 rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
+              <span className="truncate font-black" style={{ color: 'var(--rd-text)' }}>
+                {monitor.name}
+              </span>
+              <span
+                className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"
+                style={{ color: 'var(--color-accent-primary)' }}
+              >
                 {monitor.type}
               </span>
               {access.badge && (
@@ -60,44 +74,41 @@ export default function MonitorCard({ monitor, uptime24h, expanded, groups, owne
                 </span>
               )}
             </span>
-            <span className="block truncate text-xs text-neutral-500 dark:text-neutral-400">
+            <span className="block truncate text-xs" style={{ color: 'var(--color-accent-primary)' }}>
               {monitor.url}
               {!access.isOwner && ownerUsername && (
-                <span className="ml-2 text-neutral-400">· Owned by {ownerUsername}</span>
+                <span className="ml-2" style={{ color: 'var(--rd-text-muted)' }}>· Owned by {ownerUsername}</span>
               )}
             </span>
           </span>
         </div>
 
         {/* MIDDLE: metrics */}
-        <div className="hidden w-36 shrink-0 text-right sm:block">
-          <div className={`text-sm font-medium ${responseColor(monitor.last_response_time_ms)}`}>
+        <div className="relative z-10 hidden w-36 shrink-0 text-right sm:block">
+          <div className="text-[10px] uppercase" style={{ color: 'var(--rd-text-muted)' }}>Response time</div>
+          <div className={`text-sm font-black ${responseColor(monitor.last_response_time_ms)}`}>
             {formatResponseTime(monitor.last_response_time_ms)}
-          </div>
-          <div className="text-xs text-neutral-500 dark:text-neutral-400">
-            {monitor.last_check_at ? `${formatDistanceToNow(new Date(monitor.last_check_at))} ago` : 'never'}
           </div>
         </div>
 
         {/* RIGHT: uptime % + sparkline */}
-        <div className="w-28 shrink-0">
-          <div className={`text-right text-2xl font-bold leading-none ${pct != null ? uptimeColor(pct) : 'text-neutral-400'}`}>
+        <div className="relative z-10 w-28 shrink-0">
+          <div className="text-[10px] uppercase" style={{ color: 'var(--rd-text-muted)' }}>Uptime</div>
+          <div className={`text-2xl font-black leading-none ${pct != null ? uptimeColor(pct) : 'text-neutral-400'}`}>
             {pct != null ? `${pct.toFixed(1)}%` : '—'}
           </div>
           <div className="mt-1 h-[30px]">
             {uptime ? (
               <Sparkline data={uptime.hourly_data} className="h-[30px]" />
             ) : (
-              <div className="h-[30px] rounded bg-neutral-100 dark:bg-neutral-800" />
+              <div className="h-[30px] rounded" style={{ backgroundColor: 'var(--rd-border)' }} />
             )}
           </div>
         </div>
 
-        {expanded ? (
-          <ChevronDown className="h-5 w-5 shrink-0 text-neutral-400" />
-        ) : (
-          <ChevronRight className="h-5 w-5 shrink-0 text-neutral-400" />
-        )}
+        <span className="relative z-10 shrink-0" style={{ color: 'var(--color-accent-primary)' }}>
+          {expanded ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+        </span>
       </button>
 
       {/* Expanded detail */}

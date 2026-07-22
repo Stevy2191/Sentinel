@@ -1,89 +1,132 @@
 import { useState } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
-import {
-  LayoutDashboard,
-  Activity,
-  BarChart3,
-  Globe,
-  Moon,
-  Sun,
-  ShieldCheck,
-  Menu,
-  X,
-  Users,
-} from 'lucide-react'
-import { useTheme } from '@/context/ThemeContext'
+import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { Menu, X } from 'lucide-react'
 import { useAuthContext } from '@/context/AuthContext'
-import UserMenu from '@/components/UserMenu'
 
-// Settings (and its Notifications tab) are reached via the user menu, not the
-// sidebar, so the sidebar lists only the primary product areas.
 const nav = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
-  { to: '/monitors', label: 'Monitors', icon: Activity },
-  { to: '/reports', label: 'Reports', icon: BarChart3 },
-  { to: '/status-pages', label: 'Status Pages', icon: Globe },
+  { to: '/', label: 'Dashboard', end: true },
+  { to: '/monitors', label: 'Monitors' },
+  { to: '/reports', label: 'Reports' },
+  { to: '/status-pages', label: 'Status Pages' },
 ]
 
+function navClass({ isActive }: { isActive: boolean }) {
+  return `rd-nav ${isActive ? 'active' : ''}`
+}
+
 // SidebarBody is shared by the persistent desktop sidebar and the mobile drawer.
-// onNavigate lets the mobile drawer close itself when a link is tapped.
 function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
-  const { currentUser } = useAuthContext()
-  const linkClass = ({ isActive }: { isActive: boolean }) =>
-    `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-      isActive
-        ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
-        : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
-    }`
+  const navigate = useNavigate()
+  const { currentUser, logout } = useAuthContext()
+  const username = currentUser?.username ?? 'User'
+  const role = currentUser?.is_admin ? 'ADMIN' : 'MEMBER'
+
+  const go = (path: string) => {
+    onNavigate?.()
+    navigate(path)
+  }
+  const handleLogout = () => {
+    onNavigate?.()
+    logout()
+    navigate('/login')
+  }
+
   return (
     <>
-      <div className="mb-8 flex items-center gap-2 px-2">
-        <ShieldCheck className="h-7 w-7 text-primary-600" />
-        <span className="text-lg font-bold">Sentinel</span>
+      {/* Logo */}
+      <div className="mb-12">
+        <h1 className="text-3xl font-black" style={{ color: 'var(--rd-text)' }}>
+          SENTINEL
+        </h1>
+        <p className="mt-1 text-xs tracking-[0.3em]" style={{ color: 'var(--color-accent-primary)' }}>
+          MONITOR
+        </p>
       </div>
-      <nav className="flex flex-col gap-1">
-        {nav.map(({ to, label, icon: Icon, end }) => (
-          <NavLink key={to} to={to} end={end} onClick={onNavigate} className={linkClass}>
-            <Icon className="h-4 w-4" />
-            {label}
+
+      {/* Nav */}
+      <nav className="flex-1 space-y-2">
+        {nav.map((item) => (
+          <NavLink key={item.to} to={item.to} end={item.end} onClick={onNavigate} className={navClass}>
+            {item.label}
           </NavLink>
         ))}
         {currentUser?.is_admin && (
-          <>
-            <div className="my-2 border-t border-neutral-200 dark:border-neutral-800" />
-            <NavLink to="/admin/users" onClick={onNavigate} className={linkClass}>
-              <Users className="h-4 w-4" />
-              Users
-            </NavLink>
-          </>
+          <NavLink to="/admin/users" onClick={onNavigate} className={navClass}>
+            Users
+          </NavLink>
         )}
       </nav>
-      <div className="mt-auto pt-4">
-        <UserMenu />
+
+      {/* User menu */}
+      <div className="border-t pt-4" style={{ borderColor: 'var(--rd-border)' }}>
+        <div
+          className="flex w-full items-center gap-3 rounded-lg p-3"
+          style={{ backgroundColor: 'var(--color-bg-card)' }}
+        >
+          <div
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-black"
+            style={{ backgroundColor: 'var(--color-accent-online)', color: 'var(--color-bg-dark)' }}
+          >
+            {username.charAt(0).toUpperCase()}
+          </div>
+          <div className="min-w-0 flex-1 text-left">
+            <p className="truncate text-sm font-bold" style={{ color: 'var(--rd-text)' }}>
+              {username}
+            </p>
+            <p className="text-xs font-bold" style={{ color: 'var(--color-accent-primary)' }}>
+              {role}
+            </p>
+          </div>
+        </div>
+        <div className="mt-3 space-y-1">
+          <button
+            className="w-full px-4 py-2 text-left text-xs font-bold transition-colors hover:text-white"
+            style={{ color: 'var(--rd-text-muted)' }}
+            onClick={() => go('/settings')}
+          >
+            SETTINGS
+          </button>
+          <button
+            className="w-full px-4 py-2 text-left text-xs font-bold"
+            style={{ color: 'var(--color-accent-offline)' }}
+            onClick={handleLogout}
+          >
+            LOG OUT
+          </button>
+        </div>
       </div>
     </>
   )
 }
 
 export default function Layout() {
-  const { isDark, toggle } = useTheme()
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   return (
-    <div className="flex min-h-screen">
-      {/* Persistent desktop sidebar */}
-      <aside className="hidden w-60 shrink-0 flex-col border-r border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900 md:flex">
+    <div className="flex min-h-screen" style={{ backgroundColor: 'var(--color-bg-dark)' }}>
+      {/* Persistent desktop sidebar (background layer with aggressive right fade) */}
+      <aside
+        className="hidden w-64 shrink-0 flex-col p-6 md:flex"
+        style={{
+          backgroundColor: 'var(--color-bg-dark)',
+          boxShadow: 'inset -100px 0 100px -40px rgba(0, 0, 0, 1)',
+        }}
+      >
         <SidebarBody />
       </aside>
 
       {/* Mobile slide-out drawer */}
       {drawerOpen && (
         <div className="fixed inset-0 z-50 md:hidden">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setDrawerOpen(false)} aria-hidden />
-          <aside className="absolute inset-y-0 left-0 flex w-64 max-w-[80%] flex-col border-r border-neutral-200 bg-white p-4 shadow-xl dark:border-neutral-800 dark:bg-neutral-900">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setDrawerOpen(false)} aria-hidden />
+          <aside
+            className="absolute inset-y-0 left-0 flex w-64 max-w-[80%] flex-col p-6 shadow-xl"
+            style={{ backgroundColor: 'var(--color-bg-dark)' }}
+          >
             <button
               onClick={() => setDrawerOpen(false)}
-              className="absolute right-3 top-3 rounded-md p-1 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+              className="absolute right-3 top-3 rounded-md p-1"
+              style={{ color: 'var(--rd-text-muted)' }}
               aria-label="Close menu"
             >
               <X className="h-5 w-5" />
@@ -93,25 +136,30 @@ export default function Layout() {
         </div>
       )}
 
-      {/* Main */}
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 items-center justify-between gap-3 border-b border-neutral-200 bg-white px-4 dark:border-neutral-800 dark:bg-neutral-900 md:px-6">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setDrawerOpen(true)}
-              className="btn-secondary !px-2 md:hidden"
-              aria-label="Open menu"
-            >
-              <Menu className="h-5 w-5" />
-            </button>
-            <span className="font-semibold md:hidden">Sentinel</span>
-          </div>
-          <button onClick={toggle} className="btn-secondary !px-2" aria-label="Toggle theme">
-            {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+      {/* Main content — elevated rounded container floating on the outer area */}
+      <div className="flex min-w-0 flex-1 flex-col" style={{ backgroundColor: 'var(--color-bg-main)' }}>
+        {/* Mobile top bar (hamburger) */}
+        <header
+          className="flex h-14 items-center gap-2 px-4 md:hidden"
+          style={{ backgroundColor: 'var(--color-bg-main)' }}
+        >
+          <button
+            onClick={() => setDrawerOpen(true)}
+            className="rounded-md p-1"
+            style={{ color: 'var(--rd-text-muted)' }}
+            aria-label="Open menu"
+          >
+            <Menu className="h-6 w-6" />
           </button>
+          <span className="text-lg font-black" style={{ color: 'var(--rd-text)' }}>
+            SENTINEL
+          </span>
         </header>
-        <main className="flex-1 overflow-y-auto p-4 md:p-6">
-          <Outlet />
+
+        <main className="flex-1 overflow-hidden p-3 md:p-8">
+          <div className="rd-container h-full overflow-auto p-5 md:p-8">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

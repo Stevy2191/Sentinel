@@ -21,13 +21,10 @@ const STORAGE_KEY = 'sentinel-theme'
 
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined)
 
-function prefersDark(): boolean {
-  return window.matchMedia('(prefers-color-scheme: dark)').matches
-}
-
-function resolveIsDark(mode: ThemeMode): boolean {
-  if (mode === 'auto') return prefersDark()
-  return mode === 'dark'
+// The redesign commits to a fixed dark theme, so the app is always dark
+// regardless of the stored mode (light mode is retired for the new look).
+function resolveIsDark(_mode: ThemeMode): boolean {
+  return true
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {

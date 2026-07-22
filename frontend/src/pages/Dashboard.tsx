@@ -34,8 +34,7 @@ function useDebounced<T>(value: T, ms: number): T {
 const STATUS_OPTIONS = ['all', 'online', 'offline', 'maintenance', 'unknown'] as const
 type StatusFilter = (typeof STATUS_OPTIONS)[number]
 
-const selectCls =
-  'rounded-md border border-neutral-300 bg-white px-2.5 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-primary-500'
+const selectCls = 'rd-input cursor-pointer px-3 py-2 uppercase'
 
 function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
   return (
@@ -290,20 +289,22 @@ export default function Dashboard() {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Dashboard</h1>
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">
+          <h1 className="text-3xl font-black" style={{ color: 'var(--rd-text)' }}>
+            DASHBOARD
+          </h1>
+          <p className="mt-1 text-sm font-bold uppercase" style={{ color: 'var(--color-accent-primary)' }}>
             Last updated: {formatDistanceToNow(updatedAt, { addSuffix: true })}
           </p>
         </div>
-        <div className="flex gap-2">
-          <button className="btn-primary" onClick={() => navigate('/monitors/create')}>
-            <Plus className="h-4 w-4" /> New Monitor
+        <div className="flex flex-wrap gap-3">
+          <button className="rd-btn rd-btn-primary" onClick={() => navigate('/monitors/create')}>
+            <Plus className="h-4 w-4" /> NEW MONITOR
           </button>
-          <button className="btn-secondary" onClick={() => setModal({ mode: 'create' })}>
-            <FolderPlus className="h-4 w-4" /> New Group
+          <button className="rd-btn rd-btn-secondary" onClick={() => setModal({ mode: 'create' })}>
+            <FolderPlus className="h-4 w-4" /> NEW GROUP
           </button>
-          <button className="btn-secondary" onClick={() => void refetchAll()} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
+          <button className="rd-btn rd-btn-secondary" onClick={() => void refetchAll()} disabled={loading}>
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> REFRESH
           </button>
         </div>
       </div>
@@ -326,12 +327,15 @@ export default function Dashboard() {
           {/* Search (full width on mobile, ~70% on desktop) + mobile Filters toggle */}
           <div className="flex items-center gap-2">
             <div className="relative w-full md:max-w-2xl">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
+              <Search
+                className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2"
+                style={{ color: 'var(--color-accent-primary)' }}
+              />
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search monitors…"
-                className="w-full rounded-md border border-neutral-300 bg-white py-2 pl-9 pr-3 text-sm dark:border-neutral-700 dark:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                placeholder="SEARCH MONITORS..."
+                className="rd-input py-3 pl-11 pr-4"
               />
             </div>
             <button

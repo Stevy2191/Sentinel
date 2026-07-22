@@ -39,6 +39,19 @@
   --color-warning: 245 158 11; /* amber-500 */
   --color-error: 239 68 68; /* red-500 */
   --color-info: 59 130 246; /* blue-500 */
+
+  /* ---- Redesign palette (committed dark theme) ---- */
+  --color-bg-main: #030712; /* outer area behind the elevated container */
+  --color-bg-dark: #0f172a; /* sidebar */
+  --color-bg-card: #1e293b; /* elevated container + cards */
+  --color-accent-primary: #7c3aed; /* purple — interactive chrome */
+  --color-accent-online: #10b981; /* green */
+  --color-accent-offline: #ff5a47; /* red */
+  --color-accent-warning: #ffa500; /* amber */
+  --color-uptime-bar: #0d8659; /* dark green waveform */
+  --rd-text: #ffffff;
+  --rd-text-muted: #94a3b8;
+  --rd-border: #334155;
 }
 
 .dark {

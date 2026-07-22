@@ -15,17 +15,8 @@
     <meta name="apple-mobile-web-app-title" content="Sentinel" />
     <title>Sentinel</title>
     <script>
-      // Apply the persisted theme before first paint to avoid a flash.
-      try {
-        var saved = localStorage.getItem('sentinel-theme')
-        var isDark =
-          saved === 'dark' ||
-          ((saved === 'auto' || saved === null) &&
-            window.matchMedia('(prefers-color-scheme: dark)').matches)
-        document.documentElement.classList.toggle('dark', isDark)
-      } catch (e) {
-        /* ignore */
-      }
+      // Redesign commits to a fixed dark theme — always dark, before first paint.
+      document.documentElement.classList.add('dark')
     </script>
   </head>
   <body>

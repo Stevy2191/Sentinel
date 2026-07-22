@@ -63,3 +63,107 @@
     @apply btn border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200 dark:hover:bg-neutral-700;
   }
 }
+
+/* ============================================================
+   Redesign (Peekaping-style layered dark theme) utility classes
+   ============================================================ */
+@layer components {
+  /* Sidebar nav: text-only, uppercase, purple active/hover. */
+  .rd-nav {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 0.75rem 1rem;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    border-left: 4px solid transparent;
+    color: var(--rd-text-muted);
+    transition: color 0.15s, border-color 0.15s;
+    cursor: pointer;
+  }
+  .rd-nav:hover,
+  .rd-nav.active {
+    color: var(--color-accent-primary);
+    border-left-color: var(--color-accent-primary);
+  }
+
+  /* Buttons */
+  .rd-btn {
+    padding: 0.5rem 1rem;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: opacity 0.15s, color 0.15s, border-color 0.15s;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .rd-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .rd-btn-primary {
+    background-color: var(--color-accent-online);
+    color: var(--color-bg-dark);
+    border: none;
+  }
+  .rd-btn-primary:hover:not(:disabled) {
+    opacity: 0.85;
+  }
+  .rd-btn-secondary {
+    background-color: transparent;
+    color: var(--rd-text-muted);
+    border: 1px solid var(--rd-border);
+  }
+  .rd-btn-secondary:hover:not(:disabled) {
+    color: var(--color-accent-primary);
+    border-color: var(--color-accent-primary);
+  }
+
+  /* Elevated container that holds each page's content. */
+  .rd-container {
+    background-color: var(--color-bg-card);
+    border-radius: 28px;
+    box-shadow: inset 0 -100px 100px -40px rgba(0, 0, 0, 0.8);
+  }
+
+  /* Cards / rows with a left status border and top/bottom fade accents. */
+  .rd-card {
+    position: relative;
+    overflow: hidden;
+    background-color: var(--color-bg-card);
+    border-left: 4px solid var(--rd-accent, var(--color-accent-online));
+  }
+  .rd-card::before,
+  .rd-card::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    width: 50%;
+    height: 2px;
+    background-image: linear-gradient(to right, var(--rd-accent, var(--color-accent-online)), transparent);
+    pointer-events: none;
+  }
+  .rd-card::before {
+    top: 0;
+  }
+  .rd-card::after {
+    bottom: 0;
+  }
+
+  .rd-input {
+    width: 100%;
+    background-color: var(--color-bg-card);
+    border: 1px solid var(--rd-border);
+    color: var(--rd-text);
+    border-radius: 8px;
+    font-size: 0.8125rem;
+    font-weight: 700;
+  }
+  .rd-input::placeholder {
+    color: var(--rd-text-muted);
+  }
+}
