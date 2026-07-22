@@ -166,4 +166,21 @@
   .rd-input::placeholder {
     color: var(--rd-text-muted);
   }
+
+  /* Compact select for the filter row — sizes to content, not full width. */
+  .rd-select {
+    background-color: var(--color-bg-card);
+    border: 1px solid var(--rd-border);
+    color: var(--rd-text-muted);
+    border-radius: 8px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .rd-select:hover {
+    border-color: var(--color-accent-primary);
+  }
 }

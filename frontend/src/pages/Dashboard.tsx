@@ -34,7 +34,7 @@ function useDebounced<T>(value: T, ms: number): T {
 const STATUS_OPTIONS = ['all', 'online', 'offline', 'maintenance', 'unknown'] as const
 type StatusFilter = (typeof STATUS_OPTIONS)[number]
 
-const selectCls = 'rd-input cursor-pointer px-3 py-2 uppercase'
+const selectCls = 'rd-select'
 
 function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
   return (
@@ -319,7 +319,7 @@ export default function Dashboard() {
       )}
 
       {/* Always-visible stats */}
-      <DashboardStats total={stats.total} online={stats.online} offline={stats.offline} avgResponseMs={stats.avg} />
+      <DashboardStats total={stats.total} online={stats.online} offline={stats.offline} />
 
       {/* Search + dual filters */}
       {monitors.length > 0 && (

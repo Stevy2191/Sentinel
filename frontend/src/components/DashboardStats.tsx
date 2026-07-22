@@ -1,18 +1,12 @@
-import { formatResponseTime } from '@/utils/formatters'
-
 interface Props {
   total: number
   online: number
   offline: number
-  avgResponseMs: number
 }
 
 function StatCard({ label, value, color }: { label: string; value: string | number; color: string }) {
   return (
-    <div
-      className="rd-card p-6"
-      style={{ borderRadius: '12px', ['--rd-accent' as string]: color }}
-    >
+    <div className="rd-card p-6" style={{ borderRadius: '12px', ['--rd-accent' as string]: color }}>
       <p className="mb-3 text-xs font-black tracking-wider" style={{ color }}>
         {label}
       </p>
@@ -23,14 +17,13 @@ function StatCard({ label, value, color }: { label: string; value: string | numb
   )
 }
 
-/** Compact, always-visible top stats row with the redesign accent-card system. */
-export default function DashboardStats({ total, online, offline, avgResponseMs }: Props) {
+/** Three accent stat cards: Total Monitors, Online, Offline. */
+export default function DashboardStats({ total, online, offline }: Props) {
   return (
-    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+    <div className="grid grid-cols-3 gap-4">
       <StatCard label="TOTAL MONITORS" value={total} color="var(--color-accent-primary)" />
       <StatCard label="ONLINE" value={online} color="var(--color-accent-online)" />
       <StatCard label="OFFLINE" value={offline} color="var(--color-accent-offline)" />
-      <StatCard label="AVG RESPONSE" value={formatResponseTime(avgResponseMs)} color="var(--color-accent-warning)" />
     </div>
   )
 }
