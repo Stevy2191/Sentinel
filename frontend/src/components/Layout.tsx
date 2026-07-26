@@ -50,11 +50,6 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
             {item.label}
           </NavLink>
         ))}
-        {currentUser?.is_admin && (
-          <NavLink to="/admin/users" onClick={onNavigate} className={navClass}>
-            Users
-          </NavLink>
-        )}
       </nav>
 
       {/* User menu */}
@@ -79,6 +74,15 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
           </div>
         </div>
         <div className="mt-3 space-y-1">
+          {currentUser?.is_admin && (
+            <button
+              className="w-full px-4 py-2 text-left text-xs font-bold transition-colors hover:text-white"
+              style={{ color: 'var(--rd-text-muted)' }}
+              onClick={() => go('/admin/users')}
+            >
+              USERS
+            </button>
+          )}
           <button
             className="w-full px-4 py-2 text-left text-xs font-bold transition-colors hover:text-white"
             style={{ color: 'var(--rd-text-muted)' }}
