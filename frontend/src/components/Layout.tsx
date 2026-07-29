@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { Menu, X } from 'lucide-react'
 import { useAuthContext } from '@/context/AuthContext'
-import EcgTrace from '@/components/EcgTrace'
 
 const nav = [
   { to: '/', label: 'Dashboard', end: true },
@@ -34,15 +33,12 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <>
-      {/* Wordmark + the console's own pulse (ambient "power on" heartbeat) */}
+      {/* Wordmark */}
       <div className="mb-8">
         <h1 className="vs-title text-[26px]">SENTINEL</h1>
         <p className="vs-eyebrow mt-1" style={{ color: 'var(--vs-cyan)' }}>
           Vitals Monitor
         </p>
-        <div className="mt-3 h-6 opacity-80">
-          <EcgTrace status="up" height={24} speed={38} strokeWidth={1.5} cursor={false} />
-        </div>
       </div>
 
       {/* Nav */}
