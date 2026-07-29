@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Play, Pause, Pencil, Trash2, Loader2, AlertTriangle } from 'lucide-react'
+import { Play, Pause, Pencil, Trash2, Loader2, AlertTriangle, Wrench } from 'lucide-react'
 import {
   AreaChart,
   Area,
@@ -18,6 +18,7 @@ import {
   useTestMonitor,
 } from '@/hooks/useMonitors'
 import { useMoveMonitorToGroup } from '@/hooks/useMonitorGroups'
+import { useEnableMaintenanceMode, useDisableMaintenanceMode } from '@/hooks/useMaintenanceMode'
 import ActionMenu, { type ActionItem } from '@/components/ActionMenu'
 import { formatDatetime } from '@/utils/formatters'
 import type { HourPoint, HourStatus, UptimeHistory } from '@/hooks/useMonitorUptime'
@@ -101,8 +102,12 @@ export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, ac
   const { delete: del, loading: deleting } = useDeleteMonitor(monitor.id)
   const { test, loading: testing } = useTestMonitor(monitor.id)
   const { move } = useMoveMonitorToGroup()
+  const { enable, loading: enablingMaint } = useEnableMaintenanceMode()
+  const { disable, loading: disablingMaint } = useDisableMaintenanceMode()
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const busy = pausing || resuming || deleting || testing
+  const [maintOpen, setMaintOpen] = useState(false)
+  const [customUntil, setCustomUntil] = useState('')
+  const busy = pausing || resuming || deleting || testing || enablingMaint || disablingMaint
 
   // Incidents load lazily — the panel only mounts when the card is expanded.
   const [incidents, setIncidents] = useState<IncidentRow[] | null>(null)
@@ -131,6 +136,28 @@ export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, ac
     }
   }
 
+  // Put the monitor into maintenance starting now for the given number of hours.
+  const startMaintenance = (hours: number) => {
+    const start = new Date()
+    const end = new Date(start.getTime() + hours * 3600e3)
+    void act(async () => {
+      await enable(monitor.id, start.toISOString(), end.toISOString())
+      setMaintOpen(false)
+    }, 'Maintenance started')
+  }
+  const startMaintenanceUntil = () => {
+    const end = new Date(customUntil)
+    if (isNaN(end.getTime()) || end.getTime() <= Date.now()) {
+      push('Pick an end time in the future', 'error')
+      return
+    }
+    void act(async () => {
+      await enable(monitor.id, new Date().toISOString(), end.toISOString())
+      setMaintOpen(false)
+      setCustomUntil('')
+    }, 'Maintenance started')
+  }
+
   const online = monitor.current_status === 'online'
   const offline = monitor.current_status === 'offline'
   const inMaintenance = monitor.is_in_maintenance ?? false
@@ -145,6 +172,9 @@ export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, ac
       monitor.enabled
         ? { key: 'pause', label: 'Pause', icon: Pause, disabled: busy, onClick: () => void act(() => pause(), 'Monitor paused') }
         : { key: 'resume', label: 'Resume', icon: Play, disabled: busy, onClick: () => void act(() => resume(), 'Monitor resumed') },
+      inMaintenance
+        ? { key: 'maint', label: 'End maintenance', icon: Wrench, disabled: busy, onClick: () => void act(() => disable(monitor.id), 'Maintenance ended') }
+        : { key: 'maint', label: 'Maintenance', icon: Wrench, disabled: busy, onClick: () => setMaintOpen((o) => !o) },
       { key: 'edit', label: 'Edit', icon: Pencil, onClick: () => navigate(`/monitors/${monitor.id}/edit`) }
     )
   }
@@ -225,6 +255,53 @@ export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, ac
               }
             >
               {deleting ? 'Deleting…' : 'Delete'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Maintenance: active banner (with End now) or the quick scheduler. */}
+      {inMaintenance && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm"
+          style={{ borderColor: 'rgba(255,194,75,0.5)', backgroundColor: 'rgba(255,194,75,0.1)' }}>
+          <span className="flex items-center gap-2 font-medium" style={{ color: 'var(--vs-amber)' }}>
+            <Wrench className="h-4 w-4" /> Maintenance active
+            {monitor.maintenance_end && (
+              <span className="font-normal" style={{ color: 'var(--vs-text-dim)' }}>· ends {formatDatetime(monitor.maintenance_end)}</span>
+            )}
+          </span>
+          {access.canEdit && (
+            <button className="btn-secondary !py-1" disabled={busy} onClick={() => void act(() => disable(monitor.id), 'Maintenance ended')}>
+              End now
+            </button>
+          )}
+        </div>
+      )}
+
+      {maintOpen && !inMaintenance && access.canEdit && (
+        <div className="rounded-md border p-3 text-sm"
+          style={{ borderColor: 'rgba(255,194,75,0.5)', backgroundColor: 'rgba(255,194,75,0.08)' }}>
+          <p className="mb-2" style={{ color: 'var(--vs-amber)' }}>
+            Start maintenance now — downtime during the window won’t count against uptime or raise incidents.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            {([['1h', 1], ['4h', 4], ['8h', 8], ['24h', 24]] as const).map(([lbl, h]) => (
+              <button key={lbl} className="btn-secondary !py-1" disabled={busy} onClick={() => startMaintenance(h)}>
+                {lbl}
+              </button>
+            ))}
+            <span className="text-xs" style={{ color: 'var(--vs-text-dim)' }}>or until</span>
+            <input
+              type="datetime-local"
+              className="rounded-md border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-100"
+              value={customUntil}
+              onChange={(e) => setCustomUntil(e.target.value)}
+            />
+            <button className="btn-primary !py-1" disabled={busy || !customUntil} onClick={startMaintenanceUntil}>
+              Start
+            </button>
+            <button className="btn-secondary !py-1" onClick={() => setMaintOpen(false)}>
+              Cancel
             </button>
           </div>
         </div>
