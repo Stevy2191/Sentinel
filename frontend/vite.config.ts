@@ -17,12 +17,9 @@ export default defineConfig({
     // Proxy API calls to the backend so the browser sees same-origin requests
     // (avoids CORS, which the backend does not currently enable).
     proxy: {
+      // Carries the public status page JSON at /api/v1/public/status/:slug too.
+      // /public/status/:slug is NOT proxied — it is the SPA route, served by Vite.
       '/api': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
-      },
-      // Public status pages live outside /api.
-      '/public': {
         target: 'http://localhost:3001',
         changeOrigin: true,
       },

@@ -267,9 +267,9 @@ func UpdateMonitorPositionHandler(statusPageService *services.StatusPageService)
 	}
 }
 
-// GetPublicStatusPageHandler handles GET /public/status/:slug. This endpoint is
-// public and requires no authentication. Unpublished pages return 404 so their
-// existence is not leaked.
+// GetPublicStatusPageHandler handles GET /api/v1/public/status/:slug. This
+// endpoint is public and requires no authentication. Unpublished pages return
+// 404 so their existence is not leaked.
 func GetPublicStatusPageHandler(statusPageService *services.StatusPageService, incidentService *services.IncidentService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		slug := c.Param("slug")
@@ -380,8 +380,11 @@ func RegisterStatusPageRoutes(rg *gin.RouterGroup, statusPageService *services.S
 	pages.PATCH("/:slug/monitors/:monitor_id/position", UpdateMonitorPositionHandler(statusPageService))
 }
 
-// RegisterPublicStatusRoutes mounts the unauthenticated public status page at
-// /public/status/:slug directly on the engine.
+// RegisterPublicStatusRoutes mounts the unauthenticated public status page JSON
+// endpoint at /api/v1/public/status/:slug directly on the engine (no auth
+// middleware). It lives under /api/ so it does not collide with the SPA route of
+// the same human-facing name (/public/status/:slug), which the web server serves
+// as the app.
 func RegisterPublicStatusRoutes(router *gin.Engine, statusPageService *services.StatusPageService, incidentService *services.IncidentService) {
-	router.GET("/public/status/:slug", GetPublicStatusPageHandler(statusPageService, incidentService))
+	router.GET("/api/v1/public/status/:slug", GetPublicStatusPageHandler(statusPageService, incidentService))
 }

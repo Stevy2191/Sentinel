@@ -4,9 +4,11 @@ import { extractError, type ApiError } from '@/services/api'
 import type { ApiResponse, PublicStatusData } from '@/types'
 
 /**
- * usePublicStatusPage fetches a public status page. This endpoint lives outside
- * /api/v1 (at /public/status/:slug) and requires no authentication, so it uses a
- * bare axios call (proxied by the dev server in development).
+ * usePublicStatusPage fetches a public status page. The JSON endpoint lives at
+ * /api/v1/public/status/:slug (no authentication required) — deliberately under
+ * /api/ so it does not collide with the SPA route of the same human-facing name
+ * (/public/status/:slug), which the web server serves as the app. Uses a bare
+ * axios call so no auth token/interceptors are involved.
  */
 export function usePublicStatusPage(slug: string | undefined) {
   const [data, setData] = useState<PublicStatusData | null>(null)
@@ -18,7 +20,7 @@ export function usePublicStatusPage(slug: string | undefined) {
     setLoading(true)
     setError(null)
     try {
-      const res = await axios.get<ApiResponse<PublicStatusData>>(`/public/status/${slug}`)
+      const res = await axios.get<ApiResponse<PublicStatusData>>(`/api/v1/public/status/${slug}`)
       setData(res.data.data)
     } catch (err) {
       const status =
