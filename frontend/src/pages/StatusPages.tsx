@@ -53,7 +53,7 @@ function StatusPageList() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-black" style={{ color: 'var(--rd-text)' }}>STATUS PAGES</h1>
+          <h1 className="vs-title text-3xl">STATUS PAGES</h1>
           <p className="text-sm text-neutral-500 dark:text-neutral-400">
             Create and manage public status dashboards
           </p>

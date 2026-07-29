@@ -130,7 +130,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
         <button className="btn-secondary" onClick={() => navigate('/monitors')}>
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
-        <h1 className="text-2xl font-bold">Create Monitor</h1>
+        <h1 className="vs-title text-2xl">Create Monitor</h1>
         <MonitorForm
           onSubmit={handleCreate}
           isLoading={creating}
@@ -152,7 +152,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
         <button className="btn-secondary" onClick={() => navigate(`/monitors/${id}`)}>
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
-        <h1 className="text-2xl font-bold">Edit Monitor</h1>
+        <h1 className="vs-title text-2xl">Edit Monitor</h1>
         <MonitorForm
           initialValues={monitorToForm(monitor)}
           onSubmit={handleUpdate}
@@ -269,7 +269,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold">{monitor.name}</h1>
+            <h1 className="font-display text-2xl font-semibold" style={{ color: 'var(--vs-text)' }}>{monitor.name}</h1>
             <span className="rounded-md bg-neutral-100 px-2 py-1 text-xs font-semibold uppercase text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
               {monitor.type}
             </span>

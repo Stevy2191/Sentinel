@@ -25,16 +25,16 @@ import type { MonitorAccess } from '@/utils/monitorAccess'
 import type { Monitor, MonitorGroup } from '@/types'
 
 export function uptimeColor(pct: number): string {
-  if (pct >= 95) return 'text-emerald-500'
-  if (pct >= 80) return 'text-amber-500'
-  return 'text-red-500'
+  if (pct >= 95) return 'text-primary-400'
+  if (pct >= 80) return 'text-amber-400'
+  return 'text-red-400'
 }
 
 const STATUS_COLOR: Record<HourStatus, string> = {
-  up: '#10b981',
-  down: '#ef4444',
-  partial: '#f59e0b',
-  nodata: '#cbd5e1',
+  up: '#37F98A', // ECG green
+  down: '#FF4D4D', // flatline red
+  partial: '#FFC24B', // amber
+  nodata: '#4E5E68', // dim
 }
 
 // Sparkline renders 24 hourly bars colored by status. Bar height reflects the
@@ -267,15 +267,18 @@ export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, ac
               <AreaChart data={uptime.response_time_data} margin={{ top: 5, right: 10, bottom: 0, left: -8 }}>
                 <defs>
                   <linearGradient id={`rt-${monitor.id}`} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                    <stop offset="5%" stopColor="#3DE1FF" stopOpacity={0.28} />
+                    <stop offset="95%" stopColor="#3DE1FF" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#64748b" strokeOpacity={0.15} />
-                <XAxis dataKey="time" tick={{ fontSize: 10 }} interval={5} minTickGap={16} />
-                <YAxis tick={{ fontSize: 10 }} width={40} unit="" />
-                <Tooltip formatter={(v: number) => [`${v} ms`, 'response']} />
-                <Area type="monotone" dataKey="responseTime" stroke="#10b981" strokeWidth={2} fill={`url(#rt-${monitor.id})`} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#16303a" strokeOpacity={0.6} />
+                <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#7A8A94' }} interval={5} minTickGap={16} />
+                <YAxis tick={{ fontSize: 10, fill: '#7A8A94' }} width={40} unit="" />
+                <Tooltip
+                  formatter={(v: number) => [`${v} ms`, 'response']}
+                  contentStyle={{ background: '#0d141b', border: '1px solid #1e2a33', borderRadius: 8, color: '#e8f0f2' }}
+                />
+                <Area type="monotone" dataKey="responseTime" stroke="#3DE1FF" strokeWidth={2} fill={`url(#rt-${monitor.id})`} />
               </AreaChart>
             </ResponsiveContainer>
           ) : (

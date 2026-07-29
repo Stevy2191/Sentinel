@@ -115,7 +115,7 @@ export default function Monitors() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-black" style={{ color: 'var(--rd-text)' }}>MONITORS</h1>
+          <h1 className="vs-title text-3xl">MONITORS</h1>
           <p className="text-sm text-neutral-500 dark:text-neutral-400">
             {filtered.length} of {monitors.length} monitors
           </p>

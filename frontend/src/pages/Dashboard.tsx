@@ -14,12 +14,13 @@ import { useUsers } from '@/hooks/useUsers'
 import { useToasts, Toaster } from '@/components/Toast'
 import ColorPicker from '@/components/ColorPicker'
 import DashboardStats from '@/components/DashboardStats'
+import EcgTrace, { type Vital } from '@/components/EcgTrace'
 import GroupSection from '@/components/GroupSection'
 import MonitorCard from '@/components/MonitorCard'
 import type { Monitor, MonitorGroup } from '@/types'
 
 const REFRESH_MS = 30_000
-const DEFAULT_GROUP_COLOR = '#10b981'
+const DEFAULT_GROUP_COLOR = '#37F98A'
 
 // useDebounced returns a value that only updates after `ms` of no changes.
 function useDebounced<T>(value: T, ms: number): T {
@@ -284,28 +285,52 @@ export default function Dashboard() {
 
   const cardProps = { groups, onToggle: toggleCard, onChanged: () => void refetchAll(), push }
 
+  // Overall station vital: reserve the full red flatline for a total outage;
+  // a partial outage reads as amber "attention", all-clear as the green pulse.
+  const station: { vital: Vital; label: string; color: string } =
+    stats.total === 0
+      ? { vital: 'idle', label: 'No monitors connected', color: 'var(--vs-text-dim)' }
+      : stats.online === 0
+        ? { vital: 'down', label: 'Critical — all services down', color: 'var(--vs-flat)' }
+        : stats.offline > 0
+          ? { vital: 'degraded', label: 'Attention — some services down', color: 'var(--vs-amber)' }
+          : { vital: 'up', label: 'All systems live', color: 'var(--vs-ecg)' }
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-black" style={{ color: 'var(--rd-text)' }}>
-            DASHBOARD
-          </h1>
-          <p className="mt-1 text-sm font-bold uppercase" style={{ color: 'var(--color-accent-primary)' }}>
-            Last updated: {formatDistanceToNow(updatedAt, { addSuffix: true })}
-          </p>
+    <div className="space-y-5">
+      {/* Station hero: the collective heartbeat is the page's thesis. */}
+      <div className="rd-card overflow-hidden" style={{ ['--rd-accent' as string]: station.color }}>
+        <div className="flex flex-wrap items-start justify-between gap-4 px-5 pt-5">
+          <div className="min-w-0">
+            <p className="vs-eyebrow">Bedside Monitor</p>
+            <h1 className="vs-title vs-glow mt-1 text-3xl" style={{ color: station.color }}>
+              {station.label}
+            </h1>
+            <p className="vs-readout mt-2 text-sm" style={{ color: 'var(--vs-text-dim)' }}>
+              <span style={{ color: 'var(--vs-ecg)' }}>{stats.online} alive</span>
+              {' · '}
+              <span style={{ color: stats.offline > 0 ? 'var(--vs-flat)' : 'var(--vs-text-dim)' }}>
+                {stats.offline} critical
+              </span>
+              {' · updated '}
+              {formatDistanceToNow(updatedAt, { addSuffix: true })}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button className="rd-btn rd-btn-primary" onClick={() => navigate('/monitors/create')}>
+              <Plus className="h-4 w-4" /> New monitor
+            </button>
+            <button className="rd-btn rd-btn-secondary" onClick={() => setModal({ mode: 'create' })}>
+              <FolderPlus className="h-4 w-4" /> New group
+            </button>
+            <button className="rd-btn rd-btn-secondary" onClick={() => void refetchAll()} disabled={loading}>
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
+            </button>
+          </div>
         </div>
-        <div className="flex flex-wrap gap-3">
-          <button className="rd-btn rd-btn-primary" onClick={() => navigate('/monitors/create')}>
-            <Plus className="h-4 w-4" /> NEW MONITOR
-          </button>
-          <button className="rd-btn rd-btn-secondary" onClick={() => setModal({ mode: 'create' })}>
-            <FolderPlus className="h-4 w-4" /> NEW GROUP
-          </button>
-          <button className="rd-btn rd-btn-secondary" onClick={() => void refetchAll()} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> REFRESH
-          </button>
+        {/* the trace bleeds to the edges of the well */}
+        <div className="mt-3 h-16">
+          <EcgTrace status={station.vital} height={64} speed={54} strokeWidth={2} />
         </div>
       </div>
 

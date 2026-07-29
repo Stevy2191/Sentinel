@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { Menu, X } from 'lucide-react'
 import { useAuthContext } from '@/context/AuthContext'
+import EcgTrace from '@/components/EcgTrace'
 
 const nav = [
   { to: '/', label: 'Dashboard', end: true },
@@ -33,14 +34,15 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <>
-      {/* Logo */}
-      <div className="mb-12">
-        <h1 className="text-3xl font-black" style={{ color: 'var(--rd-text)' }}>
-          SENTINEL
-        </h1>
-        <p className="mt-1 text-xs tracking-[0.3em]" style={{ color: 'var(--color-accent-primary)' }}>
-          MONITOR
+      {/* Wordmark + the console's own pulse (ambient "power on" heartbeat) */}
+      <div className="mb-8">
+        <h1 className="vs-title text-[26px]">SENTINEL</h1>
+        <p className="vs-eyebrow mt-1" style={{ color: 'var(--vs-cyan)' }}>
+          Vitals Monitor
         </p>
+        <div className="mt-3 h-6 opacity-80">
+          <EcgTrace status="up" height={24} speed={38} strokeWidth={1.5} cursor={false} />
+        </div>
       </div>
 
       {/* Nav */}
@@ -155,9 +157,7 @@ export default function Layout() {
           >
             <Menu className="h-6 w-6" />
           </button>
-          <span className="text-lg font-black" style={{ color: 'var(--rd-text)' }}>
-            SENTINEL
-          </span>
+          <span className="vs-title text-lg">SENTINEL</span>
         </header>
 
         <main className="flex-1 overflow-hidden p-3 md:p-8">

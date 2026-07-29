@@ -13,12 +13,12 @@ import { usePublicStatusPage } from '@/hooks/usePublicStatus'
 import { formatResponseTime, formatDowntime } from '@/utils/formatters'
 import type { PublicMonitor } from '@/types'
 
-const DEFAULT_THEME = '#10b981'
+const DEFAULT_THEME = '#37F98A'
 
 function uptimeColor(pct: number): string {
-  if (pct >= 99) return '#10b981'
-  if (pct >= 95) return '#f59e0b'
-  return '#ef4444'
+  if (pct >= 99) return '#37F98A'
+  if (pct >= 95) return '#FFC24B'
+  return '#FF4D4D'
 }
 
 function relative(iso: string | null | undefined): string {

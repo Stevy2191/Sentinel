@@ -17,7 +17,7 @@ export const emptyStatusPageForm: StatusPageFormValues = {
   name: '',
   description: '',
   logo_url: '',
-  theme_color: '#10b981',
+  theme_color: '#37F98A',
   published: true,
 }
 
@@ -27,7 +27,7 @@ export function statusPageToForm(p: StatusPage): StatusPageFormValues {
     name: p.name,
     description: p.description,
     logo_url: p.logo_url,
-    theme_color: p.theme_color || '#10b981',
+    theme_color: p.theme_color || '#37F98A',
     published: p.published,
   }
 }

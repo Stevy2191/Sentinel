@@ -35,14 +35,14 @@ function dateInput(d: Date): string {
   return format(d, 'yyyy-MM-dd')
 }
 function respFill(ms: number): string {
-  if (ms < 200) return '#10b981'
-  if (ms <= 500) return '#f59e0b'
-  return '#ef4444'
+  if (ms < 200) return '#37F98A'
+  if (ms <= 500) return '#FFC24B'
+  return '#FF4D4D'
 }
 function uptimeTextColor(pct: number): string {
-  if (pct < 95) return 'text-red-500'
-  if (pct < 99) return 'text-amber-500'
-  return 'text-emerald-500'
+  if (pct < 95) return 'text-red-400'
+  if (pct < 99) return 'text-amber-400'
+  return 'text-primary-400'
 }
 
 function download(filename: string, content: string) {
@@ -178,7 +178,7 @@ export default function Reports() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-black" style={{ color: 'var(--rd-text)' }}>REPORTS</h1>
+          <h1 className="vs-title text-3xl">REPORTS</h1>
           <p className="text-sm text-neutral-500 dark:text-neutral-400">
             View uptime trends and performance analytics
           </p>
@@ -317,13 +317,14 @@ export default function Reports() {
                       <Tooltip
                         labelFormatter={(l) => tickFmt(String(l))}
                         formatter={(v: number, name) => [name === 'uptime_percent' ? `${v}%` : v, 'Uptime']}
+                        contentStyle={{ background: '#0d141b', border: '1px solid #1e2a33', borderRadius: 8, color: '#e8f0f2' }}
                       />
                       <Area
                         type="monotone"
                         dataKey="uptime_percent"
-                        stroke="#10b981"
-                        fill="#10b981"
-                        fillOpacity={0.2}
+                        stroke="#37F98A"
+                        fill="#37F98A"
+                        fillOpacity={0.18}
                         strokeWidth={2}
                       />
                     </AreaChart>
@@ -342,6 +343,8 @@ export default function Reports() {
                       <Tooltip
                         labelFormatter={(l) => tickFmt(String(l))}
                         formatter={(v: number) => [`${v}ms`, 'Avg response']}
+                        cursor={{ fill: 'rgba(61, 225, 255, 0.06)' }}
+                        contentStyle={{ background: '#0d141b', border: '1px solid #1e2a33', borderRadius: 8, color: '#e8f0f2' }}
                       />
                       <Bar dataKey="avg_response_time_ms">
                         {buckets.map((b, i) => (

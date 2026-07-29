@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ShieldCheck, Check, X, Loader2, ArrowLeft } from 'lucide-react'
+import { Check, X, Loader2, ArrowLeft } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { validatePassword } from '@/utils/passwordValidator'
+import EcgTrace from '@/components/EcgTrace'
 
 type Mode = 'login' | 'register'
 
@@ -10,15 +11,36 @@ const usernameRe = /^[a-zA-Z0-9_]{3,32}$/
 
 function Card({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-neutral-100 p-4 dark:bg-neutral-950">
-      <div className="w-full max-w-sm rounded-lg border border-neutral-200 bg-white p-6 shadow-card dark:border-neutral-800 dark:bg-neutral-900">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-neutral-950 p-4">
+      {/* Ambient instrument graticule behind the login screen. */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundImage:
+            'linear-gradient(var(--vs-grid) 1px, transparent 1px), linear-gradient(90deg, var(--vs-grid) 1px, transparent 1px)',
+          backgroundSize: '34px 34px',
+          maskImage: 'radial-gradient(ellipse at center, black, transparent 75%)',
+          WebkitMaskImage: 'radial-gradient(ellipse at center, black, transparent 75%)',
+        }}
+      />
+      <div
+        className="relative w-full max-w-sm rounded-2xl border border-neutral-800 bg-neutral-900 p-6"
+        style={{ boxShadow: 'inset 0 -80px 80px -60px rgba(0,0,0,0.7), 0 30px 70px -30px rgba(0,0,0,0.7)' }}
+      >
         <div className="mb-6 text-center">
-          <div className="mb-2 flex items-center justify-center gap-2">
-            <ShieldCheck className="h-8 w-8 text-primary-600" />
-            <span className="text-xl font-bold">Sentinel</span>
+          <h1 className="vs-title text-3xl">SENTINEL</h1>
+          <p className="vs-eyebrow mt-1" style={{ color: 'var(--vs-cyan)' }}>
+            Vitals Monitor
+          </p>
+          <div className="mx-auto mt-3 h-8 max-w-[220px]">
+            <EcgTrace status="up" height={32} speed={40} strokeWidth={1.5} cursor={false} />
           </div>
-          <h1 className="text-lg font-semibold">{title}</h1>
-          {subtitle && <p className="text-sm text-neutral-500">{subtitle}</p>}
+        </div>
+        <div className="mb-5 text-center">
+          <h2 className="vs-title text-base" style={{ letterSpacing: '0.1em' }}>
+            {title}
+          </h2>
+          {subtitle && <p className="mt-1 text-sm text-neutral-400">{subtitle}</p>}
         </div>
         {children}
       </div>
@@ -26,12 +48,11 @@ function Card({ title, subtitle, children }: { title: string; subtitle?: string;
   )
 }
 
-const inputCls =
-  'w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-primary-500'
+const inputCls = 'rd-input px-3 py-2.5 text-sm'
 
 function Req({ ok, label }: { ok: boolean; label: string }) {
   return (
-    <div className={`flex items-center gap-1.5 text-xs ${ok ? 'text-emerald-600' : 'text-neutral-400'}`}>
+    <div className={`flex items-center gap-1.5 text-xs ${ok ? 'text-primary-400' : 'text-neutral-400'}`}>
       {ok ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
       {label}
     </div>
@@ -212,7 +233,7 @@ export default function Auth({ mode }: { mode: Mode }) {
             administrator for access.
           </p>
           <p className="mt-4 text-center text-sm text-neutral-500">
-            <Link to="/login" className="text-primary-600 hover:underline">
+            <Link to="/login" className="text-accent-400 hover:underline">
               Back to sign in
             </Link>
           </p>
@@ -231,7 +252,7 @@ export default function Auth({ mode }: { mode: Mode }) {
               placeholder="Username"
             />
             <div className="mt-1 flex items-center justify-between text-xs">
-              <span className={usernameValid ? 'text-emerald-600' : 'text-neutral-400'}>
+              <span className={usernameValid ? 'text-primary-400' : 'text-neutral-400'}>
                 Letters, numbers, underscore
               </span>
               <span className="text-neutral-400">{username.length}/32</span>
@@ -263,7 +284,7 @@ export default function Auth({ mode }: { mode: Mode }) {
               placeholder="Confirm password"
             />
             {confirm.length > 0 && (
-              <div className={`mt-1 text-xs ${passwordsMatch ? 'text-emerald-600' : 'text-error-600'}`}>
+              <div className={`mt-1 text-xs ${passwordsMatch ? 'text-primary-400' : 'text-error-600'}`}>
                 {passwordsMatch ? '✓ Passwords match' : "✗ Passwords don't match"}
               </div>
             )}
@@ -277,7 +298,7 @@ export default function Auth({ mode }: { mode: Mode }) {
         </form>
         <p className="mt-4 text-center text-sm text-neutral-500">
           Already have an account?{' '}
-          <Link to="/login" className="text-primary-600 hover:underline">
+          <Link to="/login" className="text-accent-400 hover:underline">
             Sign in
           </Link>
         </p>
@@ -313,7 +334,7 @@ export default function Auth({ mode }: { mode: Mode }) {
       {signupAllowed && (
         <p className="mt-4 text-center text-sm text-neutral-500">
           Don't have an account?{' '}
-          <Link to="/register" className="text-primary-600 hover:underline">
+          <Link to="/register" className="text-accent-400 hover:underline">
             Sign up
           </Link>
         </p>
