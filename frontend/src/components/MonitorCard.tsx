@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronRight, Wrench } from 'lucide-react'
 import { useMonitorUptime } from '@/hooks/useMonitorUptime'
 import DetailPanel, { uptimeColor } from '@/components/DetailPanel'
-import EcgTrace, { vitalOf } from '@/components/EcgTrace'
+import HealthBar24h from '@/components/HealthBar24h'
 import { formatResponseTime } from '@/utils/formatters'
 import { monitorAccess, badgeToneClass } from '@/utils/monitorAccess'
 import type { Monitor, MonitorGroup } from '@/types'
@@ -42,7 +42,6 @@ export default function MonitorCard({ monitor, uptime24h, expanded, groups, owne
   const online = monitor.current_status === 'online'
   const offline = monitor.current_status === 'offline'
   const pct = uptime?.uptime_24h ?? uptime24h
-  const vital = vitalOf(monitor.current_status, inMaintenance)
   // Status drives the row's left channel border + fade accent.
   const statusColor = inMaintenance
     ? 'var(--color-accent-warning)'
@@ -104,9 +103,11 @@ export default function MonitorCard({ monitor, uptime24h, expanded, groups, owne
           </span>
         </div>
 
-        {/* MIDDLE: the service's live vital trace (flatlines red when down) */}
-        <div className="relative z-10 hidden h-8 min-w-[100px] flex-1 md:block" style={{ maxWidth: 260 }}>
-          <EcgTrace status={vital} height={32} speed={40} strokeWidth={1.75} />
+        {/* MIDDLE: the last 24 hours, one capsule per hour. Fixed widths rather
+            than flex-1, so the bar never competes with the monitor's name for
+            room — it appears only once the row is wide enough to carry it. */}
+        <div className="relative z-10 hidden w-[220px] shrink-0 lg:block xl:w-[320px]">
+          <HealthBar24h hours={uptime?.hourly_data ?? []} loading={uptimeLoading} />
         </div>
 
         {/* RESP readout */}

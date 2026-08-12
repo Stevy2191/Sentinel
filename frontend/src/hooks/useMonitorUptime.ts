@@ -5,9 +5,22 @@ import type { ApiResponse } from '@/types'
 export type HourStatus = 'up' | 'down' | 'partial' | 'nodata'
 
 export interface HourPoint {
-  hour: number // clock hour 0-23 of the bucket
-  uptime: number // 0-100
+  hour: number // clock hour 0-23 of the bucket (UTC)
+  uptime: number // 0-100, from the checks recorded in the hour
   status: HourStatus
+
+  // Incident- and maintenance-derived view of the same hour, used by the
+  // 24-hour health bar. Timestamps are RFC3339 UTC; null means "none in this
+  // hour". down_start/down_end bound the hour's downtime, so a tooltip can name
+  // the minutes a service was actually unavailable.
+  bucket_start: string
+  down_seconds: number
+  maintenance_seconds: number
+  down_start: string | null
+  down_end: string | null
+  maintenance_start: string | null
+  maintenance_end: string | null
+  observed: boolean // false for hours before the monitor was created
 }
 
 export interface ResponsePoint {

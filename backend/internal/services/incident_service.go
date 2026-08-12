@@ -123,6 +123,32 @@ func (s *IncidentService) GetIncidents(ctx context.Context, monitorID uuid.UUID,
 	return incidents, nil
 }
 
+// GetOverlappingIncidents returns every incident for a monitor that overlaps the
+// [start, end] window: it began at or before end, and either is still open or
+// ended at or after start.
+//
+// This differs from GetIncidents, which filters on start_time alone and so
+// misses an incident that began before the window and is still running through
+// it — the case that matters when rendering a fixed recent window.
+func (s *IncidentService) GetOverlappingIncidents(ctx context.Context, monitorID uuid.UUID, start, end time.Time) ([]models.Incident, error) {
+	if monitorID == uuid.Nil {
+		return nil, errors.New("monitor id is required")
+	}
+	if end.Before(start) {
+		return nil, fmt.Errorf("end %s is before start %s", end.Format(time.RFC3339), start.Format(time.RFC3339))
+	}
+
+	var incidents []models.Incident
+	err := s.db.WithContext(ctx).
+		Where("monitor_id = ? AND start_time <= ? AND (end_time IS NULL OR end_time >= ?)", monitorID, end, start).
+		Order("start_time ASC").
+		Find(&incidents).Error
+	if err != nil {
+		return nil, fmt.Errorf("querying overlapping incidents for monitor %s: %w", monitorID, err)
+	}
+	return incidents, nil
+}
+
 // GetActiveIncident returns the currently open incident for a monitor, or
 // (nil, nil) if there is none.
 func (s *IncidentService) GetActiveIncident(ctx context.Context, monitorID uuid.UUID) (*models.Incident, error) {

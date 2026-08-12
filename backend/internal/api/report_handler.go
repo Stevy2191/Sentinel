@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/Stevy2191/Sentinel/backend/internal/models"
 	"github.com/Stevy2191/Sentinel/backend/internal/services"
 )
 
@@ -162,10 +163,94 @@ func GetMonitorReportHandler(
 	}
 }
 
+// span is a stretch of time inside a single hourly bucket, together with how
+// many seconds of that bucket it covers. A zero start means "nothing here".
+type span struct {
+	start, end time.Time
+	seconds    int
+}
+
+// latest/earliest are the time equivalents of max/min.
+func latest(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
+}
+
+func earliest(a, b time.Time) time.Time {
+	if a.Before(b) {
+		return a
+	}
+	return b
+}
+
+// rfc3339OrNil renders a timestamp for JSON, or nil when it is unset, so the
+// client can distinguish "no downtime" from "downtime at the epoch".
+func rfc3339OrNil(t time.Time) interface{} {
+	if t.IsZero() {
+		return nil
+	}
+	return t.UTC().Format(time.RFC3339)
+}
+
+// incidentSpanInHour clips every incident to [hourStart, hourEnd] and returns
+// the outer bounds of the clipped pieces plus their total duration. Reporting
+// the outer bounds (rather than each piece) keeps the client's tooltip to a
+// single "from — to" while the second count stays exact.
+func incidentSpanInHour(incidents []models.Incident, hourStart, hourEnd, now time.Time) span {
+	var out span
+	for i := range incidents {
+		inc := incidents[i]
+
+		segStart := latest(inc.StartTime.UTC(), hourStart)
+		// An open incident is still running, so it covers the hour up to now.
+		segEnd := now
+		if inc.EndTime != nil {
+			segEnd = inc.EndTime.UTC()
+		}
+		segEnd = earliest(segEnd, hourEnd)
+
+		if !segEnd.After(segStart) {
+			continue
+		}
+		out.seconds += int(segEnd.Sub(segStart).Seconds())
+		if out.start.IsZero() || segStart.Before(out.start) {
+			out.start = segStart
+		}
+		if segEnd.After(out.end) {
+			out.end = segEnd
+		}
+	}
+	return out
+}
+
+// maintenanceSpanInHour clips the monitor's maintenance window to the hour.
+//
+// A monitor carries only its current window (there is no maintenance history
+// table), so an hour is reported as maintenance only while that window is still
+// set — a window cleared after the fact leaves no trace.
+func maintenanceSpanInHour(monitor *models.Monitor, hourStart, hourEnd time.Time) span {
+	if !monitor.MaintenanceModeEnabled || monitor.MaintenanceStart == nil || monitor.MaintenanceEnd == nil {
+		return span{}
+	}
+	segStart := latest(monitor.MaintenanceStart.UTC(), hourStart)
+	segEnd := earliest(monitor.MaintenanceEnd.UTC(), hourEnd)
+	if !segEnd.After(segStart) {
+		return span{}
+	}
+	return span{start: segStart, end: segEnd, seconds: int(segEnd.Sub(segStart).Seconds())}
+}
+
 // GetUptimeHistoryHandler handles GET /api/v1/monitors/:id/uptime-history. It
 // returns 24h/7d/30d uptime (incident-based, consistent with the other reports),
 // a 24-bucket hourly uptime series for sparklines, and a 24-hour hourly response
 // time series for the detail chart — all in one request.
+//
+// Each hourly bucket carries two views of the hour. "uptime"/"status" summarize
+// the checks recorded in it (what the sparkline draws), while "down_*" and
+// "maintenance_*" give the actual clock spans derived from incidents and the
+// monitor's maintenance window (what the 24-hour health bar draws).
 func GetUptimeHistoryHandler(
 	monitorService *services.MonitorService,
 	checkService *services.CheckService,
@@ -209,7 +294,13 @@ func GetUptimeHistoryHandler(
 			respondError(c, http.StatusInternalServerError, err.Error())
 			return
 		}
-		type bucket struct{ total, failed, sumResp, respN int }
+		type bucket struct {
+			total, failed, sumResp, respN int
+			// First/last failing check in the hour: the fallback source for a
+			// downtime span when no incident was recorded (e.g. failures during a
+			// maintenance window, where incidents are suppressed).
+			firstFail, lastFail time.Time
+		}
 		buckets := make(map[time.Time]*bucket)
 		truncHour := func(t time.Time) time.Time {
 			t = t.UTC()
@@ -228,7 +319,22 @@ func GetUptimeHistoryHandler(
 				b.respN++
 			} else {
 				b.failed++
+				ts := ch.Timestamp.UTC()
+				if b.firstFail.IsZero() || ts.Before(b.firstFail) {
+					b.firstFail = ts
+				}
+				if ts.After(b.lastFail) {
+					b.lastFail = ts
+				}
 			}
+		}
+
+		// Incidents overlapping the window give each hour its true downtime span,
+		// including one that started before the window and is still open.
+		incidents, err := incidentService.GetOverlappingIncidents(ctx, id, now.Add(-24*time.Hour), now)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, err.Error())
+			return
 		}
 
 		hourly := make([]gin.H, 0, 24)
@@ -254,7 +360,35 @@ func GetUptimeHistoryHandler(
 					avg = b.sumResp / b.respN
 				}
 			}
-			hourly = append(hourly, gin.H{"hour": k.Hour(), "uptime": uptime, "status": status})
+
+			// The hour is only observable up to "now" — never attribute downtime to
+			// the part of the current hour that hasn't happened yet.
+			hourEnd := earliest(k.Add(time.Hour), now.UTC())
+
+			downSpan := incidentSpanInHour(incidents, k, hourEnd, now.UTC())
+			if downSpan.seconds == 0 && b != nil && !b.firstFail.IsZero() {
+				// No incident on record, but checks failed here: report the span the
+				// failures cover so the hour still reads as degraded.
+				downSpan = span{start: b.firstFail, end: b.lastFail, seconds: 0}
+			}
+			maintSpan := maintenanceSpanInHour(monitor, k, hourEnd)
+
+			entry := gin.H{
+				"hour":                k.Hour(),
+				"uptime":              uptime,
+				"status":              status,
+				"bucket_start":        k.Format(time.RFC3339),
+				"down_seconds":        downSpan.seconds,
+				"maintenance_seconds": maintSpan.seconds,
+				"down_start":          rfc3339OrNil(downSpan.start),
+				"down_end":            rfc3339OrNil(downSpan.end),
+				"maintenance_start":   rfc3339OrNil(maintSpan.start),
+				"maintenance_end":     rfc3339OrNil(maintSpan.end),
+				// An hour entirely before the monitor existed has nothing to report,
+				// as opposed to an hour that was simply quiet.
+				"observed": !k.Add(time.Hour).Before(monitor.CreatedAt.UTC()),
+			}
+			hourly = append(hourly, entry)
 			responseData = append(responseData, gin.H{"time": fmt.Sprintf("%02d:00", k.Hour()), "responseTime": avg})
 		}
 
