@@ -1,7 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { RefreshCw, Plus, FolderPlus, Search, Trash2, Filter, X } from 'lucide-react'
-import { formatDistanceToNow } from 'date-fns'
+import {
+  RefreshCw,
+  Plus,
+  FolderPlus,
+  Search,
+  Trash2,
+  SlidersHorizontal,
+  X,
+  ChevronDown,
+  Wand2,
+  Upload,
+  Globe,
+} from 'lucide-react'
 import { useMonitors } from '@/hooks/useMonitors'
 import {
   useMonitorGroups,
@@ -13,10 +24,9 @@ import { useSummaryReport } from '@/hooks/useReports'
 import { useUsers } from '@/hooks/useUsers'
 import { useToasts, Toaster } from '@/components/Toast'
 import ColorPicker from '@/components/ColorPicker'
-import DashboardStats from '@/components/DashboardStats'
-import EcgTrace, { type Vital } from '@/components/EcgTrace'
 import GroupSection from '@/components/GroupSection'
 import MonitorCard from '@/components/MonitorCard'
+import StatusSidebar, { REPORT_PERIODS, type ReportPeriod } from '@/components/StatusSidebar'
 import type { Monitor, MonitorGroup } from '@/types'
 
 const REFRESH_MS = 30_000
@@ -32,19 +42,218 @@ function useDebounced<T>(value: T, ms: number): T {
   return debounced
 }
 
-const STATUS_OPTIONS = ['all', 'online', 'offline', 'maintenance', 'unknown'] as const
+/** Close a popover when the pointer goes down anywhere outside it. */
+function useDismissOnOutsideClick(open: boolean, close: () => void) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) close()
+    }
+    const onEsc = (e: KeyboardEvent) => e.key === 'Escape' && close()
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onEsc)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onEsc)
+    }
+  }, [open, close])
+  return ref
+}
+
+const STATUS_OPTIONS = ['all', 'online', 'offline', 'maintenance', 'paused', 'unknown'] as const
 type StatusFilter = (typeof STATUS_OPTIONS)[number]
+
+const SORTS = [
+  { key: 'down-first', label: 'Down first' },
+  { key: 'name', label: 'Name (A–Z)' },
+  { key: 'uptime', label: 'Lowest uptime' },
+  { key: 'slowest', label: 'Slowest first' },
+] as const
+type SortKey = (typeof SORTS)[number]['key']
+
+// Sort weight for "Down first": the states that need attention float up, and
+// paused monitors sink below healthy ones — dormant is not urgent. Checked
+// before status so a monitor paused while offline still sorts as paused.
+function urgency(m: Monitor): number {
+  if (!m.enabled) return 4
+  if (m.current_status === 'offline') return 0
+  if (m.is_in_maintenance) return 1
+  if (m.current_status === 'online') return 3
+  return 2 // unknown / not yet checked
+}
 
 const selectCls = 'rd-select'
 
-function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
+// ---------- "New" split button ----------
+function NewMenu({ onSingle, onGroup }: { onSingle: () => void; onGroup: () => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useDismissOnOutsideClick(open, useCallback(() => setOpen(false), []))
+
+  // Two of these flows don't exist yet; they stay visible so the menu shows the
+  // intended shape, but are disabled rather than pretending to work.
+  const items = [
+    { key: 'single', label: 'Single monitor', icon: Globe, onClick: onSingle },
+    { key: 'wizard', label: 'Monitor wizard', icon: Wand2, soon: true },
+    { key: 'bulk', label: 'Bulk upload', icon: Upload, soon: true },
+    { key: 'group', label: 'Group', icon: FolderPlus, onClick: onGroup },
+  ]
+
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-primary-100 px-2 py-0.5 text-xs font-medium text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">
-      {label}
-      <button onClick={onRemove} className="rounded-full hover:bg-primary-200 dark:hover:bg-primary-800" aria-label={`Remove ${label}`}>
-        <X className="h-3 w-3" />
+    <div ref={ref} className="relative shrink-0">
+      <button
+        className="rd-btn rd-btn-primary"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <Plus className="h-4 w-4" /> New
+        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
-    </span>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 z-40 mt-2 w-52 overflow-hidden rounded-lg py-1 shadow-xl"
+          style={{ backgroundColor: 'var(--vs-panel)', border: '1px solid var(--vs-line)' }}
+        >
+          {items.map((item) => (
+            <button
+              key={item.key}
+              role="menuitem"
+              disabled={item.soon}
+              onClick={() => {
+                setOpen(false)
+                item.onClick?.()
+              }}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+              style={{ color: 'var(--vs-text)' }}
+              title={item.soon ? 'Not available yet' : undefined}
+            >
+              <item.icon className="h-4 w-4 shrink-0" style={{ color: 'var(--vs-cyan)' }} />
+              <span className="flex-1">{item.label}</span>
+              {item.soon && (
+                <span className="vs-eyebrow shrink-0" style={{ fontSize: '0.5625rem' }}>
+                  Soon
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------- filter popover ----------
+interface FilterMenuProps {
+  activeCount: number
+  allTypes: string[]
+  allTags: string[]
+  groups: MonitorGroup[]
+  typeFilter: string
+  statusFilter: StatusFilter
+  groupFilter: string
+  selectedTags: string[]
+  setTypeFilter: (v: string) => void
+  setStatusFilter: (v: StatusFilter) => void
+  setGroupFilter: (v: string) => void
+  toggleTag: (t: string) => void
+  clearAll: () => void
+}
+
+function FilterMenu(props: FilterMenuProps) {
+  const [open, setOpen] = useState(false)
+  const ref = useDismissOnOutsideClick(open, useCallback(() => setOpen(false), []))
+  const { activeCount } = props
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        className="rd-btn rd-btn-secondary"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        style={activeCount > 0 ? { color: 'var(--vs-cyan)', borderColor: 'var(--vs-cyan)' } : undefined}
+      >
+        <SlidersHorizontal className="h-4 w-4" />
+        Filter{activeCount > 0 && ` (${activeCount})`}
+      </button>
+      {open && (
+        <div
+          className="absolute left-0 z-40 mt-2 w-72 space-y-3 rounded-lg p-3 shadow-xl"
+          style={{ backgroundColor: 'var(--vs-panel)', border: '1px solid var(--vs-line)' }}
+        >
+          <label className="block">
+            <span className="vs-eyebrow mb-1 block">Type</span>
+            <select className={`${selectCls} w-full`} value={props.typeFilter} onChange={(e) => props.setTypeFilter(e.target.value)}>
+              <option value="all">All</option>
+              {props.allTypes.map((t) => (
+                <option key={t} value={t}>
+                  {t.toUpperCase()}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="vs-eyebrow mb-1 block">Status</span>
+            <select
+              className={`${selectCls} w-full`}
+              value={props.statusFilter}
+              onChange={(e) => props.setStatusFilter(e.target.value as StatusFilter)}
+            >
+              <option value="all">All</option>
+              <option value="online">Online</option>
+              <option value="offline">Offline</option>
+              <option value="maintenance">Maintenance</option>
+              <option value="paused">Paused</option>
+              <option value="unknown">Unknown</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="vs-eyebrow mb-1 block">Group</span>
+            <select className={`${selectCls} w-full`} value={props.groupFilter} onChange={(e) => props.setGroupFilter(e.target.value)}>
+              <option value="all">All</option>
+              <option value="ungrouped">Ungrouped</option>
+              {props.groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {props.allTags.length > 0 && (
+            <div>
+              <span className="vs-eyebrow mb-1.5 block">Tags</span>
+              <div className="flex flex-wrap gap-1.5">
+                {props.allTags.map((t) => {
+                  const on = props.selectedTags.includes(t)
+                  return (
+                    <button
+                      key={t}
+                      onClick={() => props.toggleTag(t)}
+                      className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
+                        on ? 'bg-primary-600 text-white' : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'
+                      }`}
+                    >
+                      {t}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+          {activeCount > 0 && (
+            <button
+              onClick={props.clearAll}
+              className="flex w-full items-center justify-center gap-1.5 rounded-md py-1.5 text-xs"
+              style={{ color: 'var(--vs-text-dim)', border: '1px solid var(--vs-line)' }}
+            >
+              <X className="h-3.5 w-3.5" /> Clear all filters
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -167,8 +376,8 @@ export default function Dashboard() {
   const { usernameFor } = useUsers()
   const { toasts, push } = useToasts()
 
-  // 24h uptime for every monitor in one call (summary endpoint). Window is fixed
-  // at mount so the summary hook doesn't refetch on every render.
+  // 24h uptime for every monitor in one call, powering each card's fallback
+  // percentage. Fixed at mount so the hook doesn't refetch on every render.
   const window24h = useMemo(() => {
     const end = new Date()
     return { start: new Date(end.getTime() - 24 * 3600e3).toISOString(), end: end.toISOString() }
@@ -180,8 +389,15 @@ export default function Dashboard() {
     return m
   }, [summary])
 
-  const [updatedAt, setUpdatedAt] = useState<Date>(new Date())
-  const [, setTick] = useState(0)
+  // The sidebar's reporting window is independently selectable.
+  const [period, setPeriod] = useState<ReportPeriod>('30d')
+  const periodRange = useMemo(() => {
+    const hours = REPORT_PERIODS.find((p) => p.key === period)?.hours ?? 24 * 30
+    const end = new Date()
+    return { start: new Date(end.getTime() - hours * 3600e3).toISOString(), end: end.toISOString() }
+  }, [period])
+  const { report: periodSummary, loading: periodLoading } = useSummaryReport(periodRange.start, periodRange.end)
+
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [modal, setModal] = useState<{ mode: 'create' | 'edit'; group?: MonitorGroup } | null>(null)
@@ -191,13 +407,8 @@ export default function Dashboard() {
   const [typeFilter, setTypeFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [groupFilter, setGroupFilter] = useState<string>('all') // 'all' | 'ungrouped' | groupId
-  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
+  const [sort, setSort] = useState<SortKey>('down-first')
 
-  useEffect(() => setUpdatedAt(new Date()), [monitors])
-  useEffect(() => {
-    const t = window.setInterval(() => setTick((x) => x + 1), 1000)
-    return () => window.clearInterval(t)
-  }, [])
   useEffect(() => {
     const t = window.setInterval(() => {
       void refetch()
@@ -210,13 +421,18 @@ export default function Dashboard() {
     await Promise.all([refetch(), refetchGroups()])
   }, [refetch, refetchGroups])
 
-  const stats = useMemo(() => {
-    const total = monitors.length
-    const online = monitors.filter((m) => m.current_status === 'online').length
-    const offline = monitors.filter((m) => m.current_status === 'offline').length
-    const responders = monitors.filter((m) => m.last_response_time_ms > 0)
-    const avg = responders.length > 0 ? Math.round(responders.reduce((s, m) => s + m.last_response_time_ms, 0) / responders.length) : 0
-    return { total, online, offline, avg }
+  // Live counts for the status card. "Paused" is a configuration state, so a
+  // disabled monitor is counted as paused rather than by its last known status.
+  const counts = useMemo(() => {
+    let down = 0
+    let up = 0
+    let paused = 0
+    for (const m of monitors) {
+      if (!m.enabled) paused++
+      else if (m.current_status === 'offline') down++
+      else if (m.current_status === 'online') up++
+    }
+    return { down, up, paused, active: monitors.length - paused, total: monitors.length }
   }, [monitors])
 
   const allTags = useMemo(() => {
@@ -239,26 +455,41 @@ export default function Dashboard() {
 
   const filtered = useMemo(() => {
     const q = debouncedSearch.trim().toLowerCase()
-    return monitors.filter((m) => {
-      const matchQ =
-        !q ||
-        m.name.toLowerCase().includes(q) ||
-        m.url.toLowerCase().includes(q) ||
-        (m.tags ?? []).some((t) => t.toLowerCase().includes(q))
+    const matches = monitors.filter((m) => {
+      const matchQ = !q || m.name.toLowerCase().includes(q) || m.url.toLowerCase().includes(q)
       const matchType = typeFilter === 'all' || m.type === typeFilter
       const matchStatus =
         statusFilter === 'all' ||
-        (statusFilter === 'maintenance' ? !!m.is_in_maintenance : m.current_status === statusFilter)
+        (statusFilter === 'maintenance'
+          ? !!m.is_in_maintenance
+          : statusFilter === 'paused'
+            ? !m.enabled
+            : m.current_status === statusFilter)
       const matchGroup =
-        groupFilter === 'all' ||
-        (groupFilter === 'ungrouped' ? !m.group_id : m.group_id === groupFilter)
+        groupFilter === 'all' || (groupFilter === 'ungrouped' ? !m.group_id : m.group_id === groupFilter)
       const matchTags = selectedTags.length === 0 || (m.tags ?? []).some((t) => selectedTags.includes(t))
       return matchQ && matchType && matchStatus && matchGroup && matchTags
     })
-  }, [monitors, debouncedSearch, typeFilter, statusFilter, groupFilter, selectedTags])
+
+    const byName = (a: Monitor, b: Monitor) => a.name.localeCompare(b.name)
+    return [...matches].sort((a, b) => {
+      switch (sort) {
+        case 'name':
+          return byName(a, b)
+        case 'uptime': {
+          const ua = uptimeById.get(a.id) ?? 100
+          const ub = uptimeById.get(b.id) ?? 100
+          return ua - ub || byName(a, b)
+        }
+        case 'slowest':
+          return b.last_response_time_ms - a.last_response_time_ms || byName(a, b)
+        default:
+          return urgency(a) - urgency(b) || byName(a, b)
+      }
+    })
+  }, [monitors, debouncedSearch, typeFilter, statusFilter, groupFilter, selectedTags, sort, uptimeById])
 
   const clearAllFilters = () => {
-    setSearch('')
     setTypeFilter('all')
     setStatusFilter('all')
     setGroupFilter('all')
@@ -285,57 +516,83 @@ export default function Dashboard() {
 
   const cardProps = { groups, onToggle: toggleCard, onChanged: () => void refetchAll(), push }
 
-  // Overall station vital: reserve the full red flatline for a total outage;
-  // a partial outage reads as amber "attention", all-clear as the green pulse.
-  const station: { vital: Vital; label: string; color: string } =
-    stats.total === 0
-      ? { vital: 'idle', label: 'No monitors connected', color: 'var(--vs-text-dim)' }
-      : stats.online === 0
-        ? { vital: 'down', label: 'Critical — all services down', color: 'var(--vs-flat)' }
-        : stats.offline > 0
-          ? { vital: 'degraded', label: 'Attention — some services down', color: 'var(--vs-amber)' }
-          : { vital: 'up', label: 'All systems live', color: 'var(--vs-ecg)' }
-
   return (
-    <div className="space-y-5">
-      {/* Station hero: the collective heartbeat is the page's thesis. */}
-      <div className="rd-card overflow-hidden" style={{ ['--rd-accent' as string]: station.color }}>
-        <div className="flex flex-wrap items-start justify-between gap-4 px-5 pt-5">
-          <div className="min-w-0">
-            <p className="vs-eyebrow">Bedside Monitor</p>
-            <h1 className="vs-title vs-glow mt-1 text-3xl" style={{ color: station.color }}>
-              {station.label}
-            </h1>
-            <p className="vs-readout mt-2 text-sm" style={{ color: 'var(--vs-text-dim)' }}>
-              <span style={{ color: 'var(--vs-ecg)' }}>{stats.online} alive</span>
-              {' · '}
-              <span style={{ color: stats.offline > 0 ? 'var(--vs-flat)' : 'var(--vs-text-dim)' }}>
-                {stats.offline} critical
-              </span>
-              {' · updated '}
-              {formatDistanceToNow(updatedAt, { addSuffix: true })}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button className="rd-btn rd-btn-primary" onClick={() => navigate('/monitors/create')}>
-              <Plus className="h-4 w-4" /> New monitor
+    // The inner-scroll layout is a desktop affordance: below xl the sidebar
+    // stacks and the page scrolls normally, which suits a narrow screen better.
+    <div className="flex flex-col gap-4 xl:h-full">
+      {/* Toolbar: everything needed to find a monitor, on one line. */}
+      <div className="flex shrink-0 flex-wrap items-center gap-2.5">
+        {/* normal-case overrides vs-title's uppercase: the title is set as
+            plain sentence-case text rather than an instrument label. */}
+        <h1 className="vs-title shrink-0 text-2xl normal-case">Monitors.</h1>
+
+        <div className="relative min-w-[180px] flex-1">
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
+            style={{ color: 'var(--vs-text-dim)' }}
+          />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name or URL"
+            aria-label="Search by name or URL"
+            className="rd-input py-2 pl-9 pr-8"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5"
+              style={{ color: 'var(--vs-text-dim)' }}
+              aria-label="Clear search"
+            >
+              <X className="h-3.5 w-3.5" />
             </button>
-            <button className="rd-btn rd-btn-secondary" onClick={() => setModal({ mode: 'create' })}>
-              <FolderPlus className="h-4 w-4" /> New group
-            </button>
-            <button className="rd-btn rd-btn-secondary" onClick={() => void refetchAll()} disabled={loading}>
-              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
-            </button>
-          </div>
+          )}
         </div>
-        {/* the trace bleeds to the edges of the well */}
-        <div className="mt-3 h-16">
-          <EcgTrace status={station.vital} height={64} speed={54} strokeWidth={2} />
-        </div>
+
+        <FilterMenu
+          activeCount={activeFilterCount}
+          allTypes={allTypes}
+          allTags={allTags}
+          groups={groups}
+          typeFilter={typeFilter}
+          statusFilter={statusFilter}
+          groupFilter={groupFilter}
+          selectedTags={selectedTags}
+          setTypeFilter={setTypeFilter}
+          setStatusFilter={setStatusFilter}
+          setGroupFilter={setGroupFilter}
+          toggleTag={toggleTag}
+          clearAll={clearAllFilters}
+        />
+
+        <select
+          className={`${selectCls} shrink-0`}
+          value={sort}
+          onChange={(e) => setSort(e.target.value as SortKey)}
+          aria-label="Sort monitors"
+        >
+          {SORTS.map((s) => (
+            <option key={s.key} value={s.key}>
+              {s.label}
+            </option>
+          ))}
+        </select>
+
+        <button
+          className="rd-btn rd-btn-secondary shrink-0"
+          onClick={() => void refetchAll()}
+          disabled={loading}
+          aria-label="Refresh"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+        </button>
+
+        <NewMenu onSingle={() => navigate('/monitors/create')} onGroup={() => setModal({ mode: 'create' })} />
       </div>
 
       {error && (
-        <div className="card flex items-center justify-between border-error-300 p-4">
+        <div className="card flex shrink-0 items-center justify-between border-error-300 p-3">
           <span className="text-error-700 dark:text-error-300">Failed to load monitors: {error.message}</span>
           <button className="btn-secondary" onClick={() => void refetch()}>
             Retry
@@ -343,193 +600,118 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Always-visible stats */}
-      <DashboardStats total={stats.total} online={stats.online} offline={stats.offline} />
+      {/* Body: the list owns the scroll so the toolbar and sidebar stay put. */}
+      <div className="flex flex-col gap-4 xl:min-h-0 xl:flex-1 xl:flex-row">
+        <aside className="order-first shrink-0 xl:order-last xl:w-72">
+          <StatusSidebar
+            down={counts.down}
+            up={counts.up}
+            paused={counts.paused}
+            active={counts.active}
+            total={counts.total}
+            period={period}
+            onPeriodChange={setPeriod}
+            summary={periodSummary}
+            summaryLoading={periodLoading}
+          />
+        </aside>
 
-      {/* Search + dual filters */}
-      {monitors.length > 0 && (
-        <div className="space-y-3">
-          {/* Search (full width on mobile, ~70% on desktop) + mobile Filters toggle */}
-          <div className="flex items-center gap-2">
-            <div className="relative w-full md:max-w-2xl">
-              <Search
-                className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2"
-                style={{ color: 'var(--color-accent-primary)' }}
-              />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="SEARCH MONITORS..."
-                className="rd-input py-3 pl-11 pr-4"
-              />
+        <div className="min-w-0 flex-1 xl:min-h-0 xl:overflow-y-auto xl:pr-1">
+          {loading && monitors.length === 0 ? (
+            <div className="space-y-2">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="rd-card h-[76px] animate-pulse" />
+              ))}
             </div>
-            <button
-              className="btn-secondary shrink-0 md:hidden"
-              onClick={() => setMobileFiltersOpen((o) => !o)}
-              aria-expanded={mobileFiltersOpen}
-            >
-              <Filter className="h-4 w-4" /> Filters
-              {activeFilterCount > 0 && (
-                <span className="ml-1 rounded-full bg-primary-600 px-1.5 text-xs text-white">{activeFilterCount}</span>
-              )}
-            </button>
-          </div>
-
-          {/* Filter controls: inline on md+, collapsible on mobile */}
-          <div className={`${mobileFiltersOpen ? 'flex' : 'hidden'} flex-wrap items-center gap-2 md:flex`}>
-            <select className={selectCls} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} aria-label="Filter by type">
-              <option value="all">Type: All</option>
-              {allTypes.map((t) => (
-                <option key={t} value={t}>
-                  {t.toUpperCase()}
-                </option>
-              ))}
-            </select>
-            <select className={selectCls} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)} aria-label="Filter by status">
-              <option value="all">Status: All</option>
-              <option value="online">Online</option>
-              <option value="offline">Offline</option>
-              <option value="maintenance">Maintenance</option>
-              <option value="unknown">Unknown</option>
-            </select>
-            <select className={selectCls} value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)} aria-label="Filter by group">
-              <option value="all">Group: All</option>
-              <option value="ungrouped">Ungrouped</option>
-              {groups.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.name}
-                </option>
-              ))}
-            </select>
-
-            {allTags.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1.5">
-                {allTags.map((t) => {
-                  const on = selectedTags.includes(t)
-                  return (
-                    <button
-                      key={t}
-                      onClick={() => toggleTag(t)}
-                      className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
-                        on
-                          ? 'bg-primary-600 text-white'
-                          : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700'
-                      }`}
-                    >
-                      {t}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-
-            {mobileFiltersOpen && (
-              <button className="btn-primary md:hidden" onClick={() => setMobileFiltersOpen(false)}>
-                Done
+          ) : monitors.length === 0 ? (
+            <div className="card flex flex-col items-center gap-3 p-12 text-center">
+              <div className="text-lg font-semibold">No monitors yet</div>
+              <p className="text-sm text-neutral-500 dark:text-neutral-400">
+                Create your first monitor to start tracking uptime.
+              </p>
+              <button className="btn-primary" onClick={() => navigate('/monitors/create')}>
+                <Plus className="h-4 w-4" /> Create Your First Monitor
               </button>
-            )}
-          </div>
+            </div>
+          ) : filterActive && filtered.length === 0 ? (
+            <div className="card p-8 text-center text-sm text-neutral-500 dark:text-neutral-400">
+              No monitors match the current search or filters.
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {groups.map((g) => {
+                const members = monitorsByGroup.get(g.id) ?? []
+                if (filterActive && members.length === 0) return null
+                return (
+                  <GroupSection
+                    key={g.id}
+                    title={g.name}
+                    color={g.color}
+                    uptime={g.group_uptime}
+                    count={members.length}
+                    expanded={!collapsed[g.id]}
+                    onToggle={() => toggleGroup(g.id)}
+                    onEdit={() => setModal({ mode: 'edit', group: g })}
+                  >
+                    {members.length === 0 ? (
+                      <p className="px-2 py-1 text-sm text-neutral-400">
+                        No monitors in this group yet — assign one from a card’s Group dropdown.
+                      </p>
+                    ) : (
+                      members.map((m) => (
+                        <MonitorCard
+                          key={m.id}
+                          monitor={m}
+                          uptime24h={uptimeById.get(m.id) ?? null}
+                          expanded={expandedId === m.id}
+                          ownerUsername={usernameFor(m.owner_id)}
+                          {...cardProps}
+                        />
+                      ))
+                    )}
+                  </GroupSection>
+                )
+              })}
 
-          {/* Active filter chips */}
-          {activeFilterCount > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              {typeFilter !== 'all' && (
-                <FilterChip label={`Type: ${typeFilter.toUpperCase()}`} onRemove={() => setTypeFilter('all')} />
-              )}
-              {statusFilter !== 'all' && (
-                <FilterChip label={`Status: ${statusFilter}`} onRemove={() => setStatusFilter('all')} />
-              )}
-              {groupFilter !== 'all' && (
-                <FilterChip
-                  label={`Group: ${groupFilter === 'ungrouped' ? 'Ungrouped' : groups.find((g) => g.id === groupFilter)?.name ?? groupFilter}`}
-                  onRemove={() => setGroupFilter('all')}
-                />
-              )}
-              {selectedTags.map((t) => (
-                <FilterChip key={t} label={`Tag: ${t}`} onRemove={() => toggleTag(t)} />
-              ))}
-              <button onClick={clearAllFilters} className="text-xs text-primary-600 hover:underline">
-                Clear all
-              </button>
+              {ungrouped.length > 0 &&
+                (groups.length > 0 ? (
+                  <GroupSection
+                    title="Ungrouped"
+                    color={null}
+                    uptime={null}
+                    count={ungrouped.length}
+                    expanded={!collapsed.__ungrouped}
+                    onToggle={() => toggleGroup('__ungrouped')}
+                  >
+                    {ungrouped.map((m) => (
+                      <MonitorCard
+                        key={m.id}
+                        monitor={m}
+                        uptime24h={uptimeById.get(m.id) ?? null}
+                        expanded={expandedId === m.id}
+                        ownerUsername={usernameFor(m.owner_id)}
+                        {...cardProps}
+                      />
+                    ))}
+                  </GroupSection>
+                ) : (
+                  <div className="space-y-2.5">
+                    {ungrouped.map((m) => (
+                      <MonitorCard
+                        key={m.id}
+                        monitor={m}
+                        uptime24h={uptimeById.get(m.id) ?? null}
+                        expanded={expandedId === m.id}
+                        ownerUsername={usernameFor(m.owner_id)}
+                        {...cardProps}
+                      />
+                    ))}
+                  </div>
+                ))}
             </div>
           )}
         </div>
-      )}
-
-      {/* Content */}
-      {loading && monitors.length === 0 ? (
-        <div className="card animate-pulse p-6">
-          <div className="h-4 w-1/3 rounded bg-neutral-200 dark:bg-neutral-800" />
-          <div className="mt-4 space-y-2">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="h-12 rounded bg-neutral-200 dark:bg-neutral-800" />
-            ))}
-          </div>
-        </div>
-      ) : monitors.length === 0 ? (
-        <div className="card flex flex-col items-center gap-3 p-12 text-center">
-          <div className="text-lg font-semibold">No monitors yet</div>
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">Create your first monitor to start tracking uptime.</p>
-          <button className="btn-primary" onClick={() => navigate('/monitors/create')}>
-            <Plus className="h-4 w-4" /> Create Your First Monitor
-          </button>
-        </div>
-      ) : filterActive && filtered.length === 0 ? (
-        <div className="card p-8 text-center text-sm text-neutral-500 dark:text-neutral-400">
-          No monitors match the current search/tag filter.
-        </div>
-      ) : (
-        <div className="space-y-6">
-          {groups.map((g) => {
-            const members = monitorsByGroup.get(g.id) ?? []
-            if (filterActive && members.length === 0) return null
-            return (
-              <GroupSection
-                key={g.id}
-                title={g.name}
-                color={g.color}
-                uptime={g.group_uptime}
-                count={members.length}
-                expanded={!collapsed[g.id]}
-                onToggle={() => toggleGroup(g.id)}
-                onEdit={() => setModal({ mode: 'edit', group: g })}
-              >
-                {members.length === 0 ? (
-                  <p className="px-2 py-1 text-sm text-neutral-400">
-                    No monitors in this group yet — assign one from a card’s Group dropdown.
-                  </p>
-                ) : (
-                  members.map((m) => (
-                    <MonitorCard key={m.id} monitor={m} uptime24h={uptimeById.get(m.id) ?? null} expanded={expandedId === m.id} ownerUsername={usernameFor(m.owner_id)} {...cardProps} />
-                  ))
-                )}
-              </GroupSection>
-            )
-          })}
-
-          {ungrouped.length > 0 &&
-            (groups.length > 0 ? (
-              <GroupSection
-                title="Ungrouped"
-                color={null}
-                uptime={null}
-                count={ungrouped.length}
-                expanded={!collapsed.__ungrouped}
-                onToggle={() => toggleGroup('__ungrouped')}
-              >
-                {ungrouped.map((m) => (
-                  <MonitorCard key={m.id} monitor={m} uptime24h={uptimeById.get(m.id) ?? null} expanded={expandedId === m.id} ownerUsername={usernameFor(m.owner_id)} {...cardProps} />
-                ))}
-              </GroupSection>
-            ) : (
-              <div className="space-y-2">
-                {ungrouped.map((m) => (
-                  <MonitorCard key={m.id} monitor={m} uptime24h={uptimeById.get(m.id) ?? null} expanded={expandedId === m.id} ownerUsername={usernameFor(m.owner_id)} {...cardProps} />
-                ))}
-              </div>
-            ))}
-        </div>
-      )}
+      </div>
 
       {modal && (
         <GroupModal mode={modal.mode} group={modal.group} onClose={() => setModal(null)} onSaved={() => void refetchAll()} push={push} />

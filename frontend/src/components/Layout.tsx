@@ -105,7 +105,11 @@ export default function Layout() {
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   return (
-    <div className="flex min-h-screen" style={{ backgroundColor: 'var(--color-bg-dark)' }}>
+    // Pinning the shell to the viewport at xl lets `main`'s overflow-hidden and
+    // the container's own overflow-auto do their job: pages scroll inside the
+    // rounded container instead of moving the whole page. Narrow screens keep
+    // ordinary page scrolling, which behaves better with mobile browser chrome.
+    <div className="flex min-h-screen xl:h-screen" style={{ backgroundColor: 'var(--color-bg-dark)' }}>
       {/* Persistent desktop sidebar (background layer with aggressive right fade) */}
       <aside
         className="hidden w-64 shrink-0 flex-col p-6 md:flex"
