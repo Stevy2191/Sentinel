@@ -6,6 +6,10 @@ import { formatResponseTime } from '@/utils/formatters'
 import { monitorAccess, badgeToneClass } from '@/utils/monitorAccess'
 import type { Monitor, MonitorGroup } from '@/types'
 
+// Two tags is what a dense row can carry without starving the monitor's name;
+// the rest fold into a "+N".
+const MAX_INLINE_TAGS = 2
+
 function responseColor(ms: number): string {
   if (ms <= 0) return 'text-neutral-500'
   if (ms < 200) return 'text-primary-400'
@@ -42,6 +46,11 @@ export default function MonitorCard({ monitor, uptime24h, expanded, groups, owne
   const online = monitor.current_status === 'online'
   const offline = monitor.current_status === 'offline'
   const pct = uptime?.uptime_24h ?? uptime24h
+  // Tags share the name's line, so cap how many take room from it; the rest
+  // collapse into a "+N" that names them on hover.
+  const tags = monitor.tags ?? []
+  const shownTags = tags.slice(0, MAX_INLINE_TAGS)
+  const hiddenTags = tags.slice(MAX_INLINE_TAGS)
   // Status drives the row's left channel border + fade accent.
   const statusColor = inMaintenance
     ? 'var(--color-accent-warning)'
@@ -68,6 +77,11 @@ export default function MonitorCard({ monitor, uptime24h, expanded, groups, owne
             style={{ backgroundColor: statusColor, boxShadow: `0 0 8px ${statusColor}` }}
           />
           <span className="min-w-0">
+            {/* Type reads as the silkscreen caption over the name, the way an
+                instrument labels the channel it is showing. */}
+            <span className="vs-eyebrow block" style={{ color: 'var(--vs-cyan)', letterSpacing: '0.12em' }}>
+              {monitor.type}
+            </span>
             <span className="flex items-center gap-2">
               <span className="truncate text-[15px] font-semibold" style={{ color: 'var(--vs-text)' }}>
                 {monitor.name}
@@ -87,9 +101,34 @@ export default function MonitorCard({ monitor, uptime24h, expanded, groups, owne
                   {maintLeft && <span className="vs-readout font-medium normal-case">· {maintLeft}</span>}
                 </span>
               )}
-              <span className="vs-eyebrow shrink-0" style={{ color: 'var(--vs-cyan)', letterSpacing: '0.12em' }}>
-                {monitor.type}
-              </span>
+              {/* Tags sit beside the name, but never at its expense: the group
+                  is hidden until the row is wide enough to hold both, and the
+                  outsized shrink factor means any remaining squeeze eats into
+                  the tags rather than truncating the name. */}
+              {tags.length > 0 && (
+                <span
+                  className="hidden min-w-0 items-center gap-2 overflow-hidden xl:flex"
+                  style={{ flexShrink: 999 }}
+                >
+                  {shownTags.map((t) => (
+                    <span
+                      key={t}
+                      className="shrink-0 rounded-full bg-primary-100 px-2 py-0.5 text-[10px] font-medium text-primary-700 dark:bg-primary-900/40 dark:text-primary-300"
+                    >
+                      {t}
+                    </span>
+                  ))}
+                  {hiddenTags.length > 0 && (
+                    <span
+                      className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium"
+                      style={{ backgroundColor: 'rgba(255,255,255,0.05)', color: 'var(--vs-text-dim)' }}
+                      title={hiddenTags.join(', ')}
+                    >
+                      +{hiddenTags.length}
+                    </span>
+                  )}
+                </span>
+              )}
               {access.badge && (
                 <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${badgeToneClass[access.badge.tone]}`}>
                   {access.badge.label}
