@@ -4,11 +4,14 @@ import type { HourPoint } from '@/hooks/useMonitorUptime'
 
 export type PillStatus = 'up' | 'down' | 'maintenance' | 'unknown'
 
+// The Vital Signs channels from theme.css, so the bar re-tones with the rest of
+// the app instead of pinning its own greens and reds: ECG green = alive, amber =
+// degraded/maintenance, flatline red = down, silkscreen grey = nothing to report.
 const PILL_COLOR: Record<PillStatus, string> = {
-  up: '#22c55e',
-  down: '#ef4444',
-  maintenance: '#f97316',
-  unknown: '#3a4750', // hour the monitor wasn't around for / reported nothing
+  up: 'var(--vs-ecg)',
+  down: 'var(--vs-flat)',
+  maintenance: 'var(--vs-amber)',
+  unknown: 'var(--vs-text-dim)', // hour the monitor wasn't around for
 }
 
 const STATUS_LABEL: Record<PillStatus, string> = {

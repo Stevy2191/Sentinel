@@ -194,20 +194,42 @@ func rfc3339OrNil(t time.Time) interface{} {
 	return t.UTC().Format(time.RFC3339)
 }
 
-// incidentSpanInHour clips every incident to [hourStart, hourEnd] and returns
-// the outer bounds of the clipped pieces plus their total duration. Reporting
-// the outer bounds (rather than each piece) keeps the client's tooltip to a
-// single "from — to" while the second count stays exact.
-func incidentSpanInHour(incidents []models.Incident, hourStart, hourEnd, now time.Time) span {
-	var out span
-	for i := range incidents {
-		inc := incidents[i]
+// interval is a period of interest — an outage or a maintenance window — with a
+// nil end meaning it is still running.
+type interval struct {
+	start time.Time
+	end   *time.Time
+}
 
-		segStart := latest(inc.StartTime.UTC(), hourStart)
-		// An open incident is still running, so it covers the hour up to now.
+func incidentIntervals(incidents []models.Incident) []interval {
+	out := make([]interval, 0, len(incidents))
+	for i := range incidents {
+		out = append(out, interval{start: incidents[i].StartTime, end: incidents[i].EndTime})
+	}
+	return out
+}
+
+func maintenanceIntervals(windows []models.MaintenanceHistory) []interval {
+	out := make([]interval, 0, len(windows))
+	for i := range windows {
+		end := windows[i].EndTime
+		out = append(out, interval{start: windows[i].StartTime, end: &end})
+	}
+	return out
+}
+
+// spanInHour clips every interval to [hourStart, hourEnd] and returns the outer
+// bounds of the clipped pieces plus their total duration. Reporting the outer
+// bounds (rather than each piece) keeps the client's tooltip to a single
+// "from — to" while the second count stays exact.
+func spanInHour(intervals []interval, hourStart, hourEnd, now time.Time) span {
+	var out span
+	for _, iv := range intervals {
+		segStart := latest(iv.start.UTC(), hourStart)
+		// An open interval is still running, so it covers the hour up to now.
 		segEnd := now
-		if inc.EndTime != nil {
-			segEnd = inc.EndTime.UTC()
+		if iv.end != nil {
+			segEnd = iv.end.UTC()
 		}
 		segEnd = earliest(segEnd, hourEnd)
 
@@ -225,23 +247,6 @@ func incidentSpanInHour(incidents []models.Incident, hourStart, hourEnd, now tim
 	return out
 }
 
-// maintenanceSpanInHour clips the monitor's maintenance window to the hour.
-//
-// A monitor carries only its current window (there is no maintenance history
-// table), so an hour is reported as maintenance only while that window is still
-// set — a window cleared after the fact leaves no trace.
-func maintenanceSpanInHour(monitor *models.Monitor, hourStart, hourEnd time.Time) span {
-	if !monitor.MaintenanceModeEnabled || monitor.MaintenanceStart == nil || monitor.MaintenanceEnd == nil {
-		return span{}
-	}
-	segStart := latest(monitor.MaintenanceStart.UTC(), hourStart)
-	segEnd := earliest(monitor.MaintenanceEnd.UTC(), hourEnd)
-	if !segEnd.After(segStart) {
-		return span{}
-	}
-	return span{start: segStart, end: segEnd, seconds: int(segEnd.Sub(segStart).Seconds())}
-}
-
 // GetUptimeHistoryHandler handles GET /api/v1/monitors/:id/uptime-history. It
 // returns 24h/7d/30d uptime (incident-based, consistent with the other reports),
 // a 24-bucket hourly uptime series for sparklines, and a 24-hour hourly response
@@ -249,8 +254,8 @@ func maintenanceSpanInHour(monitor *models.Monitor, hourStart, hourEnd time.Time
 //
 // Each hourly bucket carries two views of the hour. "uptime"/"status" summarize
 // the checks recorded in it (what the sparkline draws), while "down_*" and
-// "maintenance_*" give the actual clock spans derived from incidents and the
-// monitor's maintenance window (what the 24-hour health bar draws).
+// "maintenance_*" give the actual clock spans derived from incidents and from
+// recorded maintenance history (what the 24-hour health bar draws).
 func GetUptimeHistoryHandler(
 	monitorService *services.MonitorService,
 	checkService *services.CheckService,
@@ -331,11 +336,22 @@ func GetUptimeHistoryHandler(
 
 		// Incidents overlapping the window give each hour its true downtime span,
 		// including one that started before the window and is still open.
-		incidents, err := incidentService.GetOverlappingIncidents(ctx, id, now.Add(-24*time.Hour), now)
+		windowStart := now.Add(-24 * time.Hour)
+		incidents, err := incidentService.GetOverlappingIncidents(ctx, id, windowStart, now)
 		if err != nil {
 			respondError(c, http.StatusInternalServerError, err.Error())
 			return
 		}
+		// Maintenance comes from the history table rather than the monitor's
+		// current window, so an hour that was under maintenance still reports as
+		// such after that window has been cleared or replaced.
+		maintenanceWindows, err := monitorService.GetMaintenanceHistory(ctx, id, windowStart, now)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		downIntervals := incidentIntervals(incidents)
+		maintIntervals := maintenanceIntervals(maintenanceWindows)
 
 		hourly := make([]gin.H, 0, 24)
 		responseData := make([]gin.H, 0, 24)
@@ -365,13 +381,13 @@ func GetUptimeHistoryHandler(
 			// the part of the current hour that hasn't happened yet.
 			hourEnd := earliest(k.Add(time.Hour), now.UTC())
 
-			downSpan := incidentSpanInHour(incidents, k, hourEnd, now.UTC())
+			downSpan := spanInHour(downIntervals, k, hourEnd, now.UTC())
 			if downSpan.seconds == 0 && b != nil && !b.firstFail.IsZero() {
 				// No incident on record, but checks failed here: report the span the
 				// failures cover so the hour still reads as degraded.
 				downSpan = span{start: b.firstFail, end: b.lastFail, seconds: 0}
 			}
-			maintSpan := maintenanceSpanInHour(monitor, k, hourEnd)
+			maintSpan := spanInHour(maintIntervals, k, hourEnd, now.UTC())
 
 			entry := gin.H{
 				"hour":                k.Hour(),

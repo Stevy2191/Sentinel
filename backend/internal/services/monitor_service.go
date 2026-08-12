@@ -253,6 +253,8 @@ func validateMaintenanceWindow(start, end time.Time) error {
 }
 
 // EnableMaintenanceMode turns on maintenance mode for a monitor over [start, end].
+// The window is written to the monitor and to maintenance history in one
+// transaction, so the record of what happened cannot drift from what was set.
 func (s *MonitorService) EnableMaintenanceMode(ctx context.Context, monitorID uuid.UUID, startTime, endTime time.Time) error {
 	monitor, err := s.GetMonitor(ctx, monitorID)
 	if err != nil {
@@ -261,57 +263,80 @@ func (s *MonitorService) EnableMaintenanceMode(ctx context.Context, monitorID uu
 	if err := validateMaintenanceWindow(startTime, endTime); err != nil {
 		return err
 	}
-	if err := s.db.WithContext(ctx).Model(&models.Monitor{}).
-		Where("id = ?", monitorID).
-		Updates(map[string]interface{}{
-			"maintenance_mode_enabled": true,
-			"maintenance_start":        startTime,
-			"maintenance_end":          endTime,
-			"updated_at":               time.Now(),
-		}).Error; err != nil {
-		return fmt.Errorf("enabling maintenance for monitor %s: %w", monitorID, err)
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.Monitor{}).
+			Where("id = ?", monitorID).
+			Updates(map[string]interface{}{
+				"maintenance_mode_enabled": true,
+				"maintenance_start":        startTime,
+				"maintenance_end":          endTime,
+				"updated_at":               time.Now(),
+			}).Error; err != nil {
+			return fmt.Errorf("enabling maintenance for monitor %s: %w", monitorID, err)
+		}
+		return recordMaintenanceWindow(tx, monitorID, startTime, endTime)
+	})
+	if err != nil {
+		return err
 	}
 	s.logger.Printf("[monitor] maintenance enabled for %q: %s to %s", monitor.Name,
 		startTime.Format(time.RFC3339), endTime.Format(time.RFC3339))
 	return nil
 }
 
-// UpdateMaintenanceWindow changes the maintenance window of a monitor.
+// UpdateMaintenanceWindow changes the maintenance window of a monitor, moving
+// the matching history record with it.
 func (s *MonitorService) UpdateMaintenanceWindow(ctx context.Context, monitorID uuid.UUID, startTime, endTime time.Time) error {
-	if _, err := s.GetMonitor(ctx, monitorID); err != nil {
+	monitor, err := s.GetMonitor(ctx, monitorID)
+	if err != nil {
 		return err
 	}
 	if err := validateMaintenanceWindow(startTime, endTime); err != nil {
 		return err
 	}
-	if err := s.db.WithContext(ctx).Model(&models.Monitor{}).
-		Where("id = ?", monitorID).
-		Updates(map[string]interface{}{
-			"maintenance_start": startTime,
-			"maintenance_end":   endTime,
-			"updated_at":        time.Now(),
-		}).Error; err != nil {
-		return fmt.Errorf("updating maintenance window for monitor %s: %w", monitorID, err)
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.Monitor{}).
+			Where("id = ?", monitorID).
+			Updates(map[string]interface{}{
+				"maintenance_start": startTime,
+				"maintenance_end":   endTime,
+				"updated_at":        time.Now(),
+			}).Error; err != nil {
+			return fmt.Errorf("updating maintenance window for monitor %s: %w", monitorID, err)
+		}
+		return reviseMaintenanceWindow(tx, monitorID, monitor.MaintenanceStart, monitor.MaintenanceEnd, startTime, endTime)
+	})
+	if err != nil {
+		return err
 	}
 	s.logger.Printf("[monitor] maintenance window updated for %s", monitorID)
 	return nil
 }
 
-// DisableMaintenanceMode turns off maintenance mode and clears the window.
+// DisableMaintenanceMode turns off maintenance mode and clears the window from
+// the monitor. The history record is settled rather than deleted, so an hour
+// that was genuinely under maintenance still reports as such afterwards.
 func (s *MonitorService) DisableMaintenanceMode(ctx context.Context, monitorID uuid.UUID) error {
 	monitor, err := s.GetMonitor(ctx, monitorID)
 	if err != nil {
 		return err
 	}
-	if err := s.db.WithContext(ctx).Model(&models.Monitor{}).
-		Where("id = ?", monitorID).
-		Updates(map[string]interface{}{
-			"maintenance_mode_enabled": false,
-			"maintenance_start":        nil,
-			"maintenance_end":          nil,
-			"updated_at":               time.Now(),
-		}).Error; err != nil {
-		return fmt.Errorf("disabling maintenance for monitor %s: %w", monitorID, err)
+	now := time.Now()
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.Monitor{}).
+			Where("id = ?", monitorID).
+			Updates(map[string]interface{}{
+				"maintenance_mode_enabled": false,
+				"maintenance_start":        nil,
+				"maintenance_end":          nil,
+				"updated_at":               now,
+			}).Error; err != nil {
+			return fmt.Errorf("disabling maintenance for monitor %s: %w", monitorID, err)
+		}
+		return closeMaintenanceWindow(tx, monitorID, monitor.MaintenanceStart, monitor.MaintenanceEnd, now)
+	})
+	if err != nil {
+		return err
 	}
 	s.logger.Printf("[monitor] maintenance disabled for %q", monitor.Name)
 	return nil
