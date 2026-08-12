@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import NotificationChannelPicker from '@/components/NotificationChannelPicker'
 import type { ApiError } from '@/services/api'
 import type { Monitor, MonitorInput, MonitorType } from '@/types'
 
@@ -13,6 +14,8 @@ export interface MonitorFormValues {
   timeout_seconds: number
   retries: number
   tags: string
+  /** null = all channels, [] = none, [...] = only those. */
+  notify_channels: string[] | null
 }
 
 export const emptyMonitorForm: MonitorFormValues = {
@@ -26,6 +29,7 @@ export const emptyMonitorForm: MonitorFormValues = {
   timeout_seconds: 10,
   retries: 3,
   tags: '',
+  notify_channels: null,
 }
 
 /** Build form values from an existing monitor (for editing). */
@@ -41,6 +45,7 @@ export function monitorToForm(m: Monitor): MonitorFormValues {
     timeout_seconds: m.timeout_seconds,
     retries: m.retries,
     tags: (m.tags ?? []).join(', '),
+    notify_channels: m.notify_channels ?? null,
   }
 }
 
@@ -59,9 +64,10 @@ const urlHelp: Record<MonitorType, string> = {
   webhook: 'Endpoint URL',
 }
 
-type Errors = Partial<Record<keyof MonitorFormValues, string>>
+export type MonitorFormErrors = Partial<Record<keyof MonitorFormValues, string>>
+type Errors = MonitorFormErrors
 
-function validate(v: MonitorFormValues): Errors {
+export function validateMonitorForm(v: MonitorFormValues): Errors {
   const e: Errors = {}
   const name = v.name.trim()
   if (name.length < 3 || name.length > 255) e.name = 'Name must be 3–255 characters'
@@ -86,7 +92,7 @@ function validate(v: MonitorFormValues): Errors {
   return e
 }
 
-function toInput(v: MonitorFormValues): MonitorInput {
+export function monitorFormToInput(v: MonitorFormValues): MonitorInput {
   const input: MonitorInput = {
     name: v.name.trim(),
     type: v.type,
@@ -103,6 +109,7 @@ function toInput(v: MonitorFormValues): MonitorInput {
   }
   const tags = v.tags.split(',').map((t) => t.trim()).filter(Boolean)
   if (tags.length) input.tags = tags
+  input.notify_channels = v.notify_channels
   return input
 }
 
@@ -166,10 +173,10 @@ export default function MonitorForm({
 
   const handleSubmit = (ev: React.FormEvent) => {
     ev.preventDefault()
-    const errs = validate(values)
+    const errs = validateMonitorForm(values)
     setErrors(errs)
     if (Object.keys(errs).length > 0) return
-    void onSubmit(toInput(values))
+    void onSubmit(monitorFormToInput(values))
   }
 
   const isHttp = values.type === 'http'
@@ -282,7 +289,13 @@ export default function MonitorForm({
         </Field>
       </div>
 
-      <div className="card p-5">
+      <div className="card space-y-4 p-5">
+        <Field label="Notifications" help="Where alerts for this monitor are sent">
+          <NotificationChannelPicker
+            value={values.notify_channels}
+            onChange={(v) => set('notify_channels', v)}
+          />
+        </Field>
         <Field label="Tags" help="Comma-separated, e.g. prod, api">
           <input
             className={inputCls}

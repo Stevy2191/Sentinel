@@ -168,6 +168,11 @@ func applyMonitorUpdates(target, updates *models.Monitor) {
 	if updates.Tags != nil {
 		target.Tags = updates.Tags
 	}
+	// nil means the caller omitted the field; an empty slice is a deliberate
+	// "notify nowhere" and must be applied.
+	if updates.NotifyChannels != nil {
+		target.NotifyChannels = updates.NotifyChannels
+	}
 	target.Enabled = updates.Enabled
 }
 

@@ -9,6 +9,8 @@ import Layout from '@/components/Layout'
 import Dashboard from '@/pages/Dashboard'
 import Monitors from '@/pages/Monitors'
 import MonitorDetail from '@/pages/MonitorDetail'
+import MonitorWizard from '@/pages/MonitorWizard'
+import BulkUpload from '@/pages/BulkUpload'
 import Reports from '@/pages/Reports'
 import StatusPages from '@/pages/StatusPages'
 import Notifications from '@/pages/Notifications'
@@ -65,6 +67,8 @@ export default function App() {
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/monitors" element={<Monitors />} />
               <Route path="/monitors/create" element={<MonitorDetail mode="create" />} />
+              <Route path="/monitors/new/wizard" element={<MonitorWizard />} />
+              <Route path="/monitors/bulk" element={<BulkUpload />} />
               <Route path="/monitors/:id" element={<MonitorDetail mode="view" />} />
               <Route path="/monitors/:id/edit" element={<MonitorDetail mode="edit" />} />
               <Route path="/reports" element={<Reports />} />

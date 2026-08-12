@@ -52,6 +52,9 @@ export interface Monitor {
   last_response_time_ms: number
   enabled: boolean
   tags: string[] | null
+  // Channels this monitor alerts on: null = every enabled channel (default),
+  // [] = notifications disabled for this monitor, [...] = only those channels.
+  notify_channels?: string[] | null
   group_id?: string | null
   owner_id?: string | null
   is_owner?: boolean
@@ -88,6 +91,7 @@ export interface MonitorInput {
   retries?: number
   enabled?: boolean
   tags?: string[]
+  notify_channels?: string[] | null
 }
 
 export interface MonitorFilters extends PaginationParams {

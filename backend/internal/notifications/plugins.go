@@ -42,6 +42,24 @@ type NotificationMessage struct {
 	IncidentID       *uuid.UUID    `json:"incident_id,omitempty"`
 	DowntimeDuration time.Duration `json:"downtime_duration,omitempty"`
 	ResponseTimeMs   int           `json:"response_time_ms"`
+
+	// Channels restricts delivery to the named channels. A nil slice means every
+	// enabled channel — the behaviour before monitors could choose — while an
+	// empty non-nil slice means deliver nowhere. Set from Monitor.NotifyChannels.
+	Channels []string `json:"channels,omitempty"`
+}
+
+// deliversTo reports whether this message should go out over the named channel.
+func (m *NotificationMessage) deliversTo(channel string) bool {
+	if m.Channels == nil {
+		return true
+	}
+	for _, c := range m.Channels {
+		if c == channel {
+			return true
+		}
+	}
+	return false
 }
 
 // NotificationPlugin is implemented by each delivery channel (email, Slack,
@@ -113,6 +131,12 @@ func (m *NotificationManager) SendNotification(ctx context.Context, message *Not
 		return errors.New("message is nil")
 	}
 
+	// An empty (but non-nil) channel list means the monitor is opted out. Return
+	// before logging a send that is not going to happen.
+	if message.Channels != nil && len(message.Channels) == 0 {
+		return nil
+	}
+
 	m.logger.Printf("[notify] sending %s notification for %q", message.Status, message.MonitorName)
 
 	var (
@@ -128,6 +152,9 @@ func (m *NotificationManager) SendNotification(ctx context.Context, message *Not
 		}
 
 		if !plugin.IsEnabled() {
+			continue
+		}
+		if !message.deliversTo(name) {
 			continue
 		}
 		attempted++

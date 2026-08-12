@@ -122,6 +122,7 @@ func run() error {
 	v1 := router.Group("/api/v1")
 	v1.Use(api.AuthMiddleware(authService))
 	api.RegisterMonitorRoutes(v1, monitorService, checkService)
+	api.RegisterMonitorCreationRoutes(v1, monitorService, checkService)
 	api.RegisterCheckRoutes(v1, checkService, incidentService, monitorService)
 	api.RegisterReportRoutes(v1, monitorService, checkService, incidentService)
 	api.RegisterMonitorGroupRoutes(v1, monitorService, incidentService)
@@ -370,6 +371,12 @@ func handleStatusChange(
 		return
 	}
 
+	// A monitor opted out of notifications still opens and closes incidents —
+	// the history stays accurate, only the alerting is silenced.
+	if !monitor.NotifiesAnyChannel() {
+		log.Printf("monitor %s changed state but has notifications disabled; recording only", monitor.ID)
+	}
+
 	message := &notifications.NotificationMessage{
 		MonitorID:      monitor.ID,
 		MonitorName:    monitor.Name,
@@ -377,6 +384,7 @@ func handleStatusChange(
 		PreviousStatus: previous,
 		Timestamp:      time.Now(),
 		ResponseTimeMs: check.ResponseTimeMs,
+		Channels:       monitor.NotifyChannels,
 	}
 
 	switch {

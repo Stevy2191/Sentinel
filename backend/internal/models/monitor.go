@@ -119,16 +119,26 @@ type Monitor struct {
 	LastResponseTimeMs int         `json:"last_response_time_ms" gorm:"column:last_response_time_ms"`
 	Enabled            bool        `json:"enabled" gorm:"column:enabled;default:true"`
 	Tags               StringSlice `json:"tags" gorm:"column:tags;type:jsonb"`
-	GroupID            *uuid.UUID  `json:"group_id" gorm:"column:group_id;type:uuid"`
-	OwnerID            *uuid.UUID  `json:"owner_id" gorm:"column:owner_id;type:uuid"`
-	CreatedAt          time.Time   `json:"created_at" gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt          time.Time   `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
+	// NotifyChannels selects which notification channels this monitor alerts on.
+	// nil means every enabled channel (the default); an empty slice means none.
+	NotifyChannels StringSlice `json:"notify_channels" gorm:"column:notify_channels;type:jsonb"`
+	GroupID        *uuid.UUID  `json:"group_id" gorm:"column:group_id;type:uuid"`
+	OwnerID        *uuid.UUID  `json:"owner_id" gorm:"column:owner_id;type:uuid"`
+	CreatedAt      time.Time   `json:"created_at" gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt      time.Time   `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
 
 	// Maintenance mode: during an active window, failed checks are recorded but
 	// do not open incidents or fire notifications.
 	MaintenanceModeEnabled bool       `json:"maintenance_mode_enabled" gorm:"column:maintenance_mode_enabled"`
 	MaintenanceStart       *time.Time `json:"maintenance_start" gorm:"column:maintenance_start;type:timestamptz"`
 	MaintenanceEnd         *time.Time `json:"maintenance_end" gorm:"column:maintenance_end;type:timestamptz"`
+}
+
+// NotifiesAnyChannel reports whether this monitor should alert at all. A nil
+// NotifyChannels means "every enabled channel"; an explicitly empty one means
+// the monitor has been opted out of notifications.
+func (m *Monitor) NotifiesAnyChannel() bool {
+	return m.NotifyChannels == nil || len(m.NotifyChannels) > 0
 }
 
 // IsInMaintenanceWindow reports whether the monitor is currently within an

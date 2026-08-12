@@ -86,16 +86,24 @@ function urgency(m: Monitor): number {
 const selectCls = 'rd-select'
 
 // ---------- "New" split button ----------
-function NewMenu({ onSingle, onGroup }: { onSingle: () => void; onGroup: () => void }) {
+function NewMenu({
+  onSingle,
+  onWizard,
+  onBulk,
+  onGroup,
+}: {
+  onSingle: () => void
+  onWizard: () => void
+  onBulk: () => void
+  onGroup: () => void
+}) {
   const [open, setOpen] = useState(false)
   const ref = useDismissOnOutsideClick(open, useCallback(() => setOpen(false), []))
 
-  // Two of these flows don't exist yet; they stay visible so the menu shows the
-  // intended shape, but are disabled rather than pretending to work.
   const items = [
     { key: 'single', label: 'Single monitor', icon: Globe, onClick: onSingle },
-    { key: 'wizard', label: 'Monitor wizard', icon: Wand2, soon: true },
-    { key: 'bulk', label: 'Bulk upload', icon: Upload, soon: true },
+    { key: 'wizard', label: 'Monitor wizard', icon: Wand2, onClick: onWizard },
+    { key: 'bulk', label: 'Bulk upload', icon: Upload, onClick: onBulk },
     { key: 'group', label: 'Group', icon: FolderPlus, onClick: onGroup },
   ]
 
@@ -120,22 +128,15 @@ function NewMenu({ onSingle, onGroup }: { onSingle: () => void; onGroup: () => v
             <button
               key={item.key}
               role="menuitem"
-              disabled={item.soon}
               onClick={() => {
                 setOpen(false)
-                item.onClick?.()
+                item.onClick()
               }}
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors hover:bg-white/5"
               style={{ color: 'var(--vs-text)' }}
-              title={item.soon ? 'Not available yet' : undefined}
             >
               <item.icon className="h-4 w-4 shrink-0" style={{ color: 'var(--vs-cyan)' }} />
               <span className="flex-1">{item.label}</span>
-              {item.soon && (
-                <span className="vs-eyebrow shrink-0" style={{ fontSize: '0.5625rem' }}>
-                  Soon
-                </span>
-              )}
             </button>
           ))}
         </div>
@@ -588,7 +589,12 @@ export default function Dashboard() {
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
         </button>
 
-        <NewMenu onSingle={() => navigate('/monitors/create')} onGroup={() => setModal({ mode: 'create' })} />
+        <NewMenu
+          onSingle={() => navigate('/monitors/create')}
+          onWizard={() => navigate('/monitors/new/wizard')}
+          onBulk={() => navigate('/monitors/bulk')}
+          onGroup={() => setModal({ mode: 'create' })}
+        />
       </div>
 
       {error && (
