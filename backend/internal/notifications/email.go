@@ -261,7 +261,7 @@ func (p *EmailPlugin) Send(ctx context.Context, message *NotificationMessage) er
 	mime := p.buildMIME(subject, htmlBody, textBody)
 
 	start := time.Now()
-	if err := p.sendWithRetry(ctx, mime); err != nil {
+	if err := p.sendWithRetry(ctx, mime, p.to); err != nil {
 		p.logger.Printf("[email] ❌ Email failed: %v", err)
 		return err
 	}
@@ -271,7 +271,7 @@ func (p *EmailPlugin) Send(ctx context.Context, message *NotificationMessage) er
 
 // sendWithRetry attempts delivery, retrying up to twice (1s then 3s backoff) on
 // temporary network errors only. Auth/config errors are returned immediately.
-func (p *EmailPlugin) sendWithRetry(ctx context.Context, mime string) error {
+func (p *EmailPlugin) sendWithRetry(ctx context.Context, mime string, to []string) error {
 	backoffs := []time.Duration{1 * time.Second, 3 * time.Second}
 
 	var err error
@@ -286,7 +286,7 @@ func (p *EmailPlugin) sendWithRetry(ctx context.Context, mime string) error {
 			}
 		}
 
-		err = p.deliver(ctx, mime)
+		err = p.deliver(ctx, mime, to)
 		if err == nil {
 			return nil
 		}
@@ -305,8 +305,9 @@ func (p *EmailPlugin) sendWithRetry(ctx context.Context, mime string) error {
 	return err
 }
 
-// deliver performs a single SMTP conversation to send the message.
-func (p *EmailPlugin) deliver(ctx context.Context, mime string) error {
+// deliver performs a single SMTP conversation to send the message to the given
+// recipients.
+func (p *EmailPlugin) deliver(ctx context.Context, mime string, to []string) error {
 	addr := net.JoinHostPort(p.host, strconv.Itoa(p.port))
 
 	deadline := time.Now().Add(defaultSMTPTimeout)
@@ -380,7 +381,7 @@ func (p *EmailPlugin) deliver(ctx context.Context, mime string) error {
 	if err := client.Mail(p.from); err != nil {
 		return fmt.Errorf("MAIL FROM failed: %w", err)
 	}
-	for _, rcpt := range p.to {
+	for _, rcpt := range to {
 		if err := client.Rcpt(rcpt); err != nil {
 			return fmt.Errorf("RCPT TO %q failed: %w", rcpt, err)
 		}
@@ -399,6 +400,36 @@ func (p *EmailPlugin) deliver(ctx context.Context, mime string) error {
 
 	return client.Quit()
 }
+
+// SendRaw delivers an already-assembled MIME message to an explicit recipient
+// list, reusing this plugin's connection settings - including the configured
+// security mode, certificate policy, and authentication.
+//
+// Scheduled report delivery needs a custom subject, body, and file attachment,
+// none of which the notification message shape covers. Routing it through here
+// rather than a second SMTP implementation is deliberate: it keeps one place
+// where credentials can reach the wire.
+func (p *EmailPlugin) SendRaw(ctx context.Context, to []string, mime string) error {
+	if len(to) == 0 {
+		return errors.New("no recipients")
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, defaultSMTPTimeout)
+		defer cancel()
+	}
+
+	start := time.Now()
+	if err := p.sendWithRetry(ctx, mime, to); err != nil {
+		p.logger.Printf("[email] failed to send to %s: %v", strings.Join(to, ", "), err)
+		return err
+	}
+	p.logger.Printf("[email] sent to %s (%dms)", strings.Join(to, ", "), time.Since(start).Milliseconds())
+	return nil
+}
+
+// From returns the plugin's envelope sender, for building message headers.
+func (p *EmailPlugin) From() string { return p.from }
 
 // buildSubject constructs the subject line for the message's status.
 func (p *EmailPlugin) buildSubject(m *NotificationMessage) string {

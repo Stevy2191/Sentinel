@@ -37,6 +37,8 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       TIMEZONE: ${TIMEZONE:-UTC}
       REPORTS_DIR: /app/reports
+      # Used for links in scheduled report email.
+      SENTINEL_BASE_URL: ${SENTINEL_BASE_URL:-}
       JWT_SECRET: ${JWT_SECRET:-}
       # Initial state of self-registration (seeded on first run; an admin can
       # change it at runtime and that persists regardless of this value).

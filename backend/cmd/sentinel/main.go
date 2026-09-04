@@ -38,6 +38,7 @@ type config struct {
 	CheckInterval       time.Duration
 	MigrationsDir       string
 	ReportsDir          string
+	BaseURL             string
 	RegistrationEnabled bool
 }
 
@@ -50,6 +51,8 @@ func loadConfig() config {
 		// Where generated report PDFs are written. Mount this as a volume, or
 		// generated reports vanish when the container is replaced.
 		ReportsDir: getenv("REPORTS_DIR", "reports"),
+		// Absolute base URL used to build links in outgoing report email.
+		BaseURL: getenv("SENTINEL_BASE_URL", ""),
 		// Closed by default for security; the first account can always be created
 		// (see RegisterHandler), and an admin can open registration at runtime.
 		RegistrationEnabled: getenvBool("REGISTRATION_ENABLED", false),
@@ -97,6 +100,11 @@ func run() error {
 		return fmt.Errorf("initializing report renderer: %w", err)
 	}
 	reportBuilder := api.NewReportBuilder(db, reportAggregator, pdfRenderer)
+	reportGenerator := services.NewReportGenerator(db, reportAggregator, pdfRenderer)
+	// Scheduled delivery sends through the same SMTP configuration as the email
+	// notification channel, so it inherits its connection-security settings.
+	reportMailer := services.NewReportMailer(db, cfg.BaseURL)
+	reportScheduler := services.NewReportSchedulerService(db, reportGenerator, reportMailer)
 
 	// Seed the registration setting from the environment on first run only; once
 	// stored, an admin's runtime change is authoritative across restarts.
@@ -142,6 +150,7 @@ func run() error {
 	api.RegisterReportRoutes(v1, monitorService, checkService, incidentService)
 	// Saved-report builder: definitions, PDF generation, history, sharing.
 	api.RegisterReportBuilderRoutes(v1, reportBuilder)
+	api.RegisterReportScheduleRoutes(v1, api.NewReportScheduleHandler(db, reportScheduler))
 	api.RegisterIncidentRoutes(v1, incidentService, monitorService, db)
 	api.RegisterMonitorGroupRoutes(v1, monitorService, incidentService)
 	api.RegisterMonitorSharingRoutes(v1, monitorService, authService)
@@ -161,11 +170,17 @@ func run() error {
 	api.RegisterInvitationRoutes(admin, router, invitationService, authService)
 	api.RegisterNotificationConfigRoutes(v1, notificationConfigService)
 
-	// 6. Monitoring loop.
+	// 6. Scheduled report delivery. A failure to load schedules must not stop
+	// the server: monitoring is the primary job and continues without them.
+	if err := reportScheduler.Start(context.Background()); err != nil {
+		log.Printf("warning: report scheduler not started: %v", err)
+	}
+
+	// 7. Monitoring loop.
 	loopCtx, cancelLoop := context.WithCancel(context.Background())
 	go StartMonitoringLoop(loopCtx, db, monitorService, checkService, incidentService, notificationManager, cfg.CheckInterval)
 
-	// 7. HTTP server.
+	// 8. HTTP server.
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           router,
@@ -179,20 +194,23 @@ func run() error {
 		}
 	}()
 
-	// 8. Graceful shutdown.
+	// 9. Graceful shutdown.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	select {
 	case err := <-serverErr:
 		cancelLoop()
+		reportScheduler.Stop()
 		return fmt.Errorf("http server: %w", err)
 	case sig := <-quit:
 		log.Printf("shutdown signal received: %s", sig)
 	}
 
-	// Stop the monitoring loop, then the HTTP server, then the database.
+	// Stop the monitoring loop and the report scheduler, then the HTTP server,
+	// then the database.
 	cancelLoop()
+	reportScheduler.Stop()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
