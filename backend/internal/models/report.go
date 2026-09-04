@@ -191,7 +191,16 @@ type ReportAccess struct {
 	UserID     *uuid.UUID `json:"user_id" gorm:"column:user_id;type:uuid"`
 	AccessType string     `json:"access_type" gorm:"column:access_type;not null"`
 	ShareToken *string    `json:"share_token,omitempty" gorm:"column:share_token"`
-	CreatedAt  time.Time  `json:"created_at" gorm:"column:created_at;autoCreateTime"`
+	// ExpiresAt bounds a share link's lifetime. Nil means it never expires,
+	// which is what links created before expiry existed remain.
+	ExpiresAt *time.Time `json:"expires_at" gorm:"column:expires_at"`
+	CreatedAt time.Time  `json:"created_at" gorm:"column:created_at;autoCreateTime"`
+}
+
+// IsExpired reports whether this grant has lapsed. A grant with no expiry never
+// lapses.
+func (ra *ReportAccess) IsExpired(now time.Time) bool {
+	return ra.ExpiresAt != nil && !ra.ExpiresAt.After(now)
 }
 
 // TableName tells GORM which table backs the ReportAccess model.

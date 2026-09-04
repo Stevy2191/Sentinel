@@ -218,8 +218,11 @@ func (s *ReportSchedulerService) RunSchedule(ctx context.Context, scheduleID uui
 // unauthenticated access is an explicit action, not a side effect of delivery.
 func (s *ReportSchedulerService) shareTokenFor(ctx context.Context, reportID uuid.UUID) (string, error) {
 	var access models.ReportAccess
+	// Skip lapsed links: embedding one in a delivered email would send
+	// recipients to a dead page.
 	err := s.db.WithContext(ctx).
 		Where("report_id = ? AND share_token IS NOT NULL", reportID).
+		Where("expires_at IS NULL OR expires_at > ?", time.Now()).
 		Order("created_at DESC").First(&access).Error
 	if err != nil {
 		return "", err

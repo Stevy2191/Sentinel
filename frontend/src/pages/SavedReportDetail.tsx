@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Clock, Download, Loader2, Pencil, Play, Trash2 } from 'lucide-react'
+import { Clock, Download, Link2, Loader2, Pencil, Play, Plus, Trash2 } from 'lucide-react'
 import { useToasts, Toaster } from '@/components/Toast'
 import ScheduleManager from '@/components/ScheduleManager'
 import EditScheduleModal from '@/components/EditScheduleModal'
@@ -9,6 +9,7 @@ import {
   formatFileSize,
   useReportSchedules,
   useSavedReports,
+  useShareLinks,
 } from '@/hooks/useReportBuilder'
 
 /**
@@ -20,7 +21,8 @@ export default function SavedReportDetail() {
   const navigate = useNavigate()
   const { toasts, push } = useToasts()
 
-  const { reports, loading: reportsLoading, listReports } = useSavedReports()
+  const { reports, loading: reportsLoading, listReports, shareReport } = useSavedReports()
+  const { links, listLinks, revokeLink } = useShareLinks(id)
   const {
     schedules,
     listSchedules,
@@ -31,6 +33,7 @@ export default function SavedReportDetail() {
   const [showForm, setShowForm] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [expiryDays, setExpiryDays] = useState(30)
 
   // The list must actually be fetched here; the hook holds per-instance state,
   // so relying on another page having loaded it would leave this one empty.
@@ -41,6 +44,10 @@ export default function SavedReportDetail() {
   useEffect(() => {
     listSchedules()
   }, [listSchedules])
+
+  useEffect(() => {
+    listLinks()
+  }, [listLinks])
 
   const report = useMemo(() => reports.find((r) => r.id === id), [reports, id])
   // Resolved from the live list rather than copied into state, so the modal
@@ -70,6 +77,40 @@ export default function SavedReportDetail() {
       await listReports()
     } catch (err) {
       push((err as { message?: string }).message ?? 'Delivery failed', 'error')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const handleCreateLink = async () => {
+    if (!id) return
+    setBusy('share')
+    try {
+      const result = await shareReport(id, expiryDays)
+      const url = `${window.location.origin}${result.share_link}`
+      try {
+        await navigator.clipboard.writeText(url)
+        push('Share link created and copied to the clipboard', 'success')
+      } catch {
+        // Clipboard access needs a secure context and can be denied; never
+        // lose the link because of it.
+        push(`Share link created: ${url}`, 'info')
+      }
+      await listLinks()
+    } catch (err) {
+      push((err as { message?: string }).message ?? 'Could not create a share link', 'error')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const handleRevokeLink = async (shareId: string) => {
+    setBusy(shareId)
+    try {
+      await revokeLink(shareId)
+      push('Share link revoked', 'success')
+    } catch (err) {
+      push((err as { message?: string }).message ?? 'Could not revoke the link', 'error')
     } finally {
       setBusy(null)
     }
@@ -153,6 +194,82 @@ export default function SavedReportDetail() {
                   disabled={busy === gen.download_url}
                 >
                   <Download className="h-4 w-4" /> Download
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="rd-card p-5">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="vs-eyebrow flex items-center gap-2">
+            <Link2 className="h-4 w-4" /> Public share links
+          </h2>
+          <div className="flex items-center gap-2">
+            <label className="text-xs" style={{ color: 'var(--vs-text-dim)' }}>
+              Expires in
+            </label>
+            <select
+              className="rd-select"
+              value={expiryDays}
+              onChange={(e) => setExpiryDays(Number(e.target.value))}
+              aria-label="Share link lifetime"
+            >
+              <option value={1}>1 day</option>
+              <option value={7}>7 days</option>
+              <option value={30}>30 days</option>
+              <option value={90}>90 days</option>
+              <option value={0}>Never</option>
+            </select>
+            <button
+              className="rd-btn rd-btn-primary"
+              onClick={handleCreateLink}
+              disabled={busy === 'share'}
+            >
+              <Plus className="h-4 w-4" /> Create link
+            </button>
+          </div>
+        </div>
+
+        {links.length === 0 ? (
+          <p className="text-sm" style={{ color: 'var(--vs-text-dim)' }}>
+            No public links. Anyone with a link can read this report without signing in.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {links.map((link) => (
+              <div
+                key={link.id}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-md p-3"
+                style={{ background: 'var(--vs-panel-2)' }}
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-mono text-xs">
+                    {`${window.location.origin}${link.share_link}`}
+                  </p>
+                  <p className="mt-1 text-xs" style={{ color: 'var(--vs-text-dim)' }}>
+                    {link.expired ? (
+                      <span style={{ color: 'var(--vs-flat)' }}>Expired</span>
+                    ) : link.expires_at ? (
+                      `Expires ${new Date(link.expires_at).toLocaleString()}`
+                    ) : (
+                      <span style={{ color: 'var(--vs-amber)' }}>Never expires</span>
+                    )}
+                    {` · created ${new Date(link.created_at).toLocaleDateString()}`}
+                  </p>
+                </div>
+                <button
+                  className="rd-btn rd-btn-secondary"
+                  onClick={() => handleRevokeLink(link.id)}
+                  disabled={busy === link.id}
+                  title="Revoke this link"
+                >
+                  {busy === link.id ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-4 w-4" style={{ color: 'var(--vs-flat)' }} />
+                  )}
                 </button>
               </div>
             ))}

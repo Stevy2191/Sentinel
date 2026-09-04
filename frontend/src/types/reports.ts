@@ -114,5 +114,16 @@ export interface GenerateReportResult {
 export interface ShareReportResult {
   share_token: string
   share_link: string
+  /** Null means the link never expires. */
   expires_at?: string | null
+}
+
+/** An existing share link, from GET /reports/:id/shares. */
+export interface ShareLink {
+  id: string
+  share_token: string
+  share_link: string
+  expires_at?: string | null
+  expired: boolean
+  created_at: string
 }

@@ -94,6 +94,31 @@ type ReportGenerationResponse struct {
 	DownloadURL string    `json:"download_url"`
 }
 
+// shareReportRequest optionally bounds the new link's lifetime.
+type shareReportRequest struct {
+	// ExpiresInDays bounds the link. Omitted uses defaultShareExpiryDays;
+	// an explicit 0 means the link never expires.
+	ExpiresInDays *int `json:"expires_in_days"`
+}
+
+const (
+	// defaultShareExpiryDays is applied when a caller does not say. Links are
+	// public credentials, so the default is finite rather than forever.
+	defaultShareExpiryDays = 30
+	maxShareExpiryDays     = 365
+)
+
+// shareLinkResponse describes an existing share link. The token itself is
+// included so the owner can recover a link they created earlier.
+type shareLinkResponse struct {
+	ID         uuid.UUID  `json:"id"`
+	ShareToken string     `json:"share_token"`
+	ShareLink  string     `json:"share_link"`
+	ExpiresAt  *time.Time `json:"expires_at"`
+	Expired    bool       `json:"expired"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
 // ShareReportResponse carries a freshly minted share token.
 type ShareReportResponse struct {
 	ShareToken string     `json:"share_token"`
@@ -332,6 +357,32 @@ func (h *ReportBuilder) ShareReport(c *gin.Context) {
 		return
 	}
 
+	// A body is optional: an empty request still mints a link with the default
+	// expiry, so existing callers keep working.
+	var req shareReportRequest
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			respondError(c, http.StatusBadRequest, "invalid request body: "+err.Error())
+			return
+		}
+	}
+
+	days := defaultShareExpiryDays
+	if req.ExpiresInDays != nil {
+		days = *req.ExpiresInDays
+	}
+	if days < 0 || days > maxShareExpiryDays {
+		respondError(c, http.StatusBadRequest,
+			fmt.Sprintf("expires_in_days must be between 0 and %d (0 means never)", maxShareExpiryDays))
+		return
+	}
+
+	var expiresAt *time.Time
+	if days > 0 {
+		t := time.Now().AddDate(0, 0, days)
+		expiresAt = &t
+	}
+
 	token, err := generateShareToken()
 	if err != nil {
 		respondInternal(c, "generating share token", err)
@@ -343,6 +394,7 @@ func (h *ReportBuilder) ShareReport(c *gin.Context) {
 		ReportID:   report.ID,
 		AccessType: models.AccessTypeViewer,
 		ShareToken: &token,
+		ExpiresAt:  expiresAt,
 	}
 	if err := h.db.WithContext(ctx).Create(&access).Error; err != nil {
 		respondInternal(c, "creating share link", err)
@@ -352,9 +404,7 @@ func (h *ReportBuilder) ShareReport(c *gin.Context) {
 	respondSuccess(c, http.StatusOK, ShareReportResponse{
 		ShareToken: token,
 		ShareLink:  "/reports/share/" + token,
-		// Expiry is not implemented; the field is present so a caller can see
-		// plainly that the link does not expire.
-		ExpiresAt: nil,
+		ExpiresAt:  expiresAt,
 	})
 }
 
@@ -408,6 +458,12 @@ func (h *ReportBuilder) resolveShareToken(c *gin.Context) (*models.ReportAccess,
 	if err := h.db.WithContext(ctx).First(&access, "share_token = ?", token).Error; err != nil {
 		// Deliberately the same response as a missing report: a distinguishable
 		// error would let a caller confirm which tokens exist.
+		respondError(c, http.StatusNotFound, "report not found")
+		return nil, nil, false
+	}
+	// An expired link is indistinguishable from one that never existed, for the
+	// same reason: the response must not confirm that a token was ever valid.
+	if access.IsExpired(time.Now()) {
 		respondError(c, http.StatusNotFound, "report not found")
 		return nil, nil, false
 	}
@@ -620,6 +676,102 @@ func (h *ReportBuilder) DeleteReport(c *gin.Context) {
 	})
 }
 
+// ListShares handles GET /api/v1/reports/:id/shares, so an owner can see which
+// links exist, when they lapse, and revoke the ones they no longer want.
+func (h *ReportBuilder) ListShares(c *gin.Context) {
+	userID, _, isAdmin, ok := GetUserFromContext(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	reportID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "invalid report id")
+		return
+	}
+
+	ctx := c.Request.Context()
+	var report models.Report
+	if err := h.db.WithContext(ctx).First(&report, "id = ?", reportID).Error; err != nil {
+		respondError(c, http.StatusNotFound, "report not found")
+		return
+	}
+	// Seeing the live tokens is equivalent to holding them, so this needs the
+	// same right as creating one.
+	if !isAdmin && report.CreatedBy != userID && report.UserID != userID {
+		respondError(c, http.StatusForbidden, "only the report owner can manage its share links")
+		return
+	}
+
+	var grants []models.ReportAccess
+	if err := h.db.WithContext(ctx).
+		Where("report_id = ? AND share_token IS NOT NULL", reportID).
+		Order("created_at DESC").Find(&grants).Error; err != nil {
+		respondInternal(c, "listing share links", err)
+		return
+	}
+
+	now := time.Now()
+	out := make([]shareLinkResponse, 0, len(grants))
+	for _, g := range grants {
+		out = append(out, shareLinkResponse{
+			ID:         g.ID,
+			ShareToken: *g.ShareToken,
+			ShareLink:  "/reports/share/" + *g.ShareToken,
+			ExpiresAt:  g.ExpiresAt,
+			Expired:    g.IsExpired(now),
+			CreatedAt:  g.CreatedAt,
+		})
+	}
+	respondSuccess(c, http.StatusOK, out)
+}
+
+// RevokeShare handles DELETE /api/v1/reports/:id/shares/:share_id, withdrawing
+// a link immediately.
+func (h *ReportBuilder) RevokeShare(c *gin.Context) {
+	userID, _, isAdmin, ok := GetUserFromContext(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	reportID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "invalid report id")
+		return
+	}
+	shareID, err := uuid.Parse(c.Param("share_id"))
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "invalid share id")
+		return
+	}
+
+	ctx := c.Request.Context()
+	var report models.Report
+	if err := h.db.WithContext(ctx).First(&report, "id = ?", reportID).Error; err != nil {
+		respondError(c, http.StatusNotFound, "report not found")
+		return
+	}
+	if !isAdmin && report.CreatedBy != userID && report.UserID != userID {
+		respondError(c, http.StatusForbidden, "only the report owner can revoke its share links")
+		return
+	}
+
+	// Scoped to this report so a share id from another report cannot be revoked
+	// through an id the caller does own.
+	res := h.db.WithContext(ctx).
+		Where("id = ? AND report_id = ? AND share_token IS NOT NULL", shareID, reportID).
+		Delete(&models.ReportAccess{})
+	if res.Error != nil {
+		respondInternal(c, "revoking share link", res.Error)
+		return
+	}
+	if res.RowsAffected == 0 {
+		respondError(c, http.StatusNotFound, "share link not found")
+		return
+	}
+	respondSuccess(c, http.StatusOK, gin.H{"revoked": shareID})
+}
+
 // RegisterReportBuilderRoutes mounts the authenticated report-builder endpoints.
 func RegisterReportBuilderRoutes(rg *gin.RouterGroup, builder *ReportBuilder) {
 	reports := rg.Group("/reports")
@@ -630,6 +782,8 @@ func RegisterReportBuilderRoutes(rg *gin.RouterGroup, builder *ReportBuilder) {
 	reports.GET("", builder.ListReports)
 	reports.GET("/:id/download/:generation_id", builder.DownloadReport)
 	reports.POST("/:id/share", builder.ShareReport)
+	reports.GET("/:id/shares", builder.ListShares)
+	reports.DELETE("/:id/shares/:share_id", builder.RevokeShare)
 	reports.DELETE("/:id", builder.DeleteReport)
 
 	// Sibling resources the builder UI needs. They sit outside the /reports

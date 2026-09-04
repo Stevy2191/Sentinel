@@ -8,6 +8,7 @@ import type {
   ReportSchedule,
   ReportTemplate,
   SavedReport,
+  ShareLink,
   ShareReportResult,
 } from '@/types/reports'
 
@@ -57,14 +58,44 @@ export function useSavedReports() {
     [listReports]
   )
 
-  const shareReport = useCallback(async (reportId: string) => {
+  // expiresInDays: omit for the backend default (30 days); 0 means never.
+  const shareReport = useCallback(async (reportId: string, expiresInDays?: number) => {
     const { data } = await api.post<ApiResponse<ShareReportResult>>(
-      `/reports/${reportId}/share`
+      `/reports/${reportId}/share`,
+      expiresInDays === undefined ? {} : { expires_in_days: expiresInDays }
     )
     return data.data
   }, [])
 
   return { reports, loading, error, listReports, createReport, deleteReport, shareReport }
+}
+
+/** useShareLinks lists and revokes a report's public share links. */
+export function useShareLinks(reportId: string | undefined) {
+  const [links, setLinks] = useState<ShareLink[]>([])
+  const [loading, setLoading] = useState(false)
+
+  const listLinks = useCallback(async () => {
+    if (!reportId) return
+    setLoading(true)
+    try {
+      const { data } = await api.get<ApiResponse<ShareLink[]>>(`/reports/${reportId}/shares`)
+      setLinks(data.data ?? [])
+    } finally {
+      setLoading(false)
+    }
+  }, [reportId])
+
+  const revokeLink = useCallback(
+    async (shareId: string) => {
+      if (!reportId) return
+      await api.delete(`/reports/${reportId}/shares/${shareId}`)
+      await listLinks()
+    },
+    [reportId, listLinks]
+  )
+
+  return { links, loading, listLinks, revokeLink }
 }
 
 /** useReportTemplates loads the templates the wizard offers. */
