@@ -11,7 +11,7 @@ const baseURL =
 export const api: AxiosInstance = axios.create({
   baseURL,
   headers: { 'Content-Type': 'application/json' },
-  timeout: 15000,
+  timeout: 120000,
 })
 
 // A normalized API error surfaced to the UI.

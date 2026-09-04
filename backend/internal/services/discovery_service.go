@@ -33,9 +33,6 @@ const (
 	// request (1024 addresses, i.e. up to a /22) so a request can't be used to
 	// sweep, say, a /8.
 	maxDiscoveryHosts = 1024
-	// maxDiscoveryDuration is a hard ceiling on total scan time regardless of
-	// subnet size or per-host timeout, so a request can't hang indefinitely.
-	maxDiscoveryDuration = 45 * time.Second
 	// reverseDNSTimeout bounds the best-effort hostname lookup for each host
 	// that responds; it never blocks a host from being reported if it's slow.
 	reverseDNSTimeout = 500 * time.Millisecond
@@ -110,8 +107,7 @@ func (s *DiscoveryService) ScanSubnet(ctx context.Context, cidr string, perHostT
 		perHostTimeout = maxDiscoveryTimeout
 	}
 
-	scanCtx, cancel := context.WithTimeout(ctx, maxDiscoveryDuration)
-	defer cancel()
+	scanCtx := ctx
 
 	// Probe once up front rather than per host: if ICMP can't be opened at all
 	// (no CAP_NET_RAW and no unprivileged-ping range configured), there's no
