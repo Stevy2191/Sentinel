@@ -99,6 +99,7 @@ func run() error {
 	settingsService := services.NewSettingsService(db)
 	discoveryService := services.NewDiscoveryService()
 	reportAggregator := services.NewReportAggregatorService(db)
+	auditService := services.NewAuditService(db)
 	pdfRenderer, err := services.NewPDFRendererService(cfg.ReportsDir)
 	if err != nil {
 		return fmt.Errorf("initializing report renderer: %w", err)
@@ -107,6 +108,7 @@ func run() error {
 	// PDF rendering runs on a worker pool rather than in the request handler.
 	reportJobs := services.NewReportJobQueue(db, services.NewReportGenerator(db, reportAggregator, pdfRenderer), cfg.ReportWorkers)
 	reportBuilder.SetJobQueue(reportJobs)
+	reportBuilder.SetAudit(auditService)
 	reportGenerator := services.NewReportGenerator(db, reportAggregator, pdfRenderer)
 	// Scheduled delivery sends through the same SMTP configuration as the email
 	// notification channel, so it inherits its connection-security settings.
@@ -159,7 +161,7 @@ func run() error {
 	api.RegisterReportRoutes(v1, monitorService, checkService, incidentService)
 	// Saved-report builder: definitions, PDF generation, history, sharing.
 	api.RegisterReportBuilderRoutes(v1, reportBuilder)
-	api.RegisterReportScheduleRoutes(v1, api.NewReportScheduleHandler(db, reportScheduler))
+	api.RegisterReportScheduleRoutes(v1, api.NewReportScheduleHandler(db, reportScheduler, auditService))
 	api.RegisterIncidentRoutes(v1, incidentService, monitorService, db)
 	api.RegisterMonitorGroupRoutes(v1, monitorService, incidentService)
 	api.RegisterMonitorSharingRoutes(v1, monitorService, authService)
@@ -176,6 +178,7 @@ func run() error {
 	admin := v1.Group("")
 	admin.Use(api.RequireAdmin())
 	api.RegisterUserManagementRoutes(admin, authService)
+	api.RegisterAuditRoutes(admin, auditService)
 	api.RegisterInvitationRoutes(admin, router, invitationService, authService)
 	api.RegisterNotificationConfigRoutes(v1, notificationConfigService)
 

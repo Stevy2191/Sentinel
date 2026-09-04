@@ -38,6 +38,8 @@ type ReportBuilder struct {
 	scheduler *services.ReportSchedulerService
 	// jobs renders reports off the request path.
 	jobs *services.ReportJobQueue
+	// audit records who changed what.
+	audit *services.AuditService
 }
 
 // NewReportBuilder returns a handler set bound to its dependencies.
@@ -65,6 +67,17 @@ func (h *ReportBuilder) SetScheduler(s *services.ReportSchedulerService) {
 // SetJobQueue wires the render queue in after construction.
 func (h *ReportBuilder) SetJobQueue(q *services.ReportJobQueue) {
 	h.jobs = q
+}
+
+// SetAudit wires the audit service in after construction.
+func (h *ReportBuilder) SetAudit(a *services.AuditService) {
+	h.audit = a
+}
+
+// actorFrom builds the audit actor for the current request.
+func actorFrom(c *gin.Context) services.Actor {
+	userID, username, _, _ := GetUserFromContext(c)
+	return services.Actor{UserID: userID, Username: username, IP: c.ClientIP()}
 }
 
 // ---- DTOs ------------------------------------------------------------------
@@ -211,6 +224,15 @@ func (h *ReportBuilder) GenerateReport(c *gin.Context) {
 		respondInternal(c, "queueing report render", err)
 		return
 	}
+
+	h.audit.Record(c.Request.Context(), actorFrom(c),
+		models.ActionReportCreated, models.ResourceReport, &report.ID,
+		models.AuditChanges{Summary: map[string]any{
+			"name":            report.Name,
+			"scope_type":      report.ScopeType,
+			"time_range_days": report.TimeRangeDays,
+			"template_id":     report.TemplateID,
+		}})
 
 	// 202: accepted, not done. The caller polls job_url until the job reaches a
 	// terminal state.
@@ -390,6 +412,16 @@ func (h *ReportBuilder) ShareReport(c *gin.Context) {
 		respondInternal(c, "creating share link", err)
 		return
 	}
+
+	// The token itself is deliberately not recorded: an audit entry is read by
+	// more people than the link is meant for, and storing it would turn the log
+	// into a second copy of the credential.
+	h.audit.Record(c.Request.Context(), actorFrom(c),
+		models.ActionShareLinkCreated, models.ResourceShareLink, &access.ID,
+		models.AuditChanges{Summary: map[string]any{
+			"report_id":  report.ID,
+			"expires_at": expiresAt,
+		}})
 
 	respondSuccess(c, http.StatusOK, ShareReportResponse{
 		ShareToken: token,
@@ -662,6 +694,15 @@ func (h *ReportBuilder) DeleteReport(c *gin.Context) {
 		removed++
 	}
 
+	h.audit.Record(c.Request.Context(), actorFrom(c),
+		models.ActionReportDeleted, models.ResourceReport, &report.ID,
+		models.AuditChanges{Summary: map[string]any{
+			"name":              report.Name,
+			"scope_type":        report.ScopeType,
+			"schedules_removed": len(schedules),
+			"files_removed":     removed,
+		}})
+
 	respondSuccess(c, http.StatusOK, gin.H{
 		"deleted":           report.ID,
 		"schedules_removed": len(schedules),
@@ -726,6 +767,55 @@ func (h *ReportBuilder) GetReportJob(c *gin.Context) {
 		resp.DownloadURL = &url
 	}
 	respondSuccess(c, http.StatusOK, resp)
+}
+
+// ListReportJobs handles GET /api/v1/reports/:id/jobs, the render history for a
+// report. Failed attempts are the point: without this a permanently failed
+// render is indistinguishable from a report nobody ever generated.
+func (h *ReportBuilder) ListReportJobs(c *gin.Context) {
+	userID, _, isAdmin, ok := GetUserFromContext(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	reportID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "invalid report id")
+		return
+	}
+
+	ctx := c.Request.Context()
+	var report models.Report
+	if err := h.db.WithContext(ctx).First(&report, "id = ?", reportID).Error; err != nil {
+		respondError(c, http.StatusNotFound, "report not found")
+		return
+	}
+	if !h.userCanRead(ctx, &report, userID, isAdmin) {
+		respondError(c, http.StatusForbidden, "you do not have permission to view this report")
+		return
+	}
+
+	var jobs []models.ReportJob
+	if err := h.db.WithContext(ctx).Where("report_id = ?", reportID).
+		Order("created_at DESC").Limit(20).Find(&jobs).Error; err != nil {
+		respondInternal(c, "listing report jobs", err)
+		return
+	}
+
+	out := make([]jobStatusResponse, 0, len(jobs))
+	for _, j := range jobs {
+		resp := jobStatusResponse{
+			ID: j.ID, ReportID: j.ReportID, Status: j.Status,
+			GenerationID: j.GenerationID, Error: j.Error, Attempts: j.Attempts,
+			CreatedAt: j.CreatedAt, FinishedAt: j.FinishedAt,
+		}
+		if j.GenerationID != nil {
+			url := downloadURL(j.ReportID, *j.GenerationID)
+			resp.DownloadURL = &url
+		}
+		out = append(out, resp)
+	}
+	respondSuccess(c, http.StatusOK, out)
 }
 
 // ListShares handles GET /api/v1/reports/:id/shares, so an owner can see which
@@ -821,6 +911,10 @@ func (h *ReportBuilder) RevokeShare(c *gin.Context) {
 		respondError(c, http.StatusNotFound, "share link not found")
 		return
 	}
+	h.audit.Record(c.Request.Context(), actorFrom(c),
+		models.ActionShareLinkRevoked, models.ResourceShareLink, &shareID,
+		models.AuditChanges{Summary: map[string]any{"report_id": reportID}})
+
 	respondSuccess(c, http.StatusOK, gin.H{"revoked": shareID})
 }
 
@@ -835,6 +929,7 @@ func RegisterReportBuilderRoutes(rg *gin.RouterGroup, builder *ReportBuilder) {
 	reports.GET("/:id/download/:generation_id", builder.DownloadReport)
 	reports.POST("/:id/share", builder.ShareReport)
 	reports.GET("/jobs/:job_id", builder.GetReportJob)
+	reports.GET("/:id/jobs", builder.ListReportJobs)
 	reports.GET("/:id/shares", builder.ListShares)
 	reports.DELETE("/:id/shares/:share_id", builder.RevokeShare)
 	reports.DELETE("/:id", builder.DeleteReport)

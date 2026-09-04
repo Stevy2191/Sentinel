@@ -23,11 +23,27 @@ import (
 type ReportScheduleHandler struct {
 	db        *gorm.DB
 	scheduler *services.ReportSchedulerService
+	audit     *services.AuditService
 }
 
-// NewReportScheduleHandler returns a handler bound to db and the scheduler.
-func NewReportScheduleHandler(db *gorm.DB, scheduler *services.ReportSchedulerService) *ReportScheduleHandler {
-	return &ReportScheduleHandler{db: db, scheduler: scheduler}
+// NewReportScheduleHandler returns a handler bound to db, the scheduler, and
+// the audit service.
+func NewReportScheduleHandler(db *gorm.DB, scheduler *services.ReportSchedulerService, audit *services.AuditService) *ReportScheduleHandler {
+	return &ReportScheduleHandler{db: db, scheduler: scheduler, audit: audit}
+}
+
+// scheduleSnapshot captures the fields an operator would want to compare across
+// an edit. Recipients are included because changing who receives a report is
+// exactly the kind of change an audit trail exists to surface.
+func scheduleSnapshot(s *models.ReportSchedule) map[string]any {
+	return map[string]any{
+		"schedule_type":      s.ScheduleType,
+		"cron_expression":    s.CronExpression,
+		"email_recipients":   []string(s.EmailRecipients),
+		"send_as_attachment": s.SendAsAttachment,
+		"include_in_email":   s.IncludeInEmail,
+		"is_active":          s.IsActive,
+	}
 }
 
 // scheduleRequest is the create/update body.
@@ -198,6 +214,11 @@ func (h *ReportScheduleHandler) CreateSchedule(c *gin.Context) {
 
 	// Reload so next_run_at, set during registration, is in the response.
 	h.db.WithContext(c.Request.Context()).First(&schedule, "id = ?", schedule.ID)
+
+	h.audit.Record(c.Request.Context(), actorFrom(c),
+		models.ActionScheduleCreated, models.ResourceSchedule, &schedule.ID,
+		models.AuditChanges{Summary: scheduleSnapshot(&schedule)})
+
 	respondSuccess(c, http.StatusCreated, toScheduleResponse(schedule))
 }
 
@@ -239,6 +260,9 @@ func (h *ReportScheduleHandler) UpdateSchedule(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return
 	}
+	// Snapshot before applying, so the entry can show what actually changed.
+	before := scheduleSnapshot(schedule)
+
 	if err := applyRequest(schedule, req); err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
@@ -262,6 +286,11 @@ func (h *ReportScheduleHandler) UpdateSchedule(c *gin.Context) {
 	}
 
 	h.db.WithContext(c.Request.Context()).First(schedule, "id = ?", schedule.ID)
+
+	h.audit.Record(c.Request.Context(), actorFrom(c),
+		models.ActionScheduleUpdated, models.ResourceSchedule, &schedule.ID,
+		models.AuditChanges{Before: before, After: scheduleSnapshot(schedule)})
+
 	respondSuccess(c, http.StatusOK, toScheduleResponse(*schedule))
 }
 
@@ -279,6 +308,10 @@ func (h *ReportScheduleHandler) DeleteSchedule(c *gin.Context) {
 	}
 	// Drop the cron job too, or a deleted schedule keeps sending mail.
 	h.scheduler.Unregister(schedule.ID)
+
+	h.audit.Record(c.Request.Context(), actorFrom(c),
+		models.ActionScheduleDeleted, models.ResourceSchedule, &schedule.ID,
+		models.AuditChanges{Summary: scheduleSnapshot(schedule)})
 
 	respondSuccess(c, http.StatusOK, gin.H{"deleted": schedule.ID})
 }
@@ -298,6 +331,15 @@ func (h *ReportScheduleHandler) RunScheduleNow(c *gin.Context) {
 		respondInternal(c, "running schedule", err)
 		return
 	}
+	// A manual run sends mail to real people; that is worth a record even
+	// though nothing was modified.
+	h.audit.Record(c.Request.Context(), actorFrom(c),
+		models.ActionScheduleRun, models.ResourceSchedule, &schedule.ID,
+		models.AuditChanges{Summary: map[string]any{
+			"recipients": []string(schedule.EmailRecipients),
+			"trigger":    "manual",
+		}})
+
 	respondSuccess(c, http.StatusOK, gin.H{
 		"schedule_id": schedule.ID,
 		"recipients":  len(schedule.EmailRecipients),

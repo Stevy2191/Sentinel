@@ -73,6 +73,25 @@ export function useSavedReports() {
   return { reports, loading, error, listReports, createReport, deleteReport, shareReport }
 }
 
+/** useReportJobs lists a report's render attempts, including failures. */
+export function useReportJobs(reportId: string | undefined) {
+  const [jobs, setJobs] = useState<ReportJob[]>([])
+  const [loading, setLoading] = useState(false)
+
+  const listJobs = useCallback(async () => {
+    if (!reportId) return
+    setLoading(true)
+    try {
+      const { data } = await api.get<ApiResponse<ReportJob[]>>(`/reports/${reportId}/jobs`)
+      setJobs(data.data ?? [])
+    } finally {
+      setLoading(false)
+    }
+  }, [reportId])
+
+  return { jobs, loading, listJobs }
+}
+
 /** getReportJob fetches the current state of a queued render. */
 export async function getReportJob(jobID: string): Promise<ReportJob> {
   const { data } = await api.get<ApiResponse<ReportJob>>(`/reports/jobs/${jobID}`)

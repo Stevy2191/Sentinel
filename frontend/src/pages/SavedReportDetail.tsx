@@ -1,12 +1,26 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Clock, Download, Link2, Loader2, Pencil, Play, Plus, Trash2 } from 'lucide-react'
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  Download,
+  History,
+  Link2,
+  Loader2,
+  Pencil,
+  Play,
+  Plus,
+  Trash2,
+} from 'lucide-react'
 import { useToasts, Toaster } from '@/components/Toast'
 import ScheduleManager from '@/components/ScheduleManager'
 import EditScheduleModal from '@/components/EditScheduleModal'
 import {
   downloadReportPDF,
   formatFileSize,
+  useReportJobs,
   useReportSchedules,
   useSavedReports,
   useShareLinks,
@@ -23,6 +37,7 @@ export default function SavedReportDetail() {
 
   const { reports, loading: reportsLoading, listReports, shareReport } = useSavedReports()
   const { links, listLinks, revokeLink } = useShareLinks(id)
+  const { jobs, listJobs } = useReportJobs(id)
   const {
     schedules,
     listSchedules,
@@ -34,6 +49,7 @@ export default function SavedReportDetail() {
   const [busy, setBusy] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [expiryDays, setExpiryDays] = useState(30)
+  const [openJobId, setOpenJobId] = useState<string | null>(null)
 
   // The list must actually be fetched here; the hook holds per-instance state,
   // so relying on another page having loaded it would leave this one empty.
@@ -48,6 +64,10 @@ export default function SavedReportDetail() {
   useEffect(() => {
     listLinks()
   }, [listLinks])
+
+  useEffect(() => {
+    listJobs()
+  }, [listJobs])
 
   const report = useMemo(() => reports.find((r) => r.id === id), [reports, id])
   // Resolved from the live list rather than copied into state, so the modal
@@ -197,6 +217,77 @@ export default function SavedReportDetail() {
                 </button>
               </div>
             ))}
+          </div>
+        )}
+      </section>
+
+      <section className="rd-card p-5">
+        <h2 className="vs-eyebrow mb-3 flex items-center gap-2">
+          <History className="h-4 w-4" /> Render history
+        </h2>
+        {jobs.length === 0 ? (
+          <p className="text-sm" style={{ color: 'var(--vs-text-dim)' }}>
+            No render attempts recorded.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {jobs.map((job) => {
+              const failed = job.status === 'failed'
+              const pending = job.status === 'queued' || job.status === 'running'
+              const color = failed
+                ? 'var(--vs-flat)'
+                : pending
+                  ? 'var(--vs-amber)'
+                  : 'var(--vs-ecg)'
+              return (
+                <div
+                  key={job.id}
+                  className="rounded-md p-3"
+                  style={{ background: 'var(--vs-panel-2)' }}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      {failed && (
+                        <AlertTriangle className="h-4 w-4" style={{ color: 'var(--vs-flat)' }} />
+                      )}
+                      <span className="text-sm font-medium capitalize" style={{ color }}>
+                        {job.status}
+                      </span>
+                      <span className="text-xs" style={{ color: 'var(--vs-text-dim)' }}>
+                        {new Date(job.created_at).toLocaleString()}
+                        {job.attempts > 1 && ` · ${job.attempts} attempts`}
+                      </span>
+                    </div>
+                    {failed && job.error && (
+                      // Collapsed by default: the reason is usually long and
+                      // only wanted when something has gone wrong.
+                      <button
+                        className="rd-btn rd-btn-secondary"
+                        onClick={() => setOpenJobId(openJobId === job.id ? null : job.id)}
+                        aria-expanded={openJobId === job.id}
+                        aria-controls={`job-error-${job.id}`}
+                      >
+                        {openJobId === job.id ? (
+                          <ChevronDown className="h-4 w-4" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4" />
+                        )}
+                        Details
+                      </button>
+                    )}
+                  </div>
+                  {failed && job.error && openJobId === job.id && (
+                    <pre
+                      id={`job-error-${job.id}`}
+                      className="mt-2 overflow-x-auto whitespace-pre-wrap break-words rounded p-2 font-mono text-xs"
+                      style={{ background: 'var(--vs-bg)', color: 'var(--vs-text-dim)' }}
+                    >
+                      {job.error}
+                    </pre>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
       </section>
