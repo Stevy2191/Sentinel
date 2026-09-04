@@ -7,6 +7,7 @@ import {
   useMonitorTags,
   useReportTemplates,
   useSavedReports,
+  waitForReportJob,
 } from '@/hooks/useReportBuilder'
 import type { ReportScopeType } from '@/types/reports'
 
@@ -45,6 +46,9 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
 
   const [step, setStep] = useState<WizardStep>(1)
   const [generating, setGenerating] = useState(false)
+  // Rendering is queued, so the button reflects the job's actual state rather
+  // than a generic spinner.
+  const [progress, setProgress] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [scopeType, setScopeType] = useState<ReportScopeType>('monitors')
   const [selection, setSelection] = useState<string[]>([])
@@ -120,11 +124,29 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
         custom_title: customTitle.trim() || undefined,
         custom_description: customDescription.trim() || undefined,
       })
+
+      // The report exists now; its first PDF is still rendering. Wait for the
+      // job so the detail page does not open on an empty generation list.
+      setProgress('Queued…')
+      try {
+        await waitForReportJob(result.job_id, {
+          onProgress: (job) =>
+            setProgress(job.status === 'running' ? 'Rendering…' : 'Queued…'),
+        })
+      } catch (jobErr) {
+        // The definition was saved even though the render failed, so send the
+        // user to it rather than losing their work, and say what happened.
+        onError?.(
+          (jobErr as { message?: string }).message ??
+            'The report was saved but its PDF could not be generated'
+        )
+      }
       navigate(`/reports/${result.id}`)
     } catch (err) {
       onError?.((err as { message?: string }).message ?? 'Could not generate the report')
     } finally {
       setGenerating(false)
+      setProgress(null)
     }
   }
 
@@ -366,7 +388,7 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
           >
             {generating ? (
               <span className="flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" /> Generating…
+                <Loader2 className="h-4 w-4 animate-spin" /> {progress ?? 'Saving…'}
               </span>
             ) : (
               'Generate report'

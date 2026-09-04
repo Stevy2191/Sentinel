@@ -36,6 +36,8 @@ type ReportBuilder struct {
 	// schedules away, but their cron jobs would otherwise keep firing against
 	// rows that no longer exist.
 	scheduler *services.ReportSchedulerService
+	// jobs renders reports off the request path.
+	jobs *services.ReportJobQueue
 }
 
 // NewReportBuilder returns a handler set bound to its dependencies.
@@ -58,6 +60,11 @@ func NewReportBuilder(
 // cycle between the builder and the scheduler (each needs the other).
 func (h *ReportBuilder) SetScheduler(s *services.ReportSchedulerService) {
 	h.scheduler = s
+}
+
+// SetJobQueue wires the render queue in after construction.
+func (h *ReportBuilder) SetJobQueue(q *services.ReportJobQueue) {
+	h.jobs = q
 }
 
 // ---- DTOs ------------------------------------------------------------------
@@ -173,35 +180,6 @@ func (h *ReportBuilder) GenerateReport(c *gin.Context) {
 		return
 	}
 
-	// Aggregate and render BEFORE persisting, so a failure does not leave an
-	// orphaned report definition behind.
-	reportData, err := h.aggregator.AggregateReportData(c.Request.Context(), &report)
-	if err != nil {
-		respondInternal(c, "aggregating report data", err)
-		return
-	}
-
-	pdfFilename, err := h.pdfRenderer.RenderReportToPDF(
-		reportData, template.Sections, "report_"+report.ID.String()[:8])
-	if err != nil {
-		respondInternal(c, "rendering report PDF", err)
-		return
-	}
-
-	fileSize, sizeErr := h.pdfRenderer.GetPDFFileSize(pdfFilename)
-	var fileSizePtr *int
-	if sizeErr == nil {
-		fileSizePtr = &fileSize
-	}
-
-	generation := models.ReportGeneration{
-		ID:          uuid.New(),
-		ReportID:    report.ID,
-		GeneratedAt: time.Now(),
-		PDFPath:     pdfFilename,
-		FileSize:    fileSizePtr,
-		GeneratedBy: userID,
-	}
 	access := models.ReportAccess{
 		ID:         uuid.New(),
 		ReportID:   report.ID,
@@ -209,26 +187,38 @@ func (h *ReportBuilder) GenerateReport(c *gin.Context) {
 		AccessType: models.AccessTypeOwner,
 	}
 
-	// One transaction: a report with no owner row would be invisible to its own
-	// creator in ListReports.
+	// Persist the definition and its owner grant together: a report with no
+	// owner row would be invisible to its own creator in ListReports.
+	//
+	// Rendering no longer happens here. It is queued, so a large report cannot
+	// hold a connection open for the length of a render, and the caller is not
+	// waiting on aggregation and file IO. The report exists immediately either
+	// way; only its first PDF arrives later.
 	if err := h.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&report).Error; err != nil {
 			return err
 		}
-		if err := tx.Create(&access).Error; err != nil {
-			return err
-		}
-		return tx.Create(&generation).Error
+		return tx.Create(&access).Error
 	}); err != nil {
 		respondInternal(c, "saving report", err)
 		return
 	}
 
-	respondSuccess(c, http.StatusCreated, gin.H{
-		"id":            report.ID,
-		"generation_id": generation.ID,
-		"download_url":  downloadURL(report.ID, generation.ID),
-		"warnings":      reportData.Warnings,
+	job, err := h.jobs.Enqueue(c.Request.Context(), report.ID, userID)
+	if err != nil {
+		// The definition is saved but nothing will render it; say so rather
+		// than reporting success.
+		respondInternal(c, "queueing report render", err)
+		return
+	}
+
+	// 202: accepted, not done. The caller polls job_url until the job reaches a
+	// terminal state.
+	respondSuccess(c, http.StatusAccepted, gin.H{
+		"id":      report.ID,
+		"job_id":  job.ID,
+		"status":  job.Status,
+		"job_url": jobURL(job.ID),
 	})
 }
 
@@ -566,6 +556,10 @@ func downloadURL(reportID, generationID uuid.UUID) string {
 	return fmt.Sprintf("/api/v1/reports/%s/download/%s", reportID, generationID)
 }
 
+func jobURL(jobID uuid.UUID) string {
+	return fmt.Sprintf("/api/v1/reports/jobs/%s", jobID)
+}
+
 // generateShareToken returns a 256-bit hex token. The read error is checked:
 // ignoring it could yield an all-zero, guessable token for a public link.
 func generateShareToken() (string, error) {
@@ -676,6 +670,64 @@ func (h *ReportBuilder) DeleteReport(c *gin.Context) {
 	})
 }
 
+// jobStatusResponse is what a client polls for.
+type jobStatusResponse struct {
+	ID           uuid.UUID  `json:"id"`
+	ReportID     uuid.UUID  `json:"report_id"`
+	Status       string     `json:"status"`
+	GenerationID *uuid.UUID `json:"generation_id"`
+	DownloadURL  *string    `json:"download_url"`
+	Error        *string    `json:"error"`
+	Attempts     int        `json:"attempts"`
+	CreatedAt    time.Time  `json:"created_at"`
+	FinishedAt   *time.Time `json:"finished_at"`
+}
+
+// GetReportJob handles GET /api/v1/reports/jobs/:job_id, the poll target for a
+// queued render.
+func (h *ReportBuilder) GetReportJob(c *gin.Context) {
+	userID, _, isAdmin, ok := GetUserFromContext(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	jobID, err := uuid.Parse(c.Param("job_id"))
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "invalid job id")
+		return
+	}
+
+	ctx := c.Request.Context()
+	var job models.ReportJob
+	if err := h.db.WithContext(ctx).First(&job, "id = ?", jobID).Error; err != nil {
+		respondError(c, http.StatusNotFound, "job not found")
+		return
+	}
+
+	// A job exposes a report's rendering state, so it inherits the report's
+	// permissions rather than being readable by anyone holding the id.
+	var report models.Report
+	if err := h.db.WithContext(ctx).First(&report, "id = ?", job.ReportID).Error; err != nil {
+		respondError(c, http.StatusNotFound, "job not found")
+		return
+	}
+	if !h.userCanRead(ctx, &report, userID, isAdmin) {
+		respondError(c, http.StatusForbidden, "you do not have permission to view this job")
+		return
+	}
+
+	resp := jobStatusResponse{
+		ID: job.ID, ReportID: job.ReportID, Status: job.Status,
+		GenerationID: job.GenerationID, Error: job.Error, Attempts: job.Attempts,
+		CreatedAt: job.CreatedAt, FinishedAt: job.FinishedAt,
+	}
+	if job.GenerationID != nil {
+		url := downloadURL(job.ReportID, *job.GenerationID)
+		resp.DownloadURL = &url
+	}
+	respondSuccess(c, http.StatusOK, resp)
+}
+
 // ListShares handles GET /api/v1/reports/:id/shares, so an owner can see which
 // links exist, when they lapse, and revoke the ones they no longer want.
 func (h *ReportBuilder) ListShares(c *gin.Context) {
@@ -782,6 +834,7 @@ func RegisterReportBuilderRoutes(rg *gin.RouterGroup, builder *ReportBuilder) {
 	reports.GET("", builder.ListReports)
 	reports.GET("/:id/download/:generation_id", builder.DownloadReport)
 	reports.POST("/:id/share", builder.ShareReport)
+	reports.GET("/jobs/:job_id", builder.GetReportJob)
 	reports.GET("/:id/shares", builder.ListShares)
 	reports.DELETE("/:id/shares/:share_id", builder.RevokeShare)
 	reports.DELETE("/:id", builder.DeleteReport)

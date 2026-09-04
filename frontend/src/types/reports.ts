@@ -102,12 +102,30 @@ export interface CreateSchedulePayload {
   is_active?: boolean
 }
 
-/** Response from POST /reports/generate. */
+export type ReportJobStatus = 'queued' | 'running' | 'succeeded' | 'failed'
+
+/**
+ * Response from POST /reports/generate, which returns 202. The report exists
+ * immediately; its PDF is rendered by a worker, so the caller polls job_url.
+ */
 export interface GenerateReportResult {
   id: string
-  generation_id: string
-  download_url: string
-  warnings?: string[] | null
+  job_id: string
+  status: ReportJobStatus
+  job_url: string
+}
+
+/** Response from GET /reports/jobs/:job_id. */
+export interface ReportJob {
+  id: string
+  report_id: string
+  status: ReportJobStatus
+  generation_id?: string | null
+  download_url?: string | null
+  error?: string | null
+  attempts: number
+  created_at: string
+  finished_at?: string | null
 }
 
 /** Response from POST /reports/:id/share. */

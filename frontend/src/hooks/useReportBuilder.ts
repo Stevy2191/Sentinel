@@ -5,6 +5,7 @@ import type {
   CreateReportPayload,
   CreateSchedulePayload,
   GenerateReportResult,
+  ReportJob,
   ReportSchedule,
   ReportTemplate,
   SavedReport,
@@ -38,6 +39,8 @@ export function useSavedReports() {
     }
   }, [])
 
+  // Returns as soon as the report is saved and its render is queued. The PDF is
+  // not ready yet - callers that need it should await waitForReportJob.
   const createReport = useCallback(
     async (payload: CreateReportPayload) => {
       const { data } = await api.post<ApiResponse<GenerateReportResult>>(
@@ -68,6 +71,45 @@ export function useSavedReports() {
   }, [])
 
   return { reports, loading, error, listReports, createReport, deleteReport, shareReport }
+}
+
+/** getReportJob fetches the current state of a queued render. */
+export async function getReportJob(jobID: string): Promise<ReportJob> {
+  const { data } = await api.get<ApiResponse<ReportJob>>(`/reports/jobs/${jobID}`)
+  return data.data
+}
+
+/**
+ * waitForReportJob polls a render job until it reaches a terminal state.
+ *
+ * Rendering is off the request path now, so "the report was created" and "its
+ * PDF exists" are separate events. onProgress reports each observed state so a
+ * caller can say "queued" versus "rendering" rather than a blank spinner.
+ *
+ * Rejects on a failed job, on timeout, or if a poll itself errors - a silent
+ * give-up would leave the UI claiming success for a report that has no file.
+ */
+export async function waitForReportJob(
+  jobID: string,
+  options: { timeoutMs?: number; intervalMs?: number; onProgress?: (job: ReportJob) => void } = {}
+): Promise<ReportJob> {
+  const timeoutMs = options.timeoutMs ?? 120_000
+  const intervalMs = options.intervalMs ?? 1_000
+  const deadline = Date.now() + timeoutMs
+
+  for (;;) {
+    const job = await getReportJob(jobID)
+    options.onProgress?.(job)
+
+    if (job.status === 'succeeded') return job
+    if (job.status === 'failed') {
+      throw new Error(job.error || 'The report could not be generated')
+    }
+    if (Date.now() >= deadline) {
+      throw new Error('Timed out waiting for the report to render; it may still finish in the background')
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+  }
 }
 
 /** useShareLinks lists and revokes a report's public share links. */

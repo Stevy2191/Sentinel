@@ -38,6 +38,7 @@ type config struct {
 	CheckInterval       time.Duration
 	MigrationsDir       string
 	ReportsDir          string
+	ReportWorkers       int
 	BaseURL             string
 	RegistrationEnabled bool
 }
@@ -53,6 +54,9 @@ func loadConfig() config {
 		ReportsDir: getenv("REPORTS_DIR", "reports"),
 		// Absolute base URL used to build links in outgoing report email.
 		BaseURL: getenv("SENTINEL_BASE_URL", ""),
+		// How many reports may render concurrently. Each holds a PDF in memory,
+		// so this is deliberately small.
+		ReportWorkers: getenvInt("REPORT_WORKERS", 2),
 		// Closed by default for security; the first account can always be created
 		// (see RegisterHandler), and an admin can open registration at runtime.
 		RegistrationEnabled: getenvBool("REGISTRATION_ENABLED", false),
@@ -100,6 +104,9 @@ func run() error {
 		return fmt.Errorf("initializing report renderer: %w", err)
 	}
 	reportBuilder := api.NewReportBuilder(db, reportAggregator, pdfRenderer, nil)
+	// PDF rendering runs on a worker pool rather than in the request handler.
+	reportJobs := services.NewReportJobQueue(db, services.NewReportGenerator(db, reportAggregator, pdfRenderer), cfg.ReportWorkers)
+	reportBuilder.SetJobQueue(reportJobs)
 	reportGenerator := services.NewReportGenerator(db, reportAggregator, pdfRenderer)
 	// Scheduled delivery sends through the same SMTP configuration as the email
 	// notification channel, so it inherits its connection-security settings.
@@ -172,17 +179,20 @@ func run() error {
 	api.RegisterInvitationRoutes(admin, router, invitationService, authService)
 	api.RegisterNotificationConfigRoutes(v1, notificationConfigService)
 
-	// 6. Scheduled report delivery. A failure to load schedules must not stop
+	// 6. Report render workers.
+	reportJobs.Start(context.Background())
+
+	// 7. Scheduled report delivery. A failure to load schedules must not stop
 	// the server: monitoring is the primary job and continues without them.
 	if err := reportScheduler.Start(context.Background()); err != nil {
 		log.Printf("warning: report scheduler not started: %v", err)
 	}
 
-	// 7. Monitoring loop.
+	// 8. Monitoring loop.
 	loopCtx, cancelLoop := context.WithCancel(context.Background())
 	go StartMonitoringLoop(loopCtx, db, monitorService, checkService, incidentService, notificationManager, cfg.CheckInterval)
 
-	// 8. HTTP server.
+	// 9. HTTP server.
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           router,
@@ -196,7 +206,7 @@ func run() error {
 		}
 	}()
 
-	// 9. Graceful shutdown.
+	// 10. Graceful shutdown.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
@@ -204,6 +214,7 @@ func run() error {
 	case err := <-serverErr:
 		cancelLoop()
 		reportScheduler.Stop()
+		reportJobs.Stop()
 		return fmt.Errorf("http server: %w", err)
 	case sig := <-quit:
 		log.Printf("shutdown signal received: %s", sig)
@@ -213,6 +224,9 @@ func run() error {
 	// then the database.
 	cancelLoop()
 	reportScheduler.Stop()
+	// Waits for the in-flight render to finish; anything still queued is picked
+	// up by the next process, since Start requeues interrupted jobs.
+	reportJobs.Stop()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
