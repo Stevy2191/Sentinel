@@ -120,7 +120,7 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
         custom_title: customTitle.trim() || undefined,
         custom_description: customDescription.trim() || undefined,
       })
-      navigate(`/reports/saved/${result.id}`)
+      navigate(`/reports/${result.id}`)
     } catch (err) {
       onError?.((err as { message?: string }).message ?? 'Could not generate the report')
     } finally {

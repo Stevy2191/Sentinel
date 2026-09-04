@@ -148,7 +148,7 @@ export default function SavedReports({ mode = 'list' }: SavedReportsProps) {
                   buttons are not nested inside a link. */}
               <div className="min-w-0 flex-1">
                 <Link
-                  to={`/reports/saved/${report.id}`}
+                  to={`/reports/${report.id}`}
                   className="text-lg font-semibold hover:underline"
                 >
                   {report.name}

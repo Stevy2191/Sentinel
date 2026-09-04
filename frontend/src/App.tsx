@@ -80,10 +80,12 @@ export default function App() {
               <Route path="/monitors/:id/edit" element={<MonitorDetail mode="edit" />} />
               <Route path="/reports" element={<SavedReports mode="list" />} />
               <Route path="/reports/new" element={<SavedReports mode="create" />} />
-              <Route path="/reports/saved/:id" element={<SavedReportDetail />} />
               {/* The pre-existing live analytics view, moved off /reports so the
-                  saved-report hub can own that path. */}
+                  saved-report hub can own that path. Declared before the ":id"
+                  route for clarity; React Router ranks the static segment higher
+                  either way. */}
               <Route path="/reports/analytics" element={<Reports />} />
+              <Route path="/reports/:id" element={<SavedReportDetail />} />
               <Route path="/status-pages" element={<StatusPages mode="list" />} />
               <Route path="/status-pages/create" element={<StatusPages mode="create" />} />
               <Route path="/status-pages/:slug/detail" element={<StatusPages mode="detail" />} />
