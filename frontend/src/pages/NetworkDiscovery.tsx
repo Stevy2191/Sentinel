@@ -31,7 +31,7 @@ function toMonitorInput(host: DiscoveredHost): MonitorInput {
     url: host.ip,
     interval_seconds: DEFAULT_INTERVAL_SECONDS,
     timeout_seconds: DEFAULT_TIMEOUT_SECONDS,
-    tags: ['discovered'],
+    tags: ['Discovered'],
   }
 }
 
