@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Clock, Download, Loader2, Play, Trash2 } from 'lucide-react'
+import { Clock, Download, Loader2, Pencil, Play, Trash2 } from 'lucide-react'
 import { useToasts, Toaster } from '@/components/Toast'
 import ScheduleManager from '@/components/ScheduleManager'
+import EditScheduleModal from '@/components/EditScheduleModal'
 import {
   downloadReportPDF,
   formatFileSize,
@@ -29,6 +30,7 @@ export default function SavedReportDetail() {
 
   const [showForm, setShowForm] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
 
   // The list must actually be fetched here; the hook holds per-instance state,
   // so relying on another page having loaded it would leave this one empty.
@@ -41,6 +43,12 @@ export default function SavedReportDetail() {
   }, [listSchedules])
 
   const report = useMemo(() => reports.find((r) => r.id === id), [reports, id])
+  // Resolved from the live list rather than copied into state, so the modal
+  // always opens on current values.
+  const editingSchedule = useMemo(
+    () => schedules.find((s) => s.id === editingId),
+    [schedules, editingId]
+  )
 
   const handleDownload = async (url: string, generatedAt: string) => {
     setBusy(url)
@@ -228,6 +236,14 @@ export default function SavedReportDetail() {
                 </button>
                 <button
                   className="rd-btn rd-btn-secondary"
+                  onClick={() => setEditingId(s.id)}
+                  disabled={busy === s.id}
+                  title="Edit this schedule"
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
+                <button
+                  className="rd-btn rd-btn-secondary"
                   onClick={() => handleDeleteSchedule(s.id)}
                   disabled={busy === s.id}
                   title="Delete this schedule"
@@ -239,6 +255,19 @@ export default function SavedReportDetail() {
           ))}
         </div>
       </section>
+
+      {editingSchedule && id && (
+        <EditScheduleModal
+          schedule={editingSchedule}
+          reportId={id}
+          onClose={() => setEditingId(null)}
+          onUpdated={() => {
+            setEditingId(null)
+            listSchedules()
+            push('Schedule updated', 'success')
+          }}
+        />
+      )}
 
       <Toaster toasts={toasts} />
     </div>

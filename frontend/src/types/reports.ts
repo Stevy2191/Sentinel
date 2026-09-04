@@ -93,7 +93,13 @@ export interface CreateSchedulePayload {
   cron_expression?: string
   email_recipients: string[]
   send_as_attachment: boolean
+  /**
+   * Replaced wholesale by the backend when present, so always send both fields
+   * — a partial object silently resets the one that is omitted.
+   */
   include_in_email: { include_link: boolean; include_summary: boolean }
+  /** Omitted on create (defaults to active); sent when editing. */
+  is_active?: boolean
 }
 
 /** Response from POST /reports/generate. */
