@@ -267,3 +267,37 @@ accepted values, a rejected unrecognized value, and nil meaning `starttls`.
 `README.md` references `docs/INSTALLATION.md`, `docs/API.md`,
 `docs/NOTIFICATIONS.md`, and `CONTRIBUTING.md`, none of which exist. The new
 environment variables belong in `docs/NOTIFICATIONS.md` when it is written.
+
+## Implementation notes
+
+Two deviations from the design above, both decided while writing the tests.
+
+**The cleartext-credential guard is explicit, not inherited.** The design said the
+hole would close "as a consequence rather than through new logic", relying on
+`smtp.PlainAuth.Start` refusing an unencrypted connection. That works, but it makes
+a security property depend on a stdlib internal, and it is untestable end-to-end:
+`PlainAuth` exempts localhost, and a fake SMTP server necessarily listens on
+127.0.0.1. The implementation adds `allowCleartextAuth(security, host)` in
+`email.go`, checked before any AUTH command is issued. The loopback exemption is
+preserved deliberately and is now stated in our own code rather than borrowed.
+
+**The certificate test proves the toggle, not a trusted-root success path.** The
+design described a custom `RootCAs` pool for the verification-succeeds case. The
+plugin builds its own `tls.Config` and has no way to accept an injected pool, and
+adding one purely for tests was not worth the production surface. The test instead
+asserts the pair that actually matters: a self-signed certificate is rejected with
+`skipTLSVerify` off and accepted with it on.
+
+### Verification
+
+The two strictness tests were run against the pre-fix logic to confirm they fail
+for the right reason. With the old opportunistic STARTTLS restored, the recorded
+transcript was:
+
+```
+EHLO localhost | AUTH PLAIN AHVzZXJAZmFrZS50ZXN0AHNlY3JldA== | MAIL FROM:... | DATA
+```
+
+That base64 decodes to `\0user@fake.test\0secret` — the credentials, in the clear,
+on a connection that was never encrypted. Both tests fail against the old code and
+pass against the new.

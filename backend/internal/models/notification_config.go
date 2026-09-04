@@ -8,6 +8,37 @@ import (
 	"github.com/google/uuid"
 )
 
+// SMTP connection security modes for the email channel.
+const (
+	// SMTPSecurityNone sends over a plaintext connection. Usable only for an
+	// internal relay that requires no credentials - see NotificationConfig.Validate.
+	SMTPSecurityNone = "none"
+	// SMTPSecuritySTARTTLS connects in plaintext and then requires an upgrade to
+	// TLS. The upgrade is mandatory: a server that does not advertise STARTTLS is
+	// an error, never a silent fallback to cleartext.
+	SMTPSecuritySTARTTLS = "starttls"
+	// SMTPSecuritySSLTLS performs a TLS handshake on connect (implicit TLS/SMTPS,
+	// conventionally port 465).
+	SMTPSecuritySSLTLS = "ssltls"
+)
+
+// ValidSMTPSecurity lists the accepted smtp_security values.
+var ValidSMTPSecurity = map[string]bool{
+	SMTPSecurityNone:     true,
+	SMTPSecuritySTARTTLS: true,
+	SMTPSecuritySSLTLS:   true,
+}
+
+// ResolveSMTPSecurity normalizes a stored smtp_security value. A nil or empty
+// value means STARTTLS, which is what the email plugin did unconditionally before
+// the mode became configurable.
+func ResolveSMTPSecurity(v *string) string {
+	if v == nil || *v == "" {
+		return SMTPSecuritySTARTTLS
+	}
+	return *v
+}
+
 // ValidNotificationChannels lists the channel names a config row may use.
 var ValidNotificationChannels = map[string]bool{
 	"email":    true,
@@ -32,6 +63,12 @@ type NotificationConfig struct {
 	SMTPUser     *string `json:"smtp_user" gorm:"column:smtp_user"`
 	SMTPPassword *string `json:"smtp_password,omitempty" gorm:"column:smtp_password"` // never returned in list responses
 	SMTPFrom     *string `json:"smtp_from" gorm:"column:smtp_from"`
+	// SMTPSecurity is the connection security mode: none, starttls, or ssltls.
+	// Nil means starttls (see ResolveSMTPSecurity). Not a secret.
+	SMTPSecurity *string `json:"smtp_security" gorm:"column:smtp_security"`
+	// SMTPSkipTLSVerify disables certificate verification for self-signed
+	// internal mail servers. Insecure, and an explicit opt-in.
+	SMTPSkipTLSVerify bool `json:"smtp_skip_tls_verify" gorm:"column:smtp_skip_tls_verify"`
 
 	// Slack/Discord/Webhook/Ntfy (generic URL)
 	WebhookURL *string `json:"webhook_url,omitempty" gorm:"column:webhook_url"` // hidden in list, returned on single GET
@@ -85,6 +122,14 @@ func (nc *NotificationConfig) Validate() error {
 		if nc.SMTPFrom == nil || *nc.SMTPFrom == "" {
 			return errors.New("SMTP from address is required")
 		}
+		// Nil is allowed and means starttls; a present value must be recognized.
+		if nc.SMTPSecurity != nil && !ValidSMTPSecurity[*nc.SMTPSecurity] {
+			return errors.New("SMTP security must be one of: none, starttls, ssltls")
+		}
+		// "none" combined with a password is deliberately NOT rejected here. Go's
+		// smtp.PlainAuth permits cleartext credentials to localhost, so a local
+		// relay with a password is a legitimate config. The plugin, which knows the
+		// host, is the authoritative check at send time.
 
 	case "slack", "discord", "webhook":
 		if nc.WebhookURL == nil || *nc.WebhookURL == "" {

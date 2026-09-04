@@ -119,7 +119,8 @@ func (s *NotificationConfigService) DeleteConfig(ctx context.Context, channel st
 	if err := s.db.WithContext(ctx).Model(&models.NotificationConfig{}).
 		Where("channel = ?", channel).Updates(map[string]interface{}{
 		"enabled": false, "smtp_host": nil, "smtp_port": nil, "smtp_user": nil,
-		"smtp_password": nil, "smtp_from": nil, "webhook_url": nil,
+		"smtp_password": nil, "smtp_from": nil, "smtp_security": nil,
+		"smtp_skip_tls_verify": false, "webhook_url": nil,
 		"telegram_bot_token": nil, "telegram_chat_id": nil, "ntfy_url": nil,
 		"ntfy_topic": nil, "custom_headers": nil, "last_test_at": nil,
 		"last_test_success": nil, "last_test_error": nil, "updated_at": time.Now(),

@@ -12,10 +12,27 @@ import {
   useDeleteNotificationConfig,
   type ChannelName,
   type NotificationConfig,
+  type SMTPSecurity,
 } from '@/hooks/useNotificationConfig'
 
 // ---------- validation helpers ----------
 const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+// The port conventionally paired with each security mode. Choosing a mode
+// retargets the port only when the current value is one of these, so a custom
+// port (2525, say) is never clobbered.
+const SECURITY_PORTS: Record<SMTPSecurity, string> = {
+  none: '25',
+  starttls: '587',
+  ssltls: '465',
+}
+const KNOWN_PORTS = Object.values(SECURITY_PORTS)
+
+const SECURITY_LABELS: { value: SMTPSecurity; label: string }[] = [
+  { value: 'starttls', label: 'STARTTLS (recommended)' },
+  { value: 'ssltls', label: 'SSL/TLS' },
+  { value: 'none', label: 'None (no encryption)' },
+]
 
 function isHttpUrl(v: string): boolean {
   try {
@@ -47,6 +64,8 @@ interface FormState {
   smtp_user: string
   smtp_password: string
   smtp_from: string
+  smtp_security: SMTPSecurity
+  smtp_skip_tls_verify: boolean
   webhook_url: string
   telegram_bot_token: string
   telegram_chat_id: string
@@ -63,6 +82,8 @@ const emptyForm: FormState = {
   smtp_user: '',
   smtp_password: '',
   smtp_from: '',
+  smtp_security: 'starttls',
+  smtp_skip_tls_verify: false,
   webhook_url: '',
   telegram_bot_token: '',
   telegram_chat_id: '',
@@ -81,6 +102,9 @@ function formFromConfig(cfg: NotificationConfig | null): FormState {
     smtp_user: cfg.smtp_user ?? '',
     smtp_password: cfg.smtp_password ?? '',
     smtp_from: cfg.smtp_from ?? '',
+    // Null means starttls, matching the backend's ResolveSMTPSecurity.
+    smtp_security: cfg.smtp_security ?? 'starttls',
+    smtp_skip_tls_verify: cfg.smtp_skip_tls_verify ?? false,
     webhook_url: cfg.webhook_url ?? '',
     telegram_bot_token: cfg.telegram_bot_token ?? '',
     telegram_chat_id: cfg.telegram_chat_id ?? '',
@@ -138,6 +162,8 @@ function buildPayload(channel: ChannelName, f: FormState): Partial<NotificationC
       p.smtp_user = f.smtp_user.trim()
       p.smtp_password = f.smtp_password
       p.smtp_from = f.smtp_from.trim()
+      p.smtp_security = f.smtp_security
+      p.smtp_skip_tls_verify = f.smtp_security === 'none' ? false : f.smtp_skip_tls_verify
       break
     case 'slack':
     case 'discord':
@@ -268,6 +294,16 @@ function ConfigModal({
 
   const set = (key: keyof FormState, value: string | boolean) =>
     setForm((f) => ({ ...f, [key]: value }))
+
+  // Changing the security mode also retargets a default port and clears the
+  // certificate-verification opt-out, which is meaningless without TLS.
+  const setSecurity = (mode: SMTPSecurity) =>
+    setForm((f) => ({
+      ...f,
+      smtp_security: mode,
+      smtp_port: KNOWN_PORTS.includes(f.smtp_port.trim()) ? SECURITY_PORTS[mode] : f.smtp_port,
+      smtp_skip_tls_verify: mode === 'none' ? false : f.smtp_skip_tls_verify,
+    }))
   const markTouched = (key: string) => setTouched((t) => ({ ...t, [key]: true }))
   const errFor = (key: string) => (touched[key] || submitAttempted ? errors[key] : undefined)
 
@@ -368,6 +404,46 @@ function ConfigModal({
                   <FieldError msg={errFor('smtp_port')} />
                 </div>
                 <div>
+                  <Label required>Security</Label>
+                  <select
+                    className={inputCls}
+                    value={form.smtp_security}
+                    onChange={(e) => setSecurity(e.target.value as SMTPSecurity)}
+                  >
+                    {SECURITY_LABELS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                  <Helper>
+                    STARTTLS upgrades a plain connection (port 587). SSL/TLS encrypts from the
+                    start (port 465).
+                  </Helper>
+                  {form.smtp_security === 'none' && form.smtp_password && (
+                    <p className="mt-1 text-xs text-amber-500">
+                      Credentials are not sent over an unencrypted connection unless the server is
+                      on this machine. Choose STARTTLS or SSL/TLS to authenticate.
+                    </p>
+                  )}
+                  {form.smtp_security !== 'none' && (
+                    <label className="mt-2 flex cursor-pointer items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500"
+                        checked={form.smtp_skip_tls_verify}
+                        onChange={(e) => set('smtp_skip_tls_verify', e.target.checked)}
+                      />
+                      <span className="text-sm">
+                        Skip certificate verification
+                        <span className="ml-1 text-xs text-amber-500">
+                          (insecure — only for a self-signed internal server)
+                        </span>
+                      </span>
+                    </label>
+                  )}
+                </div>
+                <div>
                   <Label required>SMTP User</Label>
                   <input
                     type="email"
@@ -400,7 +476,10 @@ function ConfigModal({
                     placeholder="alerts@example.com"
                   />
                   <FieldError msg={errFor('smtp_from')} />
-                  <Helper>Gmail: smtp.gmail.com:587 · Outlook: smtp-mail.outlook.com:587</Helper>
+                  <Helper>
+                    Gmail: smtp.gmail.com:587 (STARTTLS) · Outlook: smtp-mail.outlook.com:587
+                    (STARTTLS) · implicit TLS servers normally use port 465
+                  </Helper>
                 </div>
               </>
             )}

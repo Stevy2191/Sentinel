@@ -45,6 +45,9 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-}
+      # none | starttls | ssltls. Falls back to the legacy SMTP_TLS bool if unset.
+      SMTP_SECURITY: ${SMTP_SECURITY:-}
+      SMTP_SKIP_TLS_VERIFY: ${SMTP_SKIP_TLS_VERIFY:-false}
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}

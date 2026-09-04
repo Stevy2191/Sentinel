@@ -19,7 +19,9 @@ import (
 // per-channel connection test.
 
 // NewEmailPluginFromConfig builds an EmailPlugin from explicit SMTP settings.
-func NewEmailPluginFromConfig(host string, port int, user, password, from string, tlsEnabled bool) *EmailPlugin {
+// security is one of models.SMTPSecurity* ("" resolves to STARTTLS); skipTLSVerify
+// disables certificate verification for self-signed internal mail servers.
+func NewEmailPluginFromConfig(host string, port int, user, password, from, security string, skipTLSVerify bool) *EmailPlugin {
 	if port <= 0 {
 		port = defaultSMTPPort
 	}
@@ -30,14 +32,15 @@ func NewEmailPluginFromConfig(host string, port int, user, password, from string
 	// address (matches the env plugin's self-send fallback).
 	to := []string{from}
 	return &EmailPlugin{
-		host:       host,
-		port:       port,
-		user:       user,
-		password:   password,
-		from:       from,
-		to:         to,
-		tlsEnabled: tlsEnabled,
-		logger:     log.Default(),
+		host:          host,
+		port:          port,
+		user:          user,
+		password:      password,
+		from:          from,
+		to:            to,
+		security:      security,
+		skipTLSVerify: skipTLSVerify,
+		logger:        log.Default(),
 	}
 }
 
@@ -130,7 +133,8 @@ func BuildPluginFromConfig(cfg models.NotificationConfig) (NotificationPlugin, e
 		}
 		return NewEmailPluginFromConfig(
 			deref(cfg.SMTPHost), port, deref(cfg.SMTPUser),
-			deref(cfg.SMTPPassword), deref(cfg.SMTPFrom), true,
+			deref(cfg.SMTPPassword), deref(cfg.SMTPFrom),
+			models.ResolveSMTPSecurity(cfg.SMTPSecurity), cfg.SMTPSkipTLSVerify,
 		), nil
 	case "slack":
 		return NewSlackPluginFromConfig(deref(cfg.WebhookURL))

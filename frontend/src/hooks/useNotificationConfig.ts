@@ -4,6 +4,10 @@ import api, { type ApiError } from '@/services/api'
 // ChannelName is the set of channels the backend supports.
 export type ChannelName = 'email' | 'slack' | 'discord' | 'telegram' | 'ntfy' | 'webhook'
 
+// SMTPSecurity is the connection security mode for the email channel; it mirrors
+// models.SMTPSecurity* in the backend.
+export type SMTPSecurity = 'none' | 'starttls' | 'ssltls'
+
 // NotificationConfig mirrors the backend model. Secret fields are omitted from
 // list responses (see HideSecrets) and only present when fetching a single
 // config for editing.
@@ -17,6 +21,10 @@ export interface NotificationConfig {
   smtp_user?: string | null
   smtp_password?: string | null
   smtp_from?: string | null
+  /** Connection security. Null means starttls (the backend default). */
+  smtp_security?: SMTPSecurity | null
+  /** Skip TLS certificate verification for self-signed internal mail servers. */
+  smtp_skip_tls_verify?: boolean | null
   // Slack/Discord/Webhook (generic URL)
   webhook_url?: string | null
   // Telegram

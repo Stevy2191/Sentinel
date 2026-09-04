@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Stevy2191/Sentinel/backend/internal/models"
 )
 
 const (
@@ -28,14 +30,17 @@ const (
 
 // EmailPlugin delivers notifications over SMTP with an HTML + plain-text body.
 type EmailPlugin struct {
-	host       string
-	port       int
-	user       string
-	password   string
-	from       string
-	to         []string
-	tlsEnabled bool
-	logger     *log.Logger
+	host     string
+	port     int
+	user     string
+	password string
+	from     string
+	to       []string
+	// security is one of models.SMTPSecurity*; "" resolves to STARTTLS.
+	security string
+	// skipTLSVerify disables certificate verification. Insecure; opt-in only.
+	skipTLSVerify bool
+	logger        *log.Logger
 }
 
 // nonRetriable wraps errors (auth/config) that must not be retried.
@@ -79,10 +84,15 @@ func NewEmailPlugin() (*EmailPlugin, error) {
 		return nil, fmt.Errorf("invalid SMTP_FROM address %q: %w", from, err)
 	}
 
-	tlsEnabled := true
-	if v := strings.TrimSpace(os.Getenv("SMTP_TLS")); v != "" {
-		if parsed, err := strconv.ParseBool(v); err == nil {
-			tlsEnabled = parsed
+	security, err := resolveSecurityFromEnv()
+	if err != nil {
+		return nil, err
+	}
+
+	skipTLSVerify := false
+	if v := strings.TrimSpace(os.Getenv("SMTP_SKIP_TLS_VERIFY")); v != "" {
+		if parsed, parseErr := strconv.ParseBool(v); parseErr == nil {
+			skipTLSVerify = parsed
 		}
 	}
 
@@ -92,17 +102,65 @@ func NewEmailPlugin() (*EmailPlugin, error) {
 	}
 
 	p := &EmailPlugin{
-		host:       host,
-		port:       port,
-		user:       user,
-		password:   password,
-		from:       from,
-		to:         to,
-		tlsEnabled: tlsEnabled,
-		logger:     log.Default(),
+		host:          host,
+		port:          port,
+		user:          user,
+		password:      password,
+		from:          from,
+		to:            to,
+		security:      security,
+		skipTLSVerify: skipTLSVerify,
+		logger:        log.Default(),
 	}
 	p.logger.Printf("[email] Email plugin initialized for %s", from)
 	return p, nil
+}
+
+// resolveSecurityFromEnv reads SMTP_SECURITY, falling back to the older boolean
+// SMTP_TLS so an existing .env keeps its meaning: SMTP_TLS=false becomes "none",
+// anything else becomes STARTTLS - which is what the plugin did unconditionally
+// before the mode was configurable.
+func resolveSecurityFromEnv() (string, error) {
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("SMTP_SECURITY"))); v != "" {
+		if !models.ValidSMTPSecurity[v] {
+			return "", fmt.Errorf("invalid SMTP_SECURITY %q: must be one of none, starttls, ssltls", v)
+		}
+		return v, nil
+	}
+	if v := strings.TrimSpace(os.Getenv("SMTP_TLS")); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil && !parsed {
+			return models.SMTPSecurityNone, nil
+		}
+	}
+	return models.SMTPSecuritySTARTTLS, nil
+}
+
+// securityMode resolves the plugin's mode, treating "" as STARTTLS.
+func (p *EmailPlugin) securityMode() string {
+	return models.ResolveSMTPSecurity(&p.security)
+}
+
+// isLoopbackHost reports whether host is this machine, the one case where
+// cleartext credentials never traverse a network. net/smtp makes the same
+// exemption; this states it explicitly rather than depending on that internal.
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+// allowCleartextAuth reports whether credentials may be sent given the security
+// mode and destination host. Anything encrypted is fine; plaintext is permitted
+// only to the local machine.
+func allowCleartextAuth(security, host string) bool {
+	if security != models.SMTPSecurityNone {
+		return true
+	}
+	return isLoopbackHost(host)
 }
 
 // parseRecipients splits a comma-separated recipient list, trimming blanks.
@@ -256,10 +314,29 @@ func (p *EmailPlugin) deliver(ctx context.Context, mime string) error {
 		deadline = d
 	}
 
-	var dialer net.Dialer
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
-	if err != nil {
-		return fmt.Errorf("SMTP server unreachable: %w", err)
+	security := p.securityMode()
+	tlsConfig := &tls.Config{
+		ServerName: p.host,
+		// Opt-in only, for self-signed certificates on internal mail servers.
+		InsecureSkipVerify: p.skipTLSVerify, //nolint:gosec // deliberate, admin-configured
+	}
+
+	var conn net.Conn
+	var err error
+	if security == models.SMTPSecuritySSLTLS {
+		// Implicit TLS (SMTPS): the server expects a handshake immediately on
+		// connect and never sends a plaintext greeting.
+		tlsDialer := &tls.Dialer{NetDialer: &net.Dialer{}, Config: tlsConfig}
+		conn, err = tlsDialer.DialContext(ctx, "tcp", addr)
+		if err != nil {
+			return fmt.Errorf("SMTP TLS connection failed: %w", err)
+		}
+	} else {
+		var dialer net.Dialer
+		conn, err = dialer.DialContext(ctx, "tcp", addr)
+		if err != nil {
+			return fmt.Errorf("SMTP server unreachable: %w", err)
+		}
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(deadline)
@@ -270,20 +347,33 @@ func (p *EmailPlugin) deliver(ctx context.Context, mime string) error {
 	}
 	defer client.Close()
 
-	if p.tlsEnabled {
-		if ok, _ := client.Extension("STARTTLS"); ok {
-			if err := client.StartTLS(&tls.Config{ServerName: p.host}); err != nil {
-				return fmt.Errorf("STARTTLS failed: %w", err)
-			}
+	if security == models.SMTPSecuritySTARTTLS {
+		// Required, not opportunistic. A server that cannot upgrade must not go on
+		// to carry credentials in cleartext, which is what the old code did.
+		if ok, _ := client.Extension("STARTTLS"); !ok {
+			return nonRetriable{errors.New(
+				"server does not advertise STARTTLS; use SSL/TLS (port 465) or set security to None")}
+		}
+		if err := client.StartTLS(tlsConfig); err != nil {
+			return fmt.Errorf("STARTTLS failed: %w", err)
 		}
 	}
 
 	if p.user != "" && p.password != "" {
-		if ok, _ := client.Extension("AUTH"); ok {
-			auth := smtp.PlainAuth("", p.user, p.password, p.host)
-			if err := client.Auth(auth); err != nil {
-				return nonRetriable{fmt.Errorf("invalid SMTP credentials: %w", err)}
-			}
+		if !allowCleartextAuth(security, p.host) {
+			return nonRetriable{errors.New(
+				"refusing to send SMTP credentials over an unencrypted connection: " +
+					"set security to STARTTLS or SSL/TLS")}
+		}
+		// Credentials configured against a server with no AUTH is a configuration
+		// error; sending anyway just produces a confusing rejection later.
+		if ok, _ := client.Extension("AUTH"); !ok {
+			return nonRetriable{errors.New(
+				"SMTP credentials are configured but the server does not advertise AUTH")}
+		}
+		auth := smtp.PlainAuth("", p.user, p.password, p.host)
+		if err := client.Auth(auth); err != nil {
+			return nonRetriable{fmt.Errorf("invalid SMTP credentials: %w", err)}
 		}
 	}
 
