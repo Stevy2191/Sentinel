@@ -56,6 +56,12 @@ services:
       - "${BACKEND_PORT:-3001}:3001"
     volumes:
       - ./backend/migrations:/app/migrations
+    # CAP_NET_RAW lets the backend open raw ICMP sockets for ping monitor
+    # checks and network discovery scans. Without it, both fall back to
+    # unprivileged ICMP (if the host's ping_group_range allows it) or a TCP
+    # connect probe, which still works but is less accurate.
+    cap_add:
+      - NET_RAW
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
