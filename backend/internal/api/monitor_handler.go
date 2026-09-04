@@ -102,6 +102,21 @@ func respondError(c *gin.Context, code int, message string) {
 	c.JSON(code, gin.H{"success": false, "error": message})
 }
 
+// respondInternal handles a server-side failure: it logs the underlying error
+// with request and user context, and returns a generic message to the client.
+//
+// A 500 is by definition something the caller cannot act on, and the error text
+// behind it is usually a database or driver message. Passing that through leaks
+// schema details, query structure, and sometimes data values to anyone able to
+// trigger the failure. Validation errors (4xx) still return their real message,
+// because there the text IS the actionable part.
+func respondInternal(c *gin.Context, operation string, err error) {
+	userID, _, _, _ := GetUserFromContext(c)
+	log.Printf("[api] %s %s: %s failed (user=%s, ip=%s): %v",
+		c.Request.Method, c.FullPath(), operation, userID, c.ClientIP(), err)
+	respondError(c, http.StatusInternalServerError, "an internal error occurred")
+}
+
 // parseMonitorID reads and validates the :id URL parameter, writing a 400 and
 // returning ok=false when it is not a valid UUID.
 func parseMonitorID(c *gin.Context) (uuid.UUID, bool) {
@@ -202,12 +217,12 @@ func GetMonitorsHandler(monitorService *services.MonitorService) gin.HandlerFunc
 		userID, _, isAdmin, _ := GetUserFromContext(c)
 		monitors, err := monitorService.ListAccessibleMonitors(c.Request.Context(), userID, isAdmin, filters)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetMonitorsHandler", err)
 			return
 		}
 		shareMap, err := monitorService.GetUserShareMap(c.Request.Context(), userID)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetMonitorsHandler", err)
 			return
 		}
 
@@ -499,7 +514,7 @@ func UpdateMaintenanceHandler(monitorService *services.MonitorService) gin.Handl
 		}
 		status, err := monitorService.GetMaintenanceStatus(c.Request.Context(), id)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "UpdateMaintenanceHandler", err)
 			return
 		}
 		respondSuccess(c, http.StatusOK, status)

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -124,7 +125,7 @@ func (h *ReportBuilder) GenerateReport(c *gin.Context) {
 			respondError(c, http.StatusNotFound, "report template not found")
 			return
 		}
-		respondError(c, http.StatusInternalServerError, "loading report template: "+err.Error())
+		respondInternal(c, "loading report template", err)
 		return
 	}
 
@@ -151,14 +152,14 @@ func (h *ReportBuilder) GenerateReport(c *gin.Context) {
 	// orphaned report definition behind.
 	reportData, err := h.aggregator.AggregateReportData(c.Request.Context(), &report)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "aggregating report data: "+err.Error())
+		respondInternal(c, "aggregating report data", err)
 		return
 	}
 
 	pdfFilename, err := h.pdfRenderer.RenderReportToPDF(
 		reportData, template.Sections, "report_"+report.ID.String()[:8])
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "rendering report PDF: "+err.Error())
+		respondInternal(c, "rendering report PDF", err)
 		return
 	}
 
@@ -194,7 +195,7 @@ func (h *ReportBuilder) GenerateReport(c *gin.Context) {
 		}
 		return tx.Create(&generation).Error
 	}); err != nil {
-		respondError(c, http.StatusInternalServerError, "saving report: "+err.Error())
+		respondInternal(c, "saving report", err)
 		return
 	}
 
@@ -223,9 +224,17 @@ func (h *ReportBuilder) ListReports(c *gin.Context) {
 			userID, userID)
 	}
 
+	// Bounded: an install that has accumulated thousands of reports must not be
+	// able to make this one query load them all into memory.
+	limit, offset := paginationParams(c)
+
+	var total int64
+	query.Count(&total)
+
 	var reports []models.Report
-	if err := query.Order("created_at DESC").Find(&reports).Error; err != nil {
-		respondError(c, http.StatusInternalServerError, "listing reports: "+err.Error())
+	if err := query.Order("created_at DESC").Limit(limit).Offset(offset).
+		Find(&reports).Error; err != nil {
+		respondInternal(c, "listing reports", err)
 		return
 	}
 
@@ -234,12 +243,32 @@ func (h *ReportBuilder) ListReports(c *gin.Context) {
 	for i := range reports {
 		resp, err := h.buildReportResponse(ctx, &reports[i], "")
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "ListReports", err)
 			return
 		}
 		out = append(out, resp)
 	}
+	// The payload stays a bare array so existing callers keep working; the totals
+	// go in headers rather than changing the response shape.
+	c.Header("X-Total-Count", strconv.FormatInt(total, 10))
+	c.Header("X-Limit", strconv.Itoa(limit))
+	c.Header("X-Offset", strconv.Itoa(offset))
 	respondSuccess(c, http.StatusOK, out)
+}
+
+// paginationParams reads ?limit and ?offset, clamped to a sane range.
+func paginationParams(c *gin.Context) (limit, offset int) {
+	limit = 50
+	if v, err := strconv.Atoi(c.Query("limit")); err == nil && v > 0 {
+		limit = v
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if v, err := strconv.Atoi(c.Query("offset")); err == nil && v > 0 {
+		offset = v
+	}
+	return limit, offset
 }
 
 // DownloadReport handles GET /api/v1/reports/:id/download/:generation_id.
@@ -305,7 +334,7 @@ func (h *ReportBuilder) ShareReport(c *gin.Context) {
 
 	token, err := generateShareToken()
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "generating share token: "+err.Error())
+		respondInternal(c, "generating share token", err)
 		return
 	}
 
@@ -316,7 +345,7 @@ func (h *ReportBuilder) ShareReport(c *gin.Context) {
 		ShareToken: &token,
 	}
 	if err := h.db.WithContext(ctx).Create(&access).Error; err != nil {
-		respondError(c, http.StatusInternalServerError, "creating share link: "+err.Error())
+		respondInternal(c, "creating share link", err)
 		return
 	}
 
@@ -339,7 +368,7 @@ func (h *ReportBuilder) ViewSharedReport(c *gin.Context) {
 
 	resp, err := h.buildReportResponse(ctx, report, *access.ShareToken)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondInternal(c, "ViewSharedReport", err)
 		return
 	}
 	respondSuccess(c, http.StatusOK, resp)
@@ -417,7 +446,7 @@ func (h *ReportBuilder) serveGeneration(c *gin.Context, reportID, generationID u
 	// value cannot walk out of the output directory.
 	path, err := h.pdfRenderer.GetPDFPath(generation.PDFPath)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, err.Error())
+		respondInternal(c, "serveGeneration", err)
 		return
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -497,7 +526,7 @@ func (h *ReportBuilder) ListTemplates(c *gin.Context) {
 	var templates []models.ReportTemplate
 	if err := h.db.WithContext(c.Request.Context()).
 		Order("is_default DESC, name ASC").Find(&templates).Error; err != nil {
-		respondError(c, http.StatusInternalServerError, "listing report templates: "+err.Error())
+		respondInternal(c, "listing report templates", err)
 		return
 	}
 	if templates == nil {
@@ -516,7 +545,7 @@ func (h *ReportBuilder) ListMonitorTags(c *gin.Context) {
 		       FROM monitors
 		      WHERE tags IS NOT NULL AND jsonb_typeof(tags) = 'array'
 		      ORDER BY tag`).Scan(&tags).Error; err != nil {
-		respondError(c, http.StatusInternalServerError, "listing monitor tags: "+err.Error())
+		respondInternal(c, "listing monitor tags", err)
 		return
 	}
 	if tags == nil {
@@ -560,7 +589,7 @@ func (h *ReportBuilder) DeleteReport(c *gin.Context) {
 	h.db.WithContext(ctx).Where("report_id = ?", reportID).Find(&schedules)
 
 	if err := h.db.WithContext(ctx).Delete(&models.Report{}, "id = ?", reportID).Error; err != nil {
-		respondError(c, http.StatusInternalServerError, "deleting report: "+err.Error())
+		respondInternal(c, "deleting report", err)
 		return
 	}
 
@@ -594,7 +623,10 @@ func (h *ReportBuilder) DeleteReport(c *gin.Context) {
 // RegisterReportBuilderRoutes mounts the authenticated report-builder endpoints.
 func RegisterReportBuilderRoutes(rg *gin.RouterGroup, builder *ReportBuilder) {
 	reports := rg.Group("/reports")
-	reports.POST("/generate", builder.GenerateReport)
+	// Each generation aggregates a window and renders a PDF, so it is the most
+	// expensive authenticated call in the API: 5 a minute per user.
+	generateLimit := NewRateLimiter(5, time.Minute, 5).Middleware("report-generate", ByUser)
+	reports.POST("/generate", generateLimit, builder.GenerateReport)
 	reports.GET("", builder.ListReports)
 	reports.GET("/:id/download/:generation_id", builder.DownloadReport)
 	reports.POST("/:id/share", builder.ShareReport)

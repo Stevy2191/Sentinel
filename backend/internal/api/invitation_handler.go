@@ -60,7 +60,7 @@ func ResendInvitationEmailHandler(invitationService *services.InvitationService)
 		// Resend only applies to still-pending invitations.
 		invites, err := invitationService.ListPendingInvitations(c.Request.Context())
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "ResendInvitationEmailHandler", err)
 			return
 		}
 		for i := range invites {
@@ -72,7 +72,7 @@ func ResendInvitationEmailHandler(invitationService *services.InvitationService)
 					respondError(c, http.StatusBadRequest, err.Error())
 					return
 				}
-				respondError(c, http.StatusInternalServerError, err.Error())
+				respondInternal(c, "ResendInvitationEmailHandler", err)
 				return
 			}
 			respondSuccess(c, http.StatusOK, gin.H{"message": "invitation email resent"})
@@ -87,7 +87,7 @@ func ListPendingInvitationsHandler(invitationService *services.InvitationService
 	return func(c *gin.Context) {
 		invites, err := invitationService.ListPendingInvitations(c.Request.Context())
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "ListPendingInvitationsHandler", err)
 			return
 		}
 		out := make([]gin.H, 0, len(invites))
@@ -96,7 +96,7 @@ func ListPendingInvitationsHandler(invitationService *services.InvitationService
 				"id": inv.ID, "email": inv.Email, "role": inv.Role,
 				"invited_by_user_id": inv.InvitedByUserID,
 				"expires_at":         inv.ExpiresAt, "created_at": inv.CreatedAt,
-				"token":              inv.Token, // for the admin "copy link" action
+				"token": inv.Token, // for the admin "copy link" action
 			})
 		}
 		respondSuccess(c, http.StatusOK, out)

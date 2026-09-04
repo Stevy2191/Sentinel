@@ -159,7 +159,7 @@ func GetMonitorSharesHandler(monitorService *services.MonitorService) gin.Handle
 		}
 		shares, err := monitorService.GetMonitorShares(c.Request.Context(), monitorID)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetMonitorSharesHandler", err)
 			return
 		}
 		respondSuccess(c, http.StatusOK, shares)
@@ -172,7 +172,7 @@ func ListUsersHandler(authService *services.AuthService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		users, err := authService.ListUsers(c.Request.Context())
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "ListUsersHandler", err)
 			return
 		}
 		out := make([]gin.H, 0, len(users))

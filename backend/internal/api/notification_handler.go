@@ -101,7 +101,7 @@ func GetNotificationHistoryHandler(
 
 		records, total, err := manager.ListNotifications(ctx, opts)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetNotificationHistoryHandler", err)
 			return
 		}
 
@@ -195,7 +195,7 @@ func RetryFailedNotificationHandler(manager *notifications.NotificationManager) 
 			case errors.Is(err, notifications.ErrNotificationNotFailed):
 				respondError(c, http.StatusBadRequest, err.Error())
 			default:
-				respondError(c, http.StatusInternalServerError, err.Error())
+				respondInternal(c, "RetryFailedNotificationHandler", err)
 			}
 			return
 		}

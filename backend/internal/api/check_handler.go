@@ -97,12 +97,12 @@ func GetMonitorChecksHandler(checkService *services.CheckService, monitorService
 		// results are accurate regardless of how many checks exist.
 		total, err := checkService.CountChecks(ctx, id, start, end)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetMonitorChecksHandler", err)
 			return
 		}
 		checks, err := checkService.GetChecksInRange(ctx, id, start, end, limit, offset)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetMonitorChecksHandler", err)
 			return
 		}
 
@@ -144,7 +144,7 @@ func GetMonitorIncidentsHandler(incidentService *services.IncidentService, monit
 
 		incidents, err := incidentService.GetIncidents(c.Request.Context(), id, start, end)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetMonitorIncidentsHandler", err)
 			return
 		}
 

@@ -75,7 +75,7 @@ func GetStatusPagesHandler(statusPageService *services.StatusPageService) gin.Ha
 		ctx := c.Request.Context()
 		pages, err := statusPageService.ListStatusPages(ctx)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetStatusPagesHandler", err)
 			return
 		}
 
@@ -107,7 +107,7 @@ func GetStatusPageHandler(statusPageService *services.StatusPageService, inciden
 
 		entries, monitors, err := statusPageService.GetPageMonitors(ctx, slug)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetStatusPageHandler", err)
 			return
 		}
 		entryByMonitor := make(map[uuid.UUID]models.StatusPageMonitor, len(entries))
@@ -287,7 +287,7 @@ func GetPublicStatusPageHandler(statusPageService *services.StatusPageService, i
 
 		entries, monitors, err := statusPageService.GetPageMonitors(ctx, slug)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetPublicStatusPageHandler", err)
 			return
 		}
 		groupByMonitor := make(map[uuid.UUID]string, len(entries))

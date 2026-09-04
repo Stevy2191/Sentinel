@@ -56,7 +56,7 @@ func UpdateIncidentHandler(incidentService *services.IncidentService, monitorSer
 				respondError(c, http.StatusNotFound, "incident not found")
 				return
 			}
-			respondError(c, http.StatusInternalServerError, "loading incident: "+err.Error())
+			respondInternal(c, "loading incident", err)
 			return
 		}
 
@@ -113,13 +113,13 @@ func UpdateIncidentHandler(incidentService *services.IncidentService, monitorSer
 		// (a struct update would skip the zero value).
 		if err := db.WithContext(ctx).Model(&models.Incident{}).
 			Where("id = ?", incidentID).Updates(updates).Error; err != nil {
-			respondError(c, http.StatusInternalServerError, "updating incident: "+err.Error())
+			respondInternal(c, "updating incident", err)
 			return
 		}
 
 		var updated models.Incident
 		if err := db.WithContext(ctx).First(&updated, "id = ?", incidentID).Error; err != nil {
-			respondError(c, http.StatusInternalServerError, "reloading incident: "+err.Error())
+			respondInternal(c, "reloading incident", err)
 			return
 		}
 		respondSuccess(c, http.StatusOK, incidentResponse{Incident: updated, Status: updated.Status()})

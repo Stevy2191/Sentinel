@@ -183,7 +183,7 @@ func (h *ReportScheduleHandler) CreateSchedule(c *gin.Context) {
 	}
 
 	if err := h.db.WithContext(c.Request.Context()).Create(&schedule).Error; err != nil {
-		respondError(c, http.StatusInternalServerError, "creating schedule: "+err.Error())
+		respondInternal(c, "creating schedule", err)
 		return
 	}
 	if schedule.IsActive {
@@ -191,7 +191,7 @@ func (h *ReportScheduleHandler) CreateSchedule(c *gin.Context) {
 			// Roll the row back rather than leaving a schedule that exists but
 			// will never fire.
 			h.db.WithContext(c.Request.Context()).Delete(&models.ReportSchedule{}, "id = ?", schedule.ID)
-			respondError(c, http.StatusInternalServerError, "registering schedule: "+err.Error())
+			respondInternal(c, "registering schedule", err)
 			return
 		}
 	}
@@ -216,7 +216,7 @@ func (h *ReportScheduleHandler) ListSchedules(c *gin.Context) {
 	var schedules []models.ReportSchedule
 	if err := h.db.WithContext(c.Request.Context()).
 		Where("report_id = ?", reportID).Order("created_at DESC").Find(&schedules).Error; err != nil {
-		respondError(c, http.StatusInternalServerError, "listing schedules: "+err.Error())
+		respondInternal(c, "listing schedules", err)
 		return
 	}
 
@@ -246,7 +246,7 @@ func (h *ReportScheduleHandler) UpdateSchedule(c *gin.Context) {
 	schedule.UpdatedAt = time.Now()
 
 	if err := h.db.WithContext(c.Request.Context()).Save(schedule).Error; err != nil {
-		respondError(c, http.StatusInternalServerError, "updating schedule: "+err.Error())
+		respondInternal(c, "updating schedule", err)
 		return
 	}
 
@@ -254,7 +254,7 @@ func (h *ReportScheduleHandler) UpdateSchedule(c *gin.Context) {
 	// would keep executing the previous cadence and recipient list.
 	if schedule.IsActive {
 		if err := h.scheduler.Register(schedule); err != nil {
-			respondError(c, http.StatusInternalServerError, "re-registering schedule: "+err.Error())
+			respondInternal(c, "re-registering schedule", err)
 			return
 		}
 	} else {
@@ -274,7 +274,7 @@ func (h *ReportScheduleHandler) DeleteSchedule(c *gin.Context) {
 
 	if err := h.db.WithContext(c.Request.Context()).
 		Delete(&models.ReportSchedule{}, "id = ?", schedule.ID).Error; err != nil {
-		respondError(c, http.StatusInternalServerError, "deleting schedule: "+err.Error())
+		respondInternal(c, "deleting schedule", err)
 		return
 	}
 	// Drop the cron job too, or a deleted schedule keeps sending mail.
@@ -295,7 +295,7 @@ func (h *ReportScheduleHandler) RunScheduleNow(c *gin.Context) {
 	}
 
 	if err := h.scheduler.RunSchedule(c.Request.Context(), schedule.ID); err != nil {
-		respondError(c, http.StatusInternalServerError, "running schedule: "+err.Error())
+		respondInternal(c, "running schedule", err)
 		return
 	}
 	respondSuccess(c, http.StatusOK, gin.H{
