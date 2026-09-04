@@ -1,0 +1,249 @@
+import { useCallback, useState } from 'react'
+import api, { type ApiError } from '@/services/api'
+import type { ApiResponse } from '@/types'
+import type {
+  CreateReportPayload,
+  CreateSchedulePayload,
+  GenerateReportResult,
+  ReportSchedule,
+  ReportTemplate,
+  SavedReport,
+  ShareReportResult,
+} from '@/types/reports'
+
+// Hooks for the saved-report builder. This is a separate file from
+// useReports.ts, which serves the live analytics page and is unrelated.
+//
+// All calls go through the shared axios client so the Authorization header is
+// attached and errors arrive as a normalized ApiError. The client's baseURL is
+// already /api/v1, so paths here are relative to that.
+
+/** useSavedReports lists, generates, deletes, and shares saved report definitions. */
+export function useSavedReports() {
+  const [reports, setReports] = useState<SavedReport[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<ApiError | null>(null)
+
+  const listReports = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const { data } = await api.get<ApiResponse<SavedReport[]>>('/reports')
+      setReports(data.data ?? [])
+    } catch (err) {
+      setError(err as ApiError)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const createReport = useCallback(
+    async (payload: CreateReportPayload) => {
+      const { data } = await api.post<ApiResponse<GenerateReportResult>>(
+        '/reports/generate',
+        payload
+      )
+      await listReports()
+      return data.data
+    },
+    [listReports]
+  )
+
+  const deleteReport = useCallback(
+    async (reportId: string) => {
+      await api.delete(`/reports/${reportId}`)
+      await listReports()
+    },
+    [listReports]
+  )
+
+  const shareReport = useCallback(async (reportId: string) => {
+    const { data } = await api.post<ApiResponse<ShareReportResult>>(
+      `/reports/${reportId}/share`
+    )
+    return data.data
+  }, [])
+
+  return { reports, loading, error, listReports, createReport, deleteReport, shareReport }
+}
+
+/** useReportTemplates loads the templates the wizard offers. */
+export function useReportTemplates() {
+  const [templates, setTemplates] = useState<ReportTemplate[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<ApiError | null>(null)
+
+  const listTemplates = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const { data } = await api.get<ApiResponse<ReportTemplate[]>>('/report-templates')
+      setTemplates(data.data ?? [])
+    } catch (err) {
+      setError(err as ApiError)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  return { templates, loading, error, listTemplates }
+}
+
+/** useReportSchedules manages one report's delivery schedules. */
+export function useReportSchedules(reportId: string | undefined) {
+  const [schedules, setSchedules] = useState<ReportSchedule[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<ApiError | null>(null)
+
+  const listSchedules = useCallback(async () => {
+    if (!reportId) return
+    setLoading(true)
+    setError(null)
+    try {
+      const { data } = await api.get<ApiResponse<ReportSchedule[]>>(
+        `/reports/${reportId}/schedules`
+      )
+      setSchedules(data.data ?? [])
+    } catch (err) {
+      setError(err as ApiError)
+    } finally {
+      setLoading(false)
+    }
+  }, [reportId])
+
+  const createSchedule = useCallback(
+    async (payload: CreateSchedulePayload) => {
+      if (!reportId) throw new Error('reportId is required')
+      const { data } = await api.post<ApiResponse<ReportSchedule>>(
+        `/reports/${reportId}/schedules`,
+        payload
+      )
+      await listSchedules()
+      return data.data
+    },
+    [reportId, listSchedules]
+  )
+
+  const updateSchedule = useCallback(
+    async (scheduleId: string, payload: CreateSchedulePayload) => {
+      const { data } = await api.patch<ApiResponse<ReportSchedule>>(
+        `/reports/schedules/${scheduleId}`,
+        payload
+      )
+      await listSchedules()
+      return data.data
+    },
+    [listSchedules]
+  )
+
+  const deleteSchedule = useCallback(
+    async (scheduleId: string) => {
+      await api.delete(`/reports/schedules/${scheduleId}`)
+      await listSchedules()
+    },
+    [listSchedules]
+  )
+
+  const runScheduleNow = useCallback(
+    async (scheduleId: string) => {
+      // Synchronous on the backend: this resolves only once the report has
+      // actually been generated and delivered, so a rejection is a real failure.
+      const { data } = await api.post<ApiResponse<{ message: string; recipients: number }>>(
+        `/reports/schedules/${scheduleId}/run`
+      )
+      await listSchedules()
+      return data.data
+    },
+    [listSchedules]
+  )
+
+  return {
+    schedules,
+    loading,
+    error,
+    listSchedules,
+    createSchedule,
+    updateSchedule,
+    deleteSchedule,
+    runScheduleNow,
+  }
+}
+
+/** useMonitorTags loads the distinct tags available for tag-scoped reports. */
+export function useMonitorTags() {
+  const [tags, setTags] = useState<string[]>([])
+  const [loading, setLoading] = useState(false)
+
+  const listTags = useCallback(async () => {
+    setLoading(true)
+    try {
+      const { data } = await api.get<ApiResponse<string[]>>('/monitor-tags')
+      setTags(data.data ?? [])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  return { tags, loading, listTags }
+}
+
+/** usePublicReport loads a shared report by token. No authentication required. */
+export function usePublicReport(token: string | undefined) {
+  const [report, setReport] = useState<SavedReport | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<ApiError | null>(null)
+
+  const load = useCallback(async () => {
+    if (!token) return
+    setLoading(true)
+    setError(null)
+    try {
+      const { data } = await api.get<ApiResponse<SavedReport>>(
+        `/public/reports/share/${token}`
+      )
+      setReport(data.data)
+    } catch (err) {
+      setError(err as ApiError)
+    } finally {
+      setLoading(false)
+    }
+  }, [token])
+
+  return { report, loading, error, load }
+}
+
+/**
+ * downloadReportPDF fetches a generation and saves it to disk.
+ *
+ * A plain <a href> or window.open cannot be used for the authenticated route:
+ * the JWT lives in localStorage and is attached by an axios interceptor, so a
+ * browser-initiated navigation would arrive without it and get a 401. Fetching
+ * as a blob keeps the header and then hands the file to the browser.
+ *
+ * Public share downloads need no header, but go through the same path so both
+ * behave identically.
+ */
+export async function downloadReportPDF(downloadURL: string, filename: string): Promise<void> {
+  // download_url comes back absolute (/api/v1/...) while the client's baseURL is
+  // already /api/v1; strip the prefix so it is not doubled.
+  const path = downloadURL.replace(/^\/api\/v1/, '')
+  const response = await api.get<Blob>(path, { responseType: 'blob' })
+
+  const blobURL = URL.createObjectURL(response.data)
+  const link = document.createElement('a')
+  link.href = blobURL
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  // Revoke on the next tick; revoking synchronously can cancel the download.
+  setTimeout(() => URL.revokeObjectURL(blobURL), 1000)
+}
+
+/** formatFileSize renders bytes adaptively - report PDFs are usually KB, not MB. */
+export function formatFileSize(bytes?: number | null): string {
+  if (bytes == null) return ''
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`
+}

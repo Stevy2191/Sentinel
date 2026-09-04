@@ -99,12 +99,14 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("initializing report renderer: %w", err)
 	}
-	reportBuilder := api.NewReportBuilder(db, reportAggregator, pdfRenderer)
+	reportBuilder := api.NewReportBuilder(db, reportAggregator, pdfRenderer, nil)
 	reportGenerator := services.NewReportGenerator(db, reportAggregator, pdfRenderer)
 	// Scheduled delivery sends through the same SMTP configuration as the email
 	// notification channel, so it inherits its connection-security settings.
 	reportMailer := services.NewReportMailer(db, cfg.BaseURL)
 	reportScheduler := services.NewReportSchedulerService(db, reportGenerator, reportMailer)
+	// Wired after construction: deleting a report must also stop its cron jobs.
+	reportBuilder.SetScheduler(reportScheduler)
 
 	// Seed the registration setting from the environment on first run only; once
 	// stored, an admin's runtime change is authoritative across restarts.

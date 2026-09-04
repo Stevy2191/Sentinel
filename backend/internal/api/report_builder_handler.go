@@ -31,6 +31,10 @@ type ReportBuilder struct {
 	aggregator    *services.ReportAggregatorService
 	pdfRenderer   *services.PDFRendererService
 	htmlGenerator *services.HTMLReportGenerator
+	// scheduler is used when deleting a report: the database cascades its
+	// schedules away, but their cron jobs would otherwise keep firing against
+	// rows that no longer exist.
+	scheduler *services.ReportSchedulerService
 }
 
 // NewReportBuilder returns a handler set bound to its dependencies.
@@ -38,13 +42,21 @@ func NewReportBuilder(
 	db *gorm.DB,
 	aggregator *services.ReportAggregatorService,
 	pdfRenderer *services.PDFRendererService,
+	scheduler *services.ReportSchedulerService,
 ) *ReportBuilder {
 	return &ReportBuilder{
 		db:            db,
 		aggregator:    aggregator,
 		pdfRenderer:   pdfRenderer,
 		htmlGenerator: services.NewHTMLReportGenerator(),
+		scheduler:     scheduler,
 	}
+}
+
+// SetScheduler wires the report scheduler in after construction, breaking the
+// cycle between the builder and the scheduler (each needs the other).
+func (h *ReportBuilder) SetScheduler(s *services.ReportSchedulerService) {
+	h.scheduler = s
 }
 
 // ---- DTOs ------------------------------------------------------------------
@@ -479,6 +491,106 @@ func generateShareToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// ListTemplates handles GET /api/v1/report-templates. The report builder needs
+// this to offer a template choice; without it the wizard has nothing to select.
+func (h *ReportBuilder) ListTemplates(c *gin.Context) {
+	var templates []models.ReportTemplate
+	if err := h.db.WithContext(c.Request.Context()).
+		Order("is_default DESC, name ASC").Find(&templates).Error; err != nil {
+		respondError(c, http.StatusInternalServerError, "listing report templates: "+err.Error())
+		return
+	}
+	if templates == nil {
+		templates = []models.ReportTemplate{}
+	}
+	respondSuccess(c, http.StatusOK, templates)
+}
+
+// ListMonitorTags handles GET /api/v1/monitor-tags, returning every distinct tag
+// in use. The report builder scopes reports by tag, and tags live in a JSONB
+// column on monitors rather than a table of their own.
+func (h *ReportBuilder) ListMonitorTags(c *gin.Context) {
+	var tags []string
+	if err := h.db.WithContext(c.Request.Context()).
+		Raw(`SELECT DISTINCT jsonb_array_elements_text(tags) AS tag
+		       FROM monitors
+		      WHERE tags IS NOT NULL AND jsonb_typeof(tags) = 'array'
+		      ORDER BY tag`).Scan(&tags).Error; err != nil {
+		respondError(c, http.StatusInternalServerError, "listing monitor tags: "+err.Error())
+		return
+	}
+	if tags == nil {
+		tags = []string{}
+	}
+	respondSuccess(c, http.StatusOK, tags)
+}
+
+// DeleteReport handles DELETE /api/v1/reports/:id. It removes the definition,
+// its generations, access grants, and schedules, and deletes the rendered PDFs
+// from disk so nothing is left orphaned.
+func (h *ReportBuilder) DeleteReport(c *gin.Context) {
+	userID, _, isAdmin, ok := GetUserFromContext(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	reportID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "invalid report id")
+		return
+	}
+
+	ctx := c.Request.Context()
+	var report models.Report
+	if err := h.db.WithContext(ctx).First(&report, "id = ?", reportID).Error; err != nil {
+		respondError(c, http.StatusNotFound, "report not found")
+		return
+	}
+	// Deleting is an owner-level action; read access is not enough.
+	if !isAdmin && report.CreatedBy != userID && report.UserID != userID {
+		respondError(c, http.StatusForbidden, "only the report owner can delete it")
+		return
+	}
+
+	// Collect what has to be cleaned up outside the database before the rows go.
+	var generations []models.ReportGeneration
+	h.db.WithContext(ctx).Where("report_id = ?", reportID).Find(&generations)
+
+	var schedules []models.ReportSchedule
+	h.db.WithContext(ctx).Where("report_id = ?", reportID).Find(&schedules)
+
+	if err := h.db.WithContext(ctx).Delete(&models.Report{}, "id = ?", reportID).Error; err != nil {
+		respondError(c, http.StatusInternalServerError, "deleting report: "+err.Error())
+		return
+	}
+
+	// The database cascades the schedule rows, but their cron jobs live in this
+	// process and would keep firing against rows that no longer exist.
+	if h.scheduler != nil {
+		for _, s := range schedules {
+			h.scheduler.Unregister(s.ID)
+		}
+	}
+
+	// Best effort: a file that cannot be removed is logged through the response
+	// rather than failing a delete that has already committed.
+	removed, failed := 0, 0
+	for _, g := range generations {
+		if err := h.pdfRenderer.DeletePDF(g.PDFPath); err != nil {
+			failed++
+			continue
+		}
+		removed++
+	}
+
+	respondSuccess(c, http.StatusOK, gin.H{
+		"deleted":           report.ID,
+		"schedules_removed": len(schedules),
+		"files_removed":     removed,
+		"files_not_removed": failed,
+	})
+}
+
 // RegisterReportBuilderRoutes mounts the authenticated report-builder endpoints.
 func RegisterReportBuilderRoutes(rg *gin.RouterGroup, builder *ReportBuilder) {
 	reports := rg.Group("/reports")
@@ -486,6 +598,12 @@ func RegisterReportBuilderRoutes(rg *gin.RouterGroup, builder *ReportBuilder) {
 	reports.GET("", builder.ListReports)
 	reports.GET("/:id/download/:generation_id", builder.DownloadReport)
 	reports.POST("/:id/share", builder.ShareReport)
+	reports.DELETE("/:id", builder.DeleteReport)
+
+	// Sibling resources the builder UI needs. They sit outside the /reports
+	// group so they do not collide with its ":id" wildcard.
+	rg.GET("/report-templates", builder.ListTemplates)
+	rg.GET("/monitor-tags", builder.ListMonitorTags)
 }
 
 // RegisterPublicReportRoutes mounts the share-token endpoints, which must sit

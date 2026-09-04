@@ -127,6 +127,20 @@ func (s *PDFRendererService) GetPDFPath(pdfFilename string) (string, error) {
 	return filepath.Join(s.outputDir, base), nil
 }
 
+// DeletePDF removes a generated report file. A file that is already gone is not
+// an error: the database row is the record that matters, and a half-deleted
+// report is worse than a missing file.
+func (s *PDFRendererService) DeletePDF(pdfFilename string) error {
+	path, err := s.GetPDFPath(pdfFilename)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
 // GetPDFFileSize returns the size of a generated report in bytes.
 func (s *PDFRendererService) GetPDFFileSize(pdfFilename string) (int, error) {
 	path, err := s.GetPDFPath(pdfFilename)
