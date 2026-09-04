@@ -188,6 +188,9 @@ func (h *ReportScheduleHandler) CreateSchedule(c *gin.Context) {
 	}
 	if schedule.IsActive {
 		if err := h.scheduler.Register(&schedule); err != nil {
+			// Roll the row back rather than leaving a schedule that exists but
+			// will never fire.
+			h.db.WithContext(c.Request.Context()).Delete(&models.ReportSchedule{}, "id = ?", schedule.ID)
 			respondError(c, http.StatusInternalServerError, "registering schedule: "+err.Error())
 			return
 		}

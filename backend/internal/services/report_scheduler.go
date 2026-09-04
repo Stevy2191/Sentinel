@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -31,31 +30,37 @@ var cronParser = cron.NewParser(
 type ReportSchedulerService struct {
 	db        *gorm.DB
 	cron      *cron.Cron
+	jobs      *CronJobManager
 	generator *ReportGenerator
 	mailer    *ReportMailer
 	logger    *log.Logger
-
-	// entries maps a schedule to its cron entry so a schedule can be
-	// re-registered or removed when it changes. Without this, editing or
-	// deleting a schedule leaves the old job running.
-	mu      sync.Mutex
-	entries map[uuid.UUID]cron.EntryID
 }
 
 // NewReportSchedulerService returns a scheduler bound to its dependencies.
 func NewReportSchedulerService(db *gorm.DB, generator *ReportGenerator, mailer *ReportMailer) *ReportSchedulerService {
+	c := cron.New(cron.WithParser(cronParser))
 	return &ReportSchedulerService{
 		db:        db,
-		cron:      cron.New(cron.WithParser(cronParser)),
+		cron:      c,
+		jobs:      NewCronJobManager(c, cronParser),
 		generator: generator,
 		mailer:    mailer,
 		logger:    log.Default(),
-		entries:   make(map[uuid.UUID]cron.EntryID),
 	}
 }
 
 // Start loads every active schedule and begins running them.
 func (s *ReportSchedulerService) Start(ctx context.Context) error {
+	// cron entry ids are local to a cron runner and restart at 1, so any value
+	// left by a previous process now points at a different schedule's job.
+	// Clear them all before registering, so a non-null cron_entry_id always
+	// belongs to this process.
+	if err := s.db.WithContext(ctx).Model(&models.ReportSchedule{}).
+		Where("cron_entry_id IS NOT NULL").
+		Update("cron_entry_id", nil).Error; err != nil {
+		s.logger.Printf("[report-scheduler] could not clear stale cron entry ids: %v", err)
+	}
+
 	var schedules []models.ReportSchedule
 	if err := s.db.WithContext(ctx).Where("is_active = ?", true).Find(&schedules).Error; err != nil {
 		return fmt.Errorf("loading report schedules: %w", err)
@@ -94,47 +99,66 @@ func (s *ReportSchedulerService) Register(schedule *models.ReportSchedule) error
 	if err != nil {
 		return err
 	}
-	spec, err := cronParser.Parse(expr)
-	if err != nil {
-		return fmt.Errorf("invalid cron expression %q: %w", expr, err)
-	}
-
-	s.Unregister(schedule.ID)
 
 	// Copy the identifier rather than capturing the caller's pointer: the row is
 	// reloaded at run time so an edit made since registration is honoured.
 	id := schedule.ID
-	entryID := s.cron.Schedule(spec, cron.FuncJob(func() {
-		s.RunSchedule(context.Background(), id)
-	}))
-
-	s.mu.Lock()
-	s.entries[id] = entryID
-	s.mu.Unlock()
-
-	next := spec.Next(time.Now())
-	if err := s.db.Model(&models.ReportSchedule{}).Where("id = ?", id).
-		Updates(map[string]interface{}{"next_run_at": next, "updated_at": time.Now()}).Error; err != nil {
-		s.logger.Printf("[report-scheduler] could not record next run for %s: %v", id, err)
+	entryID, err := s.jobs.AddJob(id.String(), expr, func() {
+		if runErr := s.RunSchedule(context.Background(), id); runErr != nil {
+			s.logger.Printf("[report-scheduler] scheduled run of %s failed: %v", id, runErr)
+		}
+	})
+	if err != nil {
+		return err
 	}
 
-	s.logger.Printf("[report-scheduler] schedule %s registered (%s), next run %s",
-		id, expr, next.Format(time.RFC3339))
+	next, err := s.jobs.GetNextRunTime(expr)
+	if err != nil {
+		// Unreachable in practice - AddJob parsed the same expression - but the
+		// job is rolled back rather than left running with no recorded next run.
+		s.jobs.RemoveJob(id.String())
+		return err
+	}
+
+	if err := s.db.Model(&models.ReportSchedule{}).Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"cron_entry_id": entryID,
+			"next_run_at":   next,
+			"updated_at":    time.Now(),
+		}).Error; err != nil {
+		// Leave no orphan job running for a schedule whose state could not be
+		// recorded.
+		s.jobs.RemoveJob(id.String())
+		return fmt.Errorf("recording cron registration for %s: %w", id, err)
+	}
+
+	s.logger.Printf("[report-scheduler] schedule %s registered as entry %d (%s), next run %s",
+		id, entryID, expr, next.Format(time.RFC3339))
 	return nil
 }
 
-// Unregister removes a schedule's cron job if it has one.
+// Unregister removes a schedule's cron job if it has one. A schedule with no
+// job is not an error: an inactive schedule legitimately has none, and treating
+// that as a failure would block deleting it.
 func (s *ReportSchedulerService) Unregister(scheduleID uuid.UUID) {
-	s.mu.Lock()
-	entryID, ok := s.entries[scheduleID]
-	if ok {
-		delete(s.entries, scheduleID)
+	if !s.jobs.RemoveJob(scheduleID.String()) {
+		return
 	}
-	s.mu.Unlock()
+	// Clear the recorded entry so the column reflects reality. The row may
+	// already be gone if the schedule was deleted; that is not an error.
+	if err := s.db.Model(&models.ReportSchedule{}).Where("id = ?", scheduleID).
+		Update("cron_entry_id", nil).Error; err != nil {
+		s.logger.Printf("[report-scheduler] could not clear cron entry id for %s: %v", scheduleID, err)
+	}
+}
 
-	if ok {
-		s.cron.Remove(entryID)
-	}
+// RegisteredCount reports how many schedules currently have a cron job. Used by
+// tests and for logging.
+func (s *ReportSchedulerService) RegisteredCount() int { return s.jobs.Count() }
+
+// EntryIDFor returns the cron entry a schedule is registered under, if any.
+func (s *ReportSchedulerService) EntryIDFor(scheduleID uuid.UUID) (int, bool) {
+	return s.jobs.EntryID(scheduleID.String())
 }
 
 // RunSchedule generates a schedule's report and emails it. It reloads the
@@ -213,8 +237,8 @@ func (s *ReportSchedulerService) recordRun(ctx context.Context, schedule *models
 	updates := map[string]interface{}{"last_run_at": now, "updated_at": now}
 
 	if expr, err := CronExpressionFor(schedule.ScheduleType, schedule.CronExpression); err == nil {
-		if spec, perr := cronParser.Parse(expr); perr == nil {
-			updates["next_run_at"] = spec.Next(now)
+		if next, nerr := s.jobs.GetNextRunTime(expr); nerr == nil {
+			updates["next_run_at"] = next
 		}
 	}
 	if err := s.db.WithContext(ctx).Model(&models.ReportSchedule{}).

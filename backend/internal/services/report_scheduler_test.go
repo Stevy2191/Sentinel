@@ -1,10 +1,14 @@
 package services
 
 import (
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/robfig/cron/v3"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
 )
@@ -128,4 +132,106 @@ func TestReportScheduleValidate(t *testing.T) {
 			t.Error("expected an error for custom with no cron expression")
 		}
 	})
+}
+
+// ---- CronJobManager -------------------------------------------------------
+
+func newTestManager() *CronJobManager {
+	return NewCronJobManager(cron.New(cron.WithParser(cronParser)), cronParser)
+}
+
+// Adding a job for a schedule that already has one must replace it, or an
+// edited schedule runs on both its old and its new cadence.
+func TestCronJobManagerReplacesExistingJob(t *testing.T) {
+	m := newTestManager()
+	id := "schedule-1"
+
+	first, err := m.AddJob(id, "0 8 * * *", func() {})
+	if err != nil {
+		t.Fatalf("AddJob: %v", err)
+	}
+	second, err := m.AddJob(id, "0 9 * * *", func() {})
+	if err != nil {
+		t.Fatalf("AddJob (replace): %v", err)
+	}
+
+	if first == second {
+		t.Error("replacing a job should produce a new entry id")
+	}
+	if m.Count() != 1 {
+		t.Errorf("registry holds %d entries, want 1 - the old job was not replaced", m.Count())
+	}
+	if got, ok := m.EntryID(id); !ok || got != second {
+		t.Errorf("EntryID = (%d, %v), want (%d, true)", got, ok, second)
+	}
+}
+
+func TestCronJobManagerRemoveJob(t *testing.T) {
+	m := newTestManager()
+	if _, err := m.AddJob("s1", "@daily", func() {}); err != nil {
+		t.Fatalf("AddJob: %v", err)
+	}
+
+	if !m.RemoveJob("s1") {
+		t.Error("RemoveJob should report that it removed a job")
+	}
+	if m.Count() != 0 {
+		t.Errorf("registry still holds %d entries", m.Count())
+	}
+	// Removing an unregistered schedule is a no-op, not a failure: an inactive
+	// schedule has no job and must still be deletable.
+	if m.RemoveJob("s1") {
+		t.Error("removing an already-removed job should report false, not panic or error")
+	}
+	if m.RemoveJob("never-registered") {
+		t.Error("removing an unknown schedule should report false")
+	}
+}
+
+func TestCronJobManagerRejectsBadExpression(t *testing.T) {
+	m := newTestManager()
+	if _, err := m.AddJob("s1", "not a cron", func() {}); err == nil {
+		t.Error("expected an error for an invalid expression")
+	}
+	if m.Count() != 0 {
+		t.Error("a failed AddJob must not leave a registry entry")
+	}
+}
+
+// The manager's parser must match the one the cron runner uses, or an
+// expression that registers could fail when its next run is computed.
+func TestCronJobManagerNextRunUsesTheSameParser(t *testing.T) {
+	m := newTestManager()
+	for _, expr := range []string{"0 8 * * *", "@daily", "@every 1h", "*/15 * * * *"} {
+		if _, err := m.AddJob("s", expr, func() {}); err != nil {
+			t.Fatalf("AddJob(%q): %v", expr, err)
+		}
+		next, err := m.GetNextRunTime(expr)
+		if err != nil {
+			t.Errorf("GetNextRunTime(%q) failed though AddJob accepted it: %v", expr, err)
+			continue
+		}
+		if !next.After(time.Now().Add(-time.Second)) {
+			t.Errorf("GetNextRunTime(%q) returned a past time %v", expr, next)
+		}
+	}
+}
+
+// The registry is written from concurrent HTTP handlers; a bare map would race.
+func TestCronJobManagerIsConcurrencySafe(t *testing.T) {
+	m := newTestManager()
+	var wg sync.WaitGroup
+	for i := 0; i < 40; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			id := fmt.Sprintf("schedule-%d", i%5)
+			if _, err := m.AddJob(id, "@daily", func() {}); err != nil {
+				t.Errorf("AddJob: %v", err)
+			}
+			m.EntryID(id)
+			m.RemoveJob(id)
+		}(i)
+	}
+	wg.Wait()
 }

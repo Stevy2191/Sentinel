@@ -69,11 +69,16 @@ type ReportSchedule struct {
 	EmailRecipients  StringSlice     `json:"email_recipients" gorm:"column:email_recipients;type:jsonb;not null"`
 	SendAsAttachment bool            `json:"send_as_attachment" gorm:"column:send_as_attachment"`
 	IncludeInEmail   EmailInclusions `json:"include_in_email" gorm:"column:include_in_email;type:jsonb"`
-	LastRunAt        *time.Time      `json:"last_run_at" gorm:"column:last_run_at"`
-	NextRunAt        *time.Time      `json:"next_run_at" gorm:"column:next_run_at"`
-	IsActive         bool            `json:"is_active" gorm:"column:is_active"`
-	CreatedAt        time.Time       `json:"created_at" gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt        time.Time       `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
+	// CronEntryID is the cron entry this schedule is registered under in the
+	// CURRENT process, or nil when it is not registered. It is not stable across
+	// restarts - see migration 017 - so it is for observability only and is
+	// never used to decide which job to remove. Not serialized to the API.
+	CronEntryID *int       `json:"-" gorm:"column:cron_entry_id"`
+	LastRunAt   *time.Time `json:"last_run_at" gorm:"column:last_run_at"`
+	NextRunAt   *time.Time `json:"next_run_at" gorm:"column:next_run_at"`
+	IsActive    bool       `json:"is_active" gorm:"column:is_active"`
+	CreatedAt   time.Time  `json:"created_at" gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt   time.Time  `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
 }
 
 // TableName tells GORM which table backs the ReportSchedule model.
