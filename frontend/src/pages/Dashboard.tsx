@@ -12,6 +12,7 @@ import {
   Wand2,
   Upload,
   Globe,
+  Radar,
 } from 'lucide-react'
 import { useMonitors } from '@/hooks/useMonitors'
 import {
@@ -90,11 +91,13 @@ function NewMenu({
   onSingle,
   onWizard,
   onBulk,
+  onDiscover,
   onGroup,
 }: {
   onSingle: () => void
   onWizard: () => void
   onBulk: () => void
+  onDiscover: () => void
   onGroup: () => void
 }) {
   const [open, setOpen] = useState(false)
@@ -104,6 +107,7 @@ function NewMenu({
     { key: 'single', label: 'Single monitor', icon: Globe, onClick: onSingle },
     { key: 'wizard', label: 'Monitor wizard', icon: Wand2, onClick: onWizard },
     { key: 'bulk', label: 'Bulk upload', icon: Upload, onClick: onBulk },
+    { key: 'discover', label: 'Network discovery', icon: Radar, onClick: onDiscover },
     { key: 'group', label: 'Group', icon: FolderPlus, onClick: onGroup },
   ]
 
@@ -593,6 +597,7 @@ export default function Dashboard() {
           onSingle={() => navigate('/monitors/create')}
           onWizard={() => navigate('/monitors/new/wizard')}
           onBulk={() => navigate('/monitors/bulk')}
+          onDiscover={() => navigate('/monitors/discover')}
           onGroup={() => setModal({ mode: 'create' })}
         />
       </div>

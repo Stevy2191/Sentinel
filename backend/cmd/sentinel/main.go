@@ -86,6 +86,7 @@ func run() error {
 	authService := services.NewAuthService(db, resolveJWTSecret())
 	invitationService := services.NewInvitationService(db, authService)
 	settingsService := services.NewSettingsService(db)
+	discoveryService := services.NewDiscoveryService()
 
 	// Seed the registration setting from the environment on first run only; once
 	// stored, an admin's runtime change is authoritative across restarts.
@@ -123,6 +124,7 @@ func run() error {
 	v1.Use(api.AuthMiddleware(authService))
 	api.RegisterMonitorRoutes(v1, monitorService, checkService)
 	api.RegisterMonitorCreationRoutes(v1, monitorService, checkService)
+	api.RegisterDiscoveryRoutes(v1, discoveryService)
 	api.RegisterCheckRoutes(v1, checkService, incidentService, monitorService)
 	api.RegisterReportRoutes(v1, monitorService, checkService, incidentService)
 	api.RegisterMonitorGroupRoutes(v1, monitorService, incidentService)

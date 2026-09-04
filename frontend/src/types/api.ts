@@ -105,6 +105,23 @@ export interface PaginatedMonitors {
   pagination: Pagination
 }
 
+// ---- Network discovery ------------------------------------------------------
+
+export interface DiscoveredHost {
+  ip: string
+  hostname?: string
+  response_time_ms: number
+  method: 'icmp' | 'tcp'
+}
+
+export interface DiscoveryResult {
+  cidr: string
+  hosts_scanned: number
+  hosts_up: number
+  duration_ms: number
+  hosts: DiscoveredHost[]
+}
+
 // ---- Checks & incidents ----------------------------------------------------
 
 export interface Check {
