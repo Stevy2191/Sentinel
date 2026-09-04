@@ -123,9 +123,12 @@ type Monitor struct {
 	// nil means every enabled channel (the default); an empty slice means none.
 	NotifyChannels StringSlice `json:"notify_channels" gorm:"column:notify_channels;type:jsonb"`
 	GroupID        *uuid.UUID  `json:"group_id" gorm:"column:group_id;type:uuid"`
-	OwnerID        *uuid.UUID  `json:"owner_id" gorm:"column:owner_id;type:uuid"`
-	CreatedAt      time.Time   `json:"created_at" gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt      time.Time   `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
+	// SLATarget is the uptime percentage this monitor is held to (e.g. 99.9).
+	// Nil means no SLA is defined and compliance is not evaluated.
+	SLATarget *float64   `json:"sla_target" gorm:"column:sla_target"`
+	OwnerID   *uuid.UUID `json:"owner_id" gorm:"column:owner_id;type:uuid"`
+	CreatedAt time.Time  `json:"created_at" gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt time.Time  `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
 
 	// Maintenance mode: during an active window, failed checks are recorded but
 	// do not open incidents or fire notifications.
@@ -232,13 +235,26 @@ type Incident struct {
 	Severity        string     `json:"severity" gorm:"column:severity"`
 	RootCause       string     `json:"root_cause" gorm:"column:root_cause"`
 	Notes           string     `json:"notes" gorm:"column:notes"`
-	CreatedAt       time.Time  `json:"created_at" gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt       time.Time  `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
+	// ResolutionNotes records how the incident was resolved, as distinct from
+	// Notes (general context). Both exist: Notes predates this and is already
+	// part of the API contract.
+	ResolutionNotes string    `json:"resolution_notes" gorm:"column:resolution_notes"`
+	CreatedAt       time.Time `json:"created_at" gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt       time.Time `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
 }
 
 // TableName tells GORM which table backs the Incident model.
 func (Incident) TableName() string {
 	return "incidents"
+}
+
+// Status derives the incident's state. The incidents table has no status column;
+// an incident is open until it is given an end time.
+func (i *Incident) Status() string {
+	if i.EndTime == nil {
+		return "ongoing"
+	}
+	return "resolved"
 }
 
 // Notification is a record of an alert dispatched over a channel, optionally

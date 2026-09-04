@@ -87,6 +87,7 @@ func run() error {
 	invitationService := services.NewInvitationService(db, authService)
 	settingsService := services.NewSettingsService(db)
 	discoveryService := services.NewDiscoveryService()
+	reportAggregator := services.NewReportAggregatorService(db)
 
 	// Seed the registration setting from the environment on first run only; once
 	// stored, an admin's runtime change is authoritative across restarts.
@@ -127,6 +128,9 @@ func run() error {
 	api.RegisterDiscoveryRoutes(v1, discoveryService)
 	api.RegisterCheckRoutes(v1, checkService, incidentService, monitorService)
 	api.RegisterReportRoutes(v1, monitorService, checkService, incidentService)
+	// Saved-report builder (definitions, PDF generation, sharing). Wiring only
+	// so far - see report_builder_handler.go for the endpoints still to come.
+	api.RegisterReportBuilderRoutes(v1, api.NewReportBuilder(db, reportAggregator))
 	api.RegisterMonitorGroupRoutes(v1, monitorService, incidentService)
 	api.RegisterMonitorSharingRoutes(v1, monitorService, authService)
 	api.RegisterStatusPageRoutes(v1, statusPageService, incidentService)
