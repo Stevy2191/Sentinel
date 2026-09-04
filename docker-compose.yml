@@ -36,6 +36,7 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-production}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       TIMEZONE: ${TIMEZONE:-UTC}
+      REPORTS_DIR: /app/reports
       JWT_SECRET: ${JWT_SECRET:-}
       # Initial state of self-registration (seeded on first run; an admin can
       # change it at runtime and that persists regardless of this value).
@@ -59,6 +60,9 @@ services:
       - "${BACKEND_PORT:-3001}:3001"
     volumes:
       - ./backend/migrations:/app/migrations
+      # Generated report PDFs, kept on the host so they survive a container
+      # replacement. REPORTS_DIR must match the container-side path.
+      - ./reports:/app/reports
     # CAP_NET_RAW lets the backend open raw ICMP sockets for ping monitor
     # checks and network discovery scans. Without it, both fall back to
     # unprivileged ICMP (if the host's ping_group_range allows it) or a TCP

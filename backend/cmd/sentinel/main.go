@@ -37,6 +37,7 @@ type config struct {
 	Environment         string
 	CheckInterval       time.Duration
 	MigrationsDir       string
+	ReportsDir          string
 	RegistrationEnabled bool
 }
 
@@ -46,6 +47,9 @@ func loadConfig() config {
 		Environment:   getenv("ENVIRONMENT", "development"),
 		CheckInterval: time.Duration(getenvInt("DEFAULT_CHECK_INTERVAL", 30)) * time.Second,
 		MigrationsDir: getenv("MIGRATIONS_DIR", "migrations"),
+		// Where generated report PDFs are written. Mount this as a volume, or
+		// generated reports vanish when the container is replaced.
+		ReportsDir: getenv("REPORTS_DIR", "reports"),
 		// Closed by default for security; the first account can always be created
 		// (see RegisterHandler), and an admin can open registration at runtime.
 		RegistrationEnabled: getenvBool("REGISTRATION_ENABLED", false),
@@ -88,6 +92,11 @@ func run() error {
 	settingsService := services.NewSettingsService(db)
 	discoveryService := services.NewDiscoveryService()
 	reportAggregator := services.NewReportAggregatorService(db)
+	pdfRenderer, err := services.NewPDFRendererService(cfg.ReportsDir)
+	if err != nil {
+		return fmt.Errorf("initializing report renderer: %w", err)
+	}
+	reportBuilder := api.NewReportBuilder(db, reportAggregator, pdfRenderer)
 
 	// Seed the registration setting from the environment on first run only; once
 	// stored, an admin's runtime change is authoritative across restarts.
@@ -119,6 +128,9 @@ func run() error {
 	// Public auth endpoints (register/login/mfa-verify) + public status pages.
 	api.RegisterAuthRoutes(router, authService, settingsService)
 	api.RegisterPublicStatusRoutes(router, statusPageService, incidentService)
+	// Share-token report access: public by design, so outside the authenticated
+	// v1 group (same split as the public status pages above).
+	api.RegisterPublicReportRoutes(router, reportBuilder)
 
 	// All other /api/v1 routes require a valid JWT.
 	v1 := router.Group("/api/v1")
@@ -128,9 +140,9 @@ func run() error {
 	api.RegisterDiscoveryRoutes(v1, discoveryService)
 	api.RegisterCheckRoutes(v1, checkService, incidentService, monitorService)
 	api.RegisterReportRoutes(v1, monitorService, checkService, incidentService)
-	// Saved-report builder (definitions, PDF generation, sharing). Wiring only
-	// so far - see report_builder_handler.go for the endpoints still to come.
-	api.RegisterReportBuilderRoutes(v1, api.NewReportBuilder(db, reportAggregator))
+	// Saved-report builder: definitions, PDF generation, history, sharing.
+	api.RegisterReportBuilderRoutes(v1, reportBuilder)
+	api.RegisterIncidentRoutes(v1, incidentService, monitorService, db)
 	api.RegisterMonitorGroupRoutes(v1, monitorService, incidentService)
 	api.RegisterMonitorSharingRoutes(v1, monitorService, authService)
 	api.RegisterStatusPageRoutes(v1, statusPageService, incidentService)
