@@ -13,6 +13,9 @@ import MonitorWizard from '@/pages/MonitorWizard'
 import BulkUpload from '@/pages/BulkUpload'
 import NetworkDiscovery from '@/pages/NetworkDiscovery'
 import Reports from '@/pages/Reports'
+import SavedReports from '@/pages/SavedReports'
+import SavedReportDetail from '@/pages/SavedReportDetail'
+import PublicReport from '@/pages/PublicReport'
 import StatusPages from '@/pages/StatusPages'
 import Notifications from '@/pages/Notifications'
 import Settings from '@/pages/Settings'
@@ -55,6 +58,8 @@ export default function App() {
             <Route path="/register" element={<Auth mode="register" />} />
             <Route path="/invitation/:token" element={<InvitationAccept />} />
             <Route path="/public/status/:slug" element={<PublicStatus />} />
+            {/* Shared reports are reachable by token without signing in. */}
+            <Route path="/reports/share/:token" element={<PublicReport />} />
 
             {/* Admin app — requires authentication. */}
             <Route
@@ -73,7 +78,14 @@ export default function App() {
               <Route path="/monitors/discover" element={<NetworkDiscovery />} />
               <Route path="/monitors/:id" element={<MonitorDetail mode="view" />} />
               <Route path="/monitors/:id/edit" element={<MonitorDetail mode="edit" />} />
-              <Route path="/reports" element={<Reports />} />
+              <Route path="/reports" element={<SavedReports mode="list" />} />
+              <Route path="/reports/new" element={<SavedReports mode="create" />} />
+              {/* The pre-existing live analytics view, moved off /reports so the
+                  saved-report hub can own that path. Declared before the ":id"
+                  route for clarity; React Router ranks the static segment higher
+                  either way. */}
+              <Route path="/reports/analytics" element={<Reports />} />
+              <Route path="/reports/:id" element={<SavedReportDetail />} />
               <Route path="/status-pages" element={<StatusPages mode="list" />} />
               <Route path="/status-pages/create" element={<StatusPages mode="create" />} />
               <Route path="/status-pages/:slug/detail" element={<StatusPages mode="detail" />} />

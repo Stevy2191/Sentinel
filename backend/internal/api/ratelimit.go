@@ -2,22 +2,36 @@ package api
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/time/rate"
 )
+
+// This file holds two independent rate-limiting mechanisms:
+//
+//   - attemptLimiter: a failure-counting lockout for auth endpoints. It only
+//     tracks failed attempts and clears on success, so a legitimate user who
+//     mistypes a password once is never penalized. Used for login, MFA
+//     verification, and registration, where the goal is stopping credential
+//     guessing.
+//   - RateLimiter: a token-bucket throttle keyed by IP or user. It caps request
+//     rate regardless of success/failure. Used for endpoints where repetition
+//     itself is the problem (e.g. report generation, which aggregates a time
+//     range and renders a PDF on every call).
+//
+// Both are in-process, which is the right scope for a single-binary
+// self-hosted deployment. Running several replicas behind a load balancer
+// would multiply the effective limit by the replica count; a shared store
+// (Postgres or Redis) would be needed for a hard global cap in that case.
+
+// ---- attemptLimiter: failure-counting lockout for auth endpoints ----------
 
 // attemptLimiter tracks failed attempts per key within a sliding window and
 // locks a key out for a cooldown period once it exceeds maxAttempts.
-//
-// This is intentionally in-process rather than backed by Redis or the
-// database: Sentinel runs as a single backend instance, so a mutex-protected
-// map is sufficient and avoids adding an external dependency. If Sentinel
-// ever moves to multiple backend replicas, this needs to move to a shared
-// store (e.g. Postgres or Redis) or attackers can simply round-robin across
-// instances to reset their attempt count.
 type attemptLimiter struct {
 	mu          sync.Mutex
 	maxAttempts int
@@ -125,11 +139,104 @@ var (
 	registerLimiter = newAttemptLimiter(5, time.Hour, time.Hour)
 )
 
-// respondRateLimited writes a 429 with a Retry-After header.
+// respondRateLimited writes a 429 with a Retry-After header. Used by the
+// attemptLimiter call sites in auth_handler.go.
 func respondRateLimited(c *gin.Context, retryAfter time.Duration) {
 	c.Header("Retry-After", fmt.Sprintf("%d", int(retryAfter.Seconds())+1))
 	c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
 		"success": false,
 		"error":   gin.H{"code": http.StatusTooManyRequests, "message": "too many attempts, please try again later"},
 	})
+}
+
+// ---- RateLimiter: token-bucket throttle for general endpoints ------------
+
+// visitorTTL is how long an idle bucket is kept before being swept, bounding
+// memory under a spray of distinct keys.
+const visitorTTL = 15 * time.Minute
+
+type visitor struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
+}
+
+// RateLimiter hands out a token bucket per key and expires idle ones.
+type RateLimiter struct {
+	every rate.Limit
+	burst int
+
+	mu       sync.Mutex
+	visitors map[string]*visitor
+}
+
+// NewRateLimiter allows burst events immediately, refilling at n per period.
+func NewRateLimiter(n int, period time.Duration, burst int) *RateLimiter {
+	rl := &RateLimiter{
+		every:    rate.Every(period / time.Duration(n)),
+		burst:    burst,
+		visitors: make(map[string]*visitor),
+	}
+	go rl.sweep()
+	return rl
+}
+
+// allow reports whether key may proceed now.
+func (rl *RateLimiter) allow(key string) bool {
+	rl.mu.Lock()
+	v, ok := rl.visitors[key]
+	if !ok {
+		v = &visitor{limiter: rate.NewLimiter(rl.every, rl.burst)}
+		rl.visitors[key] = v
+	}
+	v.lastSeen = time.Now()
+	rl.mu.Unlock()
+	return v.limiter.Allow()
+}
+
+// sweep drops buckets that have gone idle.
+func (rl *RateLimiter) sweep() {
+	ticker := time.NewTicker(visitorTTL)
+	defer ticker.Stop()
+	for range ticker.C {
+		cutoff := time.Now().Add(-visitorTTL)
+		rl.mu.Lock()
+		for key, v := range rl.visitors {
+			if v.lastSeen.Before(cutoff) {
+				delete(rl.visitors, key)
+			}
+		}
+		rl.mu.Unlock()
+	}
+}
+
+// keyFunc derives the bucket key for a request.
+type keyFunc func(*gin.Context) string
+
+// Middleware rejects requests over the limit with 429 and a Retry-After hint.
+func (rl *RateLimiter) Middleware(name string, key keyFunc) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		k := key(c)
+		if rl.allow(k) {
+			c.Next()
+			return
+		}
+		log.Printf("[ratelimit] %s: %s %s throttled (key=%s)", name, c.Request.Method, c.FullPath(), k)
+		c.Header("Retry-After", "60")
+		c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+			"success": false,
+			"error":   "too many requests; please wait a moment and try again",
+		})
+	}
+}
+
+// ByIP keys on the client address, for endpoints reachable before sign-in.
+func ByIP(c *gin.Context) string { return c.ClientIP() }
+
+// ByUser keys on the authenticated user, falling back to IP when the request is
+// rejected before AuthMiddleware populates the context.
+func ByUser(c *gin.Context) string {
+	if userID, _, _, ok := GetUserFromContext(c); ok {
+		return userID.String()
+	}
+	return c.ClientIP()
 }

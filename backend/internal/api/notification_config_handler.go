@@ -28,7 +28,7 @@ func GetNotificationConfigsHandler(service *services.NotificationConfigService) 
 	return func(c *gin.Context) {
 		configs, err := service.GetAllConfigs(c.Request.Context())
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetNotificationConfigsHandler", err)
 			return
 		}
 		respondSuccess(c, http.StatusOK, configs)
@@ -49,7 +49,7 @@ func GetNotificationConfigHandler(service *services.NotificationConfigService) g
 				respondError(c, http.StatusNotFound, "no configuration for channel "+channel)
 				return
 			}
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetNotificationConfigHandler", err)
 			return
 		}
 		respondSuccess(c, http.StatusOK, config)
@@ -99,7 +99,7 @@ func TestNotificationConfigHandler(service *services.NotificationConfigService) 
 				respondError(c, http.StatusNotFound, "no configuration for channel "+channel)
 				return
 			}
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "TestNotificationConfigHandler", err)
 			return
 		}
 		// A failed test is still a 200: the request succeeded, the delivery didn't.
@@ -129,7 +129,7 @@ func DeleteNotificationConfigHandler(service *services.NotificationConfigService
 				respondError(c, http.StatusNotFound, "no configuration for channel "+channel)
 				return
 			}
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "DeleteNotificationConfigHandler", err)
 			return
 		}
 		respondSuccess(c, http.StatusOK, gin.H{"message": "Channel " + channel + " disabled"})

@@ -73,17 +73,17 @@ func GetMonitorReportHandler(
 
 		downtimePct, err := incidentService.GetDowntimePercentage(ctx, id, start, end)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetMonitorReportHandler", err)
 			return
 		}
 		totalDowntime, err := incidentService.GetIncidentDuration(ctx, id, start, end)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetMonitorReportHandler", err)
 			return
 		}
 		incidentCount, err := incidentService.GetIncidentCount(ctx, id, start, end)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetMonitorReportHandler", err)
 			return
 		}
 
@@ -91,7 +91,7 @@ func GetMonitorReportHandler(
 		// can flag live downtime instead of only reflecting it in the percentage.
 		ongoing, currentDowntime, err := incidentService.GetCurrentDowntime(ctx, id)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetMonitorReportHandler", err)
 			return
 		}
 		// A monitor reported offline right now is "down", even if its ongoing
@@ -103,7 +103,7 @@ func GetMonitorReportHandler(
 		// it is accurate regardless of how many checks exist (not capped).
 		totalChecks, err := checkService.CountChecks(ctx, id, start, end)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetMonitorReportHandler", err)
 			return
 		}
 
@@ -112,7 +112,7 @@ func GetMonitorReportHandler(
 		// range rather than only the most recent checks.
 		rangeChecks, err := checkService.GetChecksInRange(ctx, id, start, end, 0, 0)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetMonitorReportHandler", err)
 			return
 		}
 
@@ -296,7 +296,7 @@ func GetUptimeHistoryHandler(
 		// Bucket the last 24h of checks by hour (UTC).
 		checks, err := checkService.GetChecksInRange(ctx, id, now.Add(-24*time.Hour), now, 0, 0)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetUptimeHistoryHandler", err)
 			return
 		}
 		type bucket struct {
@@ -339,7 +339,7 @@ func GetUptimeHistoryHandler(
 		windowStart := now.Add(-24 * time.Hour)
 		incidents, err := incidentService.GetOverlappingIncidents(ctx, id, windowStart, now)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetUptimeHistoryHandler", err)
 			return
 		}
 		// Maintenance comes from the history table rather than the monitor's
@@ -347,7 +347,7 @@ func GetUptimeHistoryHandler(
 		// such after that window has been cleared or replaced.
 		maintenanceWindows, err := monitorService.GetMaintenanceHistory(ctx, id, windowStart, now)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetUptimeHistoryHandler", err)
 			return
 		}
 		downIntervals := incidentIntervals(incidents)
@@ -481,7 +481,7 @@ func GetTimelineReportHandler(
 
 		checks, err := checkService.GetChecksInRange(ctx, id, start, end, 0, 0)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetTimelineReportHandler", err)
 			return
 		}
 
@@ -566,7 +566,7 @@ func GetSummaryReportHandler(
 		userID, _, isAdmin, _ := GetUserFromContext(c)
 		all, err := monitorService.ListAccessibleMonitors(ctx, userID, isAdmin, nil)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetSummaryReportHandler", err)
 			return
 		}
 

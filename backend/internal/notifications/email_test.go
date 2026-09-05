@@ -265,7 +265,7 @@ func TestDeliverImplicitTLSConnects(t *testing.T) {
 	f := startFakeSMTP(t, fakeSMTPOpts{implicitTLS: true, advertiseAUTH: true, tlsConfig: tlsCfg})
 	p := testPlugin(f, models.SMTPSecuritySSLTLS, "user@fake.test", "secret", true)
 
-	if err := p.deliver(context.Background(), testMIME()); err != nil {
+	if err := p.deliver(context.Background(), testMIME(), p.to); err != nil {
 		t.Fatalf("deliver over implicit TLS: %v (transcript: %s)", err, f.transcript())
 	}
 	if !f.sawCommand("AUTH") {
@@ -279,7 +279,7 @@ func TestDeliverSTARTTLSUpgrades(t *testing.T) {
 	f := startFakeSMTP(t, fakeSMTPOpts{advertiseSTARTTLS: true, advertiseAUTH: true, tlsConfig: tlsCfg})
 	p := testPlugin(f, models.SMTPSecuritySTARTTLS, "user@fake.test", "secret", true)
 
-	if err := p.deliver(context.Background(), testMIME()); err != nil {
+	if err := p.deliver(context.Background(), testMIME(), p.to); err != nil {
 		t.Fatalf("deliver over STARTTLS: %v (transcript: %s)", err, f.transcript())
 	}
 	if !f.sawCommand("STARTTLS") {
@@ -296,7 +296,7 @@ func TestDeliverSTARTTLSStrictWhenUnsupported(t *testing.T) {
 	f := startFakeSMTP(t, fakeSMTPOpts{advertiseSTARTTLS: false, advertiseAUTH: true})
 	p := testPlugin(f, models.SMTPSecuritySTARTTLS, "user@fake.test", "secret", false)
 
-	err := p.deliver(context.Background(), testMIME())
+	err := p.deliver(context.Background(), testMIME(), p.to)
 	if err == nil {
 		t.Fatalf("expected an error when STARTTLS is unsupported, transcript: %s", f.transcript())
 	}
@@ -323,7 +323,7 @@ func TestDeliverErrorsWhenAuthUnadvertised(t *testing.T) {
 	f := startFakeSMTP(t, fakeSMTPOpts{advertiseSTARTTLS: true, advertiseAUTH: false, tlsConfig: tlsCfg})
 	p := testPlugin(f, models.SMTPSecuritySTARTTLS, "user@fake.test", "secret", true)
 
-	err := p.deliver(context.Background(), testMIME())
+	err := p.deliver(context.Background(), testMIME(), p.to)
 	if err == nil {
 		t.Fatalf("expected an error when AUTH is unadvertised, transcript: %s", f.transcript())
 	}
@@ -341,7 +341,7 @@ func TestDeliverPlaintextRelayWithoutCredentials(t *testing.T) {
 	f := startFakeSMTP(t, fakeSMTPOpts{advertiseAUTH: false})
 	p := testPlugin(f, models.SMTPSecurityNone, "", "", false)
 
-	if err := p.deliver(context.Background(), testMIME()); err != nil {
+	if err := p.deliver(context.Background(), testMIME(), p.to); err != nil {
 		t.Fatalf("plaintext relay delivery: %v (transcript: %s)", err, f.transcript())
 	}
 	if f.sawCommand("AUTH") {
@@ -359,7 +359,7 @@ func TestDeliverCertificateVerification(t *testing.T) {
 		f := startFakeSMTP(t, fakeSMTPOpts{implicitTLS: true, advertiseAUTH: true, tlsConfig: tlsCfg})
 		p := testPlugin(f, models.SMTPSecuritySSLTLS, "user@fake.test", "secret", false)
 
-		if err := p.deliver(context.Background(), testMIME()); err == nil {
+		if err := p.deliver(context.Background(), testMIME(), p.to); err == nil {
 			t.Fatal("expected a self-signed certificate to be rejected")
 		}
 	})
@@ -369,7 +369,7 @@ func TestDeliverCertificateVerification(t *testing.T) {
 		f := startFakeSMTP(t, fakeSMTPOpts{implicitTLS: true, advertiseAUTH: true, tlsConfig: tlsCfg})
 		p := testPlugin(f, models.SMTPSecuritySSLTLS, "user@fake.test", "secret", true)
 
-		if err := p.deliver(context.Background(), testMIME()); err != nil {
+		if err := p.deliver(context.Background(), testMIME(), p.to); err != nil {
 			t.Fatalf("expected skipTLSVerify to accept a self-signed cert: %v", err)
 		}
 	})

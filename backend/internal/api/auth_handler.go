@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -510,9 +511,12 @@ func GetUserFromContext(c *gin.Context) (userID uuid.UUID, username string, isAd
 // public; the rest require a valid JWT.
 func RegisterAuthRoutes(router *gin.Engine, authService *services.AuthService, settingsService *services.SettingsService) {
 	public := router.Group("/api/v1/auth")
-	public.POST("/register", RegisterHandler(authService, settingsService))
-	public.POST("/login", LoginHandler(authService))
-	public.POST("/mfa/verify", VerifyMFAHandler(authService))
+	// Credential endpoints are the brute-force surface: 10 attempts a minute per
+	// IP, with a small burst so a mistyped password is not punished.
+	authLimit := NewRateLimiter(10, time.Minute, 5).Middleware("auth", ByIP)
+	public.POST("/register", authLimit, RegisterHandler(authService, settingsService))
+	public.POST("/login", authLimit, LoginHandler(authService))
+	public.POST("/mfa/verify", authLimit, VerifyMFAHandler(authService))
 	public.GET("/status", AuthStatusHandler(authService, settingsService))
 
 	protected := router.Group("/api/v1/auth")

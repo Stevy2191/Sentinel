@@ -159,7 +159,7 @@ func GetMonitorSharesHandler(monitorService *services.MonitorService) gin.Handle
 		}
 		shares, err := monitorService.GetMonitorShares(c.Request.Context(), monitorID)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetMonitorSharesHandler", err)
 			return
 		}
 		respondSuccess(c, http.StatusOK, shares)
@@ -172,15 +172,28 @@ func ListUsersHandler(authService *services.AuthService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		users, err := authService.ListUsers(c.Request.Context())
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "ListUsersHandler", err)
 			return
 		}
+		// This route is not admin-gated: the monitor-sharing picker needs to
+		// resolve owner ids to names, so any authenticated user may call it.
+		// The payload is therefore scoped to the caller.
+		//
+		// A non-admin gets only what that picker declares it needs (id,
+		// username, email). Returning role/is_admin to everyone told any signed-in
+		// user exactly which accounts hold administrator rights, which is a
+		// targeting aid and serves no purpose in the sharing UI.
+		_, _, isAdmin, _ := GetUserFromContext(c)
+
 		out := make([]gin.H, 0, len(users))
 		for _, u := range users {
-			out = append(out, gin.H{
-				"id": u.ID, "username": u.Username, "email": u.Email,
-				"role": u.Role, "is_admin": u.IsAdmin, "created_at": u.CreatedAt,
-			})
+			entry := gin.H{"id": u.ID, "username": u.Username, "email": u.Email}
+			if isAdmin {
+				entry["role"] = u.Role
+				entry["is_admin"] = u.IsAdmin
+				entry["created_at"] = u.CreatedAt
+			}
+			out = append(out, entry)
 		}
 		respondSuccess(c, http.StatusOK, out)
 	}

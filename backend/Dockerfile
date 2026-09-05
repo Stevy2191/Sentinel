@@ -14,5 +14,13 @@ RUN apk --no-cache add ca-certificates tzdata curl
 WORKDIR /app
 COPY --from=builder /app/sentinel .
 COPY migrations/ ./migrations/
+# Generated report PDFs land here. Mount it as a volume in compose, or reports
+# are lost whenever the container is replaced.
+#
+# No PDF engine is installed on purpose: reports are drawn in pure Go
+# (services/pdf_renderer.go). wkhtmltopdf, the usual choice, has no Alpine
+# package and was archived upstream in 2023 with open CVEs.
+RUN mkdir -p /app/reports && chmod 755 /app/reports
+VOLUME ["/app/reports"]
 EXPOSE 3001
 CMD ["./sentinel"]

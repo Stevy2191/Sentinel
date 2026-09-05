@@ -62,7 +62,7 @@ func GetMonitorGroupsHandler(monitorService *services.MonitorService, incidentSe
 	return func(c *gin.Context) {
 		groups, err := monitorService.GetMonitorGroups(c.Request.Context())
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "GetMonitorGroupsHandler", err)
 			return
 		}
 

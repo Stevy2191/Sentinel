@@ -15,5 +15,5 @@ backup-*.sql
 .vscode/
 .idea/
 
-# Generated report PDFs (mounted into the backend container)
+# Generated report PDFs (mounted into the backend container).
 /reports/

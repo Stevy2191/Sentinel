@@ -77,7 +77,7 @@ func TestMonitorConfigHandler(checkService *services.CheckService) gin.HandlerFu
 
 		check, err := checkService.ExecuteCheck(c.Request.Context(), probe)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondInternal(c, "TestMonitorConfigHandler", err)
 			return
 		}
 
