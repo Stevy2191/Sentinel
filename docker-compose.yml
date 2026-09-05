@@ -49,6 +49,7 @@ services:
       # change it at runtime and that persists regardless of this value).
       REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-false}
       ALLOW_PRIVATE_NETWORK_TARGETS: ${ALLOW_PRIVATE_NETWORK_TARGETS:-true}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
