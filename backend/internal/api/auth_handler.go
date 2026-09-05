@@ -177,7 +177,7 @@ func LoginHandler(authService *services.AuthService) gin.HandlerFunc {
 		user, err := authService.VerifyPassword(ctx, req.Username, req.Password)
 		if err != nil {
 			loginIPLimiter.RecordFailure(ip)
-			loginUserLimiter.RecordFailure(ip)
+			loginUserLimiter.RecordFailure(userKey)
 			respondAuthError(c, http.StatusUnauthorized, "Invalid credentials")
 			return
 		}
@@ -448,7 +448,6 @@ func AuthMiddleware(authService *services.AuthService) gin.HandlerFunc {
 			})
 			return
 		}
-		tokenString := strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
 
 		claims, err := authService.VerifyJWT(tokenString)
 		if err != nil {

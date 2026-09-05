@@ -604,6 +604,7 @@ export default function Dashboard() {
           onBulk={() => navigate('/monitors/bulk')}
           onDiscover={() => navigate('/monitors/discover')}
           onGroup={() => setModal({ mode: 'create' })}
+	  isAdmin={isAdmin}
         />
       </div>
 

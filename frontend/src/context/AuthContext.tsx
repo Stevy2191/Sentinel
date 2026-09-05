@@ -33,7 +33,7 @@ interface AuthContextValue {
   /** Call after a successful login/MFA-verify/invitation-accept response
    *  (the backend has already set the auth cookie) to populate currentUser. */
   refreshAuth: () => Promise<CurrentUser | null>
-  logout: () => void
+  logout: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined)
@@ -85,9 +85,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       currentUser,
       isAuthenticated: !!currentUser,
-      authChecked
+      authChecked,
       setCurrentUser,
       getCurrentUser,
+      refreshAuth,
       logout,
     }),
     [currentUser, authChecked, getCurrentUser, refreshAuth, logout]
