@@ -9,8 +9,6 @@ import {
 } from 'react'
 import api from '@/services/api'
 
-export const TOKEN_KEY = 'sentinel:token'
-
 export interface UserTheme {
   primary_color: string
   accent_color: string
@@ -27,34 +25,25 @@ export interface CurrentUser {
 }
 
 interface AuthContextValue {
-  token: string | null
   currentUser: CurrentUser | null
   isAuthenticated: boolean
-  setToken: (token: string | null) => void
+  authChecked: boolean
   setCurrentUser: (user: CurrentUser | null) => void
   getCurrentUser: () => Promise<CurrentUser | null>
+  /** Call after a successful login/MFA-verify/invitation-accept response
+   *  (the backend has already set the auth cookie) to populate currentUser. */
+  refreshAuth: () => Promise<CurrentUser | null>
   logout: () => void
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setTokenState] = useState<string | null>(() => localStorage.getItem(TOKEN_KEY))
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
-
-  const setToken = useCallback((next: string | null) => {
-    setTokenState(next)
-    if (next) {
-      localStorage.setItem(TOKEN_KEY, next)
-    } else {
-      localStorage.removeItem(TOKEN_KEY)
-    }
-  }, [])
-
-  const logout = useCallback(() => {
-    setToken(null)
-    setCurrentUser(null)
-  }, [setToken])
+  // authChecked distinguishes "haven't checked yet" from "checked, not
+  // logged in", so RequireAuth doesn't redirect to /login on the initial
+  // render before the /auth/me probe has come back.
+  const [authChecked, setAuthChecked] = useState(false)
 
   // Fetch (and refresh) the current user from /auth/me.
   const getCurrentUser = useCallback(async (): Promise<CurrentUser | null> => {
@@ -63,43 +52,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setCurrentUser(res.data.data)
       return res.data.data
     } catch {
+      setCurrentUser(null)
       return null
     }
   }, [])
 
-  // Load the current user whenever we have a token. If it's invalid, clear it.
-  useEffect(() => {
-    if (!token) {
-      setCurrentUser(null)
-      return
+  const refreshAuth = getCurrentUser
+
+  const logout = useCallback(async () => {
+    try {
+      await api.post('/auth/logout')
+    } catch {
+      // Even if the request fails, drop client-side state below.
     }
+    setCurrentUser(null)
+  }, [])
+
+  // On mount: the browser will have sent the auth cookie automatically if
+  // one exists, so ask the backend who (if anyone) it belongs to.
+  useEffect(() => {
     let active = true
-    api
-      .get<{ data: CurrentUser }>('/auth/me')
-      .then((res) => active && setCurrentUser(res.data.data))
-      .catch(() => {
-        if (active) {
-          setTokenState(null)
-          localStorage.removeItem(TOKEN_KEY)
-          setCurrentUser(null)
-        }
-      })
+        getCurrentUser().finally(() => {
+      if (active) setAuthChecked(true)
+    })
     return () => {
       active = false
     }
-  }, [token])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const value = useMemo(
     () => ({
-      token,
       currentUser,
-      isAuthenticated: !!token,
-      setToken,
+      isAuthenticated: !!currentUser,
+      authChecked
       setCurrentUser,
       getCurrentUser,
       logout,
     }),
-    [token, currentUser, setToken, getCurrentUser, logout]
+    [currentUser, authChecked, getCurrentUser, refreshAuth, logout]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

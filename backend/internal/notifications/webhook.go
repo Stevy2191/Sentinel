@@ -13,6 +13,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/Stevy2191/Sentinel/backend/internal/netguard"
 )
 
 const defaultWebhookTimeout = 30 * time.Second
@@ -82,7 +84,7 @@ func NewWebhookPlugin() (*WebhookPlugin, error) {
 
 	p := &WebhookPlugin{
 		webhookURL: webhookURL,
-		httpClient: &http.Client{Timeout: defaultWebhookTimeout},
+		httpClient: netguard.NewGuardedHTTPClient(defaultWebhookTimeout),
 		logger:     log.Default(),
 	}
 	p.logger.Printf("[webhook] Webhook plugin initialized for %s", webhookURL)

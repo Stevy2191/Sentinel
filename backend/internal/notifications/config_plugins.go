@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
+	"github.com/Stevy2191/Sentinel/backend/internal/netguard"
 )
 
 // This file builds notification plugins from a persisted models.NotificationConfig
@@ -52,7 +53,7 @@ func NewSlackPluginFromConfig(webhookURL string) (*SlackPlugin, error) {
 	}
 	return &SlackPlugin{
 		webhookURL: webhookURL,
-		httpClient: &http.Client{Timeout: defaultSlackTimeout},
+		httpClient: netguard.NewGuardedHTTPClient(defaultSlackTimeout),
 		logger:     log.Default(),
 	}, nil
 }
@@ -65,7 +66,7 @@ func NewDiscordPluginFromConfig(webhookURL string) (*DiscordPlugin, error) {
 	}
 	return &DiscordPlugin{
 		webhookURL: webhookURL,
-		httpClient: &http.Client{Timeout: defaultDiscordTimeout},
+		httpClient: netguard.NewGuardedHTTPClient(defaultDiscordTimeout),
 		logger:     log.Default(),
 	}, nil
 }
@@ -76,7 +77,7 @@ func NewTelegramPluginFromConfig(botToken, chatID string) *TelegramPlugin {
 		botToken:   botToken,
 		chatID:     chatID,
 		apiBase:    defaultTelegramAPIBase,
-		httpClient: &http.Client{Timeout: defaultTelegramTimeout},
+		httpClient: netguard.NewGuardedHTTPClient(defaultTelegramTimeout),
 		logger:     log.Default(),
 	}
 }
@@ -92,7 +93,7 @@ func NewNtfyPluginFromConfig(serverURL, topic, authToken string) *NtfyPlugin {
 		url:        serverURL,
 		topic:      topic,
 		authToken:  strings.TrimSpace(authToken),
-		httpClient: &http.Client{Timeout: defaultNtfyTimeout},
+		httpClient: netguard.NewGuardedHTTPClient(defaultNtfyTimeout),
 		logger:     log.Default(),
 	}
 }
@@ -107,7 +108,7 @@ func NewWebhookPluginFromConfig(webhookURL string, headers map[string]string) (*
 	return &WebhookPlugin{
 		webhookURL: webhookURL,
 		headers:    headers,
-		httpClient: &http.Client{Timeout: defaultWebhookTimeout},
+		httpClient: netguard.NewGuardedHTTPClient(defaultWebhookTimeout),
 		logger:     log.Default(),
 	}, nil
 }

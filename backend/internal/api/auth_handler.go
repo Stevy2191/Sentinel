@@ -19,6 +19,32 @@ func respondAuthError(c *gin.Context, code int, message string) {
 	})
 }
 
+const authCookieName = "sentinel_token"
+
+// isRequestSecure reports whether the inbound request arrived over TLS,
+// either directly or via a reverse proxy that set X-Forwarded-Proto (as
+// nginx.conf does). Used to decide the cookie's Secure flag dynamically,
+// since the default docker-compose deployment serves plain HTTP.
+func isRequestSecure(c *gin.Context) bool {
+	if c.Request.TLS != nil {
+		return true
+	}
+	return strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
+}
+
+// setAuthCookie issues the httpOnly JWT cookie used by the SPA. maxAge is in
+// seconds; pass authService.jwtExpiry-equivalent from the caller.
+func setAuthCookie(c *gin.Context, token string, maxAge int) {
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(authCookieName, token, maxAge, "/api", "", isRequestSecure(c), true)
+}
+
+// clearAuthCookie removes the auth cookie (logout).
+func clearAuthCookie(c *gin.Context) {
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(authCookieName, "", -1, "/api", "", isRequestSecure(c), true)
+}
+
 // ---- Request bodies ----
 
 type registerRequest struct {
@@ -57,6 +83,12 @@ func RegisterHandler(authService *services.AuthService, settingsService *service
 			respondAuthError(c, http.StatusBadRequest, "invalid request body")
 			return
 		}
+
+		if allowed, retryAfter := registerLimiter.Allowed(c.ClientIP()); !allowed {
+			respondRateLimited(c, retryAfter)
+			return
+		}
+
 		if req.Username == "" || req.Password == "" {
 			respondAuthError(c, http.StatusBadRequest, "username and password are required")
 			return
@@ -75,6 +107,7 @@ func RegisterHandler(authService *services.AuthService, settingsService *service
 		// Block self-registration when it's disabled — but always allow the first
 		// account so the instance can bootstrap its admin.
 		if hasUsers && !settingsService.RegistrationEnabled(ctx) {
+			registerLimiter.RecordFailure(c.ClientIP())
 			respondAuthError(c, http.StatusForbidden, "User registration is currently disabled")
 			return
 		}
@@ -82,6 +115,7 @@ func RegisterHandler(authService *services.AuthService, settingsService *service
 
 		user, err := authService.CreateUser(ctx, req.Username, req.Password, isAdmin)
 		if err != nil {
+			registerLimiter.RecordFailure(c.ClientIP())
 			respondAuthError(c, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -126,12 +160,29 @@ func LoginHandler(authService *services.AuthService) gin.HandlerFunc {
 		}
 		log.Printf("User login attempt: %s", req.Username)
 
+
+		ip := c.ClientIP()
+		userKey := ip + ":" + strings.ToLower(req.Username)
+
+		if allowed, retryAfter := loginIPLimiter.Allowed(ip); !allowed {
+			respondRateLimited(c, retryAfter)
+			return
+		}
+		if allowed, retryAfter := loginUserLimiter.Allowed(userKey); !allowed {
+			respondRateLimited(c, retryAfter)
+			return
+		}
+
 		ctx := c.Request.Context()
 		user, err := authService.VerifyPassword(ctx, req.Username, req.Password)
 		if err != nil {
+			loginIPLimiter.RecordFailure(ip)
+			loginUserLimiter.RecordFailure(ip)
 			respondAuthError(c, http.StatusUnauthorized, "Invalid credentials")
 			return
 		}
+		loginIPLimiter.RecordSuccess(ip)
+		loginUserLimiter.RecordSuccess(userKey)
 
 		if user.MFAEnabled {
 			mfaToken, err := authService.GenerateMFAToken(user.ID, user.Username)
@@ -151,8 +202,8 @@ func LoginHandler(authService *services.AuthService) gin.HandlerFunc {
 			respondAuthError(c, http.StatusInternalServerError, "could not issue token")
 			return
 		}
+		setAuthCookie(c, token, int(authService.JWTExpiry().Seconds()))
 		respondSuccess(c, http.StatusOK, gin.H{
-			"token":       token,
 			"user_id":     user.ID,
 			"username":    user.Username,
 			"is_admin":    user.IsAdmin,
@@ -178,15 +229,23 @@ func VerifyMFAHandler(authService *services.AuthService) gin.HandlerFunc {
 			return
 		}
 
+		mfaKey := c.ClientIP() + ":" + userID.String()
+		if allowed, retryAfter := mfaLimiter.Allowed(mfaKey); !allowed {
+			respondRateLimited(c, retryAfter)
+			return
+		}
+
 		ok, _ := authService.VerifyMFA(ctx, userID, req.TOTPCode)
 		if !ok {
 			// Fall back to a one-time backup code.
 			ok, _ = authService.VerifyMFABackupCode(ctx, userID, req.TOTPCode)
 		}
 		if !ok {
+			mfaLimiter.RecordFailure(mfaKey)
 			respondAuthError(c, http.StatusUnauthorized, "Invalid TOTP code or backup code")
 			return
 		}
+		mfaLimiter.RecordSuccess(mfaKey)
 
 		user, err := authService.GetUserByID(ctx, userID)
 		if err != nil {
@@ -198,8 +257,8 @@ func VerifyMFAHandler(authService *services.AuthService) gin.HandlerFunc {
 			respondAuthError(c, http.StatusInternalServerError, "could not issue token")
 			return
 		}
+		setAuthCookie(c, token, int(authService.JWTExpiry().Seconds()))
 		respondSuccess(c, http.StatusOK, gin.H{
-			"token":    token,
 			"user_id":  userID,
 			"username": username,
 		})
@@ -309,6 +368,7 @@ func LogoutHandler() gin.HandlerFunc {
 		if userID, _, _, ok := GetUserFromContext(c); ok {
 			log.Printf("User logged out: %s", userID)
 		}
+		clearAuthCookie(c)
 		respondSuccess(c, http.StatusOK, gin.H{"message": "Logged out successfully"})
 	}
 }
@@ -374,8 +434,14 @@ func ChangePasswordHandler(authService *services.AuthService) gin.HandlerFunc {
 // AuthMiddleware validates the Bearer JWT and stores the user in the context.
 func AuthMiddleware(authService *services.AuthService) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		header := c.GetHeader("Authorization")
-		if !strings.HasPrefix(header, "Bearer ") {
+		var tokenString string
+		if header := c.GetHeader("Authorization"); strings.HasPrefix(header, "Bearer ") {
+			// Bearer header still works for non-browser API clients (scripts,
+			// future mobile app, etc.) - the SPA itself no longer sends one.
+			tokenString = strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
+		} else if cookie, err := c.Cookie(authCookieName); err == nil && cookie != "" {
+			tokenString = cookie
+		} else {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"success": false,
 				"error":   gin.H{"code": http.StatusUnauthorized, "message": "missing or malformed Authorization header"},

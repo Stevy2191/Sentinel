@@ -5,11 +5,16 @@ services:
     environment:
       POSTGRES_DB: sentinel
       POSTGRES_USER: sentinel
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in your .env file before starting Sentinel}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "${DB_PORT:-5432}:5432"
+      # Localhost-only by default: the backend reaches Postgres over the
+      # internal Docker network regardless of this binding, so this only
+      # controls host/external access (e.g. for local psql). Override with a
+      # specific interface if you genuinely need remote DB access, rather
+      # than opening it to every interface.
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U sentinel"]
       interval: 10s
@@ -31,7 +36,7 @@ services:
       DB_PORT: 5432
       DB_NAME: sentinel
       DB_USER: sentinel
-      DB_PASSWORD: ${DB_PASSWORD:-changeme}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in your .env file before starting Sentinel}
       PORT: 3001
       ENVIRONMENT: ${ENVIRONMENT:-production}
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -40,6 +45,7 @@ services:
       # Initial state of self-registration (seeded on first run; an admin can
       # change it at runtime and that persists regardless of this value).
       REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-false}
+      ALLOW_PRIVATE_NETWORK_TARGETS: ${ALLOW_PRIVATE_NETWORK_TARGETS:-true}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
@@ -55,6 +61,7 @@ services:
       NTFY_URL: ${NTFY_URL:-https://ntfy.sh}
       NTFY_TOPIC: ${NTFY_TOPIC:-}
       WEBHOOK_URL: ${WEBHOOK_URL:-}
+      NOTIFICATION_SECRET_KEY: ${NOTIFICATION_SECRET_KEY:-}
     ports:
       - "${BACKEND_PORT:-3001}:3001"
     volumes:
@@ -100,7 +107,11 @@ services:
     depends_on:
       - postgres
     ports:
-      - "${ADMINER_PORT:-8080}:8080"
+      # Bound to localhost only: Adminer has no auth of its own beyond the
+      # Postgres password, so it should never be reachable from the network,
+      # only from the host itself (e.g. via an SSH tunnel). If you need
+      # remote access, tunnel in rather than widening this binding.
+      - "127.0.0.1:${ADMINER_PORT:-8080}:8080"
     environment:
       ADMINER_DEFAULT_SERVER: postgres
     restart: unless-stopped

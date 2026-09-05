@@ -52,6 +52,12 @@ func NewAuthService(db *gorm.DB, jwtSecret string) *AuthService {
 	}
 }
 
+// JWTExpiry returns the configured token lifetime, so callers (e.g. the
+// auth-cookie MaxAge) can stay in sync with it.
+func (s *AuthService) JWTExpiry() time.Duration {
+	return s.jwtExpiry
+}
+
 // CreateUser validates and creates a user with a bcrypt-hashed password.
 func (s *AuthService) CreateUser(ctx context.Context, username, password string, isAdmin bool) (*models.User, error) {
 	user := &models.User{Username: username, IsAdmin: isAdmin, Role: models.RoleForAdmin(isAdmin)}
@@ -224,7 +230,11 @@ func (s *AuthService) SetupMFA(ctx context.Context, userID uuid.UUID) (string, s
 
 	codes := make(models.StringSlice, backupCodeCount)
 	for i := range codes {
-		codes[i] = generateBackupCode()
+		code, err := generateBackupCode()
+		if err != nil {
+			return "", "", fmt.Errorf("generating MFA backup codes: %w", err)
+		}
+		codes[i] = code
 	}
 
 	// Store the secret + backup codes but leave MFA disabled until the user
@@ -289,7 +299,7 @@ func (s *AuthService) VerifyMFABackupCode(ctx context.Context, userID uuid.UUID,
 		return false, err
 	}
 	for i, code := range user.MFABackupCodes {
-		if code == backupCode {
+		if subtle.ConstantTimeCompare([]byte(code), []byte(backupCode)) == 1 {
 			// Remove the used code and persist.
 			user.MFABackupCodes = append(user.MFABackupCodes[:i], user.MFABackupCodes[i+1:]...)
 			user.UpdatedAt = time.Now()
@@ -449,16 +459,20 @@ func (s *AuthService) UpdateLastLogin(ctx context.Context, userID uuid.UUID) err
 	return nil
 }
 
-// generateBackupCode returns a random 8-character backup code.
-func generateBackupCode() string {
+// generateBackupCode returns a random 8-character backup code, or an error if
+// a secure random source isn't available. There is no safe fallback for a
+// credential like this - a time-seeded value would be guessable, so callers
+// must treat an error here as fatal to the whole MFA-setup operation rather
+// than silently handing out a weak code.
+func generateBackupCode() (string, error) {
 	b := make([]byte, backupCodeLen)
 	if _, err := rand.Read(b); err != nil {
 		// crypto/rand failure is exceptional; fall back to a time-seeded value.
-		return fmt.Sprintf("%08d", time.Now().UnixNano()%1e8)
+		return "", fmt.Errorf("generating backup code: %w", err)
 	}
 	out := make([]byte, backupCodeLen)
 	for i := range b {
 		out[i] = backupCodeCharset[int(b[i])%len(backupCodeCharset)]
 	}
-	return string(out)
+	return string(out), nil
 }

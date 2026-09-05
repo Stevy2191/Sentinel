@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
+	"github.com/Stevy2191/Sentinel/backend/internal/netguard"
 )
 
 const (
@@ -326,13 +327,13 @@ func (p *EmailPlugin) deliver(ctx context.Context, mime string) error {
 	if security == models.SMTPSecuritySSLTLS {
 		// Implicit TLS (SMTPS): the server expects a handshake immediately on
 		// connect and never sends a plaintext greeting.
-		tlsDialer := &tls.Dialer{NetDialer: &net.Dialer{}, Config: tlsConfig}
+		tlsDialer := &tls.Dialer{NetDialer: netguard.SafeDialer(defaultSMTPTimeout), Config: tlsConfig}
 		conn, err = tlsDialer.DialContext(ctx, "tcp", addr)
 		if err != nil {
 			return fmt.Errorf("SMTP TLS connection failed: %w", err)
 		}
 	} else {
-		var dialer net.Dialer
+		dialer := netguard.SafeDialer(defaultSMTPTimeout)
 		conn, err = dialer.DialContext(ctx, "tcp", addr)
 		if err != nil {
 			return fmt.Errorf("SMTP server unreachable: %w", err)

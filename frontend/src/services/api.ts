@@ -12,6 +12,9 @@ export const api: AxiosInstance = axios.create({
   baseURL,
   headers: { 'Content-Type': 'application/json' },
   timeout: 120000,
+  // The auth token now lives in an httpOnly cookie set by the backend, not
+  // in a header is attached here. withCredentials makes axios send it.
+  withCredentials: true,
 })
 
 // A normalized API error surfaced to the UI.

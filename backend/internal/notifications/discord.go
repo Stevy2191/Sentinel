@@ -13,6 +13,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/Stevy2191/Sentinel/backend/internal/netguard"
 )
 
 const defaultDiscordTimeout = 30 * time.Second
@@ -71,7 +73,7 @@ func NewDiscordPlugin() (*DiscordPlugin, error) {
 
 	p := &DiscordPlugin{
 		webhookURL: webhookURL,
-		httpClient: &http.Client{Timeout: defaultDiscordTimeout},
+		httpClient: netguard.NewGuardedHTTPClient(defaultDiscordTimeout),
 		logger:     log.Default(),
 	}
 	p.logger.Printf("[discord] Discord plugin initialized")

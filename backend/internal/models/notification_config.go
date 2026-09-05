@@ -2,10 +2,15 @@ package models
 
 import (
 	"errors"
+	"fmt"
+	"log"
 	"net/url"
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
+
+	"github.com/Stevy2191/Sentinel/backend/internal/cryptutil"
 )
 
 // SMTP connection security modes for the email channel.
@@ -97,6 +102,66 @@ type NotificationConfig struct {
 // TableName tells GORM which table backs the NotificationConfig model.
 func (NotificationConfig) TableName() string {
 	return "notification_configs"
+}
+
+// secretFields lists the pointer fields that are encrypted at rest. Order
+// doesn't matter; it's a shared list so BeforeSave/AfterSave/AfterFind stay
+// in sync automatically if a field is ever added or removed.
+func (nc *NotificationConfig) secretFields() []**string {
+	return []**string{&nc.SMTPPassword, &nc.TelegramBotToken, &nc.WebhookURL, &nc.NtfyAuthToken}
+}
+
+// BeforeSave encrypts secret fields immediately before they're written,
+// covering both Create and Update (Save calls one or the other).
+func (nc *NotificationConfig) BeforeSave(tx *gorm.DB) error {
+	for _, f := range nc.secretFields() {
+		if *f == nil || **f == "" {
+			continue
+		}
+		enc, err := cryptutil.Encrypt(**f)
+		if err != nil {
+			return fmt.Errorf("encrypting notification secret: %w", err)
+		}
+		*f = &enc
+	}
+	return nil
+}
+
+// AfterSave decrypts secret fields back in memory after a successful write,
+// so the caller's in-memory struct (e.g. an API handler about to build a
+// response) sees plaintext, not the ciphertext just persisted to Postgres.
+func (nc *NotificationConfig) AfterSave(tx *gorm.DB) error {
+	nc.decryptSecretsLenient()
+	return nil
+}
+
+// AfterFind decrypts secret fields after every load (First/Find), covering
+// NotificationConfigService and NotificationManager's direct queries alike.
+func (nc *NotificationConfig) AfterFind(tx *gorm.DB) error {
+	nc.decryptSecretsLenient()
+	return nil
+}
+
+// decryptSecretsLenient decrypts in place, but treats a decryption failure as
+// "this value predates encryption support" rather than a hard error: it
+// leaves the field as-is (still plaintext) instead of failing the whole
+// query. The value gets encrypted automatically the next time this channel
+// is saved. This makes the rollout of encryption transparent for existing
+// deployments with pre-existing plaintext rows - no separate migration step
+// or backfill script is required.
+func (nc *NotificationConfig) decryptSecretsLenient() {
+	for _, f := range nc.secretFields() {
+		if *f == nil || **f == "" {
+			continue
+		}
+		dec, err := cryptutil.Decrypt(**f)
+		if err != nil {
+			log.Printf("[notification_config] value for a secret field could not be decrypted "+
+				"(likely pre-encryption plaintext, will be encrypted on next save): %v", err)
+			continue
+		}
+		*f = &dec
+	}
 }
 
 // Validate checks that the config has the fields its channel requires.
