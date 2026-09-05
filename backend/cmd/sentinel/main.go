@@ -42,6 +42,16 @@ type config struct {
 	ReportWorkers       int
 	BaseURL             string
 	RegistrationEnabled bool
+	// TrustedProxies is a comma-separated list of IPs/CIDRs allowed to set
+	// X-Forwarded-For/X-Real-IP (e.g. the frontend nginx container). Empty by
+	// default: c.ClientIP() then always uses the real TCP peer address, which
+	// matters because BACKEND_PORT is published straight to the host by
+	// default - a caller hitting that port directly can set any
+	// X-Forwarded-For value it likes, and an unset trusted-proxy list used to
+	// mean gin trusted it anyway. That value ends up in audit_log.ip_address,
+	// so an unconfigured value here silently made every audit entry's IP
+	// spoofable.
+	TrustedProxies string
 }
 
 func loadConfig() config {
@@ -61,7 +71,30 @@ func loadConfig() config {
 		// Closed by default for security; the first account can always be created
 		// (see RegisterHandler), and an admin can open registration at runtime.
 		RegistrationEnabled: getenvBool("REGISTRATION_ENABLED", false),
+		// Empty by default - see the field comment on TrustedProxies.
+		TrustedProxies: getenv("TRUSTED_PROXIES", ""),
 	}
+}
+
+// parseTrustedProxies splits a comma-separated TRUSTED_PROXIES value into the
+// slice gin expects. An empty value returns nil, which tells gin to trust no
+// proxy at all - c.ClientIP() then always reports the direct TCP peer, never
+// a client-supplied X-Forwarded-For/X-Real-IP. That's the correct default for
+// a deployment where the backend's port may be reachable directly; set this
+// only to the exact IP or CIDR of a reverse proxy you control (e.g. the
+// frontend container's address on the compose network).
+func parseTrustedProxies(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func main() {
@@ -138,6 +171,9 @@ func run() error {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	router := gin.New()
+	if err := router.SetTrustedProxies(parseTrustedProxies(cfg.TrustedProxies)); err != nil {
+		return fmt.Errorf("configuring trusted proxies: %w", err)
+	}
 	if err := router.SetTrustedProxies(resolveTrustedProxies()); err != nil {
 		return fmt.Errorf("setting trusted proxies: %w", err)
 	}

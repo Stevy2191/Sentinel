@@ -99,6 +99,20 @@ func (s *AuditService) List(ctx context.Context, f AuditFilter) ([]models.AuditE
 		limit = 50
 	}
 
+	// Offset is already >0-checked by the handler, but has no upper bound -
+	// an admin (or a leaked/misused admin session) requesting a very large
+	// offset makes Postgres walk and discard that many rows before returning
+	// anything. total is already known from the Count above, so any offset
+	// past it can only return an empty page; clamp there instead of letting
+	// an arbitrarily large value reach the query.
+	offset := f.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	if int64(offset) > total {
+		offset = int(total)
+	}
+
 	var entries []models.AuditEntry
 	if err := q.Order("created_at DESC").Limit(limit).Offset(f.Offset).
 		Find(&entries).Error; err != nil {

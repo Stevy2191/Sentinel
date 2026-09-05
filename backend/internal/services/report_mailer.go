@@ -94,10 +94,32 @@ func deref(s *string) string {
 	return *s
 }
 
+// validateRecipients rejects any recipient containing a carriage return or
+// line feed before the To header is ever built.
+//
+// models/report_schedule.go's Validate() already rejects most malformed
+// addresses via mail.ParseAddress when a schedule is saved, but that is a
+// side effect of address parsing, not a stated guarantee against header
+// injection - and it only covers the schedule-creation path. Checking again
+// here means this file's own safety against smuggling extra SMTP headers (or
+// starting a new message body) doesn't depend on every future caller of
+// Send remembering to validate upstream first.
+func validateRecipients(to []string) error {
+	for _, addr := range to {
+		if strings.ContainsAny(addr, "\r\n") {
+			return fmt.Errorf("recipient address contains invalid control characters")
+		}
+	}
+	return nil
+}
+
 // Send delivers the report email, attaching the PDF when one is given.
 func (m *ReportMailer) Send(ctx context.Context, email ReportEmail) error {
 	if len(email.To) == 0 {
 		return errors.New("no recipients")
+	}
+	if err := validateRecipients(email.To); err != nil {
+		return fmt.Errorf("invalid recipient list: %w", err)
 	}
 
 	sender, err := m.resolveSender(ctx)
