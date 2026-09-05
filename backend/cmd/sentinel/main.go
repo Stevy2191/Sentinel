@@ -142,7 +142,7 @@ func run() error {
 		return fmt.Errorf("setting trusted proxies: %w", err)
 	}
 	router.Use(gin.Logger(), gin.Recovery())
-	router.Use(SecurityHeaders())
+	router.Use(api.SecurityHeaders())
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":    "healthy",
