@@ -138,12 +138,18 @@ func run() error {
 	}
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery())
-	router.GET("/health", func(c *gin.Context) {
+	// Liveness probe. Registered at both paths on purpose: /health is what the
+	// container healthcheck hits directly, and /api/health is reachable through
+	// the nginx /api/ proxy, so the frontend (or an external monitor) can check
+	// the backend without a second published port.
+	health := func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":    "healthy",
 			"timestamp": time.Now().UTC().Format(time.RFC3339),
 		})
-	})
+	}
+	router.GET("/health", health)
+	router.GET("/api/health", health)
 	// Public auth endpoints (register/login/mfa-verify) + public status pages.
 	api.RegisterAuthRoutes(router, authService, settingsService)
 	api.RegisterPublicStatusRoutes(router, statusPageService, incidentService)

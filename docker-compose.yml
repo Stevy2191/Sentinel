@@ -8,19 +8,30 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # Bound to loopback: nothing in the stack needs host access to Postgres -
+    # the backend reaches it over the compose network. Publishing on 0.0.0.0
+    # exposed the database to the network, with "changeme" as the compose
+    # default password. Override DB_BIND to 0.0.0.0 only if you truly need it.
     ports:
-      - "${DB_PORT:-5432}:5432"
+      - "${DB_BIND:-127.0.0.1}:${DB_PORT:-5432}:5432"
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sentinel"]
+      # -U sentinel matches POSTGRES_USER above. pg_isready only tests whether
+      # the server is accepting connections, so the role name is advisory.
+      test: ["CMD-SHELL", "pg_isready -U sentinel -d sentinel"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
   backend:
     # `build` lets `docker compose up` build locally; `image` names the tag that
     # CI builds/pushes (so `docker compose pull` also works once published).
     build:
       context: ./backend
+      args:
+        # Set GOPROXY in .env for a mirrored or firewalled build network.
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     image: ${DOCKER_REGISTRY:-ghcr.io}/stevy2191/sentinel-backend:${IMAGE_TAG:-latest}
     container_name: sentinel-backend
     depends_on:
@@ -48,6 +59,11 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-}
+      # Recipient list for alert email. Without it every alert goes only to
+      # SMTP_USER, silently, no matter what .env says.
+      SMTP_TO: ${SMTP_TO:-}
+      # Legacy boolean, still read as a fallback when SMTP_SECURITY is unset.
+      SMTP_TLS: ${SMTP_TLS:-}
       # none | starttls | ssltls. Falls back to the legacy SMTP_TLS bool if unset.
       SMTP_SECURITY: ${SMTP_SECURITY:-}
       SMTP_SKIP_TLS_VERIFY: ${SMTP_SKIP_TLS_VERIFY:-false}
@@ -57,7 +73,11 @@ services:
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       NTFY_URL: ${NTFY_URL:-https://ntfy.sh}
       NTFY_TOPIC: ${NTFY_TOPIC:-}
+      NTFY_AUTH_TOKEN: ${NTFY_AUTH_TOKEN:-}
       WEBHOOK_URL: ${WEBHOOK_URL:-}
+      # Tuning knobs that previously had no way in from .env.
+      DEFAULT_CHECK_INTERVAL: ${DEFAULT_CHECK_INTERVAL:-30}
+      REPORT_WORKERS: ${REPORT_WORKERS:-2}
     ports:
       - "${BACKEND_PORT:-3001}:3001"
     volumes:
@@ -73,28 +93,42 @@ services:
       - NET_RAW
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
-      interval: 30s
-      timeout: 10s
+      # Port 3001 and path /health are what the backend actually serves
+      # (PORT above, and router.GET("/health") in cmd/sentinel/main.go).
+      # start_period covers migrations on first boot so a slow start is not
+      # counted as a failure.
+      test: ["CMD", "curl", "-fsS", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 5s
       retries: 3
+      start_period: 30s
 
   frontend:
     build:
       context: ./frontend
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
     image: ${DOCKER_REGISTRY:-ghcr.io}/stevy2191/sentinel-frontend:${IMAGE_TAG:-latest}
     container_name: sentinel-frontend
     # The browser reaches the API through nginx (relative /api), which proxies to
     # the backend service — so no build-time API URL is needed here.
     depends_on:
-      - backend
+      # Wait for a healthy backend, not merely a started one. nginx also
+      # resolves the upstream lazily now (see nginx.conf), so this is belt and
+      # braces rather than the only thing keeping the frontend alive.
+      backend:
+        condition: service_healthy
     ports:
       - "${FRONTEND_PORT:-3000}:80"
     restart: unless-stopped
     healthcheck:
+      # /health is a real nginx location now, not the SPA fallback, so this
+      # check fails if nginx stops serving rather than passing on any response.
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
-      interval: 30s
-      timeout: 10s
+      interval: 10s
+      timeout: 5s
       retries: 3
+      start_period: 5s
 
   adminer:
     image: adminer:latest
@@ -105,8 +139,10 @@ services:
     profiles: ["adminer"]
     depends_on:
       - postgres
+    # Loopback only: Adminer is an unauthenticated database console. Reach it
+    # through an SSH tunnel rather than publishing it to the network.
     ports:
-      - "${ADMINER_PORT:-8080}:8080"
+      - "${ADMINER_BIND:-127.0.0.1}:${ADMINER_PORT:-8080}:8080"
     environment:
       ADMINER_DEFAULT_SERVER: postgres
     restart: unless-stopped

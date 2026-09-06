@@ -1,11 +1,25 @@
 # Build stage. Go version must satisfy go.mod (go 1.25).
 FROM golang:1.25-alpine AS builder
+
+# Module source and network behaviour, overridable at build time for networks
+# that cannot reach proxy.golang.org:
+#   --build-arg GOPROXY=https://your-mirror/,direct
+#   --build-arg GOPROXY=off            (fully offline, needs a vendor/ dir)
+# GOPRIVATE/GONOSUMDB are not needed here: every dependency is public.
+ARG GOPROXY=https://proxy.golang.org,direct
+ARG GOSUMDB=sum.golang.org
+ENV GOPROXY=${GOPROXY}     GOSUMDB=${GOSUMDB}     GOFLAGS=-mod=mod
+
 WORKDIR /app
 COPY go.mod go.sum ./
-RUN go mod download
+# Cache mounts keep the module and build caches across image builds, so a code
+# change no longer re-downloads every dependency.
+RUN --mount=type=cache,target=/go/pkg/mod     go mod download
+
 COPY . .
 # Static binary (pure-Go pgx driver) so it runs on a minimal alpine image.
-RUN CGO_ENABLED=0 go build -o sentinel ./cmd/sentinel
+# -trimpath drops absolute build paths; -s -w strips the symbol table.
+RUN --mount=type=cache,target=/go/pkg/mod     --mount=type=cache,target=/root/.cache/go-build     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o sentinel ./cmd/sentinel
 
 # Runtime stage.
 FROM alpine:latest
