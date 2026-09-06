@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Stevy2191/Sentinel/backend/internal/netguard"
 )
 
 const (
@@ -60,7 +62,7 @@ func NewTelegramPlugin() (*TelegramPlugin, error) {
 		botToken:   botToken,
 		chatID:     chatID,
 		apiBase:    defaultTelegramAPIBase,
-		httpClient: &http.Client{Timeout: defaultTelegramTimeout},
+		httpClient: netguard.NewGuardedHTTPClient(defaultTelegramTimeout),
 		logger:     log.Default(),
 	}
 	p.logger.Printf("[telegram] Telegram plugin initialized for chat %s", chatID)

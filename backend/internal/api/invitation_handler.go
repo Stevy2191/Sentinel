@@ -162,8 +162,8 @@ func AcceptInvitationHandler(invitationService *services.InvitationService, auth
 			respondError(c, http.StatusInternalServerError, "user created but could not issue token")
 			return
 		}
+		setAuthCookie(c, token, int(authService.JWTExpiry().Seconds()))
 		respondSuccess(c, http.StatusCreated, gin.H{
-			"token":    token,
 			"user_id":  user.ID,
 			"username": user.Username,
 			"is_admin": user.IsAdmin,

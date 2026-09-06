@@ -21,6 +21,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
+	"github.com/Stevy2191/Sentinel/backend/internal/netguard"
 )
 
 // Check result status values.
@@ -92,7 +93,7 @@ func (s *CheckService) ExecuteCheck(ctx context.Context, monitor *models.Monitor
 // nil error; a non-nil error indicates the check could not be attempted.
 func (s *CheckService) ExecuteHTTPCheck(ctx context.Context, monitor *models.Monitor) (*models.Check, error) {
 	timeout := s.checkTimeout(monitor)
-	client := &http.Client{Timeout: timeout}
+	client := netguard.NewGuardedHTTPClient(timeout)
 
 	method := strings.ToUpper(strings.TrimSpace(monitor.Method))
 	if method == "" {
@@ -184,7 +185,7 @@ func (s *CheckService) ExecuteTCPCheck(ctx context.Context, monitor *models.Moni
 	dialCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	dialer := net.Dialer{Timeout: timeout}
+	dialer := netguard.SafeDialer(timeout)
 	start := time.Now()
 	conn, err := dialer.DialContext(dialCtx, "tcp", address)
 	elapsed := time.Since(start)
@@ -220,6 +221,10 @@ func (s *CheckService) ExecutePingCheck(ctx context.Context, monitor *models.Mon
 		return s.failedCheck(monitor, 0, 0, fmt.Sprintf("resolving host: %v", err)), nil
 	}
 	target := addrs[0]
+	if ip := net.ParseIP(target); netguard.IsBlocked(ip) {
+		s.logger.Printf("[ping] monitor=%s host=%s target=%s blocked by netguard", monitor.ID, host, target)
+		return s.failedCheck(monitor, 0, 0, "target address is not allowed (blocked network range)"), nil
+	}
 
 	check, err := s.icmpPing(ctx, monitor, target, timeout)
 	if err != nil {
@@ -310,7 +315,7 @@ func (s *CheckService) tcpConnect(ctx context.Context, monitor *models.Monitor, 
 	dialCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	dialer := net.Dialer{Timeout: timeout}
+	dialer := netguard.SafeDialer(timeout)
 	start := time.Now()
 	conn, err := dialer.DialContext(dialCtx, "tcp", address)
 	elapsed := time.Since(start)

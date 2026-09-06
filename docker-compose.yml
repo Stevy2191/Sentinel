@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: sentinel
       POSTGRES_USER: sentinel
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in your .env file before starting Sentinel}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     # Bound to loopback: nothing in the stack needs host access to Postgres -
@@ -13,7 +13,12 @@ services:
     # exposed the database to the network, with "changeme" as the compose
     # default password. Override DB_BIND to 0.0.0.0 only if you truly need it.
     ports:
-      - "${DB_BIND:-127.0.0.1}:${DB_PORT:-5432}:5432"
+      # Localhost-only by default: the backend reaches Postgres over the
+      # internal Docker network regardless of this binding, so this only
+      # controls host/external access (e.g. for local psql). Override with a
+      # specific interface if you genuinely need remote DB access, rather
+      # than opening it to every interface.
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
     restart: unless-stopped
     healthcheck:
       # -U sentinel matches POSTGRES_USER above. pg_isready only tests whether
@@ -42,7 +47,7 @@ services:
       DB_PORT: 5432
       DB_NAME: sentinel
       DB_USER: sentinel
-      DB_PASSWORD: ${DB_PASSWORD:-changeme}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in your .env file before starting Sentinel}
       PORT: 3001
       ENVIRONMENT: ${ENVIRONMENT:-production}
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -54,6 +59,8 @@ services:
       # Initial state of self-registration (seeded on first run; an admin can
       # change it at runtime and that persists regardless of this value).
       REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-false}
+      ALLOW_PRIVATE_NETWORK_TARGETS: ${ALLOW_PRIVATE_NETWORK_TARGETS:-true}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
@@ -75,6 +82,7 @@ services:
       NTFY_TOPIC: ${NTFY_TOPIC:-}
       NTFY_AUTH_TOKEN: ${NTFY_AUTH_TOKEN:-}
       WEBHOOK_URL: ${WEBHOOK_URL:-}
+      NOTIFICATION_SECRET_KEY: ${NOTIFICATION_SECRET_KEY:-}
       # Tuning knobs that previously had no way in from .env.
       DEFAULT_CHECK_INTERVAL: ${DEFAULT_CHECK_INTERVAL:-30}
       REPORT_WORKERS: ${REPORT_WORKERS:-2}
@@ -142,7 +150,11 @@ services:
     # Loopback only: Adminer is an unauthenticated database console. Reach it
     # through an SSH tunnel rather than publishing it to the network.
     ports:
-      - "${ADMINER_BIND:-127.0.0.1}:${ADMINER_PORT:-8080}:8080"
+      # Bound to localhost only: Adminer has no auth of its own beyond the
+      # Postgres password, so it should never be reachable from the network,
+      # only from the host itself (e.g. via an SSH tunnel). If you need
+      # remote access, tunnel in rather than widening this binding.
+      - "127.0.0.1:${ADMINER_PORT:-8080}:8080"
     environment:
       ADMINER_DEFAULT_SERVER: postgres
     restart: unless-stopped

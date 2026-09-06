@@ -25,7 +25,7 @@ export default function UserMenu() {
     setOpen(false)
     navigate(path)
   }
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setOpen(false)
     logout()
     navigate('/login')
@@ -48,7 +48,7 @@ export default function UserMenu() {
             <SettingsIcon className="h-4 w-4" /> Settings
           </button>
           <button
-            onClick={handleLogout}
+            onClick={() => void handleLogout()}
             className="flex w-full items-center gap-2 border-t border-neutral-100 px-3 py-2 text-sm text-error-600 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-700"
           >
             <LogOut className="h-4 w-4" /> Log out

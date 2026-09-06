@@ -13,6 +13,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/Stevy2191/Sentinel/backend/internal/netguard"
 )
 
 const defaultSlackTimeout = 30 * time.Second
@@ -68,7 +70,7 @@ func NewSlackPlugin() (*SlackPlugin, error) {
 
 	p := &SlackPlugin{
 		webhookURL: webhookURL,
-		httpClient: &http.Client{Timeout: defaultSlackTimeout},
+		httpClient: netguard.NewGuardedHTTPClient(defaultSlackTimeout),
 		logger:     log.Default(),
 	}
 	p.logger.Printf("[slack] Slack plugin initialized")

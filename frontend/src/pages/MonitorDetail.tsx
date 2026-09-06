@@ -72,6 +72,18 @@ function StatBox({ label, value, tone }: { label: string; value: string; tone?: 
   )
 }
 
+// Only ever render a monitor URL as a clickable link it it's actually
+// http(s). Guards against a stored "javascript:" URL executing on click,
+// even if it somehow slipped past server-side validation
+function isSafeHttpUrl(value: string): boolean {
+	try {
+		const u = new URL(value)
+		return u.protocol === 'http:' || u.protocol === 'https:'
+	} catch {
+		return false
+	}
+}
+
 export default function MonitorDetail({ mode }: { mode: Mode }) {
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
@@ -434,7 +446,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
           <h2 className="mb-2 font-semibold">Configuration</h2>
           <div className="divide-y divide-neutral-100 dark:divide-neutral-800">
             <DetailRow label="URL / Target">
-              {isHttp ? (
+              {isHttp && isSafeHttpUrl(monitor.url) ? (
                 <a
                   href={monitor.url}
                   target="_blank"

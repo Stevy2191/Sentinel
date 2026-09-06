@@ -69,12 +69,22 @@ type ReportData struct {
 
 // AggregateReportData assembles everything a report needs. Monitors that fail to
 // aggregate are recorded in Warnings rather than failing the whole report.
-func (s *ReportAggregatorService) AggregateReportData(ctx context.Context, report *models.Report) (*ReportData, error) {
+func (s *ReportAggregatorService) AggregateReportData(ctx context.Context, report *models.Report, requestedBy uuid.UUID) (*ReportData, error) {
 	if report == nil {
 		return nil, fmt.Errorf("report is nil")
 	}
 	if report.TimeRangeDays <= 0 {
 		return nil, fmt.Errorf("report time_range_days must be greater than zero, got %d", report.TimeRangeDays)
+	}
+
+	// A report's scope can name monitors, groups, or tags the requester does
+	// not own or have been shared. Resolving scope alone is not authorization -
+	// it has to be intersected with what this specific user may see, the same
+	// way ListAccessibleMonitors does for the monitors list itself.
+	var requester models.User
+	if err := s.db.WithContext(ctx).Select("is_admin").
+		First(&requester, "id = ?", requestedBy).Error; err != nil {
+		return nil, fmt.Errorf("resolving report requester: %w", err)
 	}
 
 	monitorIDs, err := s.getMonitorIDsForScope(ctx, report.ScopeType, report.ScopeData)
@@ -100,8 +110,19 @@ func (s *ReportAggregatorService) AggregateReportData(ctx context.Context, repor
 		return data, nil
 	}
 
+	q := s.db.WithContext(ctx).Where("id IN ?", monitorIDs)
+	if !requester.IsAdmin {
+		// Same access rule as MonitorService.ListAccessibleMonitors: owned or
+		// explicitly shared. A monitor named in scope that fails this check is
+		// silently excluded rather than erroring, so a stale group/tag scope
+		// degrades to "fewer monitors in the report" instead of failing it.
+		q = q.Where(
+			"owner_id = ? OR id IN (SELECT monitor_id FROM monitor_sharing WHERE shared_with_user_id = ?)",
+			requestedBy, requestedBy,
+		)
+	}
 	var monitors []models.Monitor
-	if err := s.db.WithContext(ctx).Where("id IN ?", monitorIDs).Find(&monitors).Error; err != nil {
+	if err := q.Find(&monitors).Error; err != nil {
 		return nil, fmt.Errorf("loading monitors for report: %w", err)
 	}
 

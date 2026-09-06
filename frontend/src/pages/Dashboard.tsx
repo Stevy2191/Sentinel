@@ -1,3 +1,4 @@
+import { useAuthContext } from '@/context/AuthContext'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -93,12 +94,14 @@ function NewMenu({
   onBulk,
   onDiscover,
   onGroup,
+  isAdmin,
 }: {
   onSingle: () => void
   onWizard: () => void
   onBulk: () => void
   onDiscover: () => void
   onGroup: () => void
+  isAdmin: boolean
 }) {
   const [open, setOpen] = useState(false)
   const ref = useDismissOnOutsideClick(open, useCallback(() => setOpen(false), []))
@@ -107,7 +110,7 @@ function NewMenu({
     { key: 'single', label: 'Single monitor', icon: Globe, onClick: onSingle },
     { key: 'wizard', label: 'Monitor wizard', icon: Wand2, onClick: onWizard },
     { key: 'bulk', label: 'Bulk upload', icon: Upload, onClick: onBulk },
-    { key: 'discover', label: 'Network discovery', icon: Radar, onClick: onDiscover },
+    ...(isAdmin ? [{ key: 'discover', label: 'Network discovery', icon: Radar, onClick: onDiscover }] : []),
     { key: 'group', label: 'Group', icon: FolderPlus, onClick: onGroup },
   ]
 
@@ -375,6 +378,8 @@ function GroupModal({
 
 // ---------- page ----------
 export default function Dashboard() {
+  const { currentUser } = useAuthContext()
+  const isAdmin = currentUser?.is_admin ?? false
   const navigate = useNavigate()
   const { monitors, loading, error, refetch } = useMonitors()
   const { groups, refetch: refetchGroups } = useMonitorGroups()
@@ -599,6 +604,7 @@ export default function Dashboard() {
           onBulk={() => navigate('/monitors/bulk')}
           onDiscover={() => navigate('/monitors/discover')}
           onGroup={() => setModal({ mode: 'create' })}
+	  isAdmin={isAdmin}
         />
       </div>
 
