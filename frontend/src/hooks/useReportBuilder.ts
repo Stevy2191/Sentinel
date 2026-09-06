@@ -307,13 +307,27 @@ export function usePublicReport(token: string | undefined) {
 /**
  * downloadReportPDF fetches a generation and saves it to disk.
  *
- * A plain <a href> or window.open cannot be used for the authenticated route:
- * the JWT lives in localStorage and is attached by an axios interceptor, so a
- * browser-initiated navigation would arrive without it and get a 401. Fetching
- * as a blob keeps the header and then hands the file to the browser.
+ * Auth is no longer the reason this exists. It originally was: the JWT lived in
+ * localStorage and only an axios interceptor could attach it, so a browser
+ * navigation arrived unauthenticated. The token now lives in an httpOnly cookie
+ * scoped to /api, which a same-origin navigation sends automatically - a plain
+ * <a href> would authenticate fine today.
  *
- * Public share downloads need no header, but go through the same path so both
- * behave identically.
+ * What it still buys is failure handling. Every error on this route is a JSON
+ * body, and a navigation renders that raw in a tab:
+ *
+ *   session expired      {"error":{"code":401,"message":"..."}}
+ *   file pruned on disk  {"error":"report file is no longer available"}
+ *   stale generation id  {"error":"report generation not found"}
+ *
+ * All three are reachable in normal use - the session token lasts 24h, and
+ * report files live on a mounted volume that can be replaced. Fetching first
+ * lets the caller catch these and show a toast, and lets the filename come
+ * from the report's name rather than the server's timestamped one.
+ *
+ * The tradeoff is that the PDF is buffered in memory. Reports are a few KB
+ * today; if they ever grow large, streaming via a link becomes the better
+ * choice and this can go.
  */
 export async function downloadReportPDF(downloadURL: string, filename: string): Promise<void> {
   // download_url comes back absolute (/api/v1/...) while the client's baseURL is
