@@ -36,7 +36,9 @@ services:
       context: ./backend
       args:
         # Set GOPROXY in .env for a mirrored or firewalled build network.
-        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+        # Compose passes this explicitly, so this default - not the Dockerfile's
+        # ARG default - is what a `docker compose build` actually uses.
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,https://proxy.golang.org,direct}
     image: ${DOCKER_REGISTRY:-ghcr.io}/stevy2191/sentinel-backend:${IMAGE_TAG:-latest}
     container_name: sentinel-backend
     depends_on:

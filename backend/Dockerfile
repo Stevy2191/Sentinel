@@ -1,12 +1,20 @@
 # Build stage. Go version must satisfy go.mod (go 1.25).
 FROM golang:1.25-alpine AS builder
 
-# Module source and network behaviour, overridable at build time for networks
-# that cannot reach proxy.golang.org:
+# Module source and network behaviour, overridable at build time:
 #   --build-arg GOPROXY=https://your-mirror/,direct
 #   --build-arg GOPROXY=off            (fully offline, needs a vendor/ dir)
 # GOPRIVATE/GONOSUMDB are not needed here: every dependency is public.
-ARG GOPROXY=https://proxy.golang.org,direct
+#
+# goproxy.cn is listed first because Google's CDN times out from some regions.
+# The chain falls through to proxy.golang.org and then a direct fetch, so the
+# ordering is a latency preference rather than a dependency on any one mirror.
+#
+# Note this is set as an ENV, not via `go env -w`: an OS environment variable
+# takes precedence over the go env config file, and `go env -w` in a later RUN
+# would be silently ignored here - Go itself warns
+# "does not override conflicting OS environment variable".
+ARG GOPROXY=https://goproxy.cn,https://proxy.golang.org,direct
 ARG GOSUMDB=sum.golang.org
 ENV GOPROXY=${GOPROXY}     GOSUMDB=${GOSUMDB}     GOFLAGS=-mod=mod
 
