@@ -21,6 +21,39 @@ fatal() { err "$*"; exit 1; }
 # Work from the script's directory (repo root).
 cd "$(dirname "$0")"
 
+# env_quote VALUE → the value encoded for a Docker Compose .env file.
+#
+# Compose parses .env with its own dotenv reader, NOT with shell rules. Two
+# consequences drove this implementation, both established by testing:
+#
+#   * Unquoted values are still expanded, so "$uperSecret123!" arrives as "!".
+#   * Single-quoted values are literal but have no escape at all, so the POSIX
+#     '\'' idiom is a hard parse error: compose refuses to read the file with
+#     `unexpected character "\" in variable name`.
+#
+# Double quotes are the one form that survives everything, with \ $ " and `
+# backslash-escaped. Backslash must be escaped first or the later passes
+# double-escape their own output.
+env_quote() {
+  local v="$1"
+  v="${v//\\/\\\\}"
+  v="${v//\"/\\\"}"
+  v="${v//\$/\\\$}"
+  v="${v//\`/\\\`}"
+  printf '"%s"' "$v"
+}
+
+# Self-test of the encoder against a value containing every character that has
+# ever broken this: a leading $, an apostrophe, a space, a #, and a !.
+# Cheap, needs no Docker, and fails loudly if env_quote is ever "simplified".
+env_quote_selftest() {
+  local probe='$x'"'"'s #1 !v' expected
+  expected='"\$x'"'"'s #1 !v"'
+  if [ "$(env_quote "$probe")" != "$expected" ]; then
+    fatal "Internal error: env_quote is not escaping correctly. Refusing to write secrets."
+  fi
+}
+
 # Host ports the stack binds (see docker-compose.yml). Frontend, backend, and
 # postgres are env-backed (reassignable); adminer is fixed in compose.
 FRONTEND_PORT=3000
@@ -42,23 +75,70 @@ port_in_use() {
   elif command -v lsof >/dev/null 2>&1; then
     lsof -iTCP:"$p" -sTCP:LISTEN -t >/dev/null 2>&1
   else
-    return 1 # no tool available; assume free
+    # No inspection tool available. Report "free" so the install can proceed,
+    # but PORT_CHECK_UNAVAILABLE makes the caller say so rather than implying
+    # the port was checked.
+    PORT_CHECK_UNAVAILABLE=yes
+    return 1
+  fi
+}
+
+# Detection accuracy, in the order the tools are tried:
+#   ss / netstat  read /proc/net directly and see every listener regardless of
+#                 owner or address family. IPv4, IPv6 and Docker-published
+#                 ports are all detected.
+#   lsof          without root, only shows sockets owned by the calling user,
+#                 so a service started by root or another user reads as free.
+#   none present  nothing can be checked at all.
+warn_if_port_check_degraded() {
+  if [ "${PORT_CHECK_UNAVAILABLE:-}" = "yes" ]; then
+    warn "No ss, netstat, or lsof on this host — ports could not be checked."
+    warn "  Install iproute2 for accurate detection, or verify ports yourself."
+  elif ! command -v ss >/dev/null 2>&1 && ! command -v netstat >/dev/null 2>&1; then
+    warn "Only lsof is available, so port checks see just your own processes."
+    warn "  A port held by root or another user may be reported as free."
   fi
 }
 
 # kill_port PORT → kill the listening process(es); returns 0 if the port is free after.
 kill_port() {
   local p="$1" pids=""
+  # Try each tool that can map a port to a PID. lsof is not always installed on
+  # slim server images, where ss usually is.
   if command -v lsof >/dev/null 2>&1; then
     pids=$(lsof -tiTCP:"$p" -sTCP:LISTEN 2>/dev/null || true)
   fi
+  if [ -z "$pids" ] && command -v ss >/dev/null 2>&1; then
+    pids=$(ss -Hltnp "sport = :$p" 2>/dev/null | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u || true)
+  fi
+  if [ -z "$pids" ] && command -v fuser >/dev/null 2>&1; then
+    pids=$(fuser -n tcp "$p" 2>/dev/null | tr -s ' ' '\n' | grep -E '^[0-9]+$' || true)
+  fi
   if [ -z "$pids" ]; then
-    warn "Could not identify the process on port $p (lsof needed)."
+    warn "Could not identify the process on port $p."
+    warn "  Install lsof or iproute2, or stop it yourself and choose 's'."
     return 1
   fi
+
+  # Ask before pulling the rug: whatever holds this port may be a database, and
+  # SIGKILL gives it no chance to flush.
+  info "  Port $p is held by PID(s): $pids"
+  if ! read -r -p "  Terminate them? (y/N) " CONFIRM_KILL; then CONFIRM_KILL="n"; fi
+  case "$CONFIRM_KILL" in
+    y|Y|yes|YES) ;;
+    *) warn "Left the process running."; return 1 ;;
+  esac
+
   # shellcheck disable=SC2086
-  kill -9 $pids 2>/dev/null || true
-  sleep 1
+  kill $pids 2>/dev/null || true
+  local i=0
+  while [ "$i" -lt 5 ] && port_in_use "$p"; do sleep 1; i=$((i + 1)); done
+  if port_in_use "$p"; then
+    warn "  Still listening after SIGTERM; escalating to SIGKILL."
+    # shellcheck disable=SC2086
+    kill -9 $pids 2>/dev/null || true
+    sleep 1
+  fi
   ! port_in_use "$p"
 }
 
@@ -152,6 +232,7 @@ prompt_for_ports() {
 # service ports before docker-compose starts.
 check_port_conflicts() {
   prompt_for_ports
+  warn_if_port_check_degraded
   info "Verifying the backing service ports..."
   resolve_port PORT_DB "postgres" yes
   ok "Port check complete."
@@ -203,6 +284,17 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 ok "Docker: $(docker --version | sed 's/,.*//')"
 
+# `command -v docker` only proves the binary exists. A user outside the docker
+# group passes every check here and then fails at `up -d --build`, after all the
+# prompts and after .env has been written.
+if ! docker info >/dev/null 2>&1; then
+  fatal "Cannot reach the Docker daemon.
+  Start Docker, or add your user to the 'docker' group:
+    sudo usermod -aG docker \$USER  &&  newgrp docker
+  Then re-run this script."
+fi
+ok "Docker daemon: reachable"
+
 if docker compose version >/dev/null 2>&1; then
   COMPOSE="docker compose"
 elif command -v docker-compose >/dev/null 2>&1; then
@@ -220,7 +312,7 @@ ok "Git: $(git --version | awk '{print $3}')"
 # .env overwrite guard
 if [ -f .env ]; then
   warn "A .env file already exists."
-  read -r -p "Overwrite existing .env? (y/N) " OVERWRITE
+  if ! read -r -p "Overwrite existing .env? (y/N) " OVERWRITE; then OVERWRITE="n"; fi
   case "${OVERWRITE:-n}" in
     y|Y|yes|YES) info "Overwriting .env." ;;
     *) fatal "Aborted; leaving existing .env in place." ;;
@@ -238,7 +330,7 @@ elif command -v systemsetup >/dev/null 2>&1; then
 fi
 [ -z "$TZ_DETECTED" ] && TZ_DETECTED="UTC"
 info "Detected timezone: ${BOLD}${TZ_DETECTED}${RESET}"
-read -r -p "Use this timezone? Press ENTER to accept, or type a custom one: " TZ_INPUT
+if ! read -r -p "Use this timezone? Press ENTER to accept, or type a custom one: " TZ_INPUT; then TZ_INPUT=""; fi
 TIMEZONE="${TZ_INPUT:-$TZ_DETECTED}"
 ok "Using timezone: ${TIMEZONE}"
 echo
@@ -253,12 +345,12 @@ prompt_for_adminer
 info "${BOLD}Database password${RESET} ${DIM}(min 12 characters)${RESET}"
 DB_PASSWORD=""
 while true; do
-  read -r -s -p "Enter database password: " DB_PASSWORD; echo
+  if ! read -r -s -p "Enter database password: " DB_PASSWORD; then echo; fatal "No input available; run install.sh from an interactive terminal."; fi; echo
   if [ "${#DB_PASSWORD}" -lt 12 ]; then
     err "Password too short (${#DB_PASSWORD} chars); need at least 12. Try again."
     continue
   fi
-  read -r -s -p "Confirm database password: " DB_PASSWORD2; echo
+  if ! read -r -s -p "Confirm database password: " DB_PASSWORD2; then echo; fatal "No input available; run install.sh from an interactive terminal."; fi; echo
   if [ "$DB_PASSWORD" != "$DB_PASSWORD2" ]; then
     err "Passwords do not match. Try again."
     continue
@@ -291,16 +383,18 @@ esac
 echo
 
 # ---- 6. Optional SMTP ----
-SMTP_HOST=""; SMTP_PORT="587"; SMTP_USER=""; SMTP_PASSWORD=""; SMTP_FROM=""
+SMTP_HOST=""; SMTP_PORT="587"; SMTP_USER=""; SMTP_PASSWORD=""; SMTP_FROM=""; SMTP_TO=""
 info "${BOLD}Email alerts (optional)${RESET}"
-read -r -p "Set up email (SMTP) alerts now? (y/N) " SMTP_ANSWER
+if ! read -r -p "Set up email (SMTP) alerts now? (y/N) " SMTP_ANSWER; then SMTP_ANSWER="n"; fi
 case "${SMTP_ANSWER:-n}" in
   y|Y|yes|YES)
-    read -r -p "  SMTP host (e.g. smtp.gmail.com): " SMTP_HOST
-    read -r -p "  SMTP port [587]: " SMTP_PORT_IN; SMTP_PORT="${SMTP_PORT_IN:-587}"
-    read -r -p "  SMTP username (email): " SMTP_USER
-    read -r -s -p "  SMTP password (app password): " SMTP_PASSWORD; echo
-    read -r -p "  From address [${SMTP_USER}]: " SMTP_FROM_IN; SMTP_FROM="${SMTP_FROM_IN:-$SMTP_USER}"
+    if ! read -r -p "  SMTP host (e.g. smtp.gmail.com): " SMTP_HOST; then SMTP_HOST=""; fi
+    if ! read -r -p "  SMTP port [587]: " SMTP_PORT_IN; then SMTP_PORT_IN=""; fi; SMTP_PORT="${SMTP_PORT_IN:-587}"
+    if ! read -r -p "  SMTP username (email): " SMTP_USER; then SMTP_USER=""; fi
+    if ! read -r -s -p "  SMTP password (app password): " SMTP_PASSWORD; then SMTP_PASSWORD=""; fi; echo
+    if ! read -r -p "  From address [${SMTP_USER}]: " SMTP_FROM_IN; then SMTP_FROM_IN=""; fi; SMTP_FROM="${SMTP_FROM_IN:-$SMTP_USER}"
+    if ! read -r -p "  Send alerts to (comma separated) [${SMTP_FROM}]: " SMTP_TO_IN; then SMTP_TO_IN=""; fi
+    SMTP_TO="${SMTP_TO_IN:-$SMTP_FROM}"
     ok "SMTP configured for ${SMTP_HOST}."
     ;;
   *)
@@ -315,50 +409,102 @@ info "${BOLD}Writing .env...${RESET}"
 # Adminer container. Left empty when the user opts out, so the profiled service
 # is skipped on every `docker compose up` (no manual editing required).
 if [ "$ADMINER_ENABLED" = "true" ]; then COMPOSE_PROFILES="adminer"; else COMPOSE_PROFILES=""; fi
-cat > .env <<ENV
+# Every value goes through env_quote, which double-quotes it and backslash-
+# escapes $ so Compose cannot expand it, while spaces, #, apostrophes and
+# quotes survive intact. Writing to a temp file first means a failure part-way
+# through never leaves a half-written .env behind.
+env_quote_selftest
+
+ENV_TMP=".env.tmp.$$"
+trap 'rm -f "$ENV_TMP"' EXIT
+
+if ! cat > "$ENV_TMP" <<ENV
 # Generated by install.sh on $(date -u +%Y-%m-%dT%H:%M:%SZ)
+#
+# Values are double-quoted with \$ escaped, deliberately. Docker Compose
+# expands \$VAR inside .env values whether they are bare OR plainly
+# double-quoted, so a secret containing \$ is silently truncated without the
+# backslash. Keep the quoting if you edit this file by hand.
 
 # Database
-DB_PASSWORD=${DB_PASSWORD}
-DB_PORT=${PORT_DB}
+DB_PASSWORD=$(env_quote "$DB_PASSWORD")
+DB_PORT=$(env_quote "$PORT_DB")
 
 # Server
-FRONTEND_PORT=${FRONTEND_PORT}
-BACKEND_PORT=${BACKEND_PORT}
-ENVIRONMENT=production
+FRONTEND_PORT=$(env_quote "$FRONTEND_PORT")
+BACKEND_PORT=$(env_quote "$BACKEND_PORT")
+ENVIRONMENT='production'
 
 # Database admin tool (Adminer). ADMINER_ENABLED is informational; the
 # COMPOSE_PROFILES line below is what actually starts/skips the container.
-ADMINER_ENABLED=${ADMINER_ENABLED}
-ADMINER_PORT=${ADMINER_PORT}
-COMPOSE_PROFILES=${COMPOSE_PROFILES}
-LOG_LEVEL=info
-TIMEZONE=${TIMEZONE}
+ADMINER_ENABLED=$(env_quote "$ADMINER_ENABLED")
+ADMINER_PORT=$(env_quote "$ADMINER_PORT")
+COMPOSE_PROFILES=$(env_quote "$COMPOSE_PROFILES")
+LOG_LEVEL='info'
+TIMEZONE=$(env_quote "$TIMEZONE")
 
 # Authentication
-JWT_SECRET=${JWT_SECRET}
-REGISTRATION_ENABLED=${REGISTRATION_ENABLED}
+JWT_SECRET=$(env_quote "$JWT_SECRET")
+REGISTRATION_ENABLED=$(env_quote "$REGISTRATION_ENABLED")
 
 # SMTP (email alerts)
-SMTP_HOST=${SMTP_HOST}
-SMTP_PORT=${SMTP_PORT}
-SMTP_USER=${SMTP_USER}
-SMTP_PASSWORD=${SMTP_PASSWORD}
-SMTP_FROM=${SMTP_FROM}
+SMTP_HOST=$(env_quote "$SMTP_HOST")
+SMTP_PORT=$(env_quote "$SMTP_PORT")
+SMTP_USER=$(env_quote "$SMTP_USER")
+SMTP_PASSWORD=$(env_quote "$SMTP_PASSWORD")
+SMTP_FROM=$(env_quote "$SMTP_FROM")
+# Recipients for alert email. Empty means alerts go to SMTP_USER only.
+SMTP_TO=$(env_quote "$SMTP_TO")
+# Connection security: none | starttls | ssltls. Leave blank for the default.
+SMTP_SECURITY=''
+SMTP_SKIP_TLS_VERIFY='false'
 
 # Other notification channels (optional)
-SLACK_WEBHOOK_URL=
-DISCORD_WEBHOOK_URL=
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_CHAT_ID=
-NTFY_URL=https://ntfy.sh
-NTFY_TOPIC=
-WEBHOOK_URL=
+SLACK_WEBHOOK_URL=''
+DISCORD_WEBHOOK_URL=''
+TELEGRAM_BOT_TOKEN=''
+TELEGRAM_CHAT_ID=''
+NTFY_URL='https://ntfy.sh'
+NTFY_TOPIC=''
+NTFY_AUTH_TOKEN=''
+WEBHOOK_URL=''
+
+# Absolute URL of this install, used for links in scheduled report email.
+SENTINEL_BASE_URL=''
+
+# Tuning
+DEFAULT_CHECK_INTERVAL='30'
+REPORT_WORKERS='2'
 
 # Docker images
-DOCKER_REGISTRY=ghcr.io
-IMAGE_TAG=latest
+DOCKER_REGISTRY='ghcr.io'
+IMAGE_TAG='latest'
 ENV
+then
+  err "Could not write $ENV_TMP."
+  fatal "Check that you can write to $(pwd) and re-run."
+fi
+
+if ! mv "$ENV_TMP" .env; then
+  fatal "Could not move $ENV_TMP into place as .env."
+fi
+trap - EXIT
+
+# Verify with the parser that actually matters.
+#
+# An earlier version of this check sourced .env with `. ./.env` and compared the
+# results. That passed while Compose was rejecting the very same file: the shell
+# and Compose's dotenv reader are different parsers, and the shell is the one
+# nobody uses at runtime. `docker compose config` is the real consumer, so it is
+# the one that gets to say whether the file is valid.
+info "Verifying the generated .env..."
+if ! CONFIG_ERR=$($COMPOSE config -q 2>&1); then
+  err "Docker Compose cannot read the generated .env:"
+  printf '%s\n' "$CONFIG_ERR" | sed 's/^/    /' >&2
+  fatal "Refusing to continue with a .env Compose cannot parse."
+fi
+ok "Secrets encoded and .env parses cleanly."
+
 chmod 600 .env
 ok ".env created (permissions 600)."
 echo
@@ -370,7 +516,7 @@ echo
 PROFILE_FLAGS=""
 if [ "$ADMINER_ENABLED" = "true" ]; then PROFILE_FLAGS="--profile adminer"; fi
 info "${BOLD}Ready to launch.${RESET}"
-read -r -p "Start Sentinel now with '${COMPOSE} ${PROFILE_FLAGS} up -d --build'? (Y/n) " START_ANSWER
+if ! read -r -p "Start Sentinel now with '${COMPOSE} ${PROFILE_FLAGS} up -d --build'? (Y/n) " START_ANSWER; then START_ANSWER="n"; fi
 case "${START_ANSWER:-y}" in
   n|N|no|NO)
     info "Skipping startup. When ready, run: ${BOLD}${COMPOSE} ${PROFILE_FLAGS} up -d --build${RESET}"
