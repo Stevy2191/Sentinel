@@ -120,8 +120,27 @@ func run() error {
 
 	// Seed the registration setting from the environment on first run only; once
 	// stored, an admin's runtime change is authoritative across restarts.
-	if _, err := settingsService.SeedBool(context.Background(), models.SettingRegistrationEnabled, cfg.RegistrationEnabled); err != nil {
+	settingsCtx := context.Background()
+	seeded, err := settingsService.SeedBool(settingsCtx, models.SettingRegistrationEnabled, cfg.RegistrationEnabled)
+	if err != nil {
 		return fmt.Errorf("seeding settings: %w", err)
+	}
+	// Say so when the environment disagrees with what is stored. The stored
+	// value winning is deliberate - it is what lets an admin close registration
+	// from the UI and have it stick across restarts - but silently ignoring an
+	// explicitly set REGISTRATION_ENABLED looks exactly like the setting not
+	// working, with nothing in the log to explain it.
+	if !seeded {
+		if _, explicit := os.LookupEnv("REGISTRATION_ENABLED"); explicit {
+			if stored := settingsService.RegistrationEnabled(settingsCtx); stored != cfg.RegistrationEnabled {
+				log.Printf("WARNING: REGISTRATION_ENABLED=%t is being IGNORED. Self-registration is %s, "+
+					"because the stored setting takes precedence after the first run.",
+					cfg.RegistrationEnabled, map[bool]string{true: "OPEN", false: "CLOSED"}[stored])
+				log.Printf("  To change it: Settings -> Security -> User Registration in the web UI,")
+				log.Printf("  or: UPDATE settings SET value='%t', updated_at=now() WHERE key='%s';",
+					cfg.RegistrationEnabled, models.SettingRegistrationEnabled)
+			}
+		}
 	}
 
 	// 4. Notification plugins. Env-configured channels register first (backward
