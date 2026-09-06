@@ -24,7 +24,7 @@ interface ApiEnvelope {
  */
 export function useAuth() {
   const navigate = useNavigate()
-  const { setToken } = useAuthContext()
+  const { refreshAuth } = useAuthContext()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -46,7 +46,9 @@ export function useAuth() {
         if (data.data?.mfa_required) {
           return { success: false, mfaRequired: true, mfaToken: data.data.mfa_token }
         }
-        setToken(data.data?.token ?? null)
+	// The backend already set the auth cookie on this response; pull the
+        // user record so AuthContext flips isAuthenticated to true.
+        await refreshAuth()
         navigate('/dashboard')
         return { success: true }
       } catch {
@@ -56,7 +58,7 @@ export function useAuth() {
         setLoading(false)
       }
     },
-    [navigate, setToken]
+    [navigate, refreshAuth]
   )
 
   const register = useCallback(
@@ -106,7 +108,7 @@ export function useAuth() {
           setError(data.error?.message || 'Verification failed')
           return { success: false }
         }
-        setToken(data.data?.token ?? null)
+	await refreshAuth()
         navigate('/dashboard')
         return { success: true }
       } catch {
@@ -116,7 +118,7 @@ export function useAuth() {
         setLoading(false)
       }
     },
-    [navigate, setToken]
+    [navigate, refreshAuth]
   )
 
   return { login, register, verifyMFA, loading, error, setError }

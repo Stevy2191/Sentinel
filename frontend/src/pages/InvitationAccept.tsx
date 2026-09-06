@@ -55,7 +55,7 @@ const STRENGTH_COLOR = ['bg-red-500', 'bg-red-500', 'bg-red-500', 'bg-amber-500'
 export default function InvitationAccept() {
   const { token } = useParams<{ token: string }>()
   const navigate = useNavigate()
-  const { isAuthenticated, setToken } = useAuthContext()
+  const { isAuthenticated, refreshAuth } = useAuthContext()
   const { invitation, loading, error } = useInvitationDetails(token)
   const { accept, loading: submitting } = useAcceptInvitation()
 
@@ -83,9 +83,9 @@ export default function InvitationAccept() {
     if (!canSubmit || !token) return
     setSubmitError(null)
     try {
-      const account = await accept(token, username, password)
+      await accept(token, username, password)
       setDone(true)
-      setToken(account.token) // auto-login
+      await refreshAuth() // auto-login: backend already set the auth cookie
       window.setTimeout(() => navigate('/dashboard'), 1000)
     } catch (err) {
       const msg = (err as { message?: string }).message ?? 'Failed to accept invitation'

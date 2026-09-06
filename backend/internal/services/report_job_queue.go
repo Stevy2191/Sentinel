@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -219,12 +220,41 @@ func (q *ReportJobQueue) render(ctx context.Context, job *models.ReportJob) (*Ge
 	return q.generator.GenerateAndSaveReport(ctx, &report, job.RequestedBy)
 }
 
+// classifyJobError maps a render failure to a short, operator-safe category
+// for report_jobs.error and the API response. The underlying error can carry
+// server-side detail that has no business reaching a report viewer - e.g.
+// pdf_renderer.go wraps a MkdirAll failure with the literal output directory
+// path. Only a fixed category string is ever persisted or returned; the raw
+// error is logged in full below, keyed by job ID, so an admin can still find
+// out exactly what happened by checking the server log.
+//
+// Matching is done against the static wrap prefixes this package's own code
+// uses (report_generator.go, report_job_queue.go's render, pdf_renderer.go),
+// not against arbitrary third-party error text, so it stays reliable as those
+// call sites evolve.
+func classifyJobError(err error) string {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "loading report template"):
+		return "report template could not be loaded"
+	case strings.Contains(msg, "aggregating report data"):
+		return "could not gather monitor data for this report"
+	case strings.Contains(msg, "rendering report PDF"):
+		return "PDF rendering failed on the server"
+	case strings.Contains(msg, "saving report generation"):
+		return "generated report could not be saved"
+	case strings.Contains(msg, "loading report:"):
+		return "report definition could not be loaded"
+	default:
+		return "report render failed"
+	}
+}
+
 // finishFailed records a failure, requeueing while attempts remain.
 func (q *ReportJobQueue) finishFailed(job *models.ReportJob, runErr error) {
-	msg := runErr.Error()
 	now := time.Now()
 
-	updates := map[string]interface{}{"error": msg}
+	updates := map[string]interface{}{"error": classifyJobError(runErr)}
 	if job.Attempts < models.MaxJobAttempts {
 		// Transient causes (a locked file, a brief database blip) deserve
 		// another pass; the attempt counter stops it becoming a loop.

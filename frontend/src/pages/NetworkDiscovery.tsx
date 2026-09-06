@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Check, Loader2, Radar, Signal, X } from 'lucide-react'
 import api from '@/services/api'
 import { useScanSubnet } from '@/hooks/useDiscovery'
 import { useToasts, Toaster } from '@/components/Toast'
+import { useAuthContext } from '@/context/AuthContext'
 import type { ApiResponse, DiscoveredHost, MonitorInput } from '@/types'
 
 const DEFAULT_INTERVAL_SECONDS = 60
@@ -44,8 +45,14 @@ function toMonitorInput(host: DiscoveredHost): MonitorInput {
  */
 export default function NetworkDiscovery() {
   const navigate = useNavigate()
+  const { currentUser } = useAuthContext()
+  const isAdmin = currentUser?.is_admin ?? false
   const { toasts, push } = useToasts()
   const { scan, result, loading: scanning, error: scanError } = useScanSubnet()
+
+  useEffect(() => {
+    if (currentUser && !isAdmin) navigate('/dashboard')
+  }, [currentUser, isAdmin, navigate])
 
   const [cidr, setCidr] = useState('192.168.1.0/24')
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -106,6 +113,8 @@ export default function NetworkDiscovery() {
     setDone(null)
     setSelected(new Set())
   }
+
+  if (!currentUser || !isAdmin) return null
 
   // ---- after monitors have been added ----
   if (done) {

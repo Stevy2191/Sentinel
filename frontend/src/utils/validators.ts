@@ -5,10 +5,10 @@ export function validateUrl(url: string): boolean {
   const trimmed = url.trim()
   if (!trimmed) return false
   try {
-    // Full URL with scheme.
-    // eslint-disable-next-line no-new
-    new URL(trimmed)
-    return true
+    // Full URL with scheme: restrict to http(s) so this can't validate
+    // "javascript:", "data:", etc. as an acceptable monitor target.
+    const parsed = new URL(trimmed)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
   } catch {
     // Fall back to host or host:port (e.g. "example.com:443", "localhost").
     return /^[a-zA-Z0-9.-]+(:\d{1,5})?$/.test(trimmed)

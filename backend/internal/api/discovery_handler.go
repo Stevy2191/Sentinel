@@ -28,8 +28,8 @@ type scanSubnetRequest struct {
 //
 // This makes the server originate traffic toward whatever subnet the caller
 // names. That is deliberate — discovering a home lab or internal network is
-// the feature's purpose — but it is still a real network scan, so it is kept
-// behind authentication (like every other /api/v1 route) and bounded by
+// the feature's purpose — but it is still a real network scan, so it is
+// admin-only (not just authenticated, like most /api/v1 routes) and bounded by
 // DiscoveryService's own size/duration/rate limits rather than trusted to the
 // client.
 func ScanSubnetHandler(discoveryService *services.DiscoveryService) gin.HandlerFunc {
@@ -72,8 +72,11 @@ func classifyDiscoveryError(err error) int {
 	return http.StatusBadRequest
 }
 
-// RegisterDiscoveryRoutes mounts the network discovery endpoint.
+// RegisterDiscoveryRoutes mounts the network discovery endpoint. Admin-only:
+// a scan makes the backend originate traffic toward any subnet the caller
+// names, which is a meaningful capability to hand to a non-admin invited user.
 func RegisterDiscoveryRoutes(rg *gin.RouterGroup, discoveryService *services.DiscoveryService) {
 	discovery := rg.Group("/discovery")
+	discovery.Use(RequireAdmin())
 	discovery.POST("/scan", ScanSubnetHandler(discoveryService))
 }

@@ -25,7 +25,7 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
     onNavigate?.()
     navigate(path)
   }
-  const handleLogout = () => {
+  const handleLogout = async () => {
     onNavigate?.()
     logout()
     navigate('/login')
@@ -91,7 +91,7 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
           <button
             className="w-full px-4 py-2 text-left text-xs font-bold"
             style={{ color: 'var(--color-accent-offline)' }}
-            onClick={handleLogout}
+            onClick={() => void handleLogout()}
           >
             LOG OUT
           </button>

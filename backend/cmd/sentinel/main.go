@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -137,7 +138,11 @@ func run() error {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	router := gin.New()
+	if err := router.SetTrustedProxies(resolveTrustedProxies()); err != nil {
+		return fmt.Errorf("setting trusted proxies: %w", err)
+	}
 	router.Use(gin.Logger(), gin.Recovery())
+	router.Use(api.SecurityHeaders())
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":    "healthy",
@@ -488,10 +493,37 @@ func resolveJWTSecret() string {
 	}
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		return "sentinel-insecure-default-change-me"
+		// crypto/rand failing means the OS's secure entropy source is broken.
+		// There is no safe fallback for a JWT signing secret in that state -
+		// continuing with a hardcoded, publicly-known string would let anyone
+		// forge admin tokens. Refuse to start instead.
+		log.Fatalf("FATAL: could not generate a random JWT secret (crypto/rand failed: %v). "+
+			"Set JWT_SECRET explicitly and restart.", err)
 	}
 	log.Printf("WARNING: JWT_SECRET is not set; using a random per-process secret (all sessions reset on restart). Set JWT_SECRET in production.")
 	return base64.StdEncoding.EncodeToString(b)
+}
+
+// resolveTrustedProxies returns the CIDR ranges Gin should trust
+// X-Forwarded-For/X-Real-IP from - i.e. the reverse proxy (nginx) sitting in
+// front of this service, not arbitrary clients. Without this, Gin's default
+// is to trust every peer, which makes c.ClientIP() spoofable via a
+// client-supplied X-Forwarded-For header - harmless today (it only affects
+// log lines) but would become a real bypass if IP-based rate limiting is
+// ever added without this fixed first. Defaults to the private ranges Docker
+// commonly assigns to bridge networks; set TRUSTED_PROXIES (comma-separated
+// CIDRs) to override if you front Sentinel with a different reverse proxy.
+func resolveTrustedProxies() []string {
+	if v := os.Getenv("TRUSTED_PROXIES"); v != "" {
+		var out []string
+		for _, p := range strings.Split(v, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				out = append(out, p)
+			}
+		}
+		return out
+	}
+	return []string{"172.16.0.0/12", "192.168.0.0/16", "10.0.0.0/8"}
 }
 
 func getenvInt(key string, fallback int) int {

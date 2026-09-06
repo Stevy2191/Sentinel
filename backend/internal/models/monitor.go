@@ -7,10 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/Stevy2191/Sentinel/backend/internal/netguard"
 )
 
 // Monitor type values.
@@ -171,6 +175,32 @@ func (Monitor) TableName() string {
 	return "monitors"
 }
 
+// validateHTTPURL rejects anything but a well-formed http(s) URL with a host.
+// This matters beyond correctness: monitor URLs are rendered as clickable
+// <a href> links in the frontend, so accepting arbitrary schemes (e.g.
+// "javascript:...") would allow a stored-XZZ payload disguised as a monitor
+// target.
+func validateHTTPURL(raw string) error {
+	u, err:= url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return fmt.Errorf("invalid url: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("url must start with http:// or https://, got %q", raw)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("url must include a host, got %q", raw)
+	}
+	// Fast-fail when the host is a literal IP that's already known to be
+	// blocked (e.g. a cloud metadata address). This can't catch a hostname
+	// that resolves to a blocked address later (DNS rebinding) - that's
+	// enforced at check-execution time in CheckService via netguard.DialControl.
+	if ip := net.ParseIP(u.Hostname()); ip != nil && netguard.IsBlocked(ip) {
+		return fmt.Errorf("url targets a disallowed network address: %q", ip)
+	}
+	return nil
+}
+
 // Validate checks that the monitor's fields form a coherent, storable
 // configuration. It returns a descriptive error for the first problem found, or
 // nil if the monitor is valid.
@@ -183,8 +213,11 @@ func (m *Monitor) Validate() error {
 	}
 
 	switch m.Type {
-	case MonitorTypeHTTP, MonitorTypeTCP, MonitorTypePing, MonitorTypeDNS, MonitorTypeWebhook:
-		// valid
+	case MonitorTypeHTTP, MonitorTypeWebhook:
+		if err := validateHTTPURL(m.URL); err != nil {
+			return err
+		}
+		// valid; these targets are host[:port] strings, not URLs.
 	default:
 		return fmt.Errorf("invalid monitor type %q: must be one of http, tcp, ping, dns, webhook", m.Type)
 	}

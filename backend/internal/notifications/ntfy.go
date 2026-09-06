@@ -12,6 +12,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/Stevy2191/Sentinel/backend/internal/netguard"
 )
 
 const (
@@ -48,7 +50,7 @@ func NewNtfyPlugin() (*NtfyPlugin, error) {
 		url:        serverURL,
 		topic:      topic,
 		authToken:  strings.TrimSpace(os.Getenv("NTFY_AUTH_TOKEN")),
-		httpClient: &http.Client{Timeout: defaultNtfyTimeout},
+		httpClient: netguard.NewGuardedHTTPClient(defaultNtfyTimeout),
 		logger:     log.Default(),
 	}
 	p.logger.Printf("[ntfy] Ntfy plugin initialized for topic %s", topic)

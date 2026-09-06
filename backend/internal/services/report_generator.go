@@ -42,7 +42,7 @@ func (rg *ReportGenerator) GenerateAndSaveReport(ctx context.Context, report *mo
 		return nil, fmt.Errorf("loading report template: %w", err)
 	}
 
-	data, err := rg.aggregator.AggregateReportData(ctx, report)
+	data, err := rg.aggregator.AggregateReportData(ctx, report, generatedBy)
 	if err != nil {
 		return nil, fmt.Errorf("aggregating report data: %w", err)
 	}
