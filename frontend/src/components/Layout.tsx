@@ -81,6 +81,15 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
               USERS
             </button>
           )}
+          {/* Not admin-gated: this page holds password change and 2FA for every
+              user. The registration toggle inside it is admin-only on its own. */}
+          <button
+            className="w-full px-4 py-2 text-left text-xs font-bold transition-colors hover:text-white"
+            style={{ color: 'var(--rd-text-muted)' }}
+            onClick={() => go('/settings/security')}
+          >
+            SECURITY
+          </button>
           <button
             className="w-full px-4 py-2 text-left text-xs font-bold transition-colors hover:text-white"
             style={{ color: 'var(--rd-text-muted)' }}
