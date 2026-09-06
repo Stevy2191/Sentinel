@@ -12,8 +12,8 @@ export const api: AxiosInstance = axios.create({
   baseURL,
   headers: { 'Content-Type': 'application/json' },
   timeout: 120000,
-  // The auth token now lives in an httpOnly cookie set by the backend, not
-  // in a header is attached here. withCredentials makes axios send it.
+  // The auth token lives in an httpOnly cookie set by the backend, scoped to
+  // /api. withCredentials is what makes axios send it.
   withCredentials: true,
 })
 
@@ -24,14 +24,10 @@ export interface ApiError {
   code?: string
 }
 
-// Request interceptor: attach the auth token if present.
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('sentinel:token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
-})
+// No request interceptor for auth: nothing writes 'sentinel:token' to
+// localStorage any more, so reading it back only ever produced null. The
+// cookie above is the SPA's credential. The backend still accepts
+// "Authorization: Bearer" for scripts and non-browser clients.
 
 /** Extract a human-readable message from the backend error payload, which may
  *  be a plain string or a { code, message } object. */
