@@ -51,6 +51,7 @@ export interface Monitor {
   last_check_at: string | null
   last_response_time_ms: number
   enabled: boolean
+  ssl_verify?: boolean
   tags: string[] | null
   // Channels this monitor alerts on: null = every enabled channel (default),
   // [] = notifications disabled for this monitor, [...] = only those channels.
@@ -92,6 +93,9 @@ export interface MonitorInput {
   enabled?: boolean
   tags?: string[]
   notify_channels?: string[] | null
+  // Verify the TLS certificate on HTTPS checks. Omitted means verify, which is
+  // also the column default — never send undefined meaning "off".
+  ssl_verify?: boolean
 }
 
 export interface MonitorFilters extends PaginationParams {

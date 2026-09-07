@@ -109,17 +109,27 @@ func asBytes(value any) ([]byte, error) {
 // Monitor represents a single monitored endpoint together with its check
 // configuration and a denormalized snapshot of its most recent result.
 type Monitor struct {
-	ID                 uuid.UUID   `json:"id" gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
-	Name               string      `json:"name" gorm:"column:name;not null"`
-	Description        string      `json:"description" gorm:"column:description"`
-	Type               string      `json:"type" gorm:"column:type;not null"`
-	URL                string      `json:"url" gorm:"column:url;not null"`
-	Method             string      `json:"method" gorm:"column:method;default:GET"`
-	Headers            StringMap   `json:"headers" gorm:"column:headers;type:jsonb"`
-	Body               string      `json:"body" gorm:"column:body"`
-	IntervalSeconds    int         `json:"interval_seconds" gorm:"column:interval_seconds;default:60"`
-	TimeoutSeconds     int         `json:"timeout_seconds" gorm:"column:timeout_seconds;default:10"`
-	Retries            int         `json:"retries" gorm:"column:retries;default:0"`
+	ID              uuid.UUID `json:"id" gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
+	Name            string    `json:"name" gorm:"column:name;not null"`
+	Description     string    `json:"description" gorm:"column:description"`
+	Type            string    `json:"type" gorm:"column:type;not null"`
+	URL             string    `json:"url" gorm:"column:url;not null"`
+	Method          string    `json:"method" gorm:"column:method;default:GET"`
+	Headers         StringMap `json:"headers" gorm:"column:headers;type:jsonb"`
+	Body            string    `json:"body" gorm:"column:body"`
+	IntervalSeconds int       `json:"interval_seconds" gorm:"column:interval_seconds;default:60"`
+	TimeoutSeconds  int       `json:"timeout_seconds" gorm:"column:timeout_seconds;default:10"`
+	Retries         int       `json:"retries" gorm:"column:retries;default:0"`
+	// SSLVerify controls TLS certificate verification on HTTPS checks, and is
+	// only consulted for type=http.
+	//
+	// A pointer, not a plain bool, precisely so "the caller omitted this" is
+	// distinguishable from "the caller sent false". With a plain bool, any
+	// create request that left the field out would bind to Go's zero value and
+	// silently turn verification OFF — the opposite of the column default and
+	// the opposite of what anyone would expect. nil means "use the default",
+	// which VerifyTLS resolves to true.
+	SSLVerify          *bool       `json:"ssl_verify" gorm:"column:ssl_verify;default:true"`
 	CurrentStatus      string      `json:"current_status" gorm:"column:current_status;default:unknown"`
 	LastCheckAt        *time.Time  `json:"last_check_at" gorm:"column:last_check_at"`
 	LastResponseTimeMs int         `json:"last_response_time_ms" gorm:"column:last_response_time_ms"`
@@ -148,6 +158,13 @@ type Monitor struct {
 // the monitor has been opted out of notifications.
 func (m *Monitor) NotifiesAnyChannel() bool {
 	return m.NotifyChannels == nil || len(m.NotifyChannels) > 0
+}
+
+// VerifyTLS reports whether an HTTPS check for this monitor should verify the
+// server's certificate. Unset means verify: skipping verification is only ever
+// the result of someone deliberately asking for it.
+func (m *Monitor) VerifyTLS() bool {
+	return m.SSLVerify == nil || *m.SSLVerify
 }
 
 // IsInMaintenanceWindow reports whether the monitor is currently within an

@@ -14,18 +14,39 @@ const MAX_TIMEOUT = 300
 
 type TypeKey = 'dns' | 'http' | 'ping' | 'tcp'
 
-// Whole literal class strings: Tailwind only emits CSS for names it can find
-// spelled out, so the swatch gradient cannot be built from a key at runtime.
-const TYPE_OPTIONS: { value: TypeKey; label: string; icon: string; swatch: string }[] = [
-  { value: 'dns', label: 'DNS', icon: '🌐', swatch: 'bg-gradient-to-r from-purple-600 to-purple-500' },
-  { value: 'http', label: 'HTTP', icon: '🔗', swatch: 'bg-gradient-to-r from-cyan-600 to-cyan-500' },
-  { value: 'ping', label: 'PING', icon: '📡', swatch: 'bg-gradient-to-r from-yellow-600 to-yellow-500' },
-  { value: 'tcp', label: 'TCP', icon: '🔌', swatch: 'bg-gradient-to-r from-orange-600 to-orange-500' },
+const TYPE_OPTIONS: { value: TypeKey; label: string }[] = [
+  { value: 'dns', label: 'DNS' },
+  { value: 'http', label: 'HTTP' },
+  { value: 'ping', label: 'PING' },
+  { value: 'tcp', label: 'TCP' },
 ]
 
 const RETRY_OPTIONS = [1, 2, 3, 5]
 
 const BASE_INTERVALS = [30, 60, 300, 600, 1800, 3600]
+
+/**
+ * Parses a spoken-English duration into seconds: "45 seconds", "2 minutes",
+ * "1.5 hours", "90s", or a bare number (read as seconds).
+ *
+ * Returns null when it cannot tell what was meant. That is deliberately
+ * distinct from "understood but out of range", which the caller reports with
+ * the actual bound so the person knows what to type instead.
+ */
+export function parseDuration(raw: string): number | null {
+  const text = raw.trim().toLowerCase()
+  if (!text) return null
+  const m = /^(\d+(?:\.\d+)?)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours)?$/.exec(
+    text
+  )
+  if (!m) return null
+  const value = Number(m[1])
+  if (!Number.isFinite(value) || value <= 0) return null
+  const unit = m[2] ?? 's'
+  const multiplier = unit.startsWith('h') ? 3600 : unit.startsWith('m') ? 60 : 1
+  const seconds = Math.round(value * multiplier)
+  return seconds > 0 ? seconds : null
+}
 
 function intervalLabel(sec: number): string {
   if (sec < 60) return `${sec} seconds`
@@ -50,20 +71,69 @@ interface FormState {
   type: TypeKey
   description: string
   target: string
-  interval: number
+  /** A preset in seconds, or 'custom' while the free-text field is in use. */
+  interval: number | 'custom'
+  customInterval: string
   timeout: number
   retryAttempts: number
   enableNotifications: boolean
+  enableSSLVerify: boolean
 }
 
 interface Errors {
   name?: string
   target?: string
+  interval?: string
   timeout?: string
 }
 
 const field =
   'w-full rounded-lg border border-white/10 bg-slate-800/50 px-4 py-2 text-white placeholder-slate-500 transition focus:border-white/30 focus:outline-none'
+
+/** Toggle row, sized to match the reference (w-12 h-7 track, h-5 w-5 knob). */
+function Switch({
+  label,
+  hint,
+  checked,
+  onChange,
+  disabled = false,
+}: {
+  label: string
+  hint: string
+  checked: boolean
+  onChange: (v: boolean) => void
+  disabled?: boolean
+}) {
+  return (
+    <div
+      className={`flex items-center justify-between gap-4 rounded-lg border border-white/10 bg-slate-800/40 p-4 ${
+        disabled ? 'opacity-60' : ''
+      }`}
+    >
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-white">{label}</p>
+        <p className="text-xs text-slate-500">{hint}</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        disabled={disabled}
+        onClick={() => onChange(!checked)}
+        className={`relative h-7 w-12 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed ${
+          checked ? 'bg-emerald-600' : 'bg-slate-600'
+        }`}
+      >
+        <span
+          className={`absolute left-1 top-1 h-5 w-5 rounded-full bg-white transition-transform ${
+            checked ? 'translate-x-5' : 'translate-x-0'
+          }`}
+        />
+      </button>
+    </div>
+  )
+}
 
 interface Props {
   isOpen: boolean
@@ -95,9 +165,12 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
       // Starts at the instance default from Settings → System, so this dialog
       // agrees with the other create paths.
       interval: defaultCheckInterval,
+      customInterval: '',
       timeout: 10,
       retryAttempts: 3,
       enableNotifications: true,
+      // Verification on by default, matching the backend column default.
+      enableSSLVerify: true,
     }),
     [defaultCheckInterval]
   )
@@ -151,20 +224,24 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
   // The instance default may not be one of the stock choices; offer it anyway
   // rather than silently snapping the value to something else.
   const intervalOptions = useMemo(() => {
-    const set = new Set<number>([...BASE_INTERVALS, defaultCheckInterval, form.interval])
+    const set = new Set<number>([...BASE_INTERVALS, defaultCheckInterval])
+    if (typeof form.interval === 'number') set.add(form.interval)
     return Array.from(set)
       .filter((n) => n >= MIN_INTERVAL && n <= MAX_INTERVAL)
       .sort((a, b) => a - b)
   }, [defaultCheckInterval, form.interval])
 
-  const selectedType = TYPE_OPTIONS.find((t) => t.value === form.type) ?? TYPE_OPTIONS[1]
+  // The interval the request will actually carry, whether it came from the
+  // preset list or the free-text field. null means the text is unparseable.
+  const effectiveInterval =
+    form.interval === 'custom' ? parseDuration(form.customInterval) : form.interval
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((f) => ({ ...f, [key]: value }))
     if (key in errors) setErrors((e) => ({ ...e, [key]: undefined }))
   }
 
-  function validate(f: FormState): Errors {
+  function validate(f: FormState, interval: number | null): Errors {
     const e: Errors = {}
     if (!f.name.trim()) e.name = 'A name is required'
     const target = f.target.trim()
@@ -177,9 +254,17 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
     } else if (f.type !== 'http' && /\s/.test(target)) {
       e.target = 'Must not contain spaces'
     }
+    if (interval === null) {
+      e.interval = f.customInterval.trim()
+        ? 'Could not read that — try "45 seconds" or "2 minutes"'
+        : 'An interval is required'
+    } else if (interval < MIN_INTERVAL || interval > MAX_INTERVAL) {
+      e.interval = `Must be between ${intervalLabel(MIN_INTERVAL)} and ${intervalLabel(MAX_INTERVAL)}`
+    }
+
     if (f.timeout < MIN_TIMEOUT || f.timeout > MAX_TIMEOUT) {
       e.timeout = `Must be between ${MIN_TIMEOUT} and ${MAX_TIMEOUT} seconds`
-    } else if (f.timeout >= f.interval) {
+    } else if (interval !== null && f.timeout >= interval) {
       // The backend rejects this outright; catching it here explains why.
       e.timeout = 'Must be less than the check interval'
     }
@@ -187,9 +272,10 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
   }
 
   const submit = async () => {
-    const found = validate(form)
+    const interval = effectiveInterval
+    const found = validate(form, interval)
     setErrors(found)
-    if (Object.keys(found).length > 0) return
+    if (Object.keys(found).length > 0 || interval === null) return
 
     try {
       const created = await create({
@@ -197,9 +283,12 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
         description: form.description.trim(),
         type: form.type as MonitorType,
         url: form.target.trim(),
-        interval_seconds: form.interval,
+        interval_seconds: interval,
         timeout_seconds: form.timeout,
         retries: form.retryAttempts,
+        // Only meaningful for HTTPS checks, but sent for every type so the
+        // stored value matches what the form showed.
+        ssl_verify: form.enableSSLVerify,
         // null = every enabled channel (the default), [] = alerts off for this
         // monitor. Which channels specifically is set on the monitor's page.
         notify_channels: form.enableNotifications ? null : [],
@@ -293,7 +382,7 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
                 >
                   {TYPE_OPTIONS.map((t) => (
                     <option key={t.value} value={t.value}>
-                      {t.icon} {t.label}
+                      {t.label}
                     </option>
                   ))}
                 </select>
@@ -346,19 +435,68 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
                   <label htmlFor="cm-interval" className="mb-1 block text-sm font-medium text-white">
                     Check Interval
                   </label>
-                  <select
-                    id="cm-interval"
-                    value={form.interval}
-                    onChange={(e) => set('interval', Number(e.target.value))}
-                    className={`${field} cursor-pointer appearance-none`}
-                  >
-                    {intervalOptions.map((sec) => (
-                      <option key={sec} value={sec}>
-                        {intervalLabel(sec)}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="mt-1 text-xs text-slate-500">How often to check status</p>
+                  {form.interval === 'custom' ? (
+                    <input
+                      id="cm-interval"
+                      type="text"
+                      autoFocus
+                      value={form.customInterval}
+                      onChange={(e) => set('customInterval', e.target.value)}
+                      placeholder="e.g., 45 seconds, 2 minutes, 15 minutes"
+                      aria-invalid={!!errors.interval}
+                      className={`${field} ${errors.interval ? 'border-red-500/60' : ''}`}
+                    />
+                  ) : (
+                    <select
+                      id="cm-interval"
+                      value={form.interval}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        setForm((f) => ({
+                          ...f,
+                          interval: v === 'custom' ? 'custom' : Number(v),
+                          // Seed the box with the preset that was showing, so
+                          // switching to Custom starts from where you were.
+                          customInterval:
+                            v === 'custom' && typeof f.interval === 'number'
+                              ? String(f.interval)
+                              : f.customInterval,
+                        }))
+                        setErrors((x) => ({ ...x, interval: undefined, timeout: undefined }))
+                      }}
+                      className={`${field} cursor-pointer appearance-none`}
+                    >
+                      {intervalOptions.map((sec) => (
+                        <option key={sec} value={sec}>
+                          {intervalLabel(sec)}
+                        </option>
+                      ))}
+                      <option value="custom">Custom</option>
+                    </select>
+                  )}
+                  <p className={`mt-1 text-xs ${errors.interval ? 'text-red-400' : 'text-slate-500'}`}>
+                    {errors.interval ??
+                      (form.interval === 'custom'
+                        ? effectiveInterval !== null
+                          ? `= ${effectiveInterval} seconds`
+                          : 'Seconds, or a phrase like "2 minutes"'
+                        : 'How often to check status')}
+                  </p>
+                  {form.interval === 'custom' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setForm((f) => ({
+                          ...f,
+                          interval: parseDuration(f.customInterval) ?? defaultCheckInterval,
+                        }))
+                        setErrors((x) => ({ ...x, interval: undefined }))
+                      }}
+                      className="mt-1 text-xs text-slate-400 underline-offset-2 transition hover:text-white hover:underline"
+                    >
+                      Use a preset instead
+                    </button>
+                  )}
                 </div>
 
                 <div>
@@ -408,43 +546,32 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
             <h3 className="mb-4 text-xs font-semibold uppercase tracking-widest text-slate-300">
               Notifications
             </h3>
-            <div className="flex items-center justify-between rounded-lg border border-white/10 bg-slate-800/40 p-4">
-              <div>
-                <p className="text-sm font-medium text-white">Enable Alerts</p>
-                <p className="text-xs text-slate-500">
-                  Send to every configured channel when this monitor changes state
+            <div className="space-y-4">
+              <Switch
+                label="Enable Alerts"
+                hint="Send to every configured channel when this monitor changes state"
+                checked={form.enableNotifications}
+                onChange={(v) => set('enableNotifications', v)}
+              />
+              <Switch
+                label="Verify SSL Certificate"
+                hint={
+                  form.type === 'http'
+                    ? 'Check SSL certificate validity (for HTTPS)'
+                    : 'Only applies to HTTPS checks — no effect on a ' + form.type.toUpperCase() + ' monitor'
+                }
+                checked={form.enableSSLVerify}
+                onChange={(v) => set('enableSSLVerify', v)}
+                disabled={form.type !== 'http'}
+              />
+              {form.type === 'http' && !form.enableSSLVerify && (
+                <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
+                  With verification off, an expired, self-signed or wrong-host certificate will not
+                  be reported — use this only for a host whose certificate you control.
                 </p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={form.enableNotifications}
-                aria-label="Enable alerts"
-                onClick={() => set('enableNotifications', !form.enableNotifications)}
-                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
-                  form.enableNotifications ? 'bg-emerald-600' : 'bg-slate-700'
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-                    form.enableNotifications ? 'translate-x-[22px]' : 'translate-x-0.5'
-                  }`}
-                />
-              </button>
+              )}
             </div>
           </section>
-
-          {/* Which type card on the dashboard this monitor will land in. */}
-          <div className="rounded-lg border border-white/10 bg-gradient-to-r from-slate-800/50 to-slate-800/30 p-4">
-            <p className="mb-2 text-xs text-slate-400">Monitor Type Color</p>
-            <div className="flex items-center gap-2">
-              <div className={`h-8 w-8 rounded-lg ${selectedType.swatch}`} />
-              <span className="text-sm font-medium text-white">{selectedType.label}</span>
-              <span className="ml-auto text-right text-xs text-slate-500">
-                Appears in {selectedType.label} checks
-              </span>
-            </div>
-          </div>
         </div>
 
         {/* Footer */}
