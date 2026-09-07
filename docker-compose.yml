@@ -110,7 +110,9 @@ services:
       # (PORT above, and router.GET("/health") in cmd/sentinel/main.go).
       # start_period covers migrations on first boot so a slow start is not
       # counted as a failure.
-      test: ["CMD", "curl", "-fsS", "http://localhost:3001/health"]
+      # 127.0.0.1 rather than localhost, for the same resolution reason as the
+      # frontend check below.
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3001/health"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -135,9 +137,16 @@ services:
       - "${FRONTEND_PORT:-3000}:80"
     restart: unless-stopped
     healthcheck:
-      # /health is a real nginx location now, not the SPA fallback, so this
-      # check fails if nginx stops serving rather than passing on any response.
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      # /health is a real nginx location, not the SPA fallback, so this check
+      # fails if nginx stops serving rather than passing on any response.
+      #
+      # 127.0.0.1, NOT localhost. nginx listens on 0.0.0.0:80 (IPv4 only), while
+      # the container's /etc/hosts maps localhost to both 127.0.0.1 and ::1.
+      # BusyBox wget tries ::1 first, is refused, and does not fall back — so
+      # the check failed permanently while nginx was serving perfectly.
+      # The base image's 10-listen-on-ipv6-by-default.sh does not help here: it
+      # patches conf.d/default.conf, which our own nginx.conf never includes.
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/health"]
       interval: 10s
       timeout: 5s
       retries: 3
