@@ -1,11 +1,12 @@
 import React from 'react'
+import { colors, type MonitorTypeKey } from '@/utils/colors'
 
 interface ShimmerTypeCardProps {
   /** Monitor type label, e.g. "DNS". */
   label: string
   count: number
   online: number
-  colorType: 'dns' | 'http' | 'ping' | 'tcp'
+  colorType: MonitorTypeKey
   onMouseMove: (e: React.MouseEvent) => void
   onMouseEnter: () => void
   onMouseLeave: () => void
@@ -14,41 +15,6 @@ interface ShimmerTypeCardProps {
   onClick?: () => void
 }
 
-// Same literal-class rule as ShimmerStatCard: one complete string per colour.
-const colorMap = {
-  dns: {
-    bg: 'from-purple-600/15',
-    text: 'text-purple-400',
-    subtle: 'text-purple-400/70',
-    border: 'border-purple-500/20',
-    glow: 'bg-purple-500/10',
-    glowHover: 'group-hover:bg-purple-500/20',
-  },
-  http: {
-    bg: 'from-cyan-600/15',
-    text: 'text-cyan-400',
-    subtle: 'text-cyan-400/70',
-    border: 'border-cyan-500/20',
-    glow: 'bg-cyan-500/10',
-    glowHover: 'group-hover:bg-cyan-500/20',
-  },
-  ping: {
-    bg: 'from-yellow-600/15',
-    text: 'text-yellow-400',
-    subtle: 'text-yellow-400/70',
-    border: 'border-yellow-500/20',
-    glow: 'bg-yellow-500/10',
-    glowHover: 'group-hover:bg-yellow-500/20',
-  },
-  tcp: {
-    bg: 'from-orange-600/15',
-    text: 'text-orange-400',
-    subtle: 'text-orange-400/70',
-    border: 'border-orange-500/20',
-    glow: 'bg-orange-500/10',
-    glowHover: 'group-hover:bg-orange-500/20',
-  },
-} as const
 
 export const ShimmerTypeCard: React.FC<ShimmerTypeCardProps> = ({
   label,
@@ -62,7 +28,7 @@ export const ShimmerTypeCard: React.FC<ShimmerTypeCardProps> = ({
   shimmerStyle,
   onClick,
 }) => {
-  const c = colorMap[colorType]
+  const c = colors[colorType]
   const allUp = count > 0 && online === count
 
   return (
@@ -72,7 +38,7 @@ export const ShimmerTypeCard: React.FC<ShimmerTypeCardProps> = ({
       onMouseMove={onMouseMove}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      className={`group relative w-full overflow-hidden rounded-lg border ${c.border} bg-gradient-to-br ${c.bg} to-slate-800/40 p-5 text-left backdrop-blur-sm transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40`}
+      className={`group relative w-full overflow-hidden rounded-lg border ${c.border} bg-gradient-to-br ${c.cardBg} to-slate-800/40 p-5 text-left backdrop-blur-sm transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40`}
     >
       <div
         className={`pointer-events-none absolute right-0 top-0 -mr-10 -mt-10 h-20 w-20 rounded-full ${c.glow} blur-2xl transition-all ${c.glowHover}`}

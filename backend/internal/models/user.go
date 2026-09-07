@@ -29,15 +29,15 @@ type User struct {
 	IsAdmin bool `json:"is_admin" gorm:"column:is_admin"`
 	// Role mirrors IsAdmin ('admin' | 'user'). IsAdmin remains the authority for
 	// JWT/authorization; Role is the human-facing value for user management.
-	Role           string      `json:"role" gorm:"column:role;default:user"`
-	LastLogin      *time.Time  `json:"last_login" gorm:"column:last_login"`
+	Role      string     `json:"role" gorm:"column:role;default:user"`
+	LastLogin *time.Time `json:"last_login" gorm:"column:last_login"`
 	// Per-user theme, synced across devices. Serialized as a nested object by the
 	// /auth/me handler rather than these flat fields.
-	ThemePrimaryColor string     `json:"-" gorm:"column:theme_primary_color;default:#10b981"`
-	ThemeAccentColor  string     `json:"-" gorm:"column:theme_accent_color;default:#f59e0b"`
-	ThemeMode         string     `json:"-" gorm:"column:theme_mode;default:auto"`
-	CreatedAt      time.Time   `json:"created_at" gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt      time.Time   `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
+	ThemePrimaryColor string    `json:"-" gorm:"column:theme_primary_color;default:#10b981"`
+	ThemeAccentColor  string    `json:"-" gorm:"column:theme_accent_color;default:#f59e0b"`
+	ThemeMode         string    `json:"-" gorm:"column:theme_mode;default:auto"`
+	CreatedAt         time.Time `json:"created_at" gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt         time.Time `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
 }
 
 // TableName tells GORM which table backs the User model.

@@ -46,36 +46,72 @@ export const colors = {
     border: 'border-amber-500/30',
   },
 
-  // Monitor type colours
+  // Monitor type colours. cardBg/glow/glowHover/subtle are what the type cards
+  // need; bg/text/border are what the inline badge needs. Both read from here
+  // so the palette is defined once.
   dns: {
     gradient: 'from-purple-600 to-purple-500',
     text: 'text-purple-400',
+    subtle: 'text-purple-400/70',
     bg: 'bg-purple-500/10',
     border: 'border-purple-500/20',
+    cardBg: 'from-purple-600/15',
+    glow: 'bg-purple-500/10',
+    glowHover: 'group-hover:bg-purple-500/20',
   },
   http: {
     gradient: 'from-cyan-600 to-cyan-500',
     text: 'text-cyan-400',
+    subtle: 'text-cyan-400/70',
     bg: 'bg-cyan-500/10',
     border: 'border-cyan-500/20',
+    cardBg: 'from-cyan-600/15',
+    glow: 'bg-cyan-500/10',
+    glowHover: 'group-hover:bg-cyan-500/20',
   },
   ping: {
     gradient: 'from-yellow-600 to-yellow-500',
     text: 'text-yellow-400',
+    subtle: 'text-yellow-400/70',
     bg: 'bg-yellow-500/10',
     border: 'border-yellow-500/20',
+    cardBg: 'from-yellow-600/15',
+    glow: 'bg-yellow-500/10',
+    glowHover: 'group-hover:bg-yellow-500/20',
   },
   tcp: {
     gradient: 'from-orange-600 to-orange-500',
     text: 'text-orange-400',
+    subtle: 'text-orange-400/70',
     bg: 'bg-orange-500/10',
     border: 'border-orange-500/20',
+    cardBg: 'from-orange-600/15',
+    glow: 'bg-orange-500/10',
+    glowHover: 'group-hover:bg-orange-500/20',
+  },
+  // Webhook and anything unrecognised: deliberately neutral rather than
+  // borrowing a type colour, so an unknown type never reads as a known one.
+  neutral: {
+    gradient: 'from-slate-600 to-slate-500',
+    text: 'text-slate-300',
+    subtle: 'text-slate-400/70',
+    bg: 'bg-slate-500/10',
+    border: 'border-slate-500/20',
+    cardBg: 'from-slate-600/15',
+    glow: 'bg-slate-500/10',
+    glowHover: 'group-hover:bg-slate-500/20',
   },
 }
 
 export type ColorKey = keyof typeof colors
 
-/** Maps a monitor's type to its accent. Unknown types fall back to the HTTP cyan. */
+export type MonitorTypeKey = 'dns' | 'http' | 'ping' | 'tcp'
+
+/**
+ * Maps a monitor's type to its accent. Anything unrecognised - including
+ * webhook - gets the neutral slate rather than another type's colour, so a
+ * type you do not have a colour for never masquerades as one you do.
+ */
 export const getMonitorTypeColor = (type: string) => {
   switch (type?.toLowerCase()) {
     case 'dns':
@@ -87,6 +123,6 @@ export const getMonitorTypeColor = (type: string) => {
     case 'tcp':
       return colors.tcp
     default:
-      return colors.http
+      return colors.neutral
   }
 }
