@@ -34,7 +34,7 @@ export function monitorAccess(m: Pick<Monitor, 'is_owner' | 'permission'>): Moni
 
 // Tailwind classes for a permission badge tone.
 export const badgeToneClass: Record<'readonly' | 'editable' | 'admin', string> = {
-  readonly: 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300',
+  readonly: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
   editable: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
   admin: 'bg-info-100 text-info-700 dark:bg-info-900/40 dark:text-info-300',
 }

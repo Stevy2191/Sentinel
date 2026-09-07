@@ -13,12 +13,12 @@ import { usePublicStatusPage } from '@/hooks/usePublicStatus'
 import { formatResponseTime, formatDowntime } from '@/utils/formatters'
 import type { PublicMonitor } from '@/types'
 
-const DEFAULT_THEME = '#37F98A'
+const DEFAULT_THEME = '#10b981'
 
 function uptimeColor(pct: number): string {
-  if (pct >= 99) return '#37F98A'
-  if (pct >= 95) return '#FFC24B'
-  return '#FF4D4D'
+  if (pct >= 99) return '#10b981'
+  if (pct >= 95) return '#eab308'
+  return '#ef4444'
 }
 
 function relative(iso: string | null | undefined): string {
@@ -44,14 +44,14 @@ function StatTile({
   tone: string
 }) {
   return (
-    <div className="rounded-lg border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
+    <div className="rounded-lg border border-white/10 bg-slate-800/40 p-5 backdrop-blur-sm">
       <div className="flex items-center gap-3">
         <div className={`rounded-lg p-2 ${tone}`}>
           <Icon className="h-5 w-5" />
         </div>
         <div>
           <div className="text-xl font-bold">{value}</div>
-          <div className="text-xs text-neutral-500 dark:text-neutral-400">
+          <div className="text-xs text-slate-400">
             {label}
             {sub ? ` · ${sub}` : ''}
           </div>
@@ -64,13 +64,13 @@ function StatTile({
 function UptimeBar({ label, pct }: { label: string; pct: number }) {
   return (
     <div>
-      <div className="flex justify-between text-xs text-neutral-500 dark:text-neutral-400">
+      <div className="flex justify-between text-xs text-slate-400">
         <span>{label}</span>
         <span className="font-medium" style={{ color: uptimeColor(pct) }}>
           {pct.toFixed(2)}%
         </span>
       </div>
-      <div className="mt-1 h-1.5 overflow-hidden rounded bg-neutral-200 dark:bg-neutral-700">
+      <div className="mt-1 h-1.5 overflow-hidden rounded bg-white/10">
         <div
           className="h-full rounded"
           style={{ width: `${Math.max(0, Math.min(100, pct))}%`, backgroundColor: uptimeColor(pct) }}
@@ -84,24 +84,24 @@ function MonitorCard({ m }: { m: PublicMonitor }) {
   const online = m.status === 'online'
   const offline = m.status === 'offline'
   return (
-    <div className="rounded-lg border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
+    <div className="rounded-lg border border-white/10 bg-slate-800/40 p-5 backdrop-blur-sm">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 font-semibold">{m.name}</div>
         <span
           className={`flex shrink-0 items-center gap-1.5 text-sm font-medium ${
-            online ? 'text-emerald-500' : offline ? 'text-red-500' : 'text-neutral-400'
+            online ? 'text-emerald-500' : offline ? 'text-red-500' : 'text-slate-400'
           }`}
         >
           <span
             className={`h-2 w-2 rounded-full ${
-              online ? 'bg-emerald-500 animate-pulse' : offline ? 'bg-red-500 animate-pulse' : 'bg-neutral-400'
+              online ? 'bg-emerald-500 animate-pulse' : offline ? 'bg-red-500 animate-pulse' : 'bg-slate-400'
             }`}
           />
           {online ? 'Online' : offline ? 'Offline' : 'Unknown'}
         </span>
       </div>
 
-      <div className="mt-2 flex justify-between text-xs text-neutral-500 dark:text-neutral-400">
+      <div className="mt-2 flex justify-between text-xs text-slate-400">
         <span>{relative(m.last_check)}</span>
         <span>{formatResponseTime(m.response_time_ms)}</span>
       </div>
@@ -118,15 +118,15 @@ function MonitorCard({ m }: { m: PublicMonitor }) {
 function Skeleton() {
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-6">
-      <div className="h-8 w-1/3 animate-pulse rounded bg-neutral-200 dark:bg-neutral-800" />
+      <div className="h-8 w-1/3 animate-pulse rounded bg-white/10" />
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="h-20 animate-pulse rounded-lg bg-neutral-200 dark:bg-neutral-800" />
+          <div key={i} className="h-20 animate-pulse rounded-lg bg-white/10" />
         ))}
       </div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="h-40 animate-pulse rounded-lg bg-neutral-200 dark:bg-neutral-800" />
+          <div key={i} className="h-40 animate-pulse rounded-lg bg-white/10" />
         ))}
       </div>
     </div>
@@ -174,11 +174,11 @@ export default function PublicStatus() {
 
   if (error || !page) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-neutral-50 p-6 dark:bg-neutral-950">
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-6">
         <div className="text-center">
-          <ShieldCheck className="mx-auto mb-3 h-10 w-10 text-neutral-400" />
+          <ShieldCheck className="mx-auto mb-3 h-10 w-10 text-slate-400" />
           <h1 className="text-xl font-semibold">This status page is not available</h1>
-          <p className="mt-1 text-sm text-neutral-500">
+          <p className="mt-1 text-sm text-slate-500">
             It may be private or may not exist.
           </p>
         </div>
@@ -190,7 +190,7 @@ export default function PublicStatus() {
   const allOperational = derived.offline === 0
 
   return (
-    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
       <div className="h-1.5" style={{ backgroundColor: theme }} />
       <div className="mx-auto max-w-4xl space-y-8 p-6">
         {/* Branding */}
@@ -204,9 +204,9 @@ export default function PublicStatus() {
             <h1 className="text-3xl font-bold">{page.name}</h1>
           </div>
           {page.description && (
-            <p className="text-neutral-500 dark:text-neutral-400">{page.description}</p>
+            <p className="text-slate-400">{page.description}</p>
           )}
-          <p className="mt-1 text-xs text-neutral-400">
+          <p className="mt-1 text-xs text-slate-400">
             Last updated {relative(summary?.last_updated ?? page.updated_at)}
           </p>
         </header>
@@ -215,8 +215,8 @@ export default function PublicStatus() {
         <div
           className={`rounded-lg p-4 text-center font-medium ${
             allOperational
-              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200'
-              : 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200'
+              ? 'bg-emerald-500/20 text-emerald-300'
+              : 'bg-red-500/20 text-red-300'
           }`}
         >
           {allOperational
@@ -231,33 +231,33 @@ export default function PublicStatus() {
             value={String(derived.online)}
             sub={derived.total ? `${Math.round((derived.online / derived.total) * 100)}%` : '—'}
             icon={CheckCircle2}
-            tone="bg-emerald-100 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-400"
+            tone="bg-emerald-500/20 text-emerald-400"
           />
           <StatTile
             label="Offline"
             value={String(derived.offline)}
             sub={derived.total ? `${Math.round((derived.offline / derived.total) * 100)}%` : '—'}
             icon={XCircle}
-            tone="bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400"
+            tone="bg-red-500/20 text-red-400"
           />
           <StatTile
             label="Avg Response"
             value={formatResponseTime(derived.avgResp)}
             icon={Gauge}
-            tone="bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-400"
+            tone="bg-amber-500/20 text-amber-400"
           />
           <StatTile
             label="Uptime"
             value={`${derived.avg7.toFixed(2)}%`}
             sub="7 days"
             icon={Activity}
-            tone="bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400"
+            tone="bg-blue-500/20 text-blue-400"
           />
         </div>
 
         {/* Monitors grouped */}
         {monitors.length === 0 ? (
-          <div className="rounded-lg border border-neutral-200 p-10 text-center text-neutral-500 dark:border-neutral-800">
+          <div className="rounded-lg border border-white/10 p-10 text-center text-slate-400">
             No monitors on this status page yet.
           </div>
         ) : (
@@ -279,13 +279,13 @@ export default function PublicStatus() {
             <h2 className="flex items-center gap-2 text-lg font-semibold">
               <AlertTriangle className="h-5 w-5 text-amber-500" /> Recent Incidents
             </h2>
-            <div className="rounded-lg border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
-              <div className="divide-y divide-neutral-100 dark:divide-neutral-800">
+            <div className="rounded-lg border border-white/10 bg-slate-800/40 backdrop-blur-sm">
+              <div className="divide-y divide-white/5">
                 {recentIncidents.map((inc, i) => (
                   <div key={i} className="flex items-center justify-between gap-4 p-4 text-sm">
                     <div className="min-w-0">
                       <div className="font-medium">{inc.monitorName}</div>
-                      <div className="text-xs text-neutral-500">
+                      <div className="text-xs text-slate-500">
                         {(() => {
                           try {
                             const start = format(parseISO(inc.start), 'MMM d, HH:mm')
@@ -297,7 +297,7 @@ export default function PublicStatus() {
                         })()}
                       </div>
                     </div>
-                    <span className="shrink-0 text-neutral-500">
+                    <span className="shrink-0 text-slate-500">
                       {formatDowntime(inc.duration_minutes)}
                     </span>
                   </div>
@@ -308,7 +308,7 @@ export default function PublicStatus() {
         )}
 
         {/* Footer */}
-        <footer className="border-t border-neutral-200 pt-4 text-center text-xs text-neutral-400 dark:border-neutral-800">
+        <footer className="border-t border-white/10 pt-4 text-center text-xs text-slate-400">
           Powered by Sentinel · Last updated {relative(summary?.last_updated ?? page.updated_at)}
         </footer>
       </div>

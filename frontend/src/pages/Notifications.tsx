@@ -91,7 +91,7 @@ export default function Notifications() {
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold">Notifications</h1>
-        <p className="text-sm text-neutral-500 dark:text-neutral-400">
+        <p className="text-sm text-slate-400">
           Configure notification channels and view alert history
         </p>
       </div>
@@ -100,13 +100,13 @@ export default function Notifications() {
       <section className="space-y-4">
         <h2 className="text-lg font-semibold">Active Channels</h2>
         {chError ? (
-          <div className="card border-error-300 p-4 text-error-700 dark:text-error-300">
+          <div className="card border-red-500/30 bg-red-500/10 p-4 text-red-400">
             {chError.message}
           </div>
         ) : chLoading ? (
-          <div className="text-neutral-500">Loading channels…</div>
+          <div className="text-slate-500">Loading channels…</div>
         ) : channels.length === 0 ? (
-          <div className="card p-8 text-center text-neutral-500">
+          <div className="card p-8 text-center text-slate-500">
             No notification channels configured
           </div>
         ) : (
@@ -131,30 +131,30 @@ export default function Notifications() {
         {/* Summary stats (last 7 days) */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div className="card flex items-center gap-4 p-5">
-            <div className="rounded-lg bg-info-100 p-3 text-info-600 dark:bg-info-900/40 dark:text-info-400">
+            <div className="rounded-lg bg-info-500/20 p-3 text-info-400">
               <Bell className="h-6 w-6" />
             </div>
             <div>
               <div className="text-2xl font-bold">{weekTotal}</div>
-              <div className="text-sm text-neutral-500">Total (7 days)</div>
+              <div className="text-sm text-slate-500">Total (7 days)</div>
             </div>
           </div>
           <div className="card flex items-center gap-4 p-5">
-            <div className="rounded-lg bg-emerald-100 p-3 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-400">
+            <div className="rounded-lg bg-emerald-500/20 p-3 text-emerald-400">
               <CheckCircle2 className="h-6 w-6" />
             </div>
             <div>
-              <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{weekSent}</div>
-              <div className="text-sm text-neutral-500">Sent</div>
+              <div className="text-2xl font-bold text-emerald-400">{weekSent}</div>
+              <div className="text-sm text-slate-500">Sent</div>
             </div>
           </div>
           <div className="card flex items-center gap-4 p-5">
-            <div className="rounded-lg bg-red-100 p-3 text-red-600 dark:bg-red-900/40 dark:text-red-400">
+            <div className="rounded-lg bg-red-500/20 p-3 text-red-400">
               <XCircle className="h-6 w-6" />
             </div>
             <div>
-              <div className="text-2xl font-bold text-red-600 dark:text-red-400">{weekFailed}</div>
-              <div className="text-sm text-neutral-500">Failed</div>
+              <div className="text-2xl font-bold text-red-400">{weekFailed}</div>
+              <div className="text-sm text-slate-500">Failed</div>
             </div>
           </div>
         </div>
@@ -162,11 +162,11 @@ export default function Notifications() {
         {/* Filters */}
         <div className="card flex flex-wrap items-end gap-4 p-4">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-neutral-500">Status</span>
+            <span className="text-slate-500">Status</span>
             <select
               value={draftStatus}
               onChange={(e) => setDraftStatus(e.target.value)}
-              className="rounded-md border border-neutral-300 bg-white px-3 py-2 dark:border-neutral-700 dark:bg-neutral-800"
+              className="rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-white placeholder-slate-500"
             >
               <option value="">All</option>
               <option value="sent">Sent</option>
@@ -175,11 +175,11 @@ export default function Notifications() {
             </select>
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-neutral-500">Range</span>
+            <span className="text-slate-500">Range</span>
             <select
               value={draftDays}
               onChange={(e) => setDraftDays(Number(e.target.value))}
-              className="rounded-md border border-neutral-300 bg-white px-3 py-2 dark:border-neutral-700 dark:bg-neutral-800"
+              className="rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-white placeholder-slate-500"
             >
               {RANGE_PRESETS.map((r) => (
                 <option key={r.days} value={r.days}>
@@ -202,7 +202,7 @@ export default function Notifications() {
           onReload={() => void refetch()}
         />
 
-        <div className="flex items-center justify-between text-sm text-neutral-500">
+        <div className="flex items-center justify-between text-sm text-slate-500">
           <span>
             {total} total · page {page} of {totalPages}
           </span>

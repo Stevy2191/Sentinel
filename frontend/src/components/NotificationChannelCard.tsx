@@ -16,21 +16,21 @@ export default function NotificationChannelCard({ channel, testing, onTest, onCo
         <span
           className={`rounded-md px-2 py-1 text-xs font-medium ${
             channel.enabled
-              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
-              : 'bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
+              ? 'bg-emerald-500/20 text-emerald-400'
+              : 'bg-white/5 text-slate-400'
           }`}
         >
           {channel.enabled ? 'Enabled' : 'Disabled'}
         </span>
       </div>
 
-      <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+      <p className="mt-1 text-sm text-slate-400">
         {channel.description || `Send alerts via ${channel.name}`}
       </p>
 
       <div
         className={`mt-3 flex items-center gap-1.5 text-sm font-medium ${
-          channel.enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'
+          channel.enabled ? 'text-emerald-400' : 'text-red-500'
         }`}
       >
         {channel.enabled ? (

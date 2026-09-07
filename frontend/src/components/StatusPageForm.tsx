@@ -17,7 +17,7 @@ export const emptyStatusPageForm: StatusPageFormValues = {
   name: '',
   description: '',
   logo_url: '',
-  theme_color: '#37F98A',
+  theme_color: '#10b981',
   published: true,
 }
 
@@ -27,7 +27,7 @@ export function statusPageToForm(p: StatusPage): StatusPageFormValues {
     name: p.name,
     description: p.description,
     logo_url: p.logo_url,
-    theme_color: p.theme_color || '#37F98A',
+    theme_color: p.theme_color || '#10b981',
     published: p.published,
   }
 }
@@ -35,7 +35,7 @@ export function statusPageToForm(p: StatusPage): StatusPageFormValues {
 type Errors = Partial<Record<keyof StatusPageFormValues, string>>
 
 const inputCls =
-  'w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-60'
+  'w-full rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-60'
 
 interface Props {
   initialValues?: Partial<StatusPageFormValues>
@@ -115,7 +115,7 @@ export default function StatusPageForm({
           {errors.slug ? (
             <span className="mt-1 block text-xs text-error-600">{errors.slug}</span>
           ) : (
-            <span className="mt-1 block text-xs text-neutral-500">
+            <span className="mt-1 block text-xs text-slate-500">
               {slugReadOnly
                 ? 'Slug cannot be changed after creation'
                 : 'Public URL: /public/status/<slug>'}
@@ -166,7 +166,7 @@ export default function StatusPageForm({
               type="color"
               value={values.theme_color}
               onChange={(e) => set('theme_color', e.target.value)}
-              className="h-9 w-14 cursor-pointer rounded-md border border-neutral-300 dark:border-neutral-700"
+              className="h-9 w-14 cursor-pointer rounded-md border border-white/10"
             />
             <input
               className={`${inputCls} max-w-[140px] font-mono`}
@@ -193,7 +193,7 @@ export default function StatusPageForm({
                 className={`rounded-md px-4 py-2 text-sm font-medium ${
                   values.published === o.v
                     ? 'bg-primary-600 text-white'
-                    : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+                    : 'bg-white/5 text-slate-300'
                 }`}
               >
                 {o.label}
@@ -204,7 +204,7 @@ export default function StatusPageForm({
       </div>
 
       {error && (
-        <div className="card border-error-300 p-4 text-sm text-error-700 dark:text-error-300">
+        <div className="card border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400">
           {error.message}
         </div>
       )}

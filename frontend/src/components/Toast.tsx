@@ -23,7 +23,7 @@ export function useToasts() {
 const toneClass: Record<ToastType, string> = {
   success: 'bg-emerald-600',
   error: 'bg-red-600',
-  info: 'bg-neutral-800',
+  info: 'bg-slate-800',
 }
 
 export function Toaster({ toasts }: { toasts: ToastItem[] }) {

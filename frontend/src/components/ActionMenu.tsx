@@ -43,7 +43,7 @@ export default function ActionMenu({ items, label = 'Actions' }: { items: Action
       {open && (
         <div
           role="menu"
-          className="absolute right-0 z-30 mt-1 w-48 overflow-hidden rounded-md border border-neutral-200 bg-white py-1 shadow-card dark:border-neutral-700 dark:bg-neutral-800"
+          className="absolute right-0 z-30 mt-1 w-48 overflow-hidden rounded-md border border-white/10 bg-slate-900 py-1 shadow-lg"
         >
           {items.map((item) => (
             <button
@@ -54,7 +54,7 @@ export default function ActionMenu({ items, label = 'Actions' }: { items: Action
                 setOpen(false)
                 item.onClick()
               }}
-              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-700 ${
+              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/10 disabled:opacity-50 ${
                 item.danger ? 'text-error-600' : ''
               }`}
             >

@@ -82,7 +82,7 @@ export default function SavedReports({ mode = 'list' }: SavedReportsProps) {
     return (
       <>
         <div className="mb-5 flex items-center justify-between">
-          <h1 className="vs-title text-2xl normal-case">New report</h1>
+          <h1 className="vs-title text-2xl">New report</h1>
           <button className="rd-btn rd-btn-secondary" onClick={() => navigate('/reports')}>
             Cancel
           </button>
@@ -97,7 +97,7 @@ export default function SavedReports({ mode = 'list' }: SavedReportsProps) {
     <div className="space-y-5 pb-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="vs-title flex items-center gap-2 text-2xl normal-case">
+          <h1 className="vs-title flex items-center gap-2 text-2xl">
             <FileText className="h-6 w-6" style={{ color: 'var(--vs-cyan)' }} />
             Reports
           </h1>

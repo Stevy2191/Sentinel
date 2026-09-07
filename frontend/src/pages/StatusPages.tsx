@@ -58,8 +58,8 @@ function StatusPageList() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="vs-title text-3xl">STATUS PAGES</h1>
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">
+          <h1 className="vs-title text-4xl">Status pages</h1>
+          <p className="text-sm text-slate-400">
             Create and manage public status dashboards
           </p>
         </div>
@@ -108,7 +108,7 @@ function StatusPageList() {
 
       {error && (
         <div className="card flex items-center justify-between border-error-300 p-4">
-          <span className="text-error-700 dark:text-error-300">{error.message}</span>
+          <span className="text-red-400">{error.message}</span>
           <button className="btn-secondary" onClick={() => void refetch()}>
             Retry
           </button>
@@ -116,9 +116,9 @@ function StatusPageList() {
       )}
 
       {loading ? (
-        <div className="text-neutral-500">Loading…</div>
+        <div className="text-slate-500">Loading…</div>
       ) : pages.length === 0 ? (
-        <div className="card p-12 text-center text-neutral-500">
+        <div className="card p-12 text-center text-slate-500">
           No status pages yet. Create your first one.
         </div>
       ) : (
@@ -129,7 +129,7 @@ function StatusPageList() {
                 <div className="min-w-0">
                   <Link
                     to={`/public/status/${p.slug}`}
-                    className="truncate text-lg font-bold text-primary-600 hover:underline"
+                    className="truncate text-lg font-bold text-primary-400 hover:underline"
                   >
                     /{p.slug}
                   </Link>
@@ -138,8 +138,8 @@ function StatusPageList() {
                 <span
                   className={`shrink-0 rounded-md px-2 py-1 text-xs font-medium ${
                     p.published
-                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
-                      : 'bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
+                      ? 'bg-emerald-500/20 text-emerald-400'
+                      : 'bg-white/5 text-slate-400'
                   }`}
                 >
                   {p.published ? 'Published' : 'Draft'}
@@ -147,16 +147,16 @@ function StatusPageList() {
               </div>
 
               {p.description && (
-                <p className="mt-2 line-clamp-2 text-sm text-neutral-500 dark:text-neutral-400" title={p.description}>
+                <p className="mt-2 line-clamp-2 text-sm text-slate-400" title={p.description}>
                   {p.description}
                 </p>
               )}
 
-              <div className="mt-2 text-xs text-neutral-400">
+              <div className="mt-2 text-xs text-slate-400">
                 {p.published ? 'Published' : 'Draft'} • {p.monitor_count ?? 0}{' '}
                 {(p.monitor_count ?? 0) === 1 ? 'monitor' : 'monitors'}
               </div>
-              <div className="mt-1 text-xs text-neutral-400">Created {formatDate(p.created_at)}</div>
+              <div className="mt-1 text-xs text-slate-400">Created {formatDate(p.created_at)}</div>
 
               <div className="mt-4 flex gap-2">
                 <a
@@ -192,7 +192,7 @@ function StatusPageList() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="card w-full max-w-sm p-6">
             <h3 className="text-lg font-semibold">Delete status page?</h3>
-            <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
+            <p className="mt-2 text-sm text-slate-400">
               This deletes /{confirmSlug} and its monitor associations. This cannot be undone.
             </p>
             <div className="mt-6 flex justify-end gap-2">
@@ -237,7 +237,7 @@ function StatusPageEditor({ mode }: { mode: 'create' | 'edit' }) {
   }
 
   if (mode === 'edit' && (loading || !page)) {
-    return <div className="text-neutral-500">Loading…</div>
+    return <div className="text-slate-500">Loading…</div>
   }
 
   return (
@@ -335,11 +335,11 @@ function StatusPageDetailView() {
     }
   }
 
-  if (loading && !page) return <div className="text-neutral-500">Loading…</div>
+  if (loading && !page) return <div className="text-slate-500">Loading…</div>
   if (error || !page) {
     return (
       <div className="space-y-4">
-        <div className="card p-6 text-neutral-500">{error?.message ?? 'Status page not found.'}</div>
+        <div className="card p-6 text-slate-500">{error?.message ?? 'Status page not found.'}</div>
         <button className="btn-secondary" onClick={() => navigate('/status-pages')}>
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
@@ -363,19 +363,19 @@ function StatusPageDetailView() {
               <h1 className="text-2xl font-bold">{page.name}</h1>
               {page.theme_color && (
                 <span
-                  className="inline-block h-4 w-4 rounded-full border border-neutral-300 dark:border-neutral-700"
+                  className="inline-block h-4 w-4 rounded-full border border-white/10"
                   style={{ backgroundColor: page.theme_color }}
                   title={page.theme_color}
                 />
               )}
             </div>
-            <div className="text-sm text-neutral-500">/{page.slug}</div>
+            <div className="text-sm text-slate-500">/{page.slug}</div>
           </div>
           <span
             className={`rounded-md px-2 py-1 text-xs font-medium ${
               page.published
-                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
-                : 'bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
+                ? 'bg-emerald-500/20 text-emerald-400'
+                : 'bg-white/5 text-slate-400'
             }`}
           >
             {page.published ? 'Published' : 'Draft'}
@@ -397,7 +397,7 @@ function StatusPageDetailView() {
       </div>
 
       {page.description && (
-        <p className="text-neutral-500 dark:text-neutral-400">{page.description}</p>
+        <p className="text-slate-400">{page.description}</p>
       )}
 
       <div className="card p-5">
@@ -422,7 +422,7 @@ function StatusPageDetailView() {
               <label className="block">
                 <span className="mb-1 block text-sm font-medium">Monitor</span>
                 <select
-                  className="w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+                  className="w-full rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white placeholder-slate-500"
                   value={selMonitor}
                   onChange={(e) => setSelMonitor(e.target.value)}
                 >
@@ -434,7 +434,7 @@ function StatusPageDetailView() {
                   ))}
                 </select>
                 {available.length === 0 && (
-                  <span className="mt-1 block text-xs text-neutral-500">
+                  <span className="mt-1 block text-xs text-slate-500">
                     All monitors are already on this page.
                   </span>
                 )}
@@ -442,7 +442,7 @@ function StatusPageDetailView() {
               <label className="block">
                 <span className="mb-1 block text-sm font-medium">Group (optional)</span>
                 <input
-                  className="w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+                  className="w-full rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white placeholder-slate-500"
                   value={groupName}
                   onChange={(e) => setGroupName(e.target.value)}
                   placeholder="APIs"

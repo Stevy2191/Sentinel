@@ -166,7 +166,7 @@ export default function BulkUpload() {
     const failures = done.results.filter((r) => !r.created)
     return (
       <div className="mx-auto max-w-3xl space-y-5 pb-10">
-        <h1 className="vs-title text-2xl normal-case">Import complete</h1>
+        <h1 className="vs-title text-2xl">Import complete</h1>
         <div className="rd-card p-6" style={{ ['--rd-accent' as string]: done.created > 0 ? 'var(--vs-ecg)' : 'var(--vs-flat)' }}>
           <p className="vs-readout text-3xl" style={{ color: done.created > 0 ? 'var(--vs-ecg)' : 'var(--vs-flat)' }}>
             {done.created}
@@ -205,7 +205,7 @@ export default function BulkUpload() {
   return (
     <div className="mx-auto max-w-4xl space-y-5 pb-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="vs-title text-2xl normal-case">Bulk upload</h1>
+        <h1 className="vs-title text-2xl">Bulk upload</h1>
         <div className="flex gap-2">
           <button className="rd-btn rd-btn-secondary" onClick={downloadTemplate}>
             <Download className="h-4 w-4" /> Template

@@ -123,7 +123,7 @@ export default function NetworkDiscovery() {
     const failures = done.results.filter((r) => !r.created)
     return (
       <div className="mx-auto max-w-3xl space-y-5 pb-10">
-        <h1 className="vs-title text-2xl normal-case">Hosts added</h1>
+        <h1 className="vs-title text-2xl">Hosts added</h1>
         <div
           className="rd-card p-6"
           style={{ ['--rd-accent' as string]: done.created > 0 ? 'var(--vs-ecg)' : 'var(--vs-flat)' }}
@@ -161,7 +161,7 @@ export default function NetworkDiscovery() {
   return (
     <div className="mx-auto max-w-4xl space-y-5 pb-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="vs-title text-2xl normal-case">Network discovery</h1>
+        <h1 className="vs-title text-2xl">Network discovery</h1>
         <button className="rd-btn rd-btn-secondary" onClick={() => navigate('/dashboard')}>
           <X className="h-4 w-4" /> Cancel
         </button>

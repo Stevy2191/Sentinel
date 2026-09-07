@@ -17,14 +17,14 @@ interface Props {
 function LastTestIndicator({ config }: { config?: NotificationConfig }) {
   if (!config || config.last_test_success == null) {
     return (
-      <div className="flex items-center gap-1.5 text-sm text-neutral-400">
+      <div className="flex items-center gap-1.5 text-sm text-slate-400">
         <MinusCircle className="h-4 w-4" /> Never tested
       </div>
     )
   }
   if (config.last_test_success) {
     return (
-      <div className="flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
+      <div className="flex items-center gap-1.5 text-sm text-emerald-400">
         <CheckCircle2 className="h-4 w-4" /> Last test passed
       </div>
     )
@@ -52,15 +52,15 @@ export default function NotificationConfigCard({ channel, config, testing, onCon
         <span
           className={`rounded-md px-2 py-1 text-xs font-medium ${
             enabled
-              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
-              : 'bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
+              ? 'bg-emerald-500/20 text-emerald-400'
+              : 'bg-white/5 text-slate-400'
           }`}
         >
           {enabled ? 'Enabled' : 'Disabled'}
         </span>
       </div>
 
-      <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">{meta.description}</p>
+      <p className="mt-1 text-sm text-slate-400">{meta.description}</p>
 
       <div className="mt-3">
         <LastTestIndicator config={config} />

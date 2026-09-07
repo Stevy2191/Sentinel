@@ -53,7 +53,7 @@ function Toggle({
         aria-checked={checked}
         onClick={() => onChange(!checked)}
         className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
-          checked ? 'bg-primary-600' : 'bg-neutral-300 dark:bg-neutral-700'
+          checked ? 'bg-primary-600' : 'bg-white/10'
         }`}
       >
         <span
@@ -85,7 +85,7 @@ function RadioRow<T extends string>({
           className={`rounded-md px-4 py-2 text-sm font-medium ${
             value === o.value
               ? 'bg-primary-600 text-white'
-              : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+              : 'bg-white/5 text-slate-300'
           }`}
         >
           {o.label}
@@ -258,8 +258,8 @@ export default function Settings() {
   return (
     <div className="max-w-3xl space-y-6">
       <div>
-        <h1 className="vs-title text-3xl">SETTINGS</h1>
-        <p className="text-sm text-neutral-500 dark:text-neutral-400">
+        <h1 className="vs-title text-4xl">Settings</h1>
+        <p className="text-sm text-slate-400">
           Customize Sentinel to your preferences
         </p>
       </div>
@@ -273,7 +273,7 @@ export default function Settings() {
             className={`rounded-md px-4 py-2 text-sm font-medium capitalize ${
               tab === t
                 ? 'bg-primary-600 text-white'
-                : 'bg-white text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+                : 'bg-white/5 text-slate-300'
             }`}
           >
             {t}
@@ -288,7 +288,7 @@ export default function Settings() {
               {logo ? (
                 <img src={logo} alt="Logo" className="h-14 w-14 rounded-md object-contain" />
               ) : (
-                <div className="flex h-14 w-14 items-center justify-center rounded-md border border-dashed border-neutral-300 text-xs text-neutral-400 dark:border-neutral-700">
+                <div className="flex h-14 w-14 items-center justify-center rounded-md border border-dashed border-white/20 text-xs text-slate-400">
                   None
                 </div>
               )}
@@ -313,7 +313,7 @@ export default function Settings() {
             <ColorPicker label="Primary Color" value={primary} defaultValue={DEFAULTS.primaryColor} onChange={changePrimary} />
             <ColorPicker label="Accent Color" value={accent} defaultValue={DEFAULTS.accentColor} onChange={changeAccent} />
             <div className="flex items-center gap-3 pt-1">
-              <span className="text-sm text-neutral-500">Preview:</span>
+              <span className="text-sm text-slate-500">Preview:</span>
               <span className="rounded-md px-3 py-1 text-sm font-medium text-white" style={{ backgroundColor: primary }}>
                 Primary
               </span>
@@ -389,7 +389,7 @@ export default function Settings() {
                 { value: '24h', label: '24-hour' },
               ]}
             />
-            <div className="text-sm text-neutral-500">
+            <div className="text-sm text-slate-500">
               Preview: {format(now, timeFormat === '12h' ? 'h:mm:ss a' : 'HH:mm:ss')}
             </div>
           </SettingsCard>
@@ -417,7 +417,7 @@ export default function Settings() {
                 { value: 'YYYY-MM-DD', label: 'YYYY-MM-DD' },
               ]}
             />
-            <div className="text-sm text-neutral-500">
+            <div className="text-sm text-slate-500">
               Preview: {format(now, dateFmtMap[dateFormat])}
             </div>
           </SettingsCard>
@@ -446,10 +446,10 @@ export default function Settings() {
         <div className="space-y-6">
           <SettingsCard title="Application">
             <dl className="space-y-2 text-sm">
-              <div className="flex justify-between"><dt className="text-neutral-500">Version</dt><dd className="font-medium">Sentinel v1.0</dd></div>
-              <div className="flex justify-between"><dt className="text-neutral-500">License</dt><dd className="font-medium">MIT</dd></div>
-              <div className="flex justify-between"><dt className="text-neutral-500">Frontend</dt><dd className="font-medium">React + TypeScript + Vite</dd></div>
-              <div className="flex justify-between"><dt className="text-neutral-500">Database</dt><dd className="font-medium">PostgreSQL</dd></div>
+              <div className="flex justify-between"><dt className="text-slate-500">Version</dt><dd className="font-medium">Sentinel v1.0</dd></div>
+              <div className="flex justify-between"><dt className="text-slate-500">License</dt><dd className="font-medium">MIT</dd></div>
+              <div className="flex justify-between"><dt className="text-slate-500">Frontend</dt><dd className="font-medium">React + TypeScript + Vite</dd></div>
+              <div className="flex justify-between"><dt className="text-slate-500">Database</dt><dd className="font-medium">PostgreSQL</dd></div>
             </dl>
           </SettingsCard>
           <SettingsCard title="Links">
@@ -472,7 +472,7 @@ export default function Settings() {
       )}
 
       {/* Footer actions */}
-      <div className="flex items-center justify-between border-t border-neutral-200 pt-4 dark:border-neutral-800">
+      <div className="flex items-center justify-between border-t border-white/10 pt-4">
         <button className="btn-secondary text-error-600" onClick={() => setConfirmReset(true)}>
           Reset All to Defaults
         </button>
@@ -485,7 +485,7 @@ export default function Settings() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="card w-full max-w-sm p-6">
             <h3 className="text-lg font-semibold">Reset all settings?</h3>
-            <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
+            <p className="mt-2 text-sm text-slate-400">
               This restores every preference (theme, colors, font size, and more) to its default.
             </p>
             <div className="mt-6 flex justify-end gap-2">

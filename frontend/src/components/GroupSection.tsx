@@ -31,23 +31,23 @@ export default function GroupSection({
   return (
     <div className="space-y-2">
       <div
-        className="flex items-center gap-3 rounded-lg border border-neutral-800 border-l-4 bg-neutral-900/60 px-3 py-2"
+        className="flex items-center gap-3 rounded-lg border border-slate-800 border-l-4 bg-slate-900/60 px-3 py-2"
         style={{ borderLeftColor: color ?? '#7A8A94' }}
       >
         <button onClick={onToggle} className="flex min-w-0 flex-1 items-center gap-2 text-left">
           {expanded ? (
-            <ChevronDown className="h-4 w-4 shrink-0 text-neutral-400" />
+            <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
           ) : (
-            <ChevronRight className="h-4 w-4 shrink-0 text-neutral-400" />
+            <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
           )}
           <span
             className="h-2.5 w-2.5 shrink-0 rounded-full"
             style={{ backgroundColor: color ?? '#7A8A94', boxShadow: `0 0 8px ${color ?? '#7A8A94'}` }}
           />
-          <span className="vs-title truncate text-sm" style={{ letterSpacing: '0.08em' }}>
+          <span className="truncate text-sm font-medium text-white">
             {title}
           </span>
-          <span className="vs-readout shrink-0 rounded-full bg-neutral-800 px-2 py-0.5 text-xs text-neutral-300">
+          <span className="vs-readout shrink-0 rounded-full bg-white/5 px-2 py-0.5 text-xs text-slate-300">
             {count}
           </span>
         </button>
@@ -57,7 +57,7 @@ export default function GroupSection({
         {onEdit && (
           <button
             onClick={onEdit}
-            className="shrink-0 rounded p-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700"
+            className="shrink-0 rounded p-1 text-slate-400 hover:bg-white/10 hover:text-white"
             title="Edit group"
           >
             <Pencil className="h-4 w-4" />

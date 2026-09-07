@@ -18,11 +18,11 @@ import { useToasts, Toaster } from '@/components/Toast'
 import { validatePassword } from '@/utils/passwordValidator'
 
 const inputCls =
-  'w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-primary-500'
+  'w-full rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary-500'
 
 function Req({ ok, label }: { ok: boolean; label: string }) {
   return (
-    <div className={`flex items-center gap-1.5 text-xs ${ok ? 'text-emerald-600' : 'text-neutral-400'}`}>
+    <div className={`flex items-center gap-1.5 text-xs ${ok ? 'text-emerald-600' : 'text-slate-400'}`}>
       {ok ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
       {label}
     </div>
@@ -212,7 +212,7 @@ export default function SecuritySettings() {
     <div id="security" className="max-w-2xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Security</h1>
-        <p className="text-sm text-neutral-500 dark:text-neutral-400">
+        <p className="text-sm text-slate-400">
           Manage your account security and authentication
         </p>
       </div>
@@ -273,8 +273,8 @@ export default function SecuritySettings() {
           <span
             className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium ${
               mfaEnabled
-                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
-                : 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                ? 'bg-emerald-500/20 text-emerald-400'
+                : 'bg-red-500/20 text-red-400'
             }`}
           >
             {mfaEnabled ? <ShieldCheck className="h-3.5 w-3.5" /> : <ShieldOff className="h-3.5 w-3.5" />}
@@ -284,11 +284,11 @@ export default function SecuritySettings() {
 
         {mfaEnabled ? (
           <>
-            <p className="text-sm text-neutral-500 dark:text-neutral-400">
+            <p className="text-sm text-slate-400">
               Your account is protected with two-factor authentication.
             </p>
             <button
-              className="btn border border-error-300 text-error-600 hover:bg-error-50 dark:hover:bg-error-900/20"
+              className="btn border border-red-500/30 text-red-400 hover:bg-red-500/10"
               onClick={() => setDisableOpen(true)}
             >
               <ShieldOff className="h-4 w-4" /> Disable Two-Factor Authentication
@@ -296,7 +296,7 @@ export default function SecuritySettings() {
           </>
         ) : (
           <>
-            <p className="text-sm text-neutral-500 dark:text-neutral-400">
+            <p className="text-sm text-slate-400">
               Add an extra layer of security to your account with an authenticator app.
             </p>
             <button className="btn-primary" disabled={busy} onClick={() => void startEnable()}>
@@ -314,21 +314,21 @@ export default function SecuritySettings() {
             <span
               className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium ${
                 regEnabled
-                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
-                  : 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                  ? 'bg-emerald-500/20 text-emerald-400'
+                  : 'bg-red-500/20 text-red-400'
               }`}
             >
               {regEnabled ? <UserCheck className="h-3.5 w-3.5" /> : <UserX className="h-3.5 w-3.5" />}
               {regEnabled === null ? 'Loading…' : regEnabled ? 'Enabled' : 'Disabled'}
             </span>
           </div>
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">
+          <p className="text-sm text-slate-400">
             Control whether new users can create accounts.
           </p>
           <label className="flex cursor-pointer items-center gap-3">
             <input
               type="checkbox"
-              className="h-4 w-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500"
+              className="h-4 w-4 rounded border-slate-300 text-primary-400 focus:ring-primary-500"
               checked={!!regEnabled}
               disabled={regEnabled === null || regBusy}
               onChange={(e) => void toggleRegistration(e.target.checked)}
@@ -336,7 +336,7 @@ export default function SecuritySettings() {
             <span className="text-sm">Allow user registration</span>
           </label>
           {regEnabled === false && (
-            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
               ⚠️ Disabled — only you and explicitly invited users can access Sentinel.
             </div>
           )}
@@ -346,19 +346,19 @@ export default function SecuritySettings() {
       {/* Sessions */}
       <div className="card space-y-3 p-5">
         <h2 className="font-semibold">Sessions</h2>
-        <div className="flex items-center gap-3 rounded-md border border-neutral-200 p-3 dark:border-neutral-800">
-          <Monitor className="h-5 w-5 text-neutral-400" />
+        <div className="flex items-center gap-3 rounded-md border border-white/10 p-3">
+          <Monitor className="h-5 w-5 text-slate-400" />
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium">
               Current Device{' '}
-              <span className="ml-1 rounded bg-primary-100 px-1.5 py-0.5 text-xs text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">
+              <span className="ml-1 rounded bg-primary-500/20 px-1.5 py-0.5 text-xs text-primary-300">
                 active
               </span>
             </div>
-            <div className="truncate text-xs text-neutral-500">{navigator.userAgent}</div>
+            <div className="truncate text-xs text-slate-500">{navigator.userAgent}</div>
           </div>
         </div>
-        <p className="text-xs text-neutral-500">
+        <p className="text-xs text-slate-500">
           Tokens are stateless; signing in elsewhere issues a separate token.
         </p>
       </div>
@@ -370,15 +370,15 @@ export default function SecuritySettings() {
             {step === 'scan' && (
               <>
                 <h3 className="text-lg font-semibold">Set up authenticator app</h3>
-                <p className="text-sm text-neutral-500">
+                <p className="text-sm text-slate-500">
                   Scan this QR code with Google Authenticator, Authy, or a similar app.
                 </p>
                 <div className="flex justify-center rounded-md bg-white p-4">
                   <QRCodeSVG value={qrUrl} size={180} />
                 </div>
-                <div className="text-center text-xs text-neutral-500">
+                <div className="text-center text-xs text-slate-500">
                   Can't scan? Enter this code:
-                  <div className="mt-1 break-all font-mono text-sm text-neutral-700 dark:text-neutral-300">
+                  <div className="mt-1 break-all font-mono text-sm text-slate-300">
                     {secret}
                   </div>
                 </div>
@@ -409,10 +409,10 @@ export default function SecuritySettings() {
             {step === 'codes' && (
               <>
                 <h3 className="text-lg font-semibold">Save your backup codes</h3>
-                <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
                   ⚠️ Store these in a safe place. Each code works once if you lose your authenticator.
                 </div>
-                <div className="grid grid-cols-2 gap-2 rounded-md bg-neutral-100 p-3 font-mono text-sm dark:bg-neutral-800">
+                <div className="grid grid-cols-2 gap-2 rounded-md bg-white/5 p-3 font-mono text-sm">
                   {backupCodes.map((c) => (
                     <span key={c}>{c}</span>
                   ))}
@@ -445,7 +445,7 @@ export default function SecuritySettings() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="card w-full max-w-sm space-y-4 p-6">
             <h3 className="text-lg font-semibold">Disable two-factor authentication</h3>
-            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
               ⚠️ This removes the extra security from your account.
             </div>
             <input

@@ -29,29 +29,29 @@ export default function IncidentList({ monitorId }: { monitorId: string }) {
     }
   }, [monitorId])
 
-  if (loading) return <div className="text-sm text-neutral-500">Loading incidents…</div>
+  if (loading) return <div className="text-sm text-slate-500">Loading incidents…</div>
   if (error) return <div className="text-sm text-error-600">{error.message}</div>
   if (incidents.length === 0)
-    return <div className="text-sm text-neutral-500">No incidents in this period.</div>
+    return <div className="text-sm text-slate-500">No incidents in this period.</div>
 
   const totalPages = Math.max(1, Math.ceil(incidents.length / PAGE_SIZE))
   const pageItems = incidents.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   return (
     <div className="space-y-3">
-      <div className="divide-y divide-neutral-100 dark:divide-neutral-800">
+      <div className="divide-y divide-white/5">
         {pageItems.map((inc) => (
           <div key={inc.id} className="flex items-center justify-between gap-4 py-2 text-sm">
             <div className="min-w-0">
               <div className="font-medium">{formatDatetime(inc.start_time)}</div>
-              <div className="text-xs text-neutral-500">
+              <div className="text-xs text-slate-500">
                 {inc.end_time ? `Resolved ${formatDatetime(inc.end_time)}` : 'Ongoing'}
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-3">
-              <span className="text-neutral-500">{formatDuration(inc.duration_seconds)}</span>
+              <span className="text-slate-500">{formatDuration(inc.duration_seconds)}</span>
               {inc.severity && (
-                <span className="rounded-md bg-neutral-100 px-2 py-0.5 text-xs uppercase text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+                <span className="rounded-md bg-white/5 px-2 py-0.5 text-xs uppercase text-slate-300">
                   {inc.severity}
                 </span>
               )}
@@ -60,7 +60,7 @@ export default function IncidentList({ monitorId }: { monitorId: string }) {
         ))}
       </div>
       {totalPages > 1 && (
-        <div className="flex items-center justify-between text-xs text-neutral-500">
+        <div className="flex items-center justify-between text-xs text-slate-500">
           <span>
             Page {page} of {totalPages}
           </span>

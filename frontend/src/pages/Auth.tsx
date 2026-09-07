@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import { Check, X, Loader2, ArrowLeft } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { validatePassword } from '@/utils/passwordValidator'
-import EcgTrace from '@/components/EcgTrace'
 
 type Mode = 'login' | 'register'
 
@@ -11,38 +10,23 @@ const usernameRe = /^[a-zA-Z0-9_]{3,32}$/
 
 function Card({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-neutral-950 p-4">
-      {/* Ambient instrument graticule behind the login screen. */}
-      <div
-        className="pointer-events-none absolute inset-0"
-        style={{
-          backgroundImage:
-            'linear-gradient(var(--vs-grid) 1px, transparent 1px), linear-gradient(90deg, var(--vs-grid) 1px, transparent 1px)',
-          backgroundSize: '34px 34px',
-          maskImage: 'radial-gradient(ellipse at center, black, transparent 75%)',
-          WebkitMaskImage: 'radial-gradient(ellipse at center, black, transparent 75%)',
-        }}
-      />
-      <div
-        className="relative w-full max-w-sm rounded-2xl border border-neutral-800 bg-neutral-900 p-6"
-        style={{ boxShadow: 'inset 0 -80px 80px -60px rgba(0,0,0,0.7), 0 30px 70px -30px rgba(0,0,0,0.7)' }}
-      >
-        <div className="mb-6 text-center">
-          <h1 className="vs-title text-3xl">SENTINEL</h1>
-          <p className="vs-eyebrow mt-1" style={{ color: 'var(--vs-cyan)' }}>
-            Vitals Monitor
-          </p>
-          <div className="mx-auto mt-3 h-8 max-w-[220px]">
-            <EcgTrace status="up" height={32} speed={40} strokeWidth={1.5} cursor={false} />
+    // Same gradient ground as the app shell, so signing in and landing on the
+    // dashboard read as one surface rather than two products.
+    <div className="relative flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4">
+      <div className="relative w-full max-w-sm rounded-xl border border-white/10 bg-slate-800/40 p-8 backdrop-blur-sm">
+        {/* The dashboard's emerald-to-cyan wash, at card scale. */}
+        <div className="pointer-events-none absolute inset-0 rounded-xl bg-gradient-to-r from-emerald-500/0 via-emerald-500/5 to-cyan-500/0" />
+        <div className="relative z-10">
+          <div className="mb-8 text-center">
+            <h1 className="text-2xl font-light tracking-wide text-white">Sentinel</h1>
+            <p className="mt-2 text-xs text-slate-400">Uptime Monitor</p>
           </div>
+          <div className="mb-6 text-center">
+            <h2 className="text-lg font-light text-white">{title}</h2>
+            {subtitle && <p className="mt-1 text-sm text-slate-400">{subtitle}</p>}
+          </div>
+          {children}
         </div>
-        <div className="mb-5 text-center">
-          <h2 className="vs-title text-base" style={{ letterSpacing: '0.1em' }}>
-            {title}
-          </h2>
-          {subtitle && <p className="mt-1 text-sm text-neutral-400">{subtitle}</p>}
-        </div>
-        {children}
       </div>
     </div>
   )
@@ -52,7 +36,7 @@ const inputCls = 'rd-input px-3 py-2.5 text-sm'
 
 function Req({ ok, label }: { ok: boolean; label: string }) {
   return (
-    <div className={`flex items-center gap-1.5 text-xs ${ok ? 'text-primary-400' : 'text-neutral-400'}`}>
+    <div className={`flex items-center gap-1.5 text-xs ${ok ? 'text-primary-400' : 'text-slate-400'}`}>
       {ok ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
       {label}
     </div>
@@ -157,7 +141,7 @@ export default function Auth({ mode }: { mode: Mode }) {
       <Card title="Verify Your Identity">
         {!useBackup ? (
           <form onSubmit={handleVerifyTotp} className="space-y-4">
-            <p className="text-sm text-neutral-500">
+            <p className="text-sm text-slate-500">
               Enter the 6-digit code from your authenticator app.
             </p>
             <input
@@ -175,7 +159,7 @@ export default function Auth({ mode }: { mode: Mode }) {
             </button>
             <button
               type="button"
-              className="w-full text-sm text-neutral-500 hover:underline"
+              className="w-full text-sm text-slate-500 hover:underline"
               onClick={() => {
                 setUseBackup(true)
                 setError(null)
@@ -186,7 +170,7 @@ export default function Auth({ mode }: { mode: Mode }) {
           </form>
         ) : (
           <form onSubmit={handleVerifyBackup} className="space-y-4">
-            <p className="text-sm text-neutral-500">Enter one of your 8-character backup codes.</p>
+            <p className="text-sm text-slate-500">Enter one of your 8-character backup codes.</p>
             <input
               autoFocus
               maxLength={8}
@@ -201,7 +185,7 @@ export default function Auth({ mode }: { mode: Mode }) {
             </button>
             <button
               type="button"
-              className="flex w-full items-center justify-center gap-1 text-sm text-neutral-500 hover:underline"
+              className="flex w-full items-center justify-center gap-1 text-sm text-slate-500 hover:underline"
               onClick={() => {
                 setUseBackup(false)
                 setError(null)
@@ -220,7 +204,7 @@ export default function Auth({ mode }: { mode: Mode }) {
     if (registered) {
       return (
         <Card title="Account created!">
-          <p className="text-center text-sm text-neutral-500">Redirecting to sign in…</p>
+          <p className="text-center text-sm text-slate-500">Redirecting to sign in…</p>
         </Card>
       )
     }
@@ -228,11 +212,11 @@ export default function Auth({ mode }: { mode: Mode }) {
     if (signupAllowed === false) {
       return (
         <Card title="Registration disabled">
-          <p className="text-center text-sm text-neutral-500">
+          <p className="text-center text-sm text-slate-500">
             New account registration is currently disabled. Please contact an
             administrator for access.
           </p>
-          <p className="mt-4 text-center text-sm text-neutral-500">
+          <p className="mt-4 text-center text-sm text-slate-500">
             <Link to="/login" className="text-accent-400 hover:underline">
               Back to sign in
             </Link>
@@ -252,10 +236,10 @@ export default function Auth({ mode }: { mode: Mode }) {
               placeholder="Username"
             />
             <div className="mt-1 flex items-center justify-between text-xs">
-              <span className={usernameValid ? 'text-primary-400' : 'text-neutral-400'}>
+              <span className={usernameValid ? 'text-primary-400' : 'text-slate-400'}>
                 Letters, numbers, underscore
               </span>
-              <span className="text-neutral-400">{username.length}/32</span>
+              <span className="text-slate-400">{username.length}/32</span>
             </div>
           </div>
 
@@ -296,7 +280,7 @@ export default function Auth({ mode }: { mode: Mode }) {
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create Account'}
           </button>
         </form>
-        <p className="mt-4 text-center text-sm text-neutral-500">
+        <p className="mt-4 text-center text-sm text-slate-500">
           Already have an account?{' '}
           <Link to="/login" className="text-accent-400 hover:underline">
             Sign in
@@ -332,7 +316,7 @@ export default function Auth({ mode }: { mode: Mode }) {
         </button>
       </form>
       {signupAllowed && (
-        <p className="mt-4 text-center text-sm text-neutral-500">
+        <p className="mt-4 text-center text-sm text-slate-500">
           Don't have an account?{' '}
           <Link to="/register" className="text-accent-400 hover:underline">
             Sign up
