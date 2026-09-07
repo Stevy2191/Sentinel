@@ -223,7 +223,7 @@ export default function MonitorWizard() {
   return (
     <div className="mx-auto max-w-3xl space-y-6 pb-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="vs-title text-2xl normal-case">New monitor</h1>
+        <h1 className="vs-title text-2xl">New monitor</h1>
         <button className="rd-btn rd-btn-secondary" onClick={() => navigate('/dashboard')}>
           <X className="h-4 w-4" /> Cancel
         </button>

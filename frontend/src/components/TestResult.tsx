@@ -3,9 +3,9 @@ import type { Check } from '@/types'
 import { formatResponseTime } from '@/utils/formatters'
 
 const config = {
-  success: { icon: CheckCircle2, tone: 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200', label: 'Success' },
-  failed: { icon: XCircle, tone: 'border-red-300 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-900/30 dark:text-red-200', label: 'Failed' },
-  timeout: { icon: Clock, tone: 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-200', label: 'Timeout' },
+  success: { icon: CheckCircle2, tone: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300', label: 'Success' },
+  failed: { icon: XCircle, tone: 'border-red-500/30 bg-red-500/10 text-red-300', label: 'Failed' },
+  timeout: { icon: Clock, tone: 'border-amber-500/30 bg-amber-500/10 text-amber-300', label: 'Timeout' },
 } as const
 
 export default function TestResult({ check, onClose }: { check: Check; onClose?: () => void }) {

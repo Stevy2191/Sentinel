@@ -32,9 +32,9 @@ export function uptimeColor(pct: number): string {
 }
 
 const STATUS_COLOR: Record<HourStatus, string> = {
-  up: '#37F98A', // ECG green
-  down: '#FF4D4D', // flatline red
-  partial: '#FFC24B', // amber
+  up: '#10b981', // ECG green
+  down: '#ef4444', // flatline red
+  partial: '#eab308', // amber
   nodata: '#4E5E68', // dim
 }
 
@@ -67,19 +67,19 @@ interface IncidentRow {
 // severity is derived from downtime length (or ongoing).
 function severityOf(inc: IncidentRow): { label: string; cls: string } {
   if (inc.end_time === null || inc.duration_seconds >= 3600)
-    return { label: 'high', cls: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' }
+    return { label: 'high', cls: 'bg-red-500/20 text-red-400' }
   if (inc.duration_seconds >= 900)
-    return { label: 'medium', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' }
-  return { label: 'low', cls: 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400' }
+    return { label: 'medium', cls: 'bg-amber-500/20 text-amber-400' }
+  return { label: 'low', cls: 'bg-white/5 text-slate-400' }
 }
 
 function UptimeBox({ label, pct }: { label: string; pct: number | undefined }) {
   return (
-    <div className="rounded-md bg-neutral-50 p-3 text-center dark:bg-neutral-800/50">
-      <div className={`text-2xl font-bold ${pct != null ? uptimeColor(pct) : 'text-neutral-400'}`}>
+    <div className="rounded-lg bg-white/5 p-3 text-center">
+      <div className={`text-2xl font-bold ${pct != null ? uptimeColor(pct) : 'text-slate-400'}`}>
         {pct != null ? `${pct.toFixed(2)}%` : '—'}
       </div>
-      <div className="text-xs text-neutral-500 dark:text-neutral-400">{label}</div>
+      <div className="text-xs text-slate-400">{label}</div>
     </div>
   )
 }
@@ -183,7 +183,7 @@ export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, ac
   }
 
   return (
-    <div className="space-y-4 border-t border-neutral-200 p-4 dark:border-neutral-800">
+    <div className="space-y-4 border-t border-white/10 p-4">
       {/* Actions row */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
@@ -192,18 +192,18 @@ export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, ac
             <span
               className={`rounded-md px-2 py-0.5 text-xs font-medium ${
                 inMaintenance
-                  ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+                  ? 'bg-amber-500/20 text-amber-400'
                   : online
-                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                    ? 'bg-emerald-500/20 text-emerald-400'
                     : offline
-                      ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
-                      : 'bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
+                      ? 'bg-red-500/20 text-red-400'
+                      : 'bg-white/5 text-slate-400'
               }`}
             >
               {inMaintenance ? 'Maintenance' : online ? 'Online' : offline ? 'Offline' : 'Unknown'}
             </span>
           </div>
-          <div className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+          <div className="mt-0.5 text-xs text-slate-400">
             {access.isOwner
               ? 'Your monitor'
               : access.permission === 'admin'
@@ -219,7 +219,7 @@ export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, ac
               disabled={a.disabled}
               onClick={a.onClick}
               className={`btn-secondary !py-1 ${
-                a.danger ? '!border-error-300 !text-error-600 hover:!bg-error-50 dark:hover:!bg-error-900/20' : ''
+                a.danger ? '!border-red-500/30 !text-red-400 hover:!bg-red-500/10' : ''
               }`}
             >
               <a.icon className="h-4 w-4" /> {a.label}
@@ -232,14 +232,14 @@ export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, ac
       </div>
 
       {!access.canEdit && (
-        <div className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-500 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-400">
+        <div className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-400">
           Read-only access — you can view and test this monitor but not edit it.
         </div>
       )}
 
       {confirmDelete && (
-        <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-900/30">
-          <p className="mb-2 text-amber-800 dark:text-amber-200">Delete “{monitor.name}” and all its history?</p>
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
+          <p className="mb-2 text-amber-300">Delete “{monitor.name}” and all its history?</p>
           <div className="flex justify-end gap-2">
             <button className="btn-secondary !py-1" onClick={() => setConfirmDelete(false)}>
               Cancel
@@ -293,7 +293,7 @@ export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, ac
             <span className="text-xs" style={{ color: 'var(--vs-text-dim)' }}>or until</span>
             <input
               type="datetime-local"
-              className="rounded-md border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-100"
+              className="rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-xs text-slate-100"
               value={customUntil}
               onChange={(e) => setCustomUntil(e.target.value)}
             />
@@ -316,7 +316,7 @@ export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, ac
 
       {/* Detailed 24h sparkline */}
       <div>
-        <div className="mb-1 flex items-center justify-between text-xs font-medium text-neutral-500 dark:text-neutral-400">
+        <div className="mb-1 flex items-center justify-between text-xs font-medium text-slate-400">
           <span>Uptime (last 24h)</span>
           <span className="flex items-center gap-3">
             <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm" style={{ background: STATUS_COLOR.up }} /> up</span>
@@ -327,16 +327,22 @@ export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, ac
         {uptime ? (
           <Sparkline data={uptime.hourly_data} className="h-10" />
         ) : (
-          <div className="flex h-10 items-center text-xs text-neutral-400">{uptimeLoading ? 'Loading…' : 'No data'}</div>
+          <div className="flex h-10 items-center text-xs text-slate-400">{uptimeLoading ? 'Loading…' : 'No data'}</div>
         )}
       </div>
 
       {/* Response time chart */}
       <div>
-        <div className="mb-1 text-xs font-medium text-neutral-500 dark:text-neutral-400">Response time (24h)</div>
-        <div className="h-52">
+        <div className="mb-1 text-xs font-medium text-slate-400">Response time (24h)</div>
+        <div
+          className={
+            uptimeLoading || (uptime && uptime.response_time_data.some((pt) => pt.responseTime > 0))
+              ? 'h-52'
+              : 'py-6'
+          }
+        >
           {uptimeLoading ? (
-            <div className="flex h-full items-center justify-center text-neutral-400">
+            <div className="flex h-full items-center justify-center text-slate-400">
               <Loader2 className="h-5 w-5 animate-spin" />
             </div>
           ) : uptime && uptime.response_time_data.some((p) => p.responseTime > 0) ? (
@@ -344,8 +350,8 @@ export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, ac
               <AreaChart data={uptime.response_time_data} margin={{ top: 5, right: 10, bottom: 0, left: -8 }}>
                 <defs>
                   <linearGradient id={`rt-${monitor.id}`} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3DE1FF" stopOpacity={0.28} />
-                    <stop offset="95%" stopColor="#3DE1FF" stopOpacity={0} />
+                    <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.28} />
+                    <stop offset="95%" stopColor="#22d3ee" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#16303a" strokeOpacity={0.6} />
@@ -353,15 +359,13 @@ export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, ac
                 <YAxis tick={{ fontSize: 10, fill: '#7A8A94' }} width={40} unit="" />
                 <Tooltip
                   formatter={(v: number) => [`${v} ms`, 'response']}
-                  contentStyle={{ background: '#0d141b', border: '1px solid #1e2a33', borderRadius: 8, color: '#e8f0f2' }}
+                  contentStyle={{ background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#e2e8f0' }}
                 />
-                <Area type="monotone" dataKey="responseTime" stroke="#3DE1FF" strokeWidth={2} fill={`url(#rt-${monitor.id})`} />
+                <Area type="monotone" dataKey="responseTime" stroke="#22d3ee" strokeWidth={2} fill={`url(#rt-${monitor.id})`} />
               </AreaChart>
             </ResponsiveContainer>
           ) : (
-            <div className="flex h-full items-center justify-center text-sm text-neutral-400">
-              No response data in the last 24h.
-            </div>
+            <div className="text-center text-sm text-slate-400">No response data in the last 24h.</div>
           )}
         </div>
       </div>
@@ -369,22 +373,22 @@ export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, ac
       {/* Tags + move-to-group */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-xs text-neutral-500 dark:text-neutral-400">Tags:</span>
+          <span className="text-xs text-slate-400">Tags:</span>
           {monitor.tags && monitor.tags.length > 0 ? (
             monitor.tags.map((t) => (
-              <span key={t} className="rounded-full bg-primary-100 px-2 py-0.5 text-xs text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">
+              <span key={t} className="rounded-full bg-primary-500/20 px-2 py-0.5 text-xs text-primary-300">
                 {t}
               </span>
             ))
           ) : (
-            <span className="text-xs text-neutral-400">none</span>
+            <span className="text-xs text-slate-400">none</span>
           )}
         </div>
         {access.canEdit && (
           <label className="flex items-center gap-2 text-xs">
-            <span className="text-neutral-500 dark:text-neutral-400">Group:</span>
+            <span className="text-slate-400">Group:</span>
             <select
-              className="rounded-md border border-neutral-300 bg-white px-2 py-1 dark:border-neutral-700 dark:bg-neutral-800"
+              className="rounded-md border border-white/10 bg-slate-900/60 px-2 py-1 text-white"
               value={monitor.group_id ?? ''}
               onChange={(e) => void act(() => move(monitor.id, e.target.value || null), 'Monitor group updated')}
             >
@@ -401,13 +405,13 @@ export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, ac
 
       {/* Incident timeline */}
       <div>
-        <div className="mb-1 text-xs font-medium text-neutral-500 dark:text-neutral-400">Recent incidents</div>
+        <div className="mb-1 text-xs font-medium text-slate-400">Recent incidents</div>
         {incidents === null ? (
-          <p className="text-xs text-neutral-400">Loading…</p>
+          <p className="text-xs text-slate-400">Loading…</p>
         ) : incidents.length === 0 ? (
-          <p className="text-xs text-neutral-400">No incidents in the last 30 days.</p>
+          <p className="text-xs text-slate-400">No incidents in the last 30 days.</p>
         ) : (
-          <div className="divide-y divide-neutral-100 dark:divide-neutral-800">
+          <div className="divide-y divide-white/5">
             {incidents.slice(0, 5).map((inc) => {
               const sev = severityOf(inc)
               const ongoing = inc.end_time === null
@@ -418,11 +422,11 @@ export default function DetailPanel({ monitor, uptime, uptimeLoading, groups, ac
                     {formatDatetime(inc.start_time)}
                   </span>
                   <span className="flex items-center gap-2">
-                    <span className="text-neutral-500 dark:text-neutral-400">
+                    <span className="text-slate-400">
                       {ongoing ? 'ongoing' : `${Math.max(1, Math.round(inc.duration_seconds / 60))} min`}
                     </span>
                     <span className={`rounded px-1.5 py-0.5 font-medium ${sev.cls}`}>{sev.label}</span>
-                    <span className={`rounded px-1.5 py-0.5 ${ongoing ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' : 'bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'}`}>
+                    <span className={`rounded px-1.5 py-0.5 ${ongoing ? 'bg-red-500/20 text-red-400' : 'bg-white/5 text-slate-400'}`}>
                       {ongoing ? 'ongoing' : 'closed'}
                     </span>
                   </span>

@@ -174,7 +174,7 @@ export default function SavedReportDetail() {
     <div className="space-y-5 pb-10">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="vs-title text-2xl normal-case">{report.name}</h1>
+          <h1 className="vs-title text-2xl">{report.name}</h1>
           <p className="mt-1 text-sm" style={{ color: 'var(--vs-text-dim)' }}>
             {report.template_name} · {report.scope_type} · {report.time_range_days} day window
           </p>

@@ -42,7 +42,7 @@ export default function MonitorList({ monitors, onRemove, onUpdatePosition }: Pr
 
   if (monitors.length === 0) {
     return (
-      <div className="py-8 text-center text-sm text-neutral-500">
+      <div className="py-8 text-center text-sm text-slate-500">
         No monitors on this page yet.
       </div>
     )
@@ -51,7 +51,7 @@ export default function MonitorList({ monitors, onRemove, onUpdatePosition }: Pr
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-left text-sm">
-        <thead className="border-b border-neutral-200 text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+        <thead className="border-b border-white/10 text-slate-400">
           <tr>
             <th className="px-4 py-3 font-medium">Monitor</th>
             <th className="px-4 py-3 font-medium">Group</th>
@@ -60,11 +60,11 @@ export default function MonitorList({ monitors, onRemove, onUpdatePosition }: Pr
             <th className="px-4 py-3 text-right font-medium">Actions</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
+        <tbody className="divide-y divide-white/5">
           {monitors.map((m, i) => (
-            <tr key={m.id} className={i % 2 ? 'bg-neutral-50/50 dark:bg-neutral-800/30' : ''}>
+            <tr key={m.id} className={i % 2 ? 'bg-white/5' : ''}>
               <td className="px-4 py-3 font-medium">{m.name}</td>
-              <td className="px-4 py-3 text-neutral-500">{m.group_name || '—'}</td>
+              <td className="px-4 py-3 text-slate-500">{m.group_name || '—'}</td>
               <td className="px-4 py-3">
                 <span className={`rounded-md px-2 py-1 text-xs font-medium ${getStatusBgColor(m.status)}`}>
                   {m.status}
@@ -78,14 +78,14 @@ export default function MonitorList({ monitors, onRemove, onUpdatePosition }: Pr
                       min={1}
                       value={values[m.id] ?? m.position ?? 0}
                       onChange={(e) => handleChange(m.id, e.target.value)}
-                      className="w-16 rounded-md border border-neutral-300 bg-white px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+                      className="w-16 rounded-md border border-white/10 bg-slate-900/60 px-2 py-1 text-sm text-white"
                     />
                     {savingId === m.id && (
-                      <Loader2 className="h-4 w-4 animate-spin text-neutral-400" />
+                      <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
                     )}
                   </div>
                 ) : (
-                  <span className="text-neutral-500">{m.position ?? '—'}</span>
+                  <span className="text-slate-500">{m.position ?? '—'}</span>
                 )}
               </td>
               <td className="px-4 py-3">

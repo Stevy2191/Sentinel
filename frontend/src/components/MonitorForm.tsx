@@ -123,7 +123,7 @@ interface Props {
 }
 
 const inputCls =
-  'w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-primary-500'
+  'w-full rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary-500'
 
 function Field({
   label,
@@ -148,7 +148,7 @@ function Field({
       {error ? (
         <span className="mt-1 block text-xs text-error-600">{error}</span>
       ) : help ? (
-        <span className="mt-1 block text-xs text-neutral-500">{help}</span>
+        <span className="mt-1 block text-xs text-slate-500">{help}</span>
       ) : null}
     </label>
   )
@@ -200,8 +200,8 @@ export default function MonitorForm({
                 key={t.value}
                 className={`cursor-pointer rounded-md border px-4 py-2 text-sm ${
                   values.type === t.value
-                    ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
-                    : 'border-neutral-300 dark:border-neutral-700'
+                    ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300'
+                    : 'border-white/10'
                 }`}
               >
                 <input
@@ -307,7 +307,7 @@ export default function MonitorForm({
       </div>
 
       {error && (
-        <div className="card border-error-300 p-4 text-sm text-error-700 dark:text-error-300">
+        <div className="card border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400">
           {error.message}
         </div>
       )}

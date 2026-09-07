@@ -189,7 +189,7 @@ function buildPayload(channel: ChannelName, f: FormState): Partial<NotificationC
 
 // ---------- field primitives ----------
 const inputCls =
-  'w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-primary-500'
+  'w-full rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary-500'
 
 function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {
   return (
@@ -206,7 +206,7 @@ function FieldError({ msg }: { msg?: string }) {
 }
 
 function Helper({ children }: { children: React.ReactNode }) {
-  return <p className="mt-1 text-xs text-neutral-400">{children}</p>
+  return <p className="mt-1 text-xs text-slate-400">{children}</p>
 }
 
 function ExtLink({ href, children }: { href: string; children: React.ReactNode }) {
@@ -215,7 +215,7 @@ function ExtLink({ href, children }: { href: string; children: React.ReactNode }
       href={href}
       target="_blank"
       rel="noreferrer"
-      className="inline-flex items-center gap-1 text-xs text-primary-600 hover:underline"
+      className="inline-flex items-center gap-1 text-xs text-primary-400 hover:underline"
     >
       {children} <ExternalLink className="h-3 w-3" />
     </a>
@@ -248,7 +248,7 @@ function SecretInput({
       <button
         type="button"
         onClick={() => setShow((s) => !s)}
-        className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600"
+        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
         tabIndex={-1}
         aria-label={show ? 'Hide' : 'Show'}
       >
@@ -366,13 +366,13 @@ function ConfigModal({
           <h3 className="flex items-center gap-2 text-lg font-semibold">
             <span aria-hidden>{meta.emoji}</span> Configure {meta.label}
           </h3>
-          <button className="text-neutral-400 hover:text-neutral-600" onClick={onClose} aria-label="Close">
+          <button className="text-slate-400 hover:text-slate-600" onClick={onClose} aria-label="Close">
             <X className="h-5 w-5" />
           </button>
         </div>
 
         {loadingConfig ? (
-          <div className="flex items-center justify-center py-10 text-neutral-400">
+          <div className="flex items-center justify-center py-10 text-slate-400">
             <Loader2 className="h-6 w-6 animate-spin" />
           </div>
         ) : (
@@ -430,7 +430,7 @@ function ConfigModal({
                     <label className="mt-2 flex cursor-pointer items-center gap-2">
                       <input
                         type="checkbox"
-                        className="h-4 w-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500"
+                        className="h-4 w-4 rounded border-slate-300 text-primary-400 focus:ring-primary-500"
                         checked={form.smtp_skip_tls_verify}
                         onChange={(e) => set('smtp_skip_tls_verify', e.target.checked)}
                       />
@@ -619,7 +619,7 @@ function ConfigModal({
             <label className="flex cursor-pointer items-center gap-2 pt-1">
               <input
                 type="checkbox"
-                className="h-4 w-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500"
+                className="h-4 w-4 rounded border-slate-300 text-primary-400 focus:ring-primary-500"
                 checked={form.enabled}
                 onChange={(e) => set('enabled', e.target.checked)}
               />
@@ -627,9 +627,9 @@ function ConfigModal({
             </label>
 
             {/* Actions */}
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-4">
               <button
-                className="btn border border-error-300 text-error-600 hover:bg-error-50 dark:hover:bg-error-900/20"
+                className="btn border border-red-500/30 text-red-400 hover:bg-red-500/10"
                 disabled={busy}
                 onClick={() => setConfirmDelete(true)}
               >
@@ -662,7 +662,7 @@ function ConfigModal({
         >
           <div className="card w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-semibold">Disable {meta.label}?</h3>
-            <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
+            <p className="mt-2 text-sm text-slate-400">
               This disables the channel and clears its stored settings. You can reconfigure it later.
             </p>
             <div className="mt-6 flex justify-end gap-2">
@@ -723,7 +723,7 @@ export default function NotificationSettings() {
     <div className="space-y-6">
       <div>
         <h2 className="text-xl font-bold">Notification Channels</h2>
-        <p className="text-sm text-neutral-500 dark:text-neutral-400">
+        <p className="text-sm text-slate-400">
           Configure how Sentinel sends you alerts.
         </p>
       </div>
@@ -738,7 +738,7 @@ export default function NotificationSettings() {
       )}
 
       {!error && !loading && !anyConfigured && (
-        <p className="text-sm text-neutral-500 dark:text-neutral-400">
+        <p className="text-sm text-slate-400">
           No notification channels are configured yet. Click <span className="font-medium">Configure</span> on
           any channel below to get started.
         </p>

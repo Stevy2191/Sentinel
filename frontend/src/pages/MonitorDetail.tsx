@@ -58,7 +58,7 @@ function uptimeColor(pct: number): string {
 function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex justify-between gap-4 py-2 text-sm">
-      <span className="text-neutral-500 dark:text-neutral-400">{label}</span>
+      <span className="text-slate-400">{label}</span>
       <span className="text-right font-medium">{children}</span>
     </div>
   )
@@ -68,7 +68,7 @@ function StatBox({ label, value, tone }: { label: string; value: string; tone?: 
   return (
     <div className="card p-4 text-center">
       <div className={`text-2xl font-bold ${tone ?? ''}`}>{value}</div>
-      <div className="text-xs text-neutral-500 dark:text-neutral-400">{label}</div>
+      <div className="text-xs text-slate-400">{label}</div>
     </div>
   )
 }
@@ -158,7 +158,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
 
   if (mode === 'edit') {
     if (loading || !monitor) {
-      return <div className="text-neutral-500">Loading…</div>
+      return <div className="text-slate-500">Loading…</div>
     }
     return (
       <div className="max-w-3xl space-y-6">
@@ -180,11 +180,11 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
   }
 
   // ---- View ----
-  if (loading && !monitor) return <div className="text-neutral-500">Loading…</div>
+  if (loading && !monitor) return <div className="text-slate-500">Loading…</div>
   if (!monitor) {
     return (
       <div className="space-y-4">
-        <div className="card p-6 text-neutral-500">Monitor not found.</div>
+        <div className="card p-6 text-slate-500">Monitor not found.</div>
         <button className="btn-secondary" onClick={() => navigate('/monitors')}>
           <ArrowLeft className="h-4 w-4" /> Back to monitors
         </button>
@@ -292,13 +292,13 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
           >
             <span
               className={`h-2 w-2 rounded-full ${
-                online ? 'bg-emerald-500' : offline ? 'bg-red-500 animate-pulse' : 'bg-neutral-400'
+                online ? 'bg-emerald-500' : offline ? 'bg-red-500 animate-pulse' : 'bg-slate-400'
               }`}
             />
             {monitor.current_status}
             {!monitor.enabled && ' · paused'}
           </span>
-          <div className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
+          <div className="mt-2 text-sm text-slate-400">
             {access.isOwner
               ? 'Your monitor'
               : access.permission === 'admin'
@@ -328,7 +328,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
           )}
           {access.canDelete && (
             <button
-              className="btn border border-error-300 text-error-600 hover:bg-error-50 dark:hover:bg-error-900/20"
+              className="btn border border-red-500/30 text-red-400 hover:bg-red-500/10"
               onClick={() => setConfirmDelete(true)}
             >
               <Trash2 className="h-4 w-4" /> Delete
@@ -337,7 +337,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
         </div>
       </div>
       {!access.canEdit && (
-        <div className="rounded-md border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-500 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-400">
+        <div className="rounded-md border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-400">
           Read-only access — you can view and test this monitor but not edit or delete it.
         </div>
       )}
@@ -346,7 +346,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
 
       {/* Ongoing-downtime banner: the monitor is offline right now. */}
       {report?.metrics.ongoing_incident && (
-        <div className="flex items-center gap-2 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm font-medium text-red-600 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-400">
+        <div className="flex items-center gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-400">
           <span aria-hidden>⚠️</span>
           Currently Offline
           {report.metrics.current_downtime_minutes > 0 && (
@@ -389,11 +389,11 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
             <Wrench className="h-4 w-4" /> Maintenance Mode
           </h2>
           {maint?.enabled ? (
-            <span className="rounded-md bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+            <span className="rounded-md bg-amber-500/20 px-2 py-1 text-xs font-medium text-amber-300">
               {maint.status === 'active' ? '🟡 Active' : maint.status === 'scheduled' ? '🕒 Scheduled' : 'Expired'}
             </span>
           ) : (
-            <span className="rounded-md bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
+            <span className="rounded-md bg-white/5 px-2 py-1 text-xs font-medium text-slate-400">
               🟢 Not in maintenance
             </span>
           )}
@@ -402,15 +402,15 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
         {maint?.enabled ? (
           <div className="space-y-3 text-sm">
             <div className="flex justify-between">
-              <span className="text-neutral-500">Start</span>
+              <span className="text-slate-500">Start</span>
               <span className="font-medium">{maint.start_time ? formatDatetime(maint.start_time) : '—'}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-neutral-500">End</span>
+              <span className="text-slate-500">End</span>
               <span className="font-medium">{maint.end_time ? formatDatetime(maint.end_time) : '—'}</span>
             </div>
             {maint.is_currently_in_maintenance && (
-              <div className="rounded-md bg-amber-50 p-3 text-center font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+              <div className="rounded-md bg-amber-500/10 p-3 text-center font-medium text-amber-300">
                 Ends in {maint.time_remaining_minutes} minute{maint.time_remaining_minutes === 1 ? '' : 's'}
                 <div className="mt-1 text-xs font-normal">No incidents will be created during maintenance.</div>
               </div>
@@ -420,7 +420,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
                 <Pencil className="h-4 w-4" /> Edit Window
               </button>
               <button
-                className="btn border border-error-300 text-error-600 hover:bg-error-50 dark:hover:bg-error-900/20"
+                className="btn border border-red-500/30 text-red-400 hover:bg-red-500/10"
                 onClick={() => void endMaintNow()}
               >
                 End Now
@@ -429,7 +429,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
           </div>
         ) : (
           <div className="space-y-3">
-            <p className="text-sm text-neutral-500 dark:text-neutral-400">
+            <p className="text-sm text-slate-400">
               Schedule a window during which failed checks won't create incidents or send alerts.
             </p>
             <button className="btn-primary" onClick={openMaintModal}>
@@ -443,14 +443,14 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
         {/* Configuration */}
         <div className="card p-5">
           <h2 className="mb-2 font-semibold">Configuration</h2>
-          <div className="divide-y divide-neutral-100 dark:divide-neutral-800">
+          <div className="divide-y divide-white/5">
             <DetailRow label="URL / Target">
               {isHttp && isSafeHttpUrl(monitor.url) ? (
                 <a
                   href={monitor.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-primary-600 hover:underline"
+                  className="inline-flex items-center gap-1 text-primary-400 hover:underline"
                 >
                   {monitor.url} <ExternalLink className="h-3 w-3" />
                 </a>
@@ -472,12 +472,12 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
 
           {monitor.tags && monitor.tags.length > 0 && (
             <div className="mt-4">
-              <div className="mb-1 text-sm text-neutral-500">Tags</div>
+              <div className="mb-1 text-sm text-slate-500">Tags</div>
               <div className="flex flex-wrap gap-1">
                 {monitor.tags.map((t) => (
                   <span
                     key={t}
-                    className="rounded-md bg-primary-100 px-2 py-0.5 text-xs text-primary-700 dark:bg-primary-900/40 dark:text-primary-300"
+                    className="rounded-md bg-primary-500/20 px-2 py-0.5 text-xs text-primary-300"
                   >
                     {t}
                   </span>
@@ -488,16 +488,16 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
 
           {isHttp && monitor.headers && Object.keys(monitor.headers).length > 0 && (
             <div className="mt-4">
-              <div className="mb-1 text-sm text-neutral-500">Headers</div>
-              <pre className="overflow-x-auto rounded-md bg-neutral-100 p-3 text-xs dark:bg-neutral-800">
+              <div className="mb-1 text-sm text-slate-500">Headers</div>
+              <pre className="overflow-x-auto rounded-md bg-white/5 p-3 text-xs">
                 {JSON.stringify(monitor.headers, null, 2)}
               </pre>
             </div>
           )}
           {isHttp && monitor.body && (
             <div className="mt-4">
-              <div className="mb-1 text-sm text-neutral-500">Body</div>
-              <pre className="overflow-x-auto rounded-md bg-neutral-100 p-3 text-xs dark:bg-neutral-800">
+              <div className="mb-1 text-sm text-slate-500">Body</div>
+              <pre className="overflow-x-auto rounded-md bg-white/5 p-3 text-xs">
                 {monitor.body}
               </pre>
             </div>
@@ -531,7 +531,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
                 type="datetime-local"
                 value={maintStart}
                 onChange={(e) => setMaintStart(e.target.value)}
-                className="w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+                className="w-full rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white placeholder-slate-500"
               />
             </label>
             <label className="block">
@@ -540,7 +540,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
                 type="datetime-local"
                 value={maintEnd}
                 onChange={(e) => setMaintEnd(e.target.value)}
-                className="w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+                className="w-full rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white placeholder-slate-500"
               />
             </label>
             {maintStart && maintEnd && new Date(maintEnd) <= new Date(maintStart) && (
@@ -567,7 +567,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="card w-full max-w-sm p-6">
             <h3 className="text-lg font-semibold">Delete monitor?</h3>
-            <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
+            <p className="mt-2 text-sm text-slate-400">
               This permanently deletes {monitor.name} and all its history.
             </p>
             <div className="mt-6 flex justify-end gap-2">

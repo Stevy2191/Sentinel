@@ -8,19 +8,19 @@ import { useInvitationDetails, useAcceptInvitation } from '@/hooks/useInvitation
 
 const usernameRe = /^[a-zA-Z0-9_]{3,32}$/
 const inputCls =
-  'w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-primary-500'
+  'w-full rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary-500'
 
 function Shell({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-neutral-100 p-4 dark:bg-neutral-950">
-      <div className="w-full max-w-md rounded-lg border border-neutral-200 bg-white p-6 shadow-card dark:border-neutral-800 dark:bg-neutral-900">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4">
+      <div className="w-full max-w-md rounded-xl border border-white/10 bg-slate-800/40 p-8 backdrop-blur-sm">
         <div className="mb-6 text-center">
           <div className="mb-2 flex items-center justify-center gap-2">
-            <ShieldCheck className="h-8 w-8 text-primary-600" />
+            <ShieldCheck className="h-8 w-8 text-primary-400" />
             <span className="text-xl font-bold">Sentinel</span>
           </div>
           <h1 className="text-lg font-semibold">{title}</h1>
-          {subtitle && <p className="text-sm text-neutral-500">{subtitle}</p>}
+          {subtitle && <p className="text-sm text-slate-500">{subtitle}</p>}
         </div>
         {children}
       </div>
@@ -30,7 +30,7 @@ function Shell({ title, subtitle, children }: { title: string; subtitle?: string
 
 function Req({ ok, label }: { ok: boolean; label: string }) {
   return (
-    <div className={`flex items-center gap-1.5 text-xs ${ok ? 'text-emerald-600' : 'text-neutral-400'}`}>
+    <div className={`flex items-center gap-1.5 text-xs ${ok ? 'text-emerald-600' : 'text-slate-400'}`}>
       {ok ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
       {label}
     </div>
@@ -39,11 +39,11 @@ function Req({ ok, label }: { ok: boolean; label: string }) {
 
 function RoleBadge({ role }: { role: 'admin' | 'user' }) {
   return role === 'admin' ? (
-    <span className="rounded px-2 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+    <span className="rounded px-2 py-0.5 text-xs font-medium bg-emerald-500/20 text-emerald-400">
       Admin
     </span>
   ) : (
-    <span className="rounded px-2 py-0.5 text-xs font-medium bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+    <span className="rounded px-2 py-0.5 text-xs font-medium bg-white/5 text-slate-300">
       User
     </span>
   )
@@ -101,7 +101,7 @@ export default function InvitationAccept() {
   if (loading) {
     return (
       <Shell title="Loading invitation…">
-        <div className="flex justify-center py-6 text-neutral-400">
+        <div className="flex justify-center py-6 text-slate-400">
           <Loader2 className="h-8 w-8 animate-spin" />
         </div>
       </Shell>
@@ -111,7 +111,7 @@ export default function InvitationAccept() {
     return (
       <Shell title="Invalid invitation" subtitle={error ?? 'This invitation link is invalid.'}>
         <div className="text-center text-sm">
-          <Link to="/login" className="text-primary-600 hover:underline">
+          <Link to="/login" className="text-primary-400 hover:underline">
             Go to sign in →
           </Link>
         </div>
@@ -129,7 +129,7 @@ export default function InvitationAccept() {
         }
       >
         <div className="text-center text-sm">
-          <Link to="/login" className="text-primary-600 hover:underline">
+          <Link to="/login" className="text-primary-400 hover:underline">
             Go to sign in →
           </Link>
         </div>
@@ -152,17 +152,17 @@ export default function InvitationAccept() {
   return (
     <Shell title="You're invited to Sentinel" subtitle="Create your account to join">
       {/* Invitation details */}
-      <div className="mb-5 space-y-2 rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm dark:border-neutral-800 dark:bg-neutral-800/50">
+      <div className="mb-5 space-y-2 rounded-lg border border-white/10 bg-white/5 p-3 text-sm">
         <div className="flex items-center justify-between">
-          <span className="text-neutral-500 dark:text-neutral-400">Email</span>
+          <span className="text-slate-400">Email</span>
           <span className="font-medium">{invitation.email}</span>
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-neutral-500 dark:text-neutral-400">Role</span>
+          <span className="text-slate-400">Role</span>
           <RoleBadge role={invitation.role} />
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-neutral-500 dark:text-neutral-400">Expires</span>
+          <span className="text-slate-400">Expires</span>
           <span className={expiresSoon ? 'text-red-500' : ''}>
             {format(new Date(invitation.expires_at), 'MMM d, yyyy')}
           </span>
@@ -180,10 +180,10 @@ export default function InvitationAccept() {
             onBlur={() => setTouched((t) => ({ ...t, u: true }))}
           />
           <div className="mt-1 flex items-center justify-between text-xs">
-            <span className={usernameValid ? 'text-emerald-600' : 'text-neutral-400'}>
+            <span className={usernameValid ? 'text-emerald-600' : 'text-slate-400'}>
               Letters, numbers, underscore (3–32)
             </span>
-            <span className="text-neutral-400">{username.length}/32</span>
+            <span className="text-slate-400">{username.length}/32</span>
           </div>
           {touched.u && username.length > 0 && !usernameValid && (
             <p className="mt-1 text-xs text-error-600">Invalid username</p>
@@ -203,7 +203,7 @@ export default function InvitationAccept() {
             <button
               type="button"
               onClick={() => setShowPw((s) => !s)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
               tabIndex={-1}
               aria-label={showPw ? 'Hide password' : 'Show password'}
             >
@@ -213,11 +213,11 @@ export default function InvitationAccept() {
           {password.length > 0 && (
             <div className="mt-2">
               <div className="mb-1 flex gap-1">
-                <div className={`h-1 flex-1 rounded ${strength.score >= 1 ? STRENGTH_COLOR[strength.score] : 'bg-neutral-200 dark:bg-neutral-700'}`} />
-                <div className={`h-1 flex-1 rounded ${strength.score >= 3 ? STRENGTH_COLOR[strength.score] : 'bg-neutral-200 dark:bg-neutral-700'}`} />
-                <div className={`h-1 flex-1 rounded ${strength.score >= 4 ? STRENGTH_COLOR[strength.score] : 'bg-neutral-200 dark:bg-neutral-700'}`} />
+                <div className={`h-1 flex-1 rounded ${strength.score >= 1 ? STRENGTH_COLOR[strength.score] : 'bg-white/10'}`} />
+                <div className={`h-1 flex-1 rounded ${strength.score >= 3 ? STRENGTH_COLOR[strength.score] : 'bg-white/10'}`} />
+                <div className={`h-1 flex-1 rounded ${strength.score >= 4 ? STRENGTH_COLOR[strength.score] : 'bg-white/10'}`} />
               </div>
-              <p className="text-xs text-neutral-500">Strength: {STRENGTH[strength.score]}</p>
+              <p className="text-xs text-slate-500">Strength: {STRENGTH[strength.score]}</p>
             </div>
           )}
           <div className="mt-2 grid grid-cols-2 gap-1">
@@ -254,9 +254,9 @@ export default function InvitationAccept() {
         </button>
       </form>
 
-      <p className="mt-4 text-center text-sm text-neutral-500">
+      <p className="mt-4 text-center text-sm text-slate-500">
         Already have an account?{' '}
-        <Link to="/login" className="text-primary-600 hover:underline">
+        <Link to="/login" className="text-primary-400 hover:underline">
           Sign in
         </Link>
       </p>

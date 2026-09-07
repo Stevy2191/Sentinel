@@ -22,7 +22,7 @@ import {
 } from '@/hooks/useUserManagement'
 
 const inputCls =
-  'w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-primary-500'
+  'w-full rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary-500'
 const PER_PAGE = 10
 
 async function copy(text: string, push: (m: string, t?: 'success' | 'error' | 'info') => void) {
@@ -47,11 +47,11 @@ async function copy(text: string, push: (m: string, t?: 'success' | 'error' | 'i
 
 function RoleBadge({ role }: { role: Role }) {
   return role === 'admin' ? (
-    <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+    <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-emerald-500/20 text-emerald-400">
       <Shield className="h-3 w-3" /> Admin
     </span>
   ) : (
-    <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+    <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-white/5 text-slate-300">
       User
     </span>
   )
@@ -152,8 +152,8 @@ export default function AdminUsers() {
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <div>
-        <h1 className="vs-title text-3xl">USER MANAGEMENT</h1>
-        <p className="text-sm text-neutral-500 dark:text-neutral-400">Create, invite, and manage users</p>
+        <h1 className="vs-title text-4xl">User management</h1>
+        <p className="text-sm text-slate-400">Create, invite, and manage users</p>
       </div>
 
       {/* ---- Users list ---- */}
@@ -169,7 +169,7 @@ export default function AdminUsers() {
             }}
           />
           <select
-            className="rounded-md border border-neutral-300 bg-white px-2.5 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+            className="rounded-md border border-white/10 bg-slate-900/60 px-2.5 py-2 text-sm text-white"
             value={roleFilter}
             onChange={(e) => {
               setRoleFilter(e.target.value as 'all' | Role)
@@ -180,12 +180,12 @@ export default function AdminUsers() {
             <option value="admin">Admins</option>
             <option value="user">Users</option>
           </select>
-          <span className="ml-auto text-sm text-neutral-500">{filtered.length} user(s)</span>
+          <span className="ml-auto text-sm text-slate-500">{filtered.length} user(s)</span>
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-neutral-200 text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+            <thead className="border-b border-white/10 text-slate-400">
               <tr>
                 {(['username', 'email', 'role', 'created_at'] as SortKey[]).map((k) => (
                   <th key={k} className="px-3 py-2 font-medium">
@@ -197,10 +197,10 @@ export default function AdminUsers() {
                 <th className="px-3 py-2 text-right font-medium">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
+            <tbody className="divide-y divide-white/5">
               {pageRows.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-3 py-8 text-center text-neutral-500">
+                  <td colSpan={5} className="px-3 py-8 text-center text-slate-500">
                     No users match.
                   </td>
                 </tr>
@@ -208,16 +208,16 @@ export default function AdminUsers() {
                 pageRows.map((u) => {
                   const isSelf = u.id === currentUser.user_id
                   return (
-                    <tr key={u.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800/50">
+                    <tr key={u.id} className="hover:bg-white/5">
                       <td className="px-3 py-2 font-medium">
                         {u.username}
-                        {isSelf && <span className="ml-2 text-xs italic text-neutral-400">you</span>}
+                        {isSelf && <span className="ml-2 text-xs italic text-slate-400">you</span>}
                       </td>
-                      <td className="px-3 py-2 text-neutral-500">{u.email || '—'}</td>
+                      <td className="px-3 py-2 text-slate-500">{u.email || '—'}</td>
                       <td className="px-3 py-2">
                         <RoleBadge role={u.role} />
                       </td>
-                      <td className="px-3 py-2 text-neutral-500">
+                      <td className="px-3 py-2 text-slate-500">
                         {u.created_at ? format(new Date(u.created_at), 'MMM d, yyyy') : '—'}
                       </td>
                       <td className="px-3 py-2">
@@ -256,7 +256,7 @@ export default function AdminUsers() {
           </table>
         </div>
 
-        <div className="mt-3 flex items-center justify-between text-sm text-neutral-500">
+        <div className="mt-3 flex items-center justify-between text-sm text-slate-500">
           <span>Page {safePage} of {totalPages}</span>
           <div className="flex gap-2">
             <button className="btn-secondary !py-1" disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>
@@ -277,7 +277,7 @@ export default function AdminUsers() {
               key={t}
               onClick={() => setTab(t)}
               className={`rounded-md px-4 py-2 text-sm font-medium ${
-                tab === t ? 'bg-primary-600 text-white' : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+                tab === t ? 'bg-primary-600 text-white' : 'bg-white/5 text-slate-300'
               }`}
             >
               {t === 'create' ? 'Create User' : t === 'invite' ? 'Invite User' : `Pending (${invitations.length})`}
@@ -429,7 +429,7 @@ function CreateUserTab({
       {mode === 'manual' ? (
         <input className={inputCls} type="password" placeholder="Password (min 12 chars)" value={password} onChange={(e) => setPassword(e.target.value)} />
       ) : (
-        <p className="text-xs text-neutral-400">A temporary password will be shown once after creation.</p>
+        <p className="text-xs text-slate-400">A temporary password will be shown once after creation.</p>
       )}
       <button className="btn-primary w-fit" disabled={busy} onClick={() => void submit()}>
         {busy ? 'Creating…' : 'Create User'}
@@ -494,7 +494,7 @@ function InviteUserTab({
           <input type="radio" checked={delivery === 'email'} onChange={() => setDelivery('email')} /> Send email (needs SMTP)
         </label>
       </div>
-      <p className="text-xs text-neutral-400">
+      <p className="text-xs text-slate-400">
         {delivery === 'email'
           ? 'An invitation email will be sent if SMTP is configured; otherwise you can copy the link.'
           : "You'll get a link to share manually. It expires in 7 days."}
@@ -526,7 +526,7 @@ function PendingTab({
   const [confirmCancel, setConfirmCancel] = useState<string | null>(null)
 
   if (invitations.length === 0) {
-    return <p className="text-sm text-neutral-500 dark:text-neutral-400">No pending invitations.</p>
+    return <p className="text-sm text-slate-400">No pending invitations.</p>
   }
   const doResend = async (id: string, email: string) => {
     try {
@@ -552,13 +552,13 @@ function PendingTab({
       {invitations.map((inv) => {
         const expiresSoon = new Date(inv.expires_at).getTime() - Date.now() < 24 * 3600e3
         return (
-          <div key={inv.id} className="rounded-md border border-neutral-200 p-3 dark:border-neutral-800">
+          <div key={inv.id} className="rounded-md border border-white/10 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <div className="flex items-center gap-2 font-medium">
                   {inv.email} <RoleBadge role={inv.role} />
                 </div>
-                <div className="text-xs text-neutral-400">
+                <div className="text-xs text-slate-400">
                   Invited by {usernameById[inv.invited_by_user_id] ?? 'admin'} ·{' '}
                   <span className={expiresSoon ? 'text-red-500' : ''}>
                     expires {format(new Date(inv.expires_at), 'MMM d, yyyy')}
@@ -625,7 +625,7 @@ function ConfirmModal({
   return (
     <Overlay onClose={onCancel}>
       <h3 className="text-lg font-semibold">{title}</h3>
-      <p className="text-sm text-neutral-500 dark:text-neutral-400">{body}</p>
+      <p className="text-sm text-slate-400">{body}</p>
       <div className="flex justify-end gap-2">
         <button className="btn-secondary" onClick={onCancel}>
           Cancel
@@ -654,11 +654,11 @@ function PasswordModal({
   return (
     <Overlay>
       <h3 className="text-lg font-semibold">{title}</h3>
-      <p className="text-sm text-neutral-500 dark:text-neutral-400">
+      <p className="text-sm text-slate-400">
         Temporary password for <span className="font-medium">{username}</span>. It is shown only once — copy it now.
       </p>
       <div className="flex items-center gap-2">
-        <code className="flex-1 break-all rounded-md bg-neutral-100 p-2 font-mono text-sm dark:bg-neutral-800">{password}</code>
+        <code className="flex-1 break-all rounded-md bg-white/5 p-2 font-mono text-sm">{password}</code>
         <button className="btn-secondary !px-2" onClick={() => void copy(password, push)} title="Copy">
           <Copy className="h-4 w-4" />
         </button>
@@ -687,11 +687,11 @@ function LinkModal({
     <Overlay onClose={onDone}>
       <div className="flex items-start justify-between">
         <h3 className="text-lg font-semibold">Invitation Link</h3>
-        <button className="text-neutral-400 hover:text-neutral-600" onClick={onDone}>
+        <button className="text-slate-400 hover:text-slate-600" onClick={onDone}>
           <X className="h-5 w-5" />
         </button>
       </div>
-      <p className="text-sm text-neutral-500 dark:text-neutral-400">Share this link with {email}:</p>
+      <p className="text-sm text-slate-400">Share this link with {email}:</p>
       <div className="flex items-center gap-2">
         <input readOnly className={`${inputCls} font-mono`} value={link} onFocus={(e) => e.target.select()} />
         <button className="btn-secondary !px-2" onClick={() => void copy(link, push)} title="Copy">
@@ -747,7 +747,7 @@ function ResetPasswordModal({
   return (
     <Overlay onClose={onClose}>
       <h3 className="text-lg font-semibold">Reset Password</h3>
-      <p className="text-sm text-neutral-500 dark:text-neutral-400">
+      <p className="text-sm text-slate-400">
         Resetting the password for <span className="font-medium">{user.username}</span>.
       </p>
       <div className="flex flex-wrap gap-4 text-sm">

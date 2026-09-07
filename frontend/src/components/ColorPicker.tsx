@@ -19,20 +19,20 @@ export default function ColorPicker({ label, value, defaultValue, onChange }: Pr
           type="color"
           value={valid ? value : defaultValue}
           onChange={(e) => onChange(e.target.value)}
-          className="h-9 w-14 cursor-pointer rounded-md border border-neutral-300 dark:border-neutral-700"
+          className="h-9 w-14 cursor-pointer rounded-md border border-white/10"
           aria-label={`${label} picker`}
         />
         <input
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className={`w-28 rounded-md border px-3 py-2 font-mono text-sm dark:bg-neutral-800 ${
+          className={`w-28 rounded-lg border px-3 py-2 font-mono text-sm bg-slate-900/60 text-white ${
             valid
-              ? 'border-neutral-300 dark:border-neutral-700'
+              ? 'border-white/10'
               : 'border-error-400 text-error-600'
           }`}
         />
         <span
-          className="h-8 w-8 rounded-md border border-neutral-300 dark:border-neutral-700"
+          className="h-8 w-8 rounded-md border border-white/10"
           style={{ backgroundColor: valid ? value : defaultValue }}
         />
         <button

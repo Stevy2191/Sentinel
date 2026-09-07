@@ -47,19 +47,19 @@ export default function TimezoneSelector({ value, onChange }: Props) {
   return (
     <div>
       <div className="relative mb-2">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search timezones…"
-          className="w-full rounded-md border border-neutral-300 bg-white py-2 pl-9 pr-3 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+          className="w-full rounded-md border border-white/10 bg-slate-900/60 py-2 pl-9 pr-3 text-sm text-white placeholder-slate-500"
         />
       </div>
       <select
         size={6}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-md border border-neutral-300 bg-white p-1 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+        className="w-full rounded-md border border-white/10 bg-slate-900/60 p-1 text-sm text-white"
       >
         {filtered.map((z) => (
           <option key={z} value={z}>
@@ -67,7 +67,7 @@ export default function TimezoneSelector({ value, onChange }: Props) {
           </option>
         ))}
       </select>
-      <div className="mt-1 text-xs text-neutral-500">Current: {value}</div>
+      <div className="mt-1 text-xs text-slate-500">Current: {value}</div>
     </div>
   )
 }

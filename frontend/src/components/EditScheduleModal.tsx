@@ -117,7 +117,7 @@ export default function EditScheduleModal({
         className="rd-card max-h-[90vh] w-full max-w-md overflow-y-auto p-5"
       >
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="vs-title text-lg normal-case">Edit schedule</h2>
+          <h2 className="vs-title text-lg">Edit schedule</h2>
           <button
             type="button"
             onClick={onClose}

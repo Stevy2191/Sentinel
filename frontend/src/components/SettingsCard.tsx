@@ -13,7 +13,7 @@ export default function SettingsCard({ title, description, children }: Props) {
       <div className="mb-4">
         <h3 className="font-semibold">{title}</h3>
         {description && (
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">{description}</p>
+          <p className="text-sm text-slate-400">{description}</p>
         )}
       </div>
       <div className="space-y-4">{children}</div>

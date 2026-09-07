@@ -46,7 +46,7 @@ export default function PublicReport() {
     <div className="min-h-screen p-6" style={{ background: 'var(--vs-bg)' }}>
       <div className="mx-auto max-w-3xl space-y-5">
         <header className="border-b pb-5" style={{ borderColor: 'var(--vs-line)' }}>
-          <h1 className="vs-title text-2xl normal-case">{report.name}</h1>
+          <h1 className="vs-title text-2xl">{report.name}</h1>
           <div
             className="mt-2 flex flex-wrap items-center gap-3 text-sm"
             style={{ color: 'var(--vs-text-dim)' }}

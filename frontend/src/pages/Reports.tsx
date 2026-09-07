@@ -35,9 +35,9 @@ function dateInput(d: Date): string {
   return format(d, 'yyyy-MM-dd')
 }
 function respFill(ms: number): string {
-  if (ms < 200) return '#37F98A'
-  if (ms <= 500) return '#FFC24B'
-  return '#FF4D4D'
+  if (ms < 200) return '#10b981'
+  if (ms <= 500) return '#eab308'
+  return '#ef4444'
 }
 function uptimeTextColor(pct: number): string {
   if (pct < 95) return 'text-red-400'
@@ -180,8 +180,8 @@ export default function Reports() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="vs-title text-3xl">REPORTS</h1>
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">
+          <h1 className="vs-title text-4xl">Reports</h1>
+          <p className="text-sm text-slate-400">
             View uptime trends and performance analytics
           </p>
         </div>
@@ -199,7 +199,7 @@ export default function Reports() {
             className={`rounded-md px-4 py-2 text-sm font-medium capitalize ${
               tab === t
                 ? 'bg-primary-600 text-white'
-                : 'bg-white text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+                : 'bg-white/5 text-slate-300'
             }`}
           >
             {t}
@@ -218,32 +218,32 @@ export default function Reports() {
         </div>
         <div className="flex flex-wrap items-end gap-4">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-neutral-500">Start</span>
+            <span className="text-slate-500">Start</span>
             <input
               type="date"
               value={draftStart}
               onChange={(e) => setDraftStart(e.target.value)}
-              className="rounded-md border border-neutral-300 bg-white px-3 py-2 dark:border-neutral-700 dark:bg-neutral-800"
+              className="rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-white placeholder-slate-500"
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-neutral-500">End</span>
+            <span className="text-slate-500">End</span>
             <input
               type="date"
               value={draftEnd}
               onChange={(e) => setDraftEnd(e.target.value)}
-              className="rounded-md border border-neutral-300 bg-white px-3 py-2 dark:border-neutral-700 dark:bg-neutral-800"
+              className="rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-white placeholder-slate-500"
             />
           </label>
 
           {tab === 'timeline' ? (
             <>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="text-neutral-500">Monitor</span>
+                <span className="text-slate-500">Monitor</span>
                 <select
                   value={draftMonitor}
                   onChange={(e) => setDraftMonitor(e.target.value)}
-                  className="rounded-md border border-neutral-300 bg-white px-3 py-2 dark:border-neutral-700 dark:bg-neutral-800"
+                  className="rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-white placeholder-slate-500"
                 >
                   {monitors.map((m) => (
                     <option key={m.id} value={m.id}>
@@ -253,11 +253,11 @@ export default function Reports() {
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="text-neutral-500">Granularity</span>
+                <span className="text-slate-500">Granularity</span>
                 <select
                   value={granularity}
                   onChange={(e) => setGranularity(e.target.value as TimelineGranularity)}
-                  className="rounded-md border border-neutral-300 bg-white px-3 py-2 dark:border-neutral-700 dark:bg-neutral-800"
+                  className="rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-white placeholder-slate-500"
                 >
                   <option value="hourly">Hourly</option>
                   <option value="daily">Daily</option>
@@ -266,14 +266,14 @@ export default function Reports() {
             </>
           ) : (
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-neutral-500">Monitors (none = all)</span>
+              <span className="text-slate-500">Monitors (none = all)</span>
               <select
                 multiple
                 value={draftMonitorIds}
                 onChange={(e) =>
                   setDraftMonitorIds(Array.from(e.target.selectedOptions).map((o) => o.value))
                 }
-                className="h-24 min-w-[200px] rounded-md border border-neutral-300 bg-white px-3 py-2 dark:border-neutral-700 dark:bg-neutral-800"
+                className="h-24 min-w-[200px] rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-white placeholder-slate-500"
               >
                 {monitors.map((m) => (
                   <option key={m.id} value={m.id}>
@@ -294,16 +294,16 @@ export default function Reports() {
       {tab === 'timeline' && (
         <>
           {tlError && (
-            <div className="card border-error-300 p-4 text-error-700 dark:text-error-300">
+            <div className="card border-red-500/30 bg-red-500/10 p-4 text-red-400">
               {tlError.message}
             </div>
           )}
           {!applied.monitor ? (
-            <div className="card p-10 text-center text-neutral-500">Select a monitor.</div>
+            <div className="card p-10 text-center text-slate-500">Select a monitor.</div>
           ) : tlLoading ? (
-            <div className="card animate-pulse p-10 text-center text-neutral-500">Loading…</div>
+            <div className="card animate-pulse p-10 text-center text-slate-500">Loading…</div>
           ) : buckets.length === 0 ? (
-            <div className="card p-10 text-center text-neutral-500">
+            <div className="card p-10 text-center text-slate-500">
               No data for this range.
             </div>
           ) : (
@@ -319,13 +319,13 @@ export default function Reports() {
                       <Tooltip
                         labelFormatter={(l) => tickFmt(String(l))}
                         formatter={(v: number, name) => [name === 'uptime_percent' ? `${v}%` : v, 'Uptime']}
-                        contentStyle={{ background: '#0d141b', border: '1px solid #1e2a33', borderRadius: 8, color: '#e8f0f2' }}
+                        contentStyle={{ background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#e2e8f0' }}
                       />
                       <Area
                         type="monotone"
                         dataKey="uptime_percent"
-                        stroke="#37F98A"
-                        fill="#37F98A"
+                        stroke="#10b981"
+                        fill="#10b981"
                         fillOpacity={0.18}
                         strokeWidth={2}
                       />
@@ -346,7 +346,7 @@ export default function Reports() {
                         labelFormatter={(l) => tickFmt(String(l))}
                         formatter={(v: number) => [`${v}ms`, 'Avg response']}
                         cursor={{ fill: 'rgba(61, 225, 255, 0.06)' }}
-                        contentStyle={{ background: '#0d141b', border: '1px solid #1e2a33', borderRadius: 8, color: '#e8f0f2' }}
+                        contentStyle={{ background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#e2e8f0' }}
                       />
                       <Bar dataKey="avg_response_time_ms">
                         {buckets.map((b, i) => (
@@ -364,21 +364,21 @@ export default function Reports() {
                     <div className={`text-2xl font-bold ${uptimeTextColor(tlStats.avgUptime)}`}>
                       {tlStats.avgUptime.toFixed(2)}%
                     </div>
-                    <div className="text-xs text-neutral-500">Avg uptime</div>
+                    <div className="text-xs text-slate-500">Avg uptime</div>
                   </div>
                   <div className="card p-4 text-center">
                     <div className="text-2xl font-bold">{formatResponseTime(tlStats.avgResp)}</div>
-                    <div className="text-xs text-neutral-500">Avg response</div>
+                    <div className="text-xs text-slate-500">Avg response</div>
                   </div>
                   <div className="card p-4 text-center">
                     <div className="text-2xl font-bold">{tlStats.totalChecks}</div>
-                    <div className="text-xs text-neutral-500">Total checks</div>
+                    <div className="text-xs text-slate-500">Total checks</div>
                   </div>
                   <div className="card p-4 text-center">
                     <div className={`text-2xl font-bold ${tlStats.failed > 0 ? 'text-red-500' : ''}`}>
                       {tlStats.failed}
                     </div>
-                    <div className="text-xs text-neutral-500">Failed checks</div>
+                    <div className="text-xs text-slate-500">Failed checks</div>
                   </div>
                 </div>
               )}
@@ -391,14 +391,14 @@ export default function Reports() {
       {tab === 'summary' && (
         <>
           {smError && (
-            <div className="card border-error-300 p-4 text-error-700 dark:text-error-300">
+            <div className="card border-red-500/30 bg-red-500/10 p-4 text-red-400">
               {smError.message}
             </div>
           )}
           {smLoading ? (
-            <div className="card animate-pulse p-10 text-center text-neutral-500">Loading…</div>
+            <div className="card animate-pulse p-10 text-center text-slate-500">Loading…</div>
           ) : !summary || summary.monitors.length === 0 ? (
-            <div className="card p-10 text-center text-neutral-500">No data for this range.</div>
+            <div className="card p-10 text-center text-slate-500">No data for this range.</div>
           ) : (
             <>
               <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
@@ -406,36 +406,36 @@ export default function Reports() {
                   <div className={`text-2xl font-bold ${uptimeTextColor(summary.aggregate.avg_uptime)}`}>
                     {summary.aggregate.avg_uptime.toFixed(2)}%
                   </div>
-                  <div className="text-xs text-neutral-500">Avg uptime</div>
+                  <div className="text-xs text-slate-500">Avg uptime</div>
                 </div>
                 <div className="card p-4 text-center">
                   <div className="text-2xl font-bold text-emerald-500">
                     {summary.aggregate.best_uptime.toFixed(2)}%
                   </div>
-                  <div className="text-xs text-neutral-500">Best</div>
+                  <div className="text-xs text-slate-500">Best</div>
                 </div>
                 <div className="card p-4 text-center">
                   <div className="text-2xl font-bold text-red-500">
                     {summary.aggregate.worst_uptime.toFixed(2)}%
                   </div>
-                  <div className="text-xs text-neutral-500">Worst</div>
+                  <div className="text-xs text-slate-500">Worst</div>
                 </div>
                 <div className="card p-4 text-center">
                   <div className="text-2xl font-bold">{summary.aggregate.total_incidents}</div>
-                  <div className="text-xs text-neutral-500">Incidents</div>
+                  <div className="text-xs text-slate-500">Incidents</div>
                 </div>
                 <div className="card p-4 text-center">
                   <div className="text-2xl font-bold">
                     {summary.aggregate.total_downtime_minutes.toFixed(0)}m
                   </div>
-                  <div className="text-xs text-neutral-500">Downtime</div>
+                  <div className="text-xs text-slate-500">Downtime</div>
                 </div>
               </div>
 
               <div className="card overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
-                    <thead className="border-b border-neutral-200 text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+                    <thead className="border-b border-white/10 text-slate-400">
                       <tr>
                         <th className="px-4 py-3 font-medium">
                           <button className="flex items-center gap-1" onClick={() => toggleSort('name')}>
@@ -451,18 +451,18 @@ export default function Reports() {
                         <th className="px-4 py-3 font-medium">Downtime</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
+                    <tbody className="divide-y divide-white/5">
                       {sortedMonitors.map((m, i) => (
-                        <tr key={m.monitor_id} className={i % 2 ? 'bg-neutral-50/50 dark:bg-neutral-800/30' : ''}>
+                        <tr key={m.monitor_id} className={i % 2 ? 'bg-white/5' : ''}>
                           <td className="px-4 py-3 font-medium">{m.monitor_name}</td>
                           <td className="px-4 py-3">
                             <span
                               className={`rounded-md px-2 py-1 text-xs font-medium ${
                                 m.status === 'online'
-                                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                                  ? 'bg-emerald-500/20 text-emerald-400'
                                   : m.status === 'offline'
-                                    ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
-                                    : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+                                    ? 'bg-red-500/20 text-red-400'
+                                    : 'bg-white/5 text-slate-300'
                               }`}
                             >
                               {m.status}
@@ -471,7 +471,7 @@ export default function Reports() {
                           <td className={`px-4 py-3 font-semibold ${uptimeTextColor(m.uptime_percent)}`}>
                             {m.uptime_percent.toFixed(2)}%
                           </td>
-                          <td className="px-4 py-3 text-neutral-500">{m.downtime_minutes.toFixed(1)}m</td>
+                          <td className="px-4 py-3 text-slate-500">{m.downtime_minutes.toFixed(1)}m</td>
                         </tr>
                       ))}
                     </tbody>

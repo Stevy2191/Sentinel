@@ -18,7 +18,7 @@ import {
 } from '@/hooks/useMonitors'
 import { useToasts, Toaster } from '@/components/Toast'
 import { useUsers } from '@/hooks/useUsers'
-import { formatResponseTime, formatDate, getStatusBgColor } from '@/utils/formatters'
+import { formatResponseTime, formatDate } from '@/utils/formatters'
 import { monitorAccess, badgeToneClass } from '@/utils/monitorAccess'
 import type { Monitor, MonitorStatus, MonitorType } from '@/types'
 import MonitorTypeBadge from '@/components/MonitorTypeBadge'
@@ -27,7 +27,7 @@ const PAGE_SIZE = 50
 type SortKey = 'name' | 'status' | 'response'
 
 function responseColor(ms: number): string {
-  if (ms <= 0) return 'text-neutral-400'
+  if (ms <= 0) return 'text-slate-400'
   if (ms < 200) return 'text-emerald-500'
   if (ms <= 500) return 'text-amber-500'
   return 'text-red-500'
@@ -116,8 +116,8 @@ export default function Monitors() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="vs-title text-3xl">MONITORS</h1>
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">
+          <h1 className="vs-title text-4xl">Monitors</h1>
+          <p className="text-sm text-slate-400">
             {filtered.length} of {monitors.length} monitors
           </p>
         </div>
@@ -130,9 +130,9 @@ export default function Monitors() {
       {/* Filters */}
       <div className="card flex flex-wrap items-center gap-3 p-4">
         <div className="relative flex-1 min-w-[200px]">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
-            className="w-full rounded-md border border-neutral-300 bg-white py-2 pl-9 pr-3 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+            className="w-full rounded-lg border border-white/10 bg-slate-900/60 py-2 pl-9 pr-3 text-sm text-white placeholder-slate-500"
             placeholder="Search by name or URL"
             value={search}
             onChange={(e) => {
@@ -142,7 +142,7 @@ export default function Monitors() {
           />
         </div>
         <select
-          className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+          className="rd-select"
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value as MonitorType | '')}
         >
@@ -153,7 +153,7 @@ export default function Monitors() {
           <option value="dns">DNS</option>
         </select>
         <select
-          className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+          className="rd-select"
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as MonitorStatus | '')}
         >
@@ -166,7 +166,7 @@ export default function Monitors() {
 
       {error && (
         <div className="card flex items-center justify-between border-error-300 p-4">
-          <span className="text-error-700 dark:text-error-300">{error.message}</span>
+          <span className="text-red-400">{error.message}</span>
           <button className="btn-secondary" onClick={() => void refetch()}>
             Retry
           </button>
@@ -177,7 +177,7 @@ export default function Monitors() {
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-neutral-200 text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+            <thead className="border-b border-white/10 text-slate-400">
               <tr>
                 <th className="px-4 py-3 font-medium">
                   <button className="flex items-center gap-1" onClick={() => toggleSort('name')}>
@@ -202,18 +202,18 @@ export default function Monitors() {
                 <th className="px-4 py-3 text-right font-medium">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
+            <tbody className="divide-y divide-white/5">
               {loading && monitors.length === 0 ? (
                 Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i} className="animate-pulse">
                     <td colSpan={9} className="px-4 py-4">
-                      <div className="h-4 rounded bg-neutral-200 dark:bg-neutral-800" />
+                      <div className="h-4 rounded bg-white/10" />
                     </td>
                   </tr>
                 ))
               ) : pageItems.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-neutral-500">
+                  <td colSpan={9} className="px-4 py-10 text-center text-slate-500">
                     No monitors. Create your first one.
                   </td>
                 </tr>
@@ -221,19 +221,19 @@ export default function Monitors() {
                 pageItems.map((m) => (
                   <tr
                     key={m.id}
-                    className="cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
+                    className="cursor-pointer hover:bg-white/5"
                     onClick={() => navigate(`/monitors/${m.id}`)}
                   >
                     <td className="px-4 py-3">
                       <span className="font-medium">{m.name}</span>
-                      {!m.enabled && <span className="ml-2 text-xs text-neutral-400">paused</span>}
+                      {!m.enabled && <span className="ml-2 text-xs text-slate-400">paused</span>}
                     </td>
                     <td className="px-4 py-3">
                       <MonitorTypeBadge type={m.type} />
                     </td>
-                    <td className="px-4 py-3 text-neutral-500">
+                    <td className="px-4 py-3 text-slate-500">
                       {monitorAccess(m).isOwner ? (
-                        <span className="font-medium text-emerald-600 dark:text-emerald-400">You</span>
+                        <span className="font-medium text-emerald-400">You</span>
                       ) : (
                         usernameFor(m.owner_id) ?? '—'
                       )}
@@ -244,23 +244,37 @@ export default function Monitors() {
                           {monitorAccess(m).badge!.label}
                         </span>
                       ) : (
-                        <span className="text-xs text-neutral-400">Owner</span>
+                        <span className="text-xs text-slate-400">Owner</span>
                       )}
                     </td>
-                    <td className="max-w-[220px] truncate px-4 py-3 text-neutral-500">{m.url}</td>
+                    <td className="max-w-[220px] truncate px-4 py-3 text-slate-500">{m.url}</td>
                     <td className="px-4 py-3">
                       <span
-                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium ${getStatusBgColor(
-                          m.current_status
-                        )}`}
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${
+                          m.current_status === 'online'
+                            ? 'border-emerald-500/30 bg-emerald-500/20 text-emerald-400'
+                            : m.current_status === 'offline'
+                              ? 'border-red-500/30 bg-red-500/20 text-red-400'
+                              : 'border-slate-500/30 bg-slate-500/20 text-slate-400'
+                        }`}
                       >
-                        {m.current_status === 'offline' && (
-                          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />
-                        )}
-                        {m.current_status}
+                        <span
+                          className={`h-1.5 w-1.5 rounded-full ${
+                            m.current_status === 'online'
+                              ? 'bg-emerald-400'
+                              : m.current_status === 'offline'
+                                ? 'bg-red-400'
+                                : 'bg-slate-400'
+                          }`}
+                        />
+                        {m.current_status === 'online'
+                          ? 'Up'
+                          : m.current_status === 'offline'
+                            ? 'Down'
+                            : 'Pending'}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-neutral-500">
+                    <td className="px-4 py-3 text-slate-500">
                       {m.last_check_at ? formatDate(m.last_check_at) : 'Never'}
                     </td>
                     <td className={`px-4 py-3 font-medium ${responseColor(m.last_response_time_ms)}`}>
@@ -312,7 +326,7 @@ export default function Monitors() {
         </div>
       </div>
 
-      <div className="flex items-center justify-between text-sm text-neutral-500">
+      <div className="flex items-center justify-between text-sm text-slate-500">
         <span>
           Page {safePage} of {totalPages}
         </span>
@@ -335,7 +349,7 @@ export default function Monitors() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="card w-full max-w-sm p-6">
             <h3 className="text-lg font-semibold">Delete monitor?</h3>
-            <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
+            <p className="mt-2 text-sm text-slate-400">
               This permanently deletes the monitor and all its check history. This cannot be undone.
             </p>
             <div className="mt-6 flex justify-end gap-2">
