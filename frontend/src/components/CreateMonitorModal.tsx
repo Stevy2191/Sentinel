@@ -104,20 +104,14 @@ function Switch({
   hint,
   checked,
   onChange,
-  disabled = false,
 }: {
   label: string
   hint: string
   checked: boolean
   onChange: (v: boolean) => void
-  disabled?: boolean
 }) {
   return (
-    <div
-      className={`flex items-center justify-between gap-4 rounded-lg border border-white/10 bg-slate-800/40 p-4 ${
-        disabled ? 'opacity-60' : ''
-      }`}
-    >
+    <div className="flex items-center justify-between gap-4 rounded-lg border border-white/10 bg-slate-800/40 p-4">
       <div className="min-w-0">
         <p className="text-sm font-medium text-white">{label}</p>
         <p className="text-xs text-slate-500">{hint}</p>
@@ -127,9 +121,8 @@ function Switch({
         role="switch"
         aria-checked={checked}
         aria-label={label}
-        disabled={disabled}
         onClick={() => onChange(!checked)}
-        className={`relative h-7 w-12 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed ${
+        className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
           checked ? 'bg-emerald-600' : 'bg-slate-600'
         }`}
       >
@@ -178,8 +171,11 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
       timeout: 10,
       retryAttempts: 3,
       selectedNotifications: [],
-      // Verification on by default, matching the backend column default.
-      enableSSLVerify: true,
+      // Off by default. It is an opt-in check on the certificate, not on
+      // whether the service is up, and turning it on for a host with a
+      // self-signed or internal-CA certificate makes the monitor fail for a
+      // reason unrelated to the thing being monitored.
+      enableSSLVerify: false,
     }),
     [defaultCheckInterval]
   )
@@ -316,9 +312,9 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
         interval_seconds: interval,
         timeout_seconds: form.timeout,
         retries: form.retryAttempts,
-        // Only meaningful for HTTPS checks, but sent for every type so the
-        // stored value matches what the form showed.
-        ssl_verify: form.enableSSLVerify,
+        // Sent only for HTTP, the one type it affects. Other types are left to
+        // the column default rather than storing a value the form never showed.
+        ...(form.type === 'http' ? { ssl_verify: form.enableSSLVerify } : {}),
         // The explicit set that was ticked. [] means this monitor alerts
         // nowhere, which the API reads exactly that way.
         notify_channels: form.selectedNotifications,
@@ -568,22 +564,19 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
                 </p>
               </div>
 
-              <Switch
-                label="Verify SSL Certificate"
-                hint={
-                  form.type === 'http'
-                    ? 'Check SSL certificate validity (for HTTPS)'
-                    : 'Only applies to HTTPS checks — no effect on a ' + form.type.toUpperCase() + ' monitor'
-                }
-                checked={form.enableSSLVerify}
-                onChange={(v) => set('enableSSLVerify', v)}
-                disabled={form.type !== 'http'}
-              />
-              {form.type === 'http' && !form.enableSSLVerify && (
-                <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
-                  With verification off, an expired, self-signed or wrong-host certificate will not
-                  be reported — use this only for a host whose certificate you control.
-                </p>
+              {/* Only rendered for HTTP. It means nothing for DNS, PING or TCP,
+                  and a control that cannot do anything is just noise. */}
+              {form.type === 'http' && (
+                <Switch
+                  label="Verify SSL Certificate"
+                  hint={
+                    form.enableSSLVerify
+                      ? 'The check fails if the certificate is expired, self-signed or for another host'
+                      : 'Certificate problems are ignored — the check only reports whether the service responds'
+                  }
+                  checked={form.enableSSLVerify}
+                  onChange={(v) => set('enableSSLVerify', v)}
+                />
               )}
             </div>
           </section>
