@@ -69,6 +69,51 @@ export const CHANNEL_ORDER: ChannelName[] = ['email', 'slack', 'discord', 'teleg
 
 const BASE = '/settings/notification-channels'
 
+/** One channel as any authenticated user may see it: name and on/off, no config. */
+export interface AvailableChannel {
+  channel: ChannelName
+  enabled: boolean
+}
+
+/**
+ * useAvailableChannels lists the channels that can deliver an alert.
+ *
+ * Reads /notification-channels, not the admin listing: any user may create a
+ * monitor and therefore needs this, while the admin endpoint returns SMTP hosts
+ * and webhook URLs that a non-admin has no business seeing — and would 403 on
+ * anyway, leaving the picker silently empty.
+ *
+ * `enabled` gates the request so a closed modal does not fetch.
+ */
+export function useAvailableChannels(enabled = true) {
+  const [channels, setChannels] = useState<AvailableChannel[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!enabled) return
+    let active = true
+    setLoading(true)
+    setError(null)
+    api
+      .get<{ data: AvailableChannel[] }>('/notification-channels')
+      .then((r) => active && setChannels(r.data.data ?? []))
+      .catch((e) => {
+        if (!active) return
+        setChannels([])
+        setError((e as ApiError).message || 'Could not load notification channels')
+      })
+      .finally(() => active && setLoading(false))
+    return () => {
+      active = false
+    }
+  }, [enabled])
+
+  // Only a configured, switched-on channel can actually deliver.
+  const available = channels.filter((c) => c.enabled)
+  return { available, loading, error }
+}
+
 /** List all channel configs (secrets stripped by the backend). */
 export function useNotificationConfigs() {
   const [configs, setConfigs] = useState<NotificationConfig[]>([])

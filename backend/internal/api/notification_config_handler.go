@@ -35,6 +35,30 @@ func GetNotificationConfigsHandler(service *services.NotificationConfigService) 
 	}
 }
 
+// ListAvailableChannelsHandler handles GET /notification-channels for any
+// authenticated user. It answers exactly one question — which channels can
+// deliver an alert right now — so a monitor form can offer them.
+//
+// Deliberately separate from the admin listing rather than relaxing that one.
+// The admin response carries configuration: SMTP host, port and username,
+// webhook URLs. A webhook URL is itself a credential — anyone holding it can
+// post as the integration — so it must not reach a non-admin who only needs to
+// tick a box. This returns the channel name and whether it is on, nothing else.
+func ListAvailableChannelsHandler(service *services.NotificationConfigService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		configs, err := service.GetAllConfigs(c.Request.Context())
+		if err != nil {
+			respondInternal(c, "ListAvailableChannelsHandler", err)
+			return
+		}
+		out := make([]gin.H, 0, len(configs))
+		for _, cfg := range configs {
+			out = append(out, gin.H{"channel": cfg.Channel, "enabled": cfg.Enabled})
+		}
+		respondSuccess(c, http.StatusOK, out)
+	}
+}
+
 // GetNotificationConfigHandler handles GET /settings/notification-channels/:channel
 // (admin). Returns a single config including secrets, for form editing.
 func GetNotificationConfigHandler(service *services.NotificationConfigService) gin.HandlerFunc {
@@ -139,6 +163,10 @@ func DeleteNotificationConfigHandler(service *services.NotificationConfigService
 // RegisterNotificationConfigRoutes mounts the admin-only notification-channel
 // configuration endpoints on the given group (already behind AuthMiddleware).
 func RegisterNotificationConfigRoutes(rg *gin.RouterGroup, service *services.NotificationConfigService) {
+	// Readable by any authenticated user: choosing where a monitor's alerts go
+	// is part of creating a monitor, which is not an admin-only action.
+	rg.GET("/notification-channels", ListAvailableChannelsHandler(service))
+
 	g := rg.Group("/settings/notification-channels")
 	g.Use(RequireAdmin())
 	g.GET("", GetNotificationConfigsHandler(service))
