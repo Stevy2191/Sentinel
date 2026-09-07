@@ -40,6 +40,7 @@ import {
   getStatusBgColor,
 } from '@/utils/formatters'
 import type { Check, MonitorInput } from '@/types'
+import MonitorTypeBadge from '@/components/MonitorTypeBadge'
 
 // Format a Date for a datetime-local input (local time, minute precision).
 function toLocalInput(d: Date): string {
@@ -282,9 +283,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="font-display text-2xl font-semibold" style={{ color: 'var(--vs-text)' }}>{monitor.name}</h1>
-            <span className="rounded-md bg-neutral-100 px-2 py-1 text-xs font-semibold uppercase text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
-              {monitor.type}
-            </span>
+            <MonitorTypeBadge type={monitor.type} />
           </div>
           <span
             className={`mt-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium ${getStatusBgColor(
