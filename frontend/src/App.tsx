@@ -1,9 +1,8 @@
-import { Suspense, lazy, useEffect } from 'react'
+import { Suspense, lazy } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { ThemeProvider } from '@/context/ThemeContext'
-import { AuthProvider, useAuthContext } from '@/context/AuthContext'
-import { applyThemeColors } from '@/utils/themeUtils'
-import { PREF, setString } from '@/utils/preferences'
+import { AuthProvider } from '@/context/AuthContext'
+import { AppConfigProvider } from '@/context/AppConfigContext'
 import RequireAuth from '@/components/RequireAuth'
 import Layout from '@/components/Layout'
 import Auth from '@/pages/Auth'
@@ -44,31 +43,12 @@ function RouteFallback() {
   )
 }
 
-// ThemeSync applies the signed-in user's saved brand colours whenever they load
-// or change, so they follow the user across devices. Light/dark is not part of
-// this any more: the app is dark-only.
-function ThemeSync() {
-  const { currentUser } = useAuthContext()
-  const theme = currentUser?.theme
-  const primary = theme?.primary_color
-  const accent = theme?.accent_color
-
-  useEffect(() => {
-    if (!primary || !accent) return
-    applyThemeColors(primary, accent)
-    setString(PREF.primaryColor, primary)
-    setString(PREF.accentColor, accent)
-  }, [primary, accent])
-
-  return null
-}
-
 export default function App() {
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <ThemeSync />
-        <BrowserRouter>
+      <AppConfigProvider>
+        <AuthProvider>
+          <BrowserRouter>
           <Suspense fallback={<RouteFallback />}>
             <Routes>
             {/* Public routes. */}
@@ -118,8 +98,9 @@ export default function App() {
             </Route>
             </Routes>
           </Suspense>
-        </BrowserRouter>
-      </AuthProvider>
+          </BrowserRouter>
+        </AuthProvider>
+      </AppConfigProvider>
     </ThemeProvider>
   )
 }

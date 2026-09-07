@@ -25,15 +25,18 @@ var ErrEmailNotConfigured = errors.New("email is not configured (set SMTP_* envi
 
 // InvitationService manages tokenized account invitations.
 type InvitationService struct {
-	db     *gorm.DB
-	auth   *AuthService
-	logger *log.Logger
+	db      *gorm.DB
+	auth    *AuthService
+	baseURL BaseURLFunc
+	logger  *log.Logger
 }
 
 // NewInvitationService returns an InvitationService. It uses AuthService to
-// create the user when an invitation is accepted.
-func NewInvitationService(db *gorm.DB, auth *AuthService) *InvitationService {
-	return &InvitationService{db: db, auth: auth, logger: log.Default()}
+// create the user when an invitation is accepted, and baseURL to build the
+// accept link in the invitation email. A nil baseURL falls back to the
+// environment.
+func NewInvitationService(db *gorm.DB, auth *AuthService, baseURL BaseURLFunc) *InvitationService {
+	return &InvitationService{db: db, auth: auth, baseURL: baseURL, logger: log.Default()}
 }
 
 func generateInviteToken() (string, error) {
@@ -177,7 +180,13 @@ func (s *InvitationService) SendInvitationEmail(inv *models.Invitation, inviterN
 	if from == "" {
 		from = user
 	}
-	base := strings.TrimRight(strings.TrimSpace(os.Getenv("SENTINEL_BASE_URL")), "/")
+	base := ""
+	if s.baseURL != nil {
+		base = strings.TrimRight(strings.TrimSpace(s.baseURL()), "/")
+	}
+	if base == "" {
+		base = strings.TrimRight(strings.TrimSpace(os.Getenv("SENTINEL_BASE_URL")), "/")
+	}
 	if base == "" {
 		base = "http://localhost:3000"
 	}

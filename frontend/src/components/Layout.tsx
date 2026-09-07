@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { Menu, X, RefreshCw, Settings } from 'lucide-react'
 import { useAuthContext } from '@/context/AuthContext'
+import { useAppConfig } from '@/context/AppConfigContext'
 
 const nav = [
   { to: '/', label: 'Dashboard', end: true },
@@ -11,6 +12,18 @@ const nav = [
   { to: '/status-pages', label: 'Status Pages' },
   { to: '/reports', label: 'Reports' },
 ]
+
+/**
+ * Type size for the sidebar wordmark. A configurable name can be far longer
+ * than "Sentinel", and the sidebar is a fixed 224px, so the display size steps
+ * down before the name has to be cut. Truncation stays as the backstop for
+ * names too long to fit at any size.
+ */
+function wordmarkClass(name: string): string {
+  if (name.length <= 12) return 'text-xl'
+  if (name.length <= 20) return 'text-lg'
+  return 'text-base'
+}
 
 function navClass({ isActive }: { isActive: boolean }) {
   return `rd-nav ${isActive ? 'active' : ''}`
@@ -28,6 +41,7 @@ function greeting(): string {
 function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
   const navigate = useNavigate()
   const { currentUser, logout } = useAuthContext()
+  const { appName } = useAppConfig()
   const username = currentUser?.username ?? 'User'
   const role = currentUser?.is_admin ? 'Admin' : 'Member'
 
@@ -45,7 +59,12 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
     <>
       {/* Wordmark */}
       <div className="border-b border-white/10 p-6">
-        <div className="text-xl font-light tracking-wide text-white">Sentinel</div>
+        <div
+          className={`truncate font-light tracking-wide text-white ${wordmarkClass(appName)}`}
+          title={appName}
+        >
+          {appName}
+        </div>
         <div className="mt-2 text-xs text-slate-400">Uptime Monitor</div>
       </div>
 

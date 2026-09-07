@@ -3,12 +3,14 @@ import { Link } from 'react-router-dom'
 import { Check, X, Loader2, ArrowLeft } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { validatePassword } from '@/utils/passwordValidator'
+import { useAppConfig } from '@/context/AppConfigContext'
 
 type Mode = 'login' | 'register'
 
 const usernameRe = /^[a-zA-Z0-9_]{3,32}$/
 
 function Card({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+  const { appName } = useAppConfig()
   return (
     // Same gradient ground as the app shell, so signing in and landing on the
     // dashboard read as one surface rather than two products.
@@ -18,7 +20,7 @@ function Card({ title, subtitle, children }: { title: string; subtitle?: string;
         <div className="pointer-events-none absolute inset-0 rounded-xl bg-gradient-to-r from-emerald-500/0 via-emerald-500/5 to-cyan-500/0" />
         <div className="relative z-10">
           <div className="mb-8 text-center">
-            <h1 className="text-2xl font-light tracking-wide text-white">Sentinel</h1>
+            <h1 className="text-2xl font-light tracking-wide text-white">{appName}</h1>
             <p className="mt-2 text-xs text-slate-400">Uptime Monitor</p>
           </div>
           <div className="mb-6 text-center">
@@ -62,9 +64,11 @@ export default function Auth({ mode }: { mode: Mode }) {
   const [backup, setBackup] = useState('')
 
   // Whether the sign-up link/form should be offered. Registration may be closed
-  // by an admin; the very first account (setup) is always allowed. null = still
-  // loading, so we don't flash the link before we know.
-  const [signupAllowed, setSignupAllowed] = useState<boolean | null>(null)
+  // by an admin; the very first account (setup) is always allowed.
+  const { appName, registrationEnabled, setupRequired, loaded: configLoaded } = useAppConfig()
+  // null until the config has actually been read, so neither the sign-up link
+  // nor the "registration disabled" notice flashes before we know which is true.
+  const signupAllowed: boolean | null = configLoaded ? registrationEnabled || setupRequired : null
 
   useEffect(() => {
     if (mode === 'login') {
@@ -75,22 +79,6 @@ export default function Auth({ mode }: { mode: Mode }) {
     setError(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode])
-
-  // Fetch the public auth status to decide whether to offer registration.
-  useEffect(() => {
-    let active = true
-    fetch('/api/v1/auth/status')
-      .then((res) => res.json())
-      .then((body) => {
-        if (!active) return
-        const data = body?.data ?? {}
-        setSignupAllowed(Boolean(data.registration_enabled) || Boolean(data.setup_required))
-      })
-      .catch(() => active && setSignupAllowed(false))
-    return () => {
-      active = false
-    }
-  }, [])
 
   const strength = useMemo(() => validatePassword(password), [password])
   const usernameValid = usernameRe.test(username)
@@ -292,7 +280,7 @@ export default function Auth({ mode }: { mode: Mode }) {
 
   // ---- Login view ----
   return (
-    <Card title="Sign In to Sentinel">
+    <Card title={`Sign In to ${appName}`}>
       <form onSubmit={handleLogin} className="space-y-4">
         <input
           ref={usernameRef}

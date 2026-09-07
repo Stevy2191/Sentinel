@@ -153,12 +153,19 @@ func queryInt(c *gin.Context, key string, def int) int {
 }
 
 // CreateMonitorHandler handles POST /api/v1/monitors.
-func CreateMonitorHandler(monitorService *services.MonitorService) gin.HandlerFunc {
+func CreateMonitorHandler(monitorService *services.MonitorService, settingsService *services.SettingsService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var monitor models.Monitor
 		if err := c.ShouldBindJSON(&monitor); err != nil {
 			respondError(c, http.StatusBadRequest, "invalid request body: "+err.Error())
 			return
+		}
+
+		// An omitted interval takes the instance default rather than failing
+		// validation, so the setting governs API clients and not only the form.
+		if monitor.IntervalSeconds == 0 && settingsService != nil {
+			monitor.IntervalSeconds = settingsService.DefaultCheckInterval(
+				c.Request.Context(), models.DefaultMonitorCheckInterval)
 		}
 
 		if err := monitor.Validate(); err != nil {
@@ -560,9 +567,14 @@ func GetMaintenanceStatusHandler(monitorService *services.MonitorService) gin.Ha
 
 // RegisterMonitorRoutes wires the monitor handlers onto a router group at
 // /api/v1/monitors.
-func RegisterMonitorRoutes(rg *gin.RouterGroup, monitorService *services.MonitorService, checkService *services.CheckService) {
+func RegisterMonitorRoutes(
+	rg *gin.RouterGroup,
+	monitorService *services.MonitorService,
+	checkService *services.CheckService,
+	settingsService *services.SettingsService,
+) {
 	monitors := rg.Group("/monitors")
-	monitors.POST("", CreateMonitorHandler(monitorService))
+	monitors.POST("", CreateMonitorHandler(monitorService, settingsService))
 	monitors.GET("", GetMonitorsHandler(monitorService))
 	monitors.GET("/:id", GetMonitorHandler(monitorService))
 	monitors.PUT("/:id", UpdateMonitorHandler(monitorService))

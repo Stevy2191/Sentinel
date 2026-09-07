@@ -55,8 +55,11 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       TIMEZONE: ${TIMEZONE:-UTC}
       REPORTS_DIR: /app/reports
-      # Used for links in scheduled report email.
+      # Used for links in outgoing email. Seeds the stored setting on first run
+      # only; after that Settings -> System in the web UI is authoritative.
       SENTINEL_BASE_URL: ${SENTINEL_BASE_URL:-}
+      # Instance display name, also seed-once. Empty leaves it as "Sentinel".
+      APP_NAME: ${APP_NAME:-}
       JWT_SECRET: ${JWT_SECRET:-}
       # Initial state of self-registration (seeded on first run; an admin can
       # change it at runtime and that persists regardless of this value).
