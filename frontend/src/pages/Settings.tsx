@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { Upload, Trash2, Volume2, ExternalLink } from 'lucide-react'
-import { useTheme, type ThemeMode } from '@/context/ThemeContext'
 import { useToasts, Toaster } from '@/components/Toast'
 import SettingsCard from '@/components/SettingsCard'
 import ColorPicker from '@/components/ColorPicker'
@@ -97,7 +96,6 @@ function RadioRow<T extends string>({
 }
 
 export default function Settings() {
-  const { mode, setMode } = useTheme()
   const { toasts, push } = useToasts()
   const { currentUser } = useAuthContext()
   const { saveTheme } = useThemeColors()
@@ -227,9 +225,9 @@ export default function Settings() {
     setString(PREF.dateFormat, dateFormat)
     setString(PREF.reportRange, reportRange)
     applyStoredPreferences()
-    // Sync theme colors + mode to the backend so they follow the user across devices.
+    // Sync theme colours to the backend so they follow the user across devices.
     try {
-      await saveTheme(primary, accent, mode)
+      await saveTheme(primary, accent)
       push('Settings saved successfully', 'success')
     } catch {
       push('Settings saved on this device, but theme sync to the server failed', 'error')
@@ -238,7 +236,6 @@ export default function Settings() {
 
   const doReset = () => {
     resetAllPreferences()
-    setMode('auto')
     setLogo('')
     setPrimary(DEFAULTS.primaryColor)
     setAccent(DEFAULTS.accentColor)
@@ -310,18 +307,6 @@ export default function Settings() {
                 </button>
               )}
             </div>
-          </SettingsCard>
-
-          <SettingsCard title="Theme">
-            <RadioRow<ThemeMode>
-              value={mode}
-              onChange={setMode}
-              options={[
-                { value: 'auto', label: 'Auto' },
-                { value: 'light', label: 'Light' },
-                { value: 'dark', label: 'Dark' },
-              ]}
-            />
           </SettingsCard>
 
           <SettingsCard title="Brand Colors" description="Persisted and used for live previews.">
