@@ -1,72 +1,31 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from 'react'
+import { createContext, useContext, useEffect, type ReactNode } from 'react'
 
-export type ThemeMode = 'light' | 'dark' | 'auto'
-
+/**
+ * The app is dark-only.
+ *
+ * The redesign's surfaces (slate-950 ground, slate-800/40 cards, white/10
+ * borders) have no light equivalent, so a light setting could not be honoured
+ * without a second palette. Rather than leave a control that silently does
+ * nothing, the choice is gone: this provider just guarantees the `dark` class
+ * is on <html> and exposes nothing to switch.
+ *
+ * public/theme-init.js already sets the class before first paint to avoid a
+ * flash; this is the belt-and-braces for client-side navigation and for any
+ * code that re-renders the root.
+ */
 interface ThemeContextValue {
-  mode: ThemeMode
-  isDark: boolean
-  setMode: (mode: ThemeMode) => void
-  toggle: () => void
+  /** Always true. Kept so callers can read the resolved theme without branching. */
+  isDark: true
 }
-
-const STORAGE_KEY = 'sentinel-theme'
 
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined)
 
-// The redesign commits to a fixed dark theme, so the app is always dark
-// regardless of the stored mode (light mode is retired for the new look).
-function resolveIsDark(_mode: ThemeMode): boolean {
-  return true
-}
+const value: ThemeContextValue = { isDark: true }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [mode, setModeState] = useState<ThemeMode>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY) as ThemeMode | null
-    return saved ?? 'auto'
-  })
-  const [isDark, setIsDark] = useState<boolean>(() => resolveIsDark(mode))
-
-  const apply = useCallback((next: ThemeMode) => {
-    const dark = resolveIsDark(next)
-    setIsDark(dark)
-    document.documentElement.classList.toggle('dark', dark)
-  }, [])
-
-  const setMode = useCallback(
-    (next: ThemeMode) => {
-      setModeState(next)
-      localStorage.setItem(STORAGE_KEY, next)
-      apply(next)
-    },
-    [apply]
-  )
-
-  const toggle = useCallback(() => {
-    setMode(isDark ? 'light' : 'dark')
-  }, [isDark, setMode])
-
-  // Re-apply on mount and react to OS changes while in 'auto' mode.
   useEffect(() => {
-    apply(mode)
-    if (mode !== 'auto') return
-    const mql = window.matchMedia('(prefers-color-scheme: dark)')
-    const handler = () => apply('auto')
-    mql.addEventListener('change', handler)
-    return () => mql.removeEventListener('change', handler)
-  }, [mode, apply])
-
-  const value = useMemo(
-    () => ({ mode, isDark, setMode, toggle }),
-    [mode, isDark, setMode, toggle]
-  )
+    document.documentElement.classList.add('dark')
+  }, [])
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
 }
