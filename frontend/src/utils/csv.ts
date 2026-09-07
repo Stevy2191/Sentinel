@@ -16,7 +16,7 @@ export function parseCsv(text: string): string[][] {
 
   // Strip a UTF-8 BOM, which spreadsheet exports routinely prepend and which
   // would otherwise become part of the first header name.
-  const src = text.replace(/^﻿/, '')
+  const src = text.replace(/^\uFEFF/, '')
 
   const endCell = () => {
     row.push(cell)

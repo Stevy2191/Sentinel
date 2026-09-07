@@ -66,8 +66,7 @@ function useDismissOnOutsideClick(open: boolean, close: () => void) {
   return ref
 }
 
-const STATUS_OPTIONS = ['all', 'online', 'offline', 'maintenance', 'paused', 'unknown'] as const
-type StatusFilter = (typeof STATUS_OPTIONS)[number]
+type StatusFilter = 'all' | 'online' | 'offline' | 'maintenance' | 'paused' | 'unknown'
 
 const SORTS = [
   { key: 'down-first', label: 'Down first' },

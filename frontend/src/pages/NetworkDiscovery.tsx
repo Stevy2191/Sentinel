@@ -59,7 +59,9 @@ export default function NetworkDiscovery() {
   const [adding, setAdding] = useState(false)
   const [done, setDone] = useState<BulkResponse | null>(null)
 
-  const hosts = result?.hosts ?? []
+  // Memoised so the fallback [] keeps a stable identity: a fresh array each
+  // render would invalidate every downstream useMemo that depends on it.
+  const hosts = useMemo(() => result?.hosts ?? [], [result])
   const allSelected = hosts.length > 0 && selected.size === hosts.length
 
   const runScan = async () => {
