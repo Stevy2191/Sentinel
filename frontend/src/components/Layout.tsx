@@ -79,15 +79,21 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
 
       {/* User footer */}
       <div className="border-t border-white/10 p-4">
-        <div className="flex w-full items-center gap-3 rounded-lg p-3">
+        {/* The name is the way into your own profile — password, two-factor and
+            sessions — which is where people look for it. */}
+        <button
+          className="flex w-full items-center gap-3 rounded-lg p-3 text-left transition hover:bg-white/5"
+          onClick={() => go('/profile')}
+          title="View your profile"
+        >
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-sm font-semibold text-slate-900">
             {username.charAt(0).toUpperCase()}
           </div>
-          <div className="min-w-0 flex-1 text-left">
+          <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-medium text-white">{username}</div>
             <div className="text-xs text-slate-500">{role}</div>
           </div>
-        </div>
+        </button>
         <div className="mt-1 space-y-0.5">
           {currentUser?.is_admin && (
             <button
@@ -97,14 +103,6 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
               Users
             </button>
           )}
-          {/* Not admin-gated: this page holds password change and 2FA for every
-              user. The registration toggle inside it is admin-only on its own. */}
-          <button
-            className="w-full rounded-lg px-4 py-2 text-left text-xs text-slate-400 transition hover:bg-white/5 hover:text-slate-300"
-            onClick={() => go('/settings/security')}
-          >
-            Security
-          </button>
           <button
             className="w-full rounded-lg px-4 py-2 text-left text-xs text-slate-400 transition hover:bg-white/5 hover:text-slate-300"
             onClick={() => go('/settings')}

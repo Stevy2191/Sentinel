@@ -1,5 +1,5 @@
 import { Suspense, lazy } from 'react'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { ThemeProvider } from '@/context/ThemeContext'
 import { AuthProvider } from '@/context/AuthContext'
 import { AppConfigProvider } from '@/context/AppConfigContext'
@@ -29,7 +29,7 @@ const PublicReport = lazy(() => import('@/pages/PublicReport'))
 const StatusPages = lazy(() => import('@/pages/StatusPages'))
 const Notifications = lazy(() => import('@/pages/Notifications'))
 const Settings = lazy(() => import('@/pages/Settings'))
-const SecuritySettings = lazy(() => import('@/pages/SecuritySettings'))
+const Profile = lazy(() => import('@/pages/Profile'))
 const AdminUsers = lazy(() => import('@/pages/AdminUsers'))
 const PublicStatus = lazy(() => import('@/pages/PublicStatus'))
 const InvitationAccept = lazy(() => import('@/pages/InvitationAccept'))
@@ -92,7 +92,10 @@ export default function App() {
               <Route path="/status-pages/:slug/edit" element={<StatusPages mode="edit" />} />
               <Route path="/notifications" element={<Notifications />} />
               <Route path="/settings" element={<Settings />} />
-              <Route path="/settings/security" element={<SecuritySettings />} />
+              <Route path="/profile" element={<Profile />} />
+              {/* The profile page used to be Settings → Security. Kept as a
+                  redirect so existing links and bookmarks still land. */}
+              <Route path="/settings/security" element={<Navigate to="/profile" replace />} />
               {/* Admin-only page; AdminUsers itself redirects non-admins to /dashboard. */}
               <Route path="/admin/users" element={<AdminUsers />} />
             </Route>

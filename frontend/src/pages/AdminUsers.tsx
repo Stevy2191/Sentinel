@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowUpDown, Copy, Trash2, Shield, Send, Mail, Link as LinkIcon, X } from 'lucide-react'
+import { ArrowUpDown, Copy, Trash2, Shield, Send, Mail, Link as LinkIcon, X, UserCheck, UserX } from 'lucide-react'
 import { format } from 'date-fns'
+import api, { type ApiError } from '@/services/api'
 import { useAuthContext } from '@/context/AuthContext'
 import { useToasts, Toaster } from '@/components/Toast'
 import {
@@ -84,6 +85,37 @@ export default function AdminUsers() {
   const { resend } = useResendInvitation()
   const { cancel } = useCancelInvitation()
 
+  // ---- Self-registration toggle ----
+  // null while loading, and also if the read fails: the checkbox stays disabled
+  // rather than showing "off" for a value we could not actually read.
+  const [regEnabled, setRegEnabled] = useState<boolean | null>(null)
+  const [regBusy, setRegBusy] = useState(false)
+
+  useEffect(() => {
+    if (!isAdmin) return
+    let active = true
+    api
+      .get<{ data: { registration_enabled: boolean } }>('/settings')
+      .then((res) => active && setRegEnabled(res.data.data.registration_enabled))
+      .catch(() => active && setRegEnabled(null))
+    return () => {
+      active = false
+    }
+  }, [isAdmin])
+
+  const toggleRegistration = async (next: boolean) => {
+    setRegBusy(true)
+    try {
+      await api.patch('/settings/registration', { enabled: next })
+      setRegEnabled(next)
+      push(next ? 'Registration opened' : 'Registration closed', 'success')
+    } catch (err) {
+      push((err as ApiError).message || 'Failed to update registration setting', 'error')
+    } finally {
+      setRegBusy(false)
+    }
+  }
+
   // Redirect non-admins away.
   useEffect(() => {
     if (currentUser && !isAdmin) navigate('/dashboard')
@@ -152,8 +184,44 @@ export default function AdminUsers() {
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <div>
-        <h1 className="vs-title text-4xl">User management</h1>
-        <p className="text-sm text-slate-400">Create, invite, and manage users</p>
+        <h1 className="vs-title text-4xl">Users</h1>
+        <p className="text-sm text-slate-400">Create, invite, and manage who can use this instance</p>
+      </div>
+
+      {/* ---- Who may create an account ----
+          Lives here rather than under Settings: it decides who becomes a user,
+          which is the same question the rest of this page answers. */}
+      <div className="card space-y-4 p-5">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold">User Registration</h2>
+          <span
+            className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium ${
+              regEnabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+            }`}
+          >
+            {regEnabled ? <UserCheck className="h-3.5 w-3.5" /> : <UserX className="h-3.5 w-3.5" />}
+            {regEnabled === null ? 'Loading…' : regEnabled ? 'Enabled' : 'Disabled'}
+          </span>
+        </div>
+        <p className="text-sm text-slate-400">
+          Whether anyone can create their own account from the sign-in screen. With this off, people
+          join only by the invitations below.
+        </p>
+        <label className="flex cursor-pointer items-center gap-3">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded text-primary-400 focus:ring-primary-500"
+            checked={!!regEnabled}
+            disabled={regEnabled === null || regBusy}
+            onChange={(e) => void toggleRegistration(e.target.checked)}
+          />
+          <span className="text-sm">Allow anyone to register</span>
+        </label>
+        {regEnabled === false && (
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
+            Registration is closed — only existing and invited users can sign in.
+          </div>
+        )}
       </div>
 
       {/* ---- Users list ---- */}

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { format } from 'date-fns'
 import { Volume2, ExternalLink, Loader2 } from 'lucide-react'
 import api from '@/services/api'
@@ -383,10 +384,10 @@ export default function Settings() {
 
               <div className="flex items-center justify-between border-t border-white/10 pt-4">
                 <p className="text-xs text-slate-500">
-                  User registration is on the{' '}
-                  <a className="text-primary-400 hover:underline" href="/settings/security">
-                    Security
-                  </a>{' '}
+                  Who may create an account is on the{' '}
+                  <Link className="text-primary-400 hover:underline" to="/admin/users">
+                    Users
+                  </Link>{' '}
                   page.
                 </p>
                 <button
