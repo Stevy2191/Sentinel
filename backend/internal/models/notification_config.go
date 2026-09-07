@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -58,9 +59,12 @@ var ValidNotificationChannels = map[string]bool{
 // notification delivery channel. Secret fields (SMTP password, Telegram token,
 // webhook URLs) are stored here but stripped from list responses via HideSecrets.
 type NotificationConfig struct {
-	ID      uuid.UUID `json:"id" gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
-	Channel string    `json:"channel" gorm:"column:channel;not null"` // email, slack, discord, telegram, ntfy, webhook
-	Enabled bool      `json:"enabled" gorm:"column:enabled"`
+	ID uuid.UUID `json:"id" gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
+	// Name is the operator-facing label. An install can hold several channels of
+	// the same type, so the type alone no longer identifies one.
+	Name    string `json:"name" gorm:"column:name;not null"`
+	Channel string `json:"channel" gorm:"column:channel;not null"` // email, slack, discord, telegram, ntfy, webhook
+	Enabled bool   `json:"enabled" gorm:"column:enabled"`
 
 	// Email/SMTP
 	SMTPHost     *string `json:"smtp_host" gorm:"column:smtp_host"`
@@ -94,6 +98,13 @@ type NotificationConfig struct {
 	LastTestAt      *time.Time `json:"last_test_at" gorm:"column:last_test_at"`
 	LastTestSuccess *bool      `json:"last_test_success" gorm:"column:last_test_success"`
 	LastTestError   *string    `json:"last_test_error" gorm:"column:last_test_error"`
+
+	// Details is a short, non-secret summary of where this channel delivers,
+	// computed for list responses. It exists because the fields that identify a
+	// destination are often the same fields that are secret — a webhook URL is
+	// a credential — so the client cannot derive one safely from what it is
+	// given. Not persisted.
+	Details string `json:"details,omitempty" gorm:"-"`
 
 	CreatedAt time.Time `json:"created_at" gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt time.Time `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
@@ -228,8 +239,63 @@ func (nc *NotificationConfig) Validate() error {
 // HideSecrets removes sensitive fields so a config is safe to include in list
 // responses. Call this before returning configs to the frontend in bulk.
 func (nc *NotificationConfig) HideSecrets() {
+	// Computed before the secrets are cleared, since the summary is derived
+	// from them — the host of a webhook URL, for instance.
+	nc.Details = nc.Summary()
 	nc.SMTPPassword = nil
 	nc.TelegramBotToken = nil
 	nc.WebhookURL = nil
 	nc.NtfyAuthToken = nil
+}
+
+// Summary describes where this channel delivers, in one line, without
+// disclosing anything that would let the reader deliver there themselves. For
+// URL-based channels that means the host only: the path of a Slack or Discord
+// webhook is the secret part.
+func (nc *NotificationConfig) Summary() string {
+	switch nc.Channel {
+	case "email":
+		host := derefOr(nc.SMTPHost, "")
+		if host == "" {
+			return "not configured"
+		}
+		if nc.SMTPPort != nil && *nc.SMTPPort > 0 {
+			return fmt.Sprintf("%s:%d", host, *nc.SMTPPort)
+		}
+		return host
+	case "telegram":
+		if chat := derefOr(nc.TelegramChatID, ""); chat != "" {
+			return "chat " + chat
+		}
+		return "not configured"
+	case "ntfy":
+		topic := derefOr(nc.NtfyTopic, "")
+		if topic == "" {
+			return "not configured"
+		}
+		base := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(
+			derefOr(nc.NtfyURL, "https://ntfy.sh"), "https://"), "http://"), "/")
+		return base + "/" + topic
+	default:
+		raw := derefOr(nc.WebhookURL, "")
+		if raw == "" {
+			return "not configured"
+		}
+		u, err := url.Parse(raw)
+		if err != nil || u.Host == "" {
+			return "configured"
+		}
+		return u.Host
+	}
+}
+
+// derefOr returns *p trimmed, or fallback when p is nil or blank.
+func derefOr(p *string, fallback string) string {
+	if p == nil {
+		return fallback
+	}
+	if v := strings.TrimSpace(*p); v != "" {
+		return v
+	}
+	return fallback
 }
