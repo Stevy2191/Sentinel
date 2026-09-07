@@ -17,6 +17,8 @@ import StatusPageForm, { statusPageToForm } from '@/components/StatusPageForm'
 import MonitorList from '@/components/MonitorList'
 import { formatDate } from '@/utils/formatters'
 import type { StatusPageInput } from '@/types'
+import ShimmerStatCard from '@/components/ShimmerStatCard'
+import { useCardShimmer } from '@/hooks/useCardShimmer'
 
 type Mode = 'list' | 'create' | 'detail' | 'edit'
 
@@ -49,6 +51,9 @@ function StatusPageList() {
     }
   }
 
+  const shimmer = useCardShimmer(['spTotal', 'spPublished', 'spDraft'])
+  const publishedCount = pages.filter((p) => p.published).length
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -61,6 +66,44 @@ function StatusPageList() {
         <button className="btn-primary" onClick={() => navigate('/status-pages/create')}>
           <Plus className="h-4 w-4" /> Create New Status Page
         </button>
+      </div>
+
+      {/* Overview. Counts come from the pages already loaded, so the figures
+          always agree with the list below rather than a second query. */}
+      <div className="grid gap-4 sm:grid-cols-3">
+        <ShimmerStatCard
+          title="Total Status Pages"
+          value={pages.length}
+          subtitle={pages.length === 1 ? 'page' : 'pages'}
+          colorType="responseTime"
+          onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'spTotal')}
+          onMouseEnter={() => shimmer.handleCardMouseEnter('spTotal')}
+          onMouseLeave={() => shimmer.handleCardMouseLeave('spTotal')}
+          showShimmer={shimmer.isShown('spTotal')}
+          shimmerStyle={shimmer.getShimmerStyle('spTotal')}
+        />
+        <ShimmerStatCard
+          title="Published"
+          value={publishedCount}
+          subtitle="publicly reachable"
+          colorType="agents"
+          onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'spPublished')}
+          onMouseEnter={() => shimmer.handleCardMouseEnter('spPublished')}
+          onMouseLeave={() => shimmer.handleCardMouseLeave('spPublished')}
+          showShimmer={shimmer.isShown('spPublished')}
+          shimmerStyle={shimmer.getShimmerStyle('spPublished')}
+        />
+        <ShimmerStatCard
+          title="Unpublished"
+          value={pages.length - publishedCount}
+          subtitle="draft only"
+          colorType="incidents"
+          onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'spDraft')}
+          onMouseEnter={() => shimmer.handleCardMouseEnter('spDraft')}
+          onMouseLeave={() => shimmer.handleCardMouseLeave('spDraft')}
+          showShimmer={shimmer.isShown('spDraft')}
+          shimmerStyle={shimmer.getShimmerStyle('spDraft')}
+        />
       </div>
 
       {error && (
