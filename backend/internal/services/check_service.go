@@ -93,7 +93,9 @@ func (s *CheckService) ExecuteCheck(ctx context.Context, monitor *models.Monitor
 // nil error; a non-nil error indicates the check could not be attempted.
 func (s *CheckService) ExecuteHTTPCheck(ctx context.Context, monitor *models.Monitor) (*models.Check, error) {
 	timeout := s.checkTimeout(monitor)
-	client := netguard.NewGuardedHTTPClient(timeout)
+	// Certificate verification is per-monitor: on unless someone deliberately
+	// turned it off for this target.
+	client := netguard.NewGuardedHTTPClientTLS(timeout, monitor.VerifyTLS())
 
 	method := strings.ToUpper(strings.TrimSpace(monitor.Method))
 	if method == "" {

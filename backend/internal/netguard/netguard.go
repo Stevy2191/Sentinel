@@ -12,6 +12,7 @@
 package netguard
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
@@ -136,10 +137,25 @@ func SafeDialer(timeout time.Duration) *net.Dialer {
 // DialControl, so it can't be used to reach a blocked address - including via
 // a redirect, since each redirect is dialed through the same Transport.
 func NewGuardedHTTPClient(timeout time.Duration) *http.Client {
-	return &http.Client{
-		Timeout: timeout,
-		Transport: &http.Transport{
-			DialContext: SafeDialer(timeout).DialContext,
-		},
+	return NewGuardedHTTPClientTLS(timeout, true)
+}
+
+// NewGuardedHTTPClientTLS is NewGuardedHTTPClient with control over certificate
+// verification. Pass verify=false only where a caller has deliberately asked to
+// skip it for a specific target — an internal CA or a self-signed certificate
+// on a host they own. It never becomes the default: every path that does not
+// name a preference gets verification.
+//
+// The SSRF dialer guard is applied either way; disabling verification changes
+// what is trusted about the certificate, not which hosts may be reached.
+func NewGuardedHTTPClientTLS(timeout time.Duration, verify bool) *http.Client {
+	transport := &http.Transport{
+		DialContext: SafeDialer(timeout).DialContext,
 	}
+	if !verify {
+		transport.TLSClientConfig = &tls.Config{
+			InsecureSkipVerify: true, //nolint:gosec // deliberate, per-monitor opt-in
+		}
+	}
+	return &http.Client{Timeout: timeout, Transport: transport}
 }
