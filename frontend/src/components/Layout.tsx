@@ -7,7 +7,7 @@ const nav = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/monitors', label: 'Monitors' },
   { to: '/ssl', label: 'SSL & Domains' },
-  { to: '/server-monitoring', label: 'Instance Monitoring' },
+  { to: '/server-monitoring', label: 'Server Monitoring' },
   { to: '/status-pages', label: 'Status Pages' },
   { to: '/reports', label: 'Reports' },
 ]

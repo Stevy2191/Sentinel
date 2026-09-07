@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useMonitorUptime, type HourPoint } from '@/hooks/useMonitorUptime'
+import { useMonitorUptime, type RecentCheck } from '@/hooks/useMonitorUptime'
 import DetailPanel, { uptimeColor } from '@/components/DetailPanel'
 import { formatResponseTime } from '@/utils/formatters'
 import { monitorAccess, badgeToneClass } from '@/utils/monitorAccess'
@@ -56,24 +56,35 @@ const statusPill: Record<Tone, { cls: string; dot: string; label: string }> = {
   },
 }
 
-// Bar colour per hourly bucket. `nodata` and unobserved hours read as an empty
-// slot rather than a passing check, so a new monitor does not show a solid
-// green history it never earned.
-const barClass: Record<string, string> = {
-  up: 'bg-emerald-500',
-  down: 'bg-red-500',
-  partial: 'bg-yellow-500',
-  nodata: 'bg-slate-700',
+// Bar colour per check outcome. A timeout is distinguished from an outright
+// failure: both are down, but they fail differently and it is worth seeing.
+const barClass: Record<RecentCheck['status'], string> = {
+  success: 'bg-emerald-500',
+  failed: 'bg-red-500',
+  timeout: 'bg-yellow-500',
 }
 
-function UptimeBars({ hours, loading }: { hours: HourPoint[]; loading: boolean }) {
-  // Take the most recent BARS buckets, oldest-to-newest left-to-right, and pad
-  // the left with empty slots when the monitor has less history than that.
+/** "2:05 PM" — enough to place a check without crowding the tooltip. */
+function checkTitle(c: RecentCheck): string {
+  const when = new Date(c.timestamp).toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+  const detail =
+    c.status === 'success' ? `${c.response_time_ms}ms` : c.error_message || c.status
+  return `${when} · ${detail}`
+}
+
+function UptimeBars({ checks, loading }: { checks: RecentCheck[]; loading: boolean }) {
+  // Oldest-to-newest left-to-right (the API already orders them that way), with
+  // empty slots padding the left when the monitor has run fewer than BARS times.
   const cells = useMemo(() => {
-    const recent = hours.slice(-BARS)
+    const recent = checks.slice(-BARS)
     const pad = Array.from({ length: Math.max(0, BARS - recent.length) }, () => null)
     return [...pad, ...recent]
-  }, [hours])
+  }, [checks])
 
   if (loading) {
     return (
@@ -87,13 +98,11 @@ function UptimeBars({ hours, loading }: { hours: HourPoint[]; loading: boolean }
 
   return (
     <div className="flex gap-px">
-      {cells.map((h, i) => (
+      {cells.map((c, i) => (
         <div
           key={i}
-          className={`h-3 w-1 rounded-sm ${
-            h && h.observed ? (barClass[h.status] ?? 'bg-slate-700') : 'bg-slate-800'
-          }`}
-          title={h ? `${h.status} · ${h.uptime.toFixed(1)}%` : 'no data'}
+          className={`h-3 w-1 rounded-sm ${c ? barClass[c.status] : 'bg-slate-800'}`}
+          title={c ? checkTitle(c) : 'no check yet'}
         />
       ))}
     </div>
@@ -109,6 +118,8 @@ interface RowProps {
   onToggle: (id: string) => void
   onChanged: () => void
   push: (msg: string, type?: 'success' | 'error' | 'info') => void
+  /** Changes on each dashboard refresh, re-fetching this row's checks. */
+  refreshKey?: unknown
 }
 
 function MonitorRow({
@@ -120,15 +131,22 @@ function MonitorRow({
   onToggle,
   onChanged,
   push,
+  refreshKey,
 }: RowProps) {
   // One fetch per row powers both the bar strip and the uptime percentage,
   // and feeds the detail panel when the row is opened.
-  const { data: uptime, loading } = useMonitorUptime(monitor.id, '24h')
+  const { data: uptime, loading } = useMonitorUptime(monitor.id, '24h', true, refreshKey)
 
   const access = monitorAccess(monitor)
   const tone = toneOf(monitor)
   const pill = statusPill[tone]
-  const pct = uptime?.uptime_24h ?? uptime24h
+  // Pass rate over the same checks the strip draws, so the cell is internally
+  // consistent. Falls back to the summary endpoint's 24h figure only until this
+  // row's own request lands. The 24h/7d/30d windows are still shown, labelled,
+  // in the detail panel that opens beneath the row.
+  const recent = uptime?.recent_checks ?? []
+  const checkCount = Math.min(recent.length, BARS)
+  const pct = uptime ? uptime.recent_uptime : uptime24h
   const checked = monitor.last_check_at
     ? new Date(monitor.last_check_at).toLocaleTimeString([], {
         hour: '2-digit',
@@ -176,19 +194,21 @@ function MonitorRow({
 
         <td className="px-4 py-3">
           <div className="flex items-center gap-2">
-            <UptimeBars hours={uptime?.hourly_data ?? []} loading={loading} />
+            <UptimeBars checks={uptime?.recent_checks ?? []} loading={loading} />
             <span
               className={`whitespace-nowrap text-xs font-medium tabular-nums ${
                 pct != null ? uptimeColor(pct) : 'text-slate-500'
               }`}
             >
-              {pct != null ? `${pct.toFixed(1)}%` : '—'}
+              {pct != null ? `${pct.toFixed(1)}%` : '\u2014'}
             </span>
           </div>
-          {/* The reference labels this "Last 20 checks". The API exposes hourly
-              buckets rather than individual checks, so the caption names what
-              the bars actually are. */}
-          <div className="text-xs text-slate-500">Last {BARS} hours</div>
+          {/* Both the strip and the percentage describe the same sample: the
+              last N checks, whenever they happened. The caption names the real
+              count so a monitor with only six checks does not claim twenty. */}
+          <div className="text-xs text-slate-500">
+            {checkCount > 0 ? `Last ${checkCount} check${checkCount === 1 ? '' : 's'}` : 'No checks yet'}
+          </div>
         </td>
 
         <td className="px-4 py-3 text-xs text-slate-500">{checked}</td>
@@ -240,6 +260,8 @@ interface Props {
   usernameFor: (id: string | null | undefined) => string | undefined
   onChanged: () => void
   push: (msg: string, type?: 'success' | 'error' | 'info') => void
+  /** Changes on each dashboard refresh, keeping every row's strip current. */
+  refreshKey?: unknown
 }
 
 /**
@@ -256,6 +278,7 @@ export default function MonitorTable({
   usernameFor,
   onChanged,
   push,
+  refreshKey,
 }: Props) {
   return (
     <div className="overflow-hidden rounded-lg border border-white/10 bg-slate-800/40 backdrop-blur-sm">
@@ -284,6 +307,7 @@ export default function MonitorTable({
                 onToggle={onToggle}
                 onChanged={onChanged}
                 push={push}
+                refreshKey={refreshKey}
               />
             ))}
           </tbody>

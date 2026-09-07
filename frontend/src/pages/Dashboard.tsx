@@ -882,6 +882,7 @@ export default function Dashboard() {
                     usernameFor={usernameFor}
                     onChanged={() => void refetchAll()}
                     push={push}
+                    refreshKey={refreshedAt}
                   />
                 )}
               </GroupSection>
@@ -907,6 +908,7 @@ export default function Dashboard() {
                   usernameFor={usernameFor}
                   onChanged={() => void refetchAll()}
                   push={push}
+                  refreshKey={refreshedAt}
                 />
               </GroupSection>
             ) : (
@@ -919,6 +921,7 @@ export default function Dashboard() {
                 usernameFor={usernameFor}
                 onChanged={() => void refetchAll()}
                 push={push}
+                refreshKey={refreshedAt}
               />
             ))}
         </div>

@@ -5,6 +5,7 @@ import (
 	"math"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +14,17 @@ import (
 
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
 	"github.com/Stevy2191/Sentinel/backend/internal/services"
+)
+
+const (
+	// defaultRecentChecks matches the number of bars the dashboard's uptime
+	// column draws.
+	defaultRecentChecks = 20
+	// maxRecentChecks caps the "checks" query parameter.
+	maxRecentChecks = 200
+	// checkStatusSuccess is the stored status of a passing check. Duplicated
+	// from the services package, whose copy is unexported.
+	checkStatusSuccess = "success"
 )
 
 // round2 rounds a float to two decimal places.
@@ -247,10 +259,49 @@ func spanInHour(intervals []interval, hourStart, hourEnd, now time.Time) span {
 	return out
 }
 
+// buildRecentChecks turns a newest-first run of checks into the oldest-first
+// series the dashboard's per-check strip draws, plus the pass rate across
+// exactly those checks.
+//
+// The pass rate is a pointer so "no checks yet" can be reported as null: a
+// monitor that has never run has no pass rate, which is a different thing from
+// one where every check failed, and collapsing them to 0% would show a brand
+// new monitor as totally broken.
+func buildRecentChecks(newestFirst []models.Check) ([]gin.H, *float64) {
+	out := make([]gin.H, 0, len(newestFirst))
+	passed := 0
+	for i := len(newestFirst) - 1; i >= 0; i-- {
+		ch := newestFirst[i]
+		if ch.Status == checkStatusSuccess {
+			passed++
+		}
+		out = append(out, gin.H{
+			"status":           ch.Status,
+			"response_time_ms": ch.ResponseTimeMs,
+			"status_code":      ch.StatusCode,
+			"error_message":    ch.ErrorMessage,
+			"timestamp":        ch.Timestamp.UTC().Format(time.RFC3339),
+		})
+	}
+	if len(newestFirst) == 0 {
+		return out, nil
+	}
+	v := round2(float64(passed) / float64(len(newestFirst)) * 100)
+	return out, &v
+}
+
 // GetUptimeHistoryHandler handles GET /api/v1/monitors/:id/uptime-history. It
 // returns 24h/7d/30d uptime (incident-based, consistent with the other reports),
-// a 24-bucket hourly uptime series for sparklines, and a 24-hour hourly response
-// time series for the detail chart — all in one request.
+// a 24-bucket hourly uptime series for sparklines, a 24-hour hourly response
+// time series for the detail chart, and the last N individual checks — all in
+// one request.
+//
+// "recent_checks" is deliberately NOT time-bounded: it is the last N rows for
+// the monitor whenever they happened, so the dashboard's per-check strip stays
+// populated for a monitor that checks hourly or has been paused, where a
+// 24-hour window would show mostly empty slots. Its "uptime" is the pass rate
+// across exactly those checks, so the strip and the percentage beside it always
+// describe the same sample.
 //
 // Each hourly bucket carries two views of the hour. "uptime"/"status" summarize
 // the checks recorded in it (what the sparkline draws), while "down_*" and
@@ -280,6 +331,19 @@ func GetUptimeHistoryHandler(
 		default:
 			respondError(c, http.StatusBadRequest, "range must be 24h, 7d, or 30d")
 			return
+		}
+
+		// How many individual checks the caller wants in the strip. Bounded so a
+		// crafted value cannot ask the database for an unbounded scan.
+		recentLimit := defaultRecentChecks
+		if raw := c.Query("checks"); raw != "" {
+			n, err := strconv.Atoi(raw)
+			if err != nil || n < 1 || n > maxRecentChecks {
+				respondError(c, http.StatusBadRequest,
+					fmt.Sprintf("checks must be an integer between 1 and %d", maxRecentChecks))
+				return
+			}
+			recentLimit = n
 		}
 
 		ctx := c.Request.Context()
@@ -408,12 +472,23 @@ func GetUptimeHistoryHandler(
 			responseData = append(responseData, gin.H{"time": fmt.Sprintf("%02d:00", k.Hour()), "responseTime": avg})
 		}
 
+		// The per-check strip. GetRecentChecks returns newest-first; the strip is
+		// drawn oldest-to-newest, so it is reversed here rather than in the client.
+		recent, err := checkService.GetRecentChecks(ctx, id, recentLimit)
+		if err != nil {
+			respondInternal(c, "GetUptimeHistoryHandler", err)
+			return
+		}
+		recentChecks, recentUptime := buildRecentChecks(recent)
+
 		respondSuccess(c, http.StatusOK, gin.H{
 			"uptime_24h":         displayUptime(uptimeOver(24*time.Hour), currentlyOffline),
 			"uptime_7d":          displayUptime(uptimeOver(7*24*time.Hour), currentlyOffline),
 			"uptime_30d":         displayUptime(uptimeOver(30*24*time.Hour), currentlyOffline),
 			"hourly_data":        hourly,
 			"response_time_data": responseData,
+			"recent_checks":      recentChecks,
+			"recent_uptime":      recentUptime,
 		})
 	}
 }
