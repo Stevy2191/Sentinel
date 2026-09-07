@@ -97,6 +97,7 @@ function NewMenu({
   onDiscover,
   onGroup,
   isAdmin,
+  fullWidth = false,
 }: {
   onSingle: () => void
   onWizard: () => void
@@ -104,6 +105,8 @@ function NewMenu({
   onDiscover: () => void
   onGroup: () => void
   isAdmin: boolean
+  /** Fills its container — used in the dashboard's narrow right column. */
+  fullWidth?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const ref = useDismissOnOutsideClick(open, useCallback(() => setOpen(false), []))
@@ -117,9 +120,9 @@ function NewMenu({
   ]
 
   return (
-    <div ref={ref} className="relative shrink-0">
+    <div ref={ref} className={`relative ${fullWidth ? 'w-full' : 'shrink-0'}`}>
       <button
-        className="rd-btn rd-btn-primary"
+        className={`rd-btn rd-btn-primary ${fullWidth ? 'w-full justify-center' : ''}`}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
@@ -130,8 +133,7 @@ function NewMenu({
       {open && (
         <div
           role="menu"
-          className="absolute right-0 z-40 mt-2 w-52 overflow-hidden rounded-lg py-1 shadow-xl"
-          style={{ backgroundColor: 'var(--vs-panel)', border: '1px solid var(--vs-line)' }}
+          className="absolute right-0 z-40 mt-2 w-52 overflow-hidden rounded-lg border border-white/10 bg-slate-900 py-1 shadow-xl"
         >
           {items.map((item) => (
             <button
@@ -141,10 +143,9 @@ function NewMenu({
                 setOpen(false)
                 item.onClick()
               }}
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors hover:bg-white/5"
-              style={{ color: 'var(--vs-text)' }}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-white transition-colors hover:bg-white/5"
             >
-              <item.icon className="h-4 w-4 shrink-0" style={{ color: 'var(--vs-cyan)' }} />
+              <item.icon className="h-4 w-4 shrink-0 text-cyan-400" />
               <span className="flex-1">{item.label}</span>
             </button>
           ))}
@@ -715,9 +716,18 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Right third: one tile per monitor type in play. Clicking filters
-            the table below to that type. */}
-        <div className="lg:col-span-1">
+        {/* Right third: creating a monitor sits above one tile per type in
+            play. Clicking a tile filters the table below to that type. */}
+        <div className="space-y-3 lg:col-span-1">
+          <NewMenu
+            fullWidth
+            onSingle={() => navigate('/monitors/create')}
+            onWizard={() => navigate('/monitors/new/wizard')}
+            onBulk={() => navigate('/monitors/bulk')}
+            onDiscover={() => navigate('/monitors/discover')}
+            onGroup={() => setModal({ mode: 'create' })}
+            isAdmin={isAdmin}
+          />
           <div className="grid grid-cols-2 gap-3">
             {byType
               .filter((t) => t.count > 0)
@@ -811,14 +821,6 @@ export default function Dashboard() {
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
         </button>
 
-        <NewMenu
-          onSingle={() => navigate('/monitors/create')}
-          onWizard={() => navigate('/monitors/new/wizard')}
-          onBulk={() => navigate('/monitors/bulk')}
-          onDiscover={() => navigate('/monitors/discover')}
-          onGroup={() => setModal({ mode: 'create' })}
-	  isAdmin={isAdmin}
-        />
       </div>
 
       {error && (
