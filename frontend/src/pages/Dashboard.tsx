@@ -28,6 +28,7 @@ import { useToasts, Toaster } from '@/components/Toast'
 import ColorPicker from '@/components/ColorPicker'
 import GroupSection from '@/components/GroupSection'
 import MonitorTable from '@/components/MonitorTable'
+import CreateMonitorModal from '@/components/CreateMonitorModal'
 import { REPORT_PERIODS, type ReportPeriod } from '@/utils/reportPeriods'
 import type { Monitor, MonitorGroup } from '@/types'
 import { useCardShimmer } from '@/hooks/useCardShimmer'
@@ -411,6 +412,7 @@ export default function Dashboard() {
   }, [period])
   const { report: periodSummary, loading: periodLoading } = useSummaryReport(periodRange.start, periodRange.end)
 
+  const [createOpen, setCreateOpen] = useState(false)
   const [refreshedAt, setRefreshedAt] = useState(() => Date.now())
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
@@ -721,7 +723,7 @@ export default function Dashboard() {
         <div className="space-y-3 lg:col-span-1">
           <NewMenu
             fullWidth
-            onSingle={() => navigate('/monitors/create')}
+            onSingle={() => setCreateOpen(true)}
             onWizard={() => navigate('/monitors/new/wizard')}
             onBulk={() => navigate('/monitors/bulk')}
             onDiscover={() => navigate('/monitors/discover')}
@@ -844,7 +846,7 @@ export default function Dashboard() {
           <p className="text-sm text-slate-400">
             Create your first monitor to start tracking uptime.
           </p>
-          <button className="btn-primary" onClick={() => navigate('/monitors/create')}>
+          <button className="btn-primary" onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4" /> Create Your First Monitor
           </button>
         </div>
@@ -929,6 +931,13 @@ export default function Dashboard() {
         </div>
       )}
       </div>
+
+      <CreateMonitorModal
+        isOpen={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={() => void refetchAll()}
+        push={push}
+      />
 
       {modal && (
         <GroupModal mode={modal.mode} group={modal.group} onClose={() => setModal(null)} onSaved={() => void refetchAll()} push={push} />
