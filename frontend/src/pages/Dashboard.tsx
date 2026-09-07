@@ -30,6 +30,9 @@ import GroupSection from '@/components/GroupSection'
 import MonitorCard from '@/components/MonitorCard'
 import StatusSidebar, { REPORT_PERIODS, type ReportPeriod } from '@/components/StatusSidebar'
 import type { Monitor, MonitorGroup } from '@/types'
+import { useCardShimmer } from '@/hooks/useCardShimmer'
+import ShimmerStatCard from '@/components/ShimmerStatCard'
+import ShimmerTypeCard from '@/components/ShimmerTypeCard'
 
 const REFRESH_MS = 30_000
 const DEFAULT_GROUP_COLOR = '#37F98A'
@@ -445,6 +448,44 @@ export default function Dashboard() {
     return { down, up, paused, active: monitors.length - paused, total: monitors.length }
   }, [monitors])
 
+  // Overview figures for the hero cards. Average response time is computed from
+  // each monitor's last recorded value rather than a separate API call, so the
+  // number always matches what the cards below are showing.
+  const overview = useMemo(() => {
+    const timed = monitors.filter((m) => m.enabled && m.last_response_time_ms > 0)
+    const avgResponse = timed.length
+      ? Math.round(timed.reduce((sum, m) => sum + m.last_response_time_ms, 0) / timed.length)
+      : 0
+    return { avgResponse, timedCount: timed.length }
+  }, [monitors])
+
+  // Counts per monitor type, for the four type cards.
+  const byType = useMemo(() => {
+    const keys = ['dns', 'http', 'ping', 'tcp'] as const
+    return keys.map((key) => {
+      const of = monitors.filter((m) => m.type === key)
+      return {
+        key,
+        label: key.toUpperCase(),
+        count: of.length,
+        online: of.filter((m) => m.enabled && m.current_status === 'online').length,
+      }
+    })
+  }, [monitors])
+
+  // One shimmer position per card, so the highlight follows the cursor on the
+  // hovered card only.
+  const shimmer = useCardShimmer([
+    'status',
+    'responseTime',
+    'incidents',
+    'agents',
+    'dns',
+    'http',
+    'ping',
+    'tcp',
+  ])
+
   const allTags = useMemo(() => {
     const s = new Set<string>()
     for (const m of monitors) (m.tags ?? []).forEach((t) => s.add(t))
@@ -530,6 +571,141 @@ export default function Dashboard() {
     // The inner-scroll layout is a desktop affordance: below xl the sidebar
     // stacks and the page scrolls normally, which suits a narrow screen better.
     <div className="flex flex-col gap-4 xl:h-full">
+      {/* ---- Overview -------------------------------------------------- */}
+      <div className="shrink-0 space-y-4">
+        <div>
+          <h1 className="text-3xl font-light text-white">System Overview</h1>
+          <p className="mt-1 text-sm text-slate-400">
+            {counts.total} monitor{counts.total === 1 ? '' : 's'} &middot; {counts.active} active
+            {counts.paused > 0 && ` \u00b7 ${counts.paused} paused`}
+          </p>
+        </div>
+
+        {/* Headline status. Emerald when everything answers, yellow while some
+            are down, red only when nothing active is up. */}
+        <div
+          className={`relative overflow-hidden rounded-lg border p-6 backdrop-blur-sm transition-all group ${
+            counts.down === 0
+              ? 'border-emerald-500/30 bg-gradient-to-br from-emerald-600/15 to-slate-800/40'
+              : counts.up === 0
+                ? 'border-red-500/30 bg-gradient-to-br from-red-600/15 to-slate-800/40'
+                : 'border-yellow-500/30 bg-gradient-to-br from-yellow-600/15 to-slate-800/40'
+          }`}
+          onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'status')}
+          onMouseEnter={() => shimmer.handleCardMouseEnter('status')}
+          onMouseLeave={() => shimmer.handleCardMouseLeave('status')}
+        >
+          <div
+            className={`pointer-events-none absolute right-0 top-0 -mr-10 -mt-10 h-20 w-20 rounded-full blur-2xl transition-all ${
+              counts.down === 0
+                ? 'bg-emerald-500/10 group-hover:bg-emerald-500/20'
+                : counts.up === 0
+                  ? 'bg-red-500/10 group-hover:bg-red-500/20'
+                  : 'bg-yellow-500/10 group-hover:bg-yellow-500/20'
+            }`}
+          />
+          {shimmer.isShown('status') && (
+            <div
+              className="pointer-events-none absolute inset-0 rounded-lg transition-all duration-75"
+              style={shimmer.getShimmerStyle('status')}
+            />
+          )}
+          <div className="relative z-10 flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <div
+                className={`mb-2 text-xs font-semibold uppercase tracking-widest ${
+                  counts.down === 0
+                    ? 'text-emerald-400'
+                    : counts.up === 0
+                      ? 'text-red-400'
+                      : 'text-yellow-400'
+                }`}
+              >
+                System status
+              </div>
+              <div className="text-3xl font-light text-white">
+                {counts.down === 0 ? 'Operational' : counts.up === 0 ? 'Major outage' : 'Degraded'}
+              </div>
+            </div>
+            <div className="flex gap-6 text-sm">
+              <div>
+                <div className="text-xs uppercase tracking-widest text-slate-400">Up</div>
+                <div className="text-2xl font-light text-emerald-400">{counts.up}</div>
+              </div>
+              <div>
+                <div className="text-xs uppercase tracking-widest text-slate-400">Down</div>
+                <div className="text-2xl font-light text-red-400">{counts.down}</div>
+              </div>
+              <div>
+                <div className="text-xs uppercase tracking-widest text-slate-400">Paused</div>
+                <div className="text-2xl font-light text-slate-300">{counts.paused}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Three stat cards, each with its own cursor highlight. */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <ShimmerStatCard
+            title="Avg Response Time"
+            value={overview.avgResponse > 0 ? `${overview.avgResponse}ms` : '\u2014'}
+            subtitle={
+              overview.timedCount > 0 ? `across ${overview.timedCount} monitors` : 'no data yet'
+            }
+            colorType="responseTime"
+            onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'responseTime')}
+            onMouseEnter={() => shimmer.handleCardMouseEnter('responseTime')}
+            onMouseLeave={() => shimmer.handleCardMouseLeave('responseTime')}
+            showShimmer={shimmer.isShown('responseTime')}
+            shimmerStyle={shimmer.getShimmerStyle('responseTime')}
+          />
+          <ShimmerStatCard
+            title="Total Incidents"
+            value={summary?.aggregate.total_incidents ?? 0}
+            subtitle="last 24 hours"
+            colorType="incidents"
+            onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'incidents')}
+            onMouseEnter={() => shimmer.handleCardMouseEnter('incidents')}
+            onMouseLeave={() => shimmer.handleCardMouseLeave('incidents')}
+            showShimmer={shimmer.isShown('incidents')}
+            shimmerStyle={shimmer.getShimmerStyle('incidents')}
+          />
+          {/* Agents are not implemented yet - see the Server Monitoring page.
+              Shown as zero with an explicit note rather than repurposing the
+              monitor count, which would read as a working feature. */}
+          <ShimmerStatCard
+            title="Monitoring Agents"
+            value={0}
+            subtitle="coming soon"
+            colorType="agents"
+            onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'agents')}
+            onMouseEnter={() => shimmer.handleCardMouseEnter('agents')}
+            onMouseLeave={() => shimmer.handleCardMouseLeave('agents')}
+            showShimmer={shimmer.isShown('agents')}
+            shimmerStyle={shimmer.getShimmerStyle('agents')}
+          />
+        </div>
+
+        {/* Type breakdown. Clicking a card filters the list below to that type. */}
+        <div className="grid gap-4 sm:grid-cols-2">
+          {byType.map((t) => (
+            <ShimmerTypeCard
+              key={t.key}
+              label={t.label}
+              count={t.count}
+              online={t.online}
+              colorType={t.key}
+              onClick={() => setTypeFilter(typeFilter === t.key ? 'all' : t.key)}
+              onMouseMove={(e) => shimmer.handleCardMouseMove(e, t.key)}
+              onMouseEnter={() => shimmer.handleCardMouseEnter(t.key)}
+              onMouseLeave={() => shimmer.handleCardMouseLeave(t.key)}
+              showShimmer={shimmer.isShown(t.key)}
+              shimmerStyle={shimmer.getShimmerStyle(t.key)}
+            />
+          ))}
+        </div>
+      </div>
+
       {/* Toolbar: everything needed to find a monitor, on one line. */}
       <div className="flex shrink-0 flex-wrap items-center gap-2.5">
         {/* normal-case overrides vs-title's uppercase: the title is set as
