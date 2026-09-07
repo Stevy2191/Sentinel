@@ -12,15 +12,16 @@
     -webkit-tap-highlight-color: transparent;
   }
 
+  /* The reference's ground: a slate-950 → slate-900 → slate-950 diagonal.
+     It is set on <body> rather than on a wrapping div so it also backs the
+     overscroll area and any portalled overlay, instead of stopping at the
+     app root and letting white show through underneath. */
   body {
-    @apply bg-neutral-50 text-neutral-900 antialiased;
+    @apply min-h-screen bg-slate-950 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white antialiased;
+    background-attachment: fixed;
     /* Respect notch/rounded-corner safe areas when installed as a PWA. */
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
       env(safe-area-inset-left);
-  }
-
-  .dark body {
-    @apply bg-neutral-950 text-neutral-100;
   }
 
   /* Larger tap targets on touch devices (WCAG 2.5.5) without bloating desktop.
@@ -44,302 +45,164 @@
       font-size: 16px;
     }
   }
+
+  /* Default styling for text controls inside a card.
+
+     Wrapped in :where() so the whole selector weighs the same as a single
+     class. Tailwind's @layer is build-time bucketing, not a native cascade
+     layer, so ordering does NOT rescue a more specific selector: without
+     :where() this rule outranks a per-input utility and silently dropped
+     `pl-9` on the search fields, putting the text under the icon. At equal
+     specificity source order decides, and utilities are emitted last. */
+  .card :where(input:not([type='checkbox']):not([type='radio'])),
+  .card :where(select),
+  .card :where(textarea) {
+    @apply rounded-lg border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white placeholder-slate-500;
+  }
+  .card :where(input:not([type='checkbox']):not([type='radio'])):focus,
+  .card :where(select):focus,
+  .card :where(textarea):focus {
+    @apply border-emerald-500/50 outline-none ring-1 ring-emerald-500/30;
+  }
+  .card :where(input[type='checkbox'], input[type='radio']) {
+    @apply accent-emerald-500;
+  }
+
+  /* Native dropdown popups are painted by the OS, which defaults to a light
+     list on a dark page. Naming the scheme keeps them dark to match. */
+  select option {
+    background-color: #0f172a;
+    color: #e2e8f0;
+  }
 }
 
+/* ============================================================
+   Surfaces and controls, taken from design-reference.jsx.
+
+   The reference expresses everything as Tailwind utilities inline. These
+   classes exist so the ~20 pages that are not the Dashboard pick up the same
+   language without each one being rewritten by hand — a page using `.card`
+   gets the reference's exact card, and changing it here changes all of them.
+   ============================================================ */
 @layer components {
-  /* Shared surface for every page. Restyling here rather than in each page is
-     what keeps Reports, Settings, Security, Status Pages and Monitor Detail
-     consistent with the Dashboard without rewriting them.
-     Note this commits the app to the dark scheme: the redesign's ground is
-     slate-950 and there is no light equivalent of these surfaces. */
+  /* The reference card: translucent slate-800, hairline white border, blur. */
   .card {
     @apply rounded-lg border border-white/10 bg-slate-800/40 backdrop-blur-sm;
   }
 
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:opacity-50 dark:focus:ring-offset-neutral-900;
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 disabled:cursor-not-allowed disabled:opacity-50;
   }
 
-  /* Primary actions carry the operational emerald, matching the Dashboard. */
+  /* Primary actions carry the operational emerald. */
   .btn-primary {
-    @apply btn bg-emerald-600 text-white hover:bg-emerald-500 focus:ring-emerald-500;
+    @apply btn bg-emerald-600 text-white hover:bg-emerald-500;
   }
 
   .btn-secondary {
-    @apply btn border border-white/10 bg-slate-800/60 text-slate-200 hover:bg-slate-700/60 hover:text-white focus:ring-slate-500;
-  }
-}
-
-/* ============================================================
-   "Vital Signs" — bedside-monitor instrument language.
-   rd-* class names are kept from the prior redesign so existing markup
-   re-skins in place; the look underneath is now a clinical monitor.
-   ============================================================ */
-@layer components {
-  /* Every text control on the restyled pages. Scoped to .card so the
-     Dashboard's own bespoke controls are left alone. */
-  .card input:not([type='checkbox']):not([type='radio']),
-  .card select,
-  .card textarea {
-    @apply rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white placeholder-slate-500;
-  }
-  .card input:not([type='checkbox']):not([type='radio']):focus,
-  .card select:focus,
-  .card textarea:focus {
-    @apply border-emerald-500/60 outline-none ring-1 ring-emerald-500/40;
-  }
-  .card input[type='checkbox'] {
-    @apply accent-emerald-500;
+    @apply btn border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white;
   }
 
-  /* Silkscreen label — the little device captions above readouts. */
+  .btn-danger {
+    @apply btn border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 hover:text-red-300;
+  }
+
+  /* Section eyebrow: the small uppercase caption above a readout. Colour is
+     left to the caller so each card's accent carries through. */
   .vs-eyebrow {
-    font-family: theme('fontFamily.display');
-    font-weight: 600;
-    font-size: 0.6875rem;
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
-    color: var(--vs-text-dim);
+    @apply text-xs font-semibold uppercase tracking-widest text-slate-400;
   }
 
-  /* Digital readout — mono, tabular figures for numbers that update. */
+  /* Page and section headings. The reference sets headings in a light weight
+     at a large size, in sentence case — not as uppercase instrument labels. */
+  .vs-title {
+    @apply font-light text-white;
+    letter-spacing: -0.01em;
+    line-height: 1.15;
+  }
+
+  /* Numbers that update. Tabular figures stop columns from jittering. */
   .vs-readout {
-    font-family: theme('fontFamily.mono');
     font-variant-numeric: tabular-nums;
     font-feature-settings: 'tnum' 1;
-    letter-spacing: -0.01em;
   }
 
-  /* Big instrument heading. */
-  .vs-title {
-    font-family: theme('fontFamily.display');
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--vs-text);
-    line-height: 1;
-  }
-
-  /* Nav = channel selector on the console. Dim silkscreen labels; the active
-     channel lights cyan and grows a lit "channel marker" on the left. */
+  /* Sidebar nav item, exactly as the reference: a full-width rounded button
+     that fills with white/10 and gains a hairline border when active. */
   .rd-nav {
-    position: relative;
-    display: block;
-    width: 100%;
-    text-align: left;
-    padding: 0.7rem 0.9rem 0.7rem 1.1rem;
-    font-family: theme('fontFamily.display');
-    font-size: 0.9rem;
-    font-weight: 600;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--vs-text-dim);
-    border-radius: 8px;
-    transition: color 0.15s, background-color 0.15s;
-    cursor: pointer;
-  }
-  .rd-nav::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 50%;
-    height: 0;
-    width: 3px;
-    border-radius: 3px;
-    background-color: var(--vs-cyan);
-    transform: translateY(-50%);
-    transition: height 0.18s ease;
-  }
-  .rd-nav:hover {
-    color: var(--vs-text);
-    background-color: rgba(61, 225, 255, 0.05);
+    @apply block w-full rounded-lg border border-transparent px-4 py-2.5 text-left text-sm text-slate-400 transition hover:bg-white/5 hover:text-slate-300;
   }
   .rd-nav.active {
-    color: var(--vs-cyan);
-    background-color: rgba(61, 225, 255, 0.07);
-  }
-  .rd-nav.active::before {
-    height: 62%;
-    box-shadow: 0 0 10px var(--vs-cyan);
+    @apply border-white/20 bg-white/10 font-medium text-white;
   }
 
-  /* Buttons — console keys. */
+  /* Console buttons used by the Dashboard toolbar. */
   .rd-btn {
-    padding: 0.55rem 1.1rem;
-    font-family: theme('fontFamily.display');
-    font-size: 0.85rem;
-    font-weight: 600;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: opacity 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.45rem;
-    white-space: nowrap;
+    @apply inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 disabled:cursor-not-allowed disabled:opacity-50;
   }
-  .rd-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  /* Primary = "go / alive" — lit ECG-green key with a soft phosphor glow. */
   .rd-btn-primary {
-    background-color: #10b981;
-    color: #04160f;
-    border: 1px solid transparent;
-    box-shadow: 0 0 0 1px rgba(55, 249, 138, 0.4), 0 0 18px -6px var(--vs-ecg);
+    @apply bg-emerald-600 text-white hover:bg-emerald-500;
   }
-  .rd-btn-primary:hover:not(:disabled) {
-    opacity: 0.9;
-    box-shadow: 0 0 0 1px rgba(55, 249, 138, 0.6), 0 0 26px -4px var(--vs-ecg);
-  }
-  /* Secondary = unlit key that lights cyan on hover. */
   .rd-btn-secondary {
-    background-color: rgba(255, 255, 255, 0.02);
-    color: var(--vs-text-dim);
-    border: 1px solid var(--vs-line);
-  }
-  .rd-btn-secondary:hover:not(:disabled) {
-    color: var(--vs-cyan);
-    border-color: var(--vs-cyan);
-    box-shadow: 0 0 18px -8px var(--vs-cyan);
+    @apply border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white;
   }
 
-  /* The monitor "screen": a panel with a faint instrument graticule that stays
-     put while readouts scroll over it, a bezel edge, and depth vignette. */
+  /* The page surface. The instrument graticule and bezel are gone: the
+     reference puts content straight onto the gradient, so this is now a plain
+     transparent block that only carries spacing. */
   .rd-container {
-    position: relative;
-    background-color: var(--vs-panel);
-    background-image: linear-gradient(var(--vs-grid) 1px, transparent 1px),
-      linear-gradient(90deg, var(--vs-grid) 1px, transparent 1px);
-    background-size: 34px 34px;
-    background-position: -1px -1px;
-    border: 1px solid var(--vs-line);
-    border-radius: 20px;
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.015),
-      inset 0 -130px 120px -70px rgba(0, 0, 0, 0.75), 0 30px 60px -30px rgba(0, 0, 0, 0.6);
+    @apply bg-transparent;
   }
 
-  /* Vital-sign row / readout tile: a well with a lit channel edge and a faint
-     top/bottom bleed of the channel color. --rd-accent carries the status. */
-  /* Same surface as .card, keeping the accent rail that pages set through
-     --rd-accent so per-card status colour still works. */
+  /* A monitor row / list tile. Same surface as .card, plus the left accent
+     rail pages set through --rd-accent so per-row status colour still works. */
   .rd-card {
-    position: relative;
-    overflow: hidden;
-    background-color: rgb(30 41 59 / 0.4);
-    backdrop-filter: blur(4px);
-    border: 1px solid rgb(255 255 255 / 0.1);
+    @apply relative overflow-hidden rounded-lg border border-white/10 bg-slate-800/40 backdrop-blur-sm transition hover:border-white/20;
     border-left: 3px solid var(--rd-accent, #10b981);
-    border-radius: 12px;
-  }
-  .rd-card::before,
-  .rd-card::after {
-    content: '';
-    position: absolute;
-    left: 0;
-    width: 55%;
-    height: 1px;
-    background-image: linear-gradient(to right, var(--rd-accent, var(--vs-ecg)), transparent);
-    opacity: 0.7;
-    pointer-events: none;
-  }
-  .rd-card::before {
-    top: 0;
-  }
-  .rd-card::after {
-    bottom: 0;
   }
 
   .rd-input {
-    width: 100%;
-    background-color: rgb(15 23 42 / 0.6);
-    border: 1px solid rgb(255 255 255 / 0.1);
-    color: var(--vs-text);
-    border-radius: 8px;
-    font-family: theme('fontFamily.mono');
-    font-size: 0.82rem;
-    letter-spacing: 0.02em;
-    transition: border-color 0.15s, box-shadow 0.15s;
-  }
-  .rd-input::placeholder {
-    color: var(--vs-text-dim);
-    letter-spacing: 0.14em;
+    @apply w-full rounded-lg border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white placeholder-slate-500 transition;
   }
   .rd-input:focus {
-    outline: none;
-    border-color: var(--vs-cyan);
-    box-shadow: 0 0 0 1px rgba(61, 225, 255, 0.35), 0 0 22px -10px var(--vs-cyan);
+    @apply border-emerald-500/50 outline-none ring-1 ring-emerald-500/30;
   }
 
-  /* Compact instrument select for the filter row. */
   .rd-select {
-    background-color: var(--vs-panel-2);
-    border: 1px solid var(--vs-line);
-    color: var(--vs-text-dim);
-    border-radius: 8px;
-    font-family: theme('fontFamily.display');
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    padding: 0.5rem 0.75rem;
-    cursor: pointer;
-    transition: border-color 0.15s, color 0.15s;
+    @apply cursor-pointer rounded-lg border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-slate-300 transition hover:border-white/20 hover:text-white;
   }
-  .rd-select:hover {
-    color: var(--vs-text);
-    border-color: var(--vs-cyan);
+  .rd-select:focus {
+    @apply border-emerald-500/50 outline-none ring-1 ring-emerald-500/30;
   }
 
-  /* Phosphor glow utility for lit elements. */
-  .vs-glow {
-    filter: drop-shadow(0 0 4px currentColor);
+  /* Status pill, as used in the reference's table. */
+  .rd-pill {
+    @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium;
   }
-}
 
-/* ---- ECG signature: the scrolling trace + the sweep dot ---- */
-@keyframes vs-ecg-scroll {
-  from {
-    transform: translateX(0);
+  /* Table shell shared by every data table in the app. */
+  .rd-table {
+    @apply w-full text-sm;
   }
-  to {
-    /* one period; period width is set per-instance via --vs-period */
-    transform: translateX(calc(-1 * var(--vs-period, 160px)));
+  .rd-table thead tr {
+    @apply border-b border-white/10 bg-slate-800/20;
   }
-}
-@keyframes vs-pulse {
-  0%,
-  100% {
-    opacity: 0.55;
+  .rd-table th {
+    @apply px-4 py-3 text-left text-xs font-medium text-slate-400;
   }
-  50% {
-    opacity: 1;
+  .rd-table tbody {
+    @apply divide-y divide-white/5;
   }
-}
-@keyframes vs-blip {
-  0%,
-  92%,
-  100% {
-    opacity: 0.7;
+  .rd-table tbody tr {
+    @apply transition hover:bg-white/5;
   }
-  96% {
-    opacity: 1;
+  .rd-table td {
+    @apply px-4 py-3 text-slate-300;
   }
 }
 
-.vs-ecg-scroll {
-  animation: vs-ecg-scroll linear infinite;
-}
-.vs-pulse {
-  animation: vs-pulse 2.4s ease-in-out infinite;
-}
-
-/* Respect reduced-motion: freeze every ambient animation to a static trace. */
+/* Respect reduced-motion: freeze ambient animation. */
 @media (prefers-reduced-motion: reduce) {
-  .vs-ecg-scroll,
-  .vs-pulse,
   .animate-spin,
   .animate-pulse {
     animation: none !important;

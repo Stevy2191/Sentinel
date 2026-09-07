@@ -58,6 +58,8 @@ export const colors = {
     cardBg: 'from-purple-600/15',
     glow: 'bg-purple-500/10',
     glowHover: 'group-hover:bg-purple-500/20',
+    glowRgba: 'rgba(147, 51, 234, 0.1)',
+    glowRgbaHover: 'rgba(147, 51, 234, 0.2)',
   },
   http: {
     gradient: 'from-cyan-600 to-cyan-500',
@@ -68,6 +70,8 @@ export const colors = {
     cardBg: 'from-cyan-600/15',
     glow: 'bg-cyan-500/10',
     glowHover: 'group-hover:bg-cyan-500/20',
+    glowRgba: 'rgba(34, 211, 238, 0.1)',
+    glowRgbaHover: 'rgba(34, 211, 238, 0.2)',
   },
   ping: {
     gradient: 'from-yellow-600 to-yellow-500',
@@ -78,6 +82,8 @@ export const colors = {
     cardBg: 'from-yellow-600/15',
     glow: 'bg-yellow-500/10',
     glowHover: 'group-hover:bg-yellow-500/20',
+    glowRgba: 'rgba(234, 179, 8, 0.1)',
+    glowRgbaHover: 'rgba(234, 179, 8, 0.2)',
   },
   tcp: {
     gradient: 'from-orange-600 to-orange-500',
@@ -88,6 +94,8 @@ export const colors = {
     cardBg: 'from-orange-600/15',
     glow: 'bg-orange-500/10',
     glowHover: 'group-hover:bg-orange-500/20',
+    glowRgba: 'rgba(234, 88, 12, 0.1)',
+    glowRgbaHover: 'rgba(234, 88, 12, 0.2)',
   },
   // Webhook and anything unrecognised: deliberately neutral rather than
   // borrowing a type colour, so an unknown type never reads as a known one.
@@ -100,6 +108,8 @@ export const colors = {
     cardBg: 'from-slate-600/15',
     glow: 'bg-slate-500/10',
     glowHover: 'group-hover:bg-slate-500/20',
+    glowRgba: 'rgba(100, 116, 139, 0.1)',
+    glowRgbaHover: 'rgba(100, 116, 139, 0.2)',
   },
 }
 

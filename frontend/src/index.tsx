@@ -1,12 +1,8 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-// Instrument typography, bundled locally so it works offline for self-hosters:
-// Rajdhani = silkscreen device labels/headings, JetBrains Mono = digital
-// readouts, Inter = prose. (See tailwind.config fontFamily.)
-import '@fontsource/rajdhani/400.css'
-import '@fontsource/rajdhani/500.css'
-import '@fontsource/rajdhani/600.css'
-import '@fontsource/rajdhani/700.css'
+// Typography, bundled locally so it works offline for self-hosters: Inter for
+// everything the reference sets in its single grotesque, JetBrains Mono for the
+// few places that show raw values (cron strings, tokens, payloads).
 import '@fontsource-variable/inter'
 import '@fontsource-variable/jetbrains-mono'
 import App from '@/App'

@@ -17,51 +17,23 @@ export default {
         // Sentinel design system semantic palette.
         primary: cssVarScale('primary'),
         accent: cssVarScale('accent'),
-        // Clinical cool-charcoal ramp (the "instrument enclosure"). Overriding
-        // neutral re-tones every neutral-* utility across every page at once:
-        // 900 = panel, 950 = deep chassis, 800 = hairline rules.
-        neutral: {
-          50: '#EDF2F4',
-          100: '#DCE4E8',
-          200: '#B9C6CE',
-          300: '#90A2AD',
-          400: '#6B7C87',
-          500: '#4E5E68',
-          600: '#3A4750',
-          700: '#29343B',
-          800: '#1B242B',
-          900: '#111820',
-          950: '#0A0E12',
-        },
-        // Unify every "alive / success" green (emerald-*, used across many
-        // pages) onto the ECG phosphor ramp so there is exactly one green.
-        emerald: {
-          50: '#E6FFF0',
-          100: '#BBFFD6',
-          200: '#8DFABB',
-          300: '#5CF49F',
-          400: '#37F98A',
-          500: '#22E07C',
-          600: '#16B866',
-          700: '#0F9552',
-          800: '#0E7040',
-          900: '#0C5632',
-          950: '#052E1C',
-        },
         warning: colors.amber,
         error: colors.red,
         info: colors.cyan,
-        // Status colors: ECG green (alive), flatline red (down), dim (unknown).
+        // Status colors, matching the reference's emerald/red/slate.
         status: {
-          online: '#37F98A',
-          offline: '#FF4D4D',
-          unknown: '#4E5E68',
+          online: '#10b981',
+          offline: '#ef4444',
+          unknown: '#64748b',
         },
       },
       fontFamily: {
-        // Vital Signs instrument type roles.
+        // The reference sets everything in one grotesque; Inter is that face.
+        // `display` is kept as an alias rather than removed so any lingering
+        // font-display utility resolves to the same stack instead of falling
+        // back to the browser default.
         sans: ['Inter Variable', 'Inter', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
-        display: ['Rajdhani', 'Inter Variable', 'system-ui', 'sans-serif'],
+        display: ['Inter Variable', 'Inter', 'system-ui', 'sans-serif'],
         mono: ['JetBrains Mono Variable', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
       },
       fontSize: {
