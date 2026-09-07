@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { X, Loader2 } from 'lucide-react'
 import { useCreateMonitor } from '@/hooks/useMonitors'
+import {
+  useAvailableChannels,
+  CHANNEL_META,
+  CHANNEL_ORDER,
+  type ChannelName,
+} from '@/hooks/useNotificationConfig'
 import { useAppConfig } from '@/context/AppConfigContext'
 import type { ApiError } from '@/services/api'
 import type { Monitor, MonitorType } from '@/types'
@@ -76,7 +83,8 @@ interface FormState {
   customInterval: string
   timeout: number
   retryAttempts: number
-  enableNotifications: boolean
+  /** Channels this monitor alerts on. Empty means it alerts nowhere. */
+  selectedNotifications: ChannelName[]
   enableSSLVerify: boolean
 }
 
@@ -153,6 +161,7 @@ interface Props {
 export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }: Props) {
   const { defaultCheckInterval } = useAppConfig()
   const { create, loading } = useCreateMonitor()
+  const { available, loading: loadingChannels, error: channelsError } = useAvailableChannels(isOpen)
   const dialogRef = useRef<HTMLDivElement>(null)
   const firstFieldRef = useRef<HTMLInputElement>(null)
 
@@ -168,7 +177,7 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
       customInterval: '',
       timeout: 10,
       retryAttempts: 3,
-      enableNotifications: true,
+      selectedNotifications: [],
       // Verification on by default, matching the backend column default.
       enableSSLVerify: true,
     }),
@@ -186,6 +195,27 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
     const t = window.setTimeout(() => firstFieldRef.current?.focus(), 50)
     return () => window.clearTimeout(t)
   }, [isOpen, blank])
+
+  // Every available channel starts ticked, so a monitor created without opening
+  // this section alerts everywhere — the behaviour before the section existed.
+  // Keyed on the channel list so it re-seeds if the channels arrive after the
+  // reset above has already run.
+  const availableKey = available.map((c) => c.channel).join(',')
+  useEffect(() => {
+    if (!isOpen) return
+    setForm((f) => ({
+      ...f,
+      selectedNotifications: availableKey ? (availableKey.split(',') as ChannelName[]) : [],
+    }))
+  }, [isOpen, availableKey])
+
+  const toggleChannel = (channel: ChannelName) =>
+    setForm((f) => ({
+      ...f,
+      selectedNotifications: f.selectedNotifications.includes(channel)
+        ? f.selectedNotifications.filter((c) => c !== channel)
+        : [...f.selectedNotifications, channel],
+    }))
 
   // Escape closes, and focus is kept inside the dialog while it is open.
   useEffect(() => {
@@ -289,9 +319,9 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
         // Only meaningful for HTTPS checks, but sent for every type so the
         // stored value matches what the form showed.
         ssl_verify: form.enableSSLVerify,
-        // null = every enabled channel (the default), [] = alerts off for this
-        // monitor. Which channels specifically is set on the monitor's page.
-        notify_channels: form.enableNotifications ? null : [],
+        // The explicit set that was ticked. [] means this monitor alerts
+        // nowhere, which the API reads exactly that way.
+        notify_channels: form.selectedNotifications,
       })
       push(`Monitor "${created.name}" created`, 'success')
       setForm(blank)
@@ -537,22 +567,7 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
                   {errors.timeout ?? 'Maximum time to wait for a response'}
                 </p>
               </div>
-            </div>
-          </section>
 
-          <div className="border-t border-white/10" />
-
-          <section>
-            <h3 className="mb-4 text-xs font-semibold uppercase tracking-widest text-slate-300">
-              Notifications
-            </h3>
-            <div className="space-y-4">
-              <Switch
-                label="Enable Alerts"
-                hint="Send to every configured channel when this monitor changes state"
-                checked={form.enableNotifications}
-                onChange={(v) => set('enableNotifications', v)}
-              />
               <Switch
                 label="Verify SSL Certificate"
                 hint={
@@ -571,6 +586,75 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
                 </p>
               )}
             </div>
+          </section>
+
+          <div className="border-t border-white/10" />
+
+          <section>
+            <h3 className="text-xs font-semibold uppercase tracking-widest text-slate-300">
+              Notifications
+            </h3>
+            <p className="mb-4 mt-1 text-xs text-slate-500">
+              Select which channels to notify for this monitor
+            </p>
+
+            {loadingChannels ? (
+              <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-slate-800/40 p-4 text-sm text-slate-400">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading channels…
+              </div>
+            ) : channelsError ? (
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400">
+                {channelsError}
+              </div>
+            ) : available.length === 0 ? (
+              <div className="rounded-lg border border-white/10 bg-slate-800/40 p-4 text-sm text-slate-400">
+                <p>
+                  No notification channels configured.{' '}
+                  <Link
+                    to="/settings"
+                    onClick={onClose}
+                    className="text-emerald-400 underline-offset-2 hover:underline"
+                  >
+                    Create one in Settings.
+                  </Link>
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  The monitor is still created and still records incidents — it just will not
+                  alert anyone.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {/* Ordered by CHANNEL_ORDER rather than however the API returned
+                    them, so the list does not reshuffle between opens. */}
+                {CHANNEL_ORDER.filter((c) => available.some((a) => a.channel === c)).map((channel) => (
+                  <label
+                    key={channel}
+                    className="flex cursor-pointer items-center gap-3 rounded-lg border border-white/10 bg-slate-800/40 p-3 transition hover:border-white/20"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={form.selectedNotifications.includes(channel)}
+                      onChange={() => toggleChannel(channel)}
+                      className="h-4 w-4 shrink-0 rounded accent-emerald-500"
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-white">
+                        {CHANNEL_META[channel].label}
+                      </span>
+                      <span className="block text-xs text-slate-500">
+                        {CHANNEL_META[channel].description}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+                {form.selectedNotifications.length === 0 && (
+                  <p className="pt-1 text-xs text-amber-300">
+                    Nothing selected — this monitor will record incidents but not alert anyone.
+                  </p>
+                )}
+              </div>
+            )}
           </section>
         </div>
 
