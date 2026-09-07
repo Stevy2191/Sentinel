@@ -17,6 +17,7 @@ import {
   useResumeMonitor,
 } from '@/hooks/useMonitors'
 import { useToasts, Toaster } from '@/components/Toast'
+import CreateMonitorModal from '@/components/CreateMonitorModal'
 import { useUsers } from '@/hooks/useUsers'
 import { formatResponseTime, formatDate } from '@/utils/formatters'
 import { monitorAccess, badgeToneClass } from '@/utils/monitorAccess'
@@ -41,6 +42,7 @@ export default function Monitors() {
   const { resume } = useResumeMonitor()
   const { usernameFor } = useUsers()
   const { toasts, push } = useToasts()
+  const [createOpen, setCreateOpen] = useState(false)
 
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<MonitorType | ''>('')
@@ -121,7 +123,7 @@ export default function Monitors() {
             {filtered.length} of {monitors.length} monitors
           </p>
         </div>
-        <button className="btn-primary" onClick={() => navigate('/monitors/create')}>
+        <button className="btn-primary" onClick={() => setCreateOpen(true)}>
           <Plus className="h-4 w-4" />
           Create New Monitor
         </button>
@@ -366,6 +368,13 @@ export default function Monitors() {
           </div>
         </div>
       )}
+
+      <CreateMonitorModal
+        isOpen={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={() => void refetch()}
+        push={push}
+      />
 
       <Toaster toasts={toasts} />
     </div>
