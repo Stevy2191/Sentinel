@@ -21,6 +21,7 @@ import { useUsers } from '@/hooks/useUsers'
 import { formatResponseTime, formatDate, getStatusBgColor } from '@/utils/formatters'
 import { monitorAccess, badgeToneClass } from '@/utils/monitorAccess'
 import type { Monitor, MonitorStatus, MonitorType } from '@/types'
+import MonitorTypeBadge from '@/components/MonitorTypeBadge'
 
 const PAGE_SIZE = 50
 type SortKey = 'name' | 'status' | 'response'
@@ -227,7 +228,9 @@ export default function Monitors() {
                       <span className="font-medium">{m.name}</span>
                       {!m.enabled && <span className="ml-2 text-xs text-neutral-400">paused</span>}
                     </td>
-                    <td className="px-4 py-3 uppercase text-neutral-500">{m.type}</td>
+                    <td className="px-4 py-3">
+                      <MonitorTypeBadge type={m.type} />
+                    </td>
                     <td className="px-4 py-3 text-neutral-500">
                       {monitorAccess(m).isOwner ? (
                         <span className="font-medium text-emerald-600 dark:text-emerald-400">You</span>
