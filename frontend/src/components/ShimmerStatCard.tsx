@@ -17,6 +17,7 @@ interface ShimmerStatCardProps {
 // from a key at runtime.
 const colorMap = {
   responseTime: {
+    hoverBorder: 'hover:border-blue-500/50',
     bg: 'from-blue-600/15',
     text: 'text-blue-400',
     subtle: 'text-blue-400/70',
@@ -25,6 +26,7 @@ const colorMap = {
     glowHover: 'group-hover:bg-blue-500/20',
   },
   incidents: {
+    hoverBorder: 'hover:border-red-500/50',
     bg: 'from-red-600/15',
     text: 'text-red-400',
     subtle: 'text-red-400/70',
@@ -33,6 +35,7 @@ const colorMap = {
     glowHover: 'group-hover:bg-red-500/20',
   },
   agents: {
+    hoverBorder: 'hover:border-amber-500/50',
     bg: 'from-amber-600/15',
     text: 'text-amber-400',
     subtle: 'text-amber-400/70',
@@ -57,7 +60,7 @@ export const ShimmerStatCard: React.FC<ShimmerStatCardProps> = ({
 
   return (
     <div
-      className={`relative overflow-hidden rounded-lg border ${c.border} bg-gradient-to-br ${c.bg} to-slate-800/40 p-6 backdrop-blur-sm transition-all group cursor-default`}
+      className={`group relative cursor-default overflow-hidden rounded-lg border ${c.border} ${c.hoverBorder} bg-gradient-to-br ${c.bg} to-slate-800/40 p-6 backdrop-blur-sm transition-all`}
       onMouseMove={onMouseMove}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}

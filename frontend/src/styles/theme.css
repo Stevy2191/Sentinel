@@ -1,97 +1,114 @@
-/* Sentinel — "Vital Signs" theme.
-   The product is a bedside monitor for your infrastructure: every service has a
-   pulse, an outage flatlines. Colors are mapped to real patient-monitor
-   channels so status reads instantly:
-     ECG green  = alive / uptime / primary action
-     SpO2 cyan  = interactive chrome, links, data labels
-     amber      = degraded / warning / maintenance
-     flatline   = down / critical / destructive
-     magenta    = secondary metric (used sparingly)
-   Consumed by index.css, Tailwind (primary/accent scales) and inline styles. */
+/* Sentinel theme — matches design-reference.jsx.
+   The ground is a slate-950 → slate-900 gradient; surfaces are translucent
+   slate-800 panels with white/10 hairlines and a backdrop blur. Accent colour
+   is carried entirely by the eight-colour scheme in utils/colors.ts, which is
+   applied as Tailwind classes rather than through these variables.
+
+   These custom properties exist because a lot of components set colours via
+   inline style={{...}}. They are kept as the single place those resolve, and
+   every one of them now maps onto a literal Tailwind slate/accent value so the
+   variable path and the class path cannot drift apart. */
 
 :root {
-  /* primary = ECG green (channel: alive). "R G B" triplets feed Tailwind's
-     primary color utilities so bg-primary and text-primary read as the pulse. */
-  --primary-50: 220 255 235;
-  --primary-100: 187 255 214;
-  --primary-200: 141 250 187;
-  --primary-300: 92 244 159;
-  --primary-400: 55 249 138;
-  --primary-500: 34 224 124;
-  --primary-600: 22 184 102;
-  --primary-700: 15 148 82;
-  --primary-800: 14 112 64;
-  --primary-900: 12 86 50;
-  --primary-950: 5 46 28;
+  /* primary = emerald: the operational colour, and every primary action. */
+  --primary-50: 236 253 245;
+  --primary-100: 209 250 229;
+  --primary-200: 167 243 208;
+  --primary-300: 110 231 183;
+  --primary-400: 52 211 153;
+  --primary-500: 16 185 129;
+  --primary-600: 5 150 105;
+  --primary-700: 4 120 87;
+  --primary-800: 6 95 70;
+  --primary-900: 6 78 59;
+  --primary-950: 2 44 34;
 
-  /* accent = SpO2 cyan (channel: interactive/data). */
-  --accent-50: 224 250 255;
-  --accent-100: 190 244 255;
-  --accent-200: 145 234 255;
-  --accent-300: 97 224 255;
-  --accent-400: 61 225 255;
-  --accent-500: 34 199 240;
-  --accent-600: 14 165 210;
-  --accent-700: 12 130 168;
-  --accent-800: 15 104 134;
-  --accent-900: 17 86 111;
+  /* accent = cyan: the HTTP channel, and interactive chrome. */
+  --accent-50: 236 254 255;
+  --accent-100: 207 250 254;
+  --accent-200: 165 243 252;
+  --accent-300: 103 232 249;
+  --accent-400: 34 211 238;
+  --accent-500: 6 182 212;
+  --accent-600: 8 145 178;
+  --accent-700: 14 116 144;
+  --accent-800: 21 94 117;
+  --accent-900: 22 78 99;
   --accent-950: 8 51 68;
 
-  /* Semantic (dark-only app, so these are the effective values). */
-  --color-bg: 10 14 18; /* clinical chassis */
-  --color-surface: 17 24 32; /* panel */
-  --color-border: 27 36 43;
-  --color-text: 232 240 242;
-  --color-text-muted: 122 138 148;
+  /* Semantic triplets consumed by Tailwind's rgb(var(--x) / <alpha>) colours. */
+  --color-bg: 2 6 23; /* slate-950 */
+  --color-surface: 30 41 59; /* slate-800 */
+  --color-border: 255 255 255;
+  --color-text: 255 255 255;
+  --color-text-muted: 148 163 184; /* slate-400 */
 
-  --color-primary: 34 224 124; /* ECG green */
-  --color-warning: 255 194 75; /* amber */
-  --color-error: 255 77 77; /* flatline red */
-  --color-info: 61 225 255; /* SpO2 cyan */
+  --color-primary: 16 185 129; /* emerald-500 */
+  --color-warning: 234 179 8; /* yellow-500 */
+  --color-error: 239 68 68; /* red-500 */
+  --color-info: 34 211 238; /* cyan-400 */
 
-  /* ---- Vital Signs palette (hex, for inline styles + components) ---- */
-  --vs-bg: #0a0e12; /* deep chassis behind the monitor screen */
-  --vs-bg-2: #070b0f; /* deepest recess (bezel shadow) */
-  --vs-panel: #111820; /* the monitor "screen" + cards */
-  --vs-panel-2: #0d141b; /* recessed wells inside the screen */
-  --vs-grid: #16303a; /* faint instrument graticule lines */
-  --vs-line: #1e2a33; /* hairline borders */
+  /* ---- Reference palette (hex, for inline styles) ---- */
+  --sl-950: #020617; /* page ground, darkest stop of the gradient */
+  --sl-900: #0f172a; /* middle stop, and the sidebar body */
+  --sl-800: #1e293b; /* card body (used at 40% alpha) */
+  --sl-700: #334155;
+  --sl-500: #64748b; /* de-emphasised meta text */
+  --sl-400: #94a3b8; /* secondary text */
+  --sl-300: #cbd5e1; /* primary body text on cards */
+  --sl-line: rgba(255, 255, 255, 0.1); /* every hairline border */
 
-  --vs-ecg: #37f98a; /* channel: ECG / alive / uptime */
-  --vs-cyan: #3de1ff; /* channel: SpO2 / interactive / data */
-  --vs-amber: #ffc24b; /* channel: degraded / warning */
-  --vs-flat: #ff4d4d; /* channel: flatline / down / critical */
-  --vs-mag: #ff5da2; /* channel: secondary metric (respiration) */
+  /* The eight accents, as hex, for the inline-style paths. */
+  --c-purple: #c084fc; /* DNS */
+  --c-blue: #60a5fa; /* Response time */
+  --c-red: #f87171; /* Incidents */
+  --c-yellow: #facc15; /* PING */
+  --c-amber: #fbbf24; /* Agents */
+  --c-emerald: #34d399; /* Operational */
+  --c-cyan: #22d3ee; /* HTTP */
+  --c-orange: #fb923c; /* TCP */
 
-  --vs-text: #e8f0f2; /* readout white (cool) */
-  --vs-text-dim: #7a8a94; /* silkscreen label grey */
+  /* ---- Back-compat aliases. Components written against the previous theme
+       keep working; they now resolve to the reference's slate values. ---- */
+  --color-bg-main: var(--sl-900);
+  --color-bg-dark: var(--sl-950);
+  --color-bg-card: rgba(30, 41, 59, 0.4);
+  --color-accent-primary: var(--c-cyan);
+  --color-accent-online: var(--c-emerald);
+  --color-accent-offline: var(--c-red);
+  --color-accent-warning: var(--c-yellow);
+  --color-uptime-bar: #10b981;
+  --rd-text: #ffffff;
+  --rd-text-muted: var(--sl-400);
+  --rd-border: var(--sl-line);
 
-  /* ---- Back-compat aliases: the prior redesign's variable names now point at
-     the Vital Signs channels, so every component that still references them
-     re-skins without edits. ---- */
-  --color-bg-main: var(--vs-bg);
-  --color-bg-dark: var(--vs-bg-2);
-  --color-bg-card: var(--vs-panel);
-  --color-accent-primary: var(--vs-cyan); /* interactive chrome → SpO2 cyan */
-  --color-accent-online: var(--vs-ecg);
-  --color-accent-offline: var(--vs-flat);
-  --color-accent-warning: var(--vs-amber);
-  --color-uptime-bar: var(--vs-ecg);
-  --rd-text: var(--vs-text);
-  --rd-text-muted: var(--vs-text-dim);
-  --rd-border: var(--vs-line);
+  /* Older names from the instrument theme, retargeted rather than removed so
+     no component is left resolving a variable that no longer exists. */
+  --vs-bg: var(--sl-950);
+  --vs-bg-2: var(--sl-950);
+  --vs-panel: rgba(30, 41, 59, 0.4);
+  --vs-panel-2: rgba(15, 23, 42, 0.6);
+  --vs-line: var(--sl-line);
+  --vs-grid: transparent;
+  --vs-ecg: var(--c-emerald);
+  --vs-cyan: var(--c-cyan);
+  --vs-amber: var(--c-amber);
+  --vs-flat: var(--c-red);
+  --vs-mag: var(--c-purple);
+  --vs-text: #ffffff;
+  --vs-text-dim: var(--sl-400);
 }
 
-/* The app is dark-only; keep the class hook aligned with :root. */
+/* The app is dark-only; the class hook stays aligned with :root. */
 .dark {
-  --color-bg: 10 14 18;
-  --color-surface: 17 24 32;
-  --color-border: 27 36 43;
-  --color-text: 232 240 242;
-  --color-text-muted: 122 138 148;
+  --color-bg: 2 6 23;
+  --color-surface: 30 41 59;
+  --color-border: 255 255 255;
+  --color-text: 255 255 255;
+  --color-text-muted: 148 163 184;
 
-  --color-primary: 34 224 124;
-  --color-warning: 255 194 75;
-  --color-error: 255 77 77;
-  --color-info: 61 225 255;
+  --color-primary: 16 185 129;
+  --color-warning: 234 179 8;
+  --color-error: 239 68 68;
+  --color-info: 34 211 238;
 }

@@ -27,15 +27,15 @@ import { useUsers } from '@/hooks/useUsers'
 import { useToasts, Toaster } from '@/components/Toast'
 import ColorPicker from '@/components/ColorPicker'
 import GroupSection from '@/components/GroupSection'
-import MonitorCard from '@/components/MonitorCard'
-import StatusSidebar, { REPORT_PERIODS, type ReportPeriod } from '@/components/StatusSidebar'
+import MonitorTable from '@/components/MonitorTable'
+import { REPORT_PERIODS, type ReportPeriod } from '@/utils/reportPeriods'
 import type { Monitor, MonitorGroup } from '@/types'
 import { useCardShimmer } from '@/hooks/useCardShimmer'
 import ShimmerStatCard from '@/components/ShimmerStatCard'
 import ShimmerTypeCard from '@/components/ShimmerTypeCard'
 
 const REFRESH_MS = 30_000
-const DEFAULT_GROUP_COLOR = '#37F98A'
+const DEFAULT_GROUP_COLOR = '#10b981'
 
 // useDebounced returns a value that only updates after `ms` of no changes.
 function useDebounced<T>(value: T, ms: number): T {
@@ -242,7 +242,7 @@ function FilterMenu(props: FilterMenuProps) {
                       key={t}
                       onClick={() => props.toggleTag(t)}
                       className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
-                        on ? 'bg-primary-600 text-white' : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'
+                        on ? 'bg-primary-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                       }`}
                     >
                       {t}
@@ -290,7 +290,7 @@ function GroupModal({
   const [confirmDelete, setConfirmDelete] = useState(false)
   const busy = creating || updating || deleting
   const inputCls =
-    'w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-primary-500'
+    'w-full rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary-500'
 
   const save = async () => {
     if (!name.trim()) {
@@ -339,10 +339,10 @@ function GroupModal({
           <input className={inputCls} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional" />
         </div>
         <ColorPicker label="Color" value={color} defaultValue={DEFAULT_GROUP_COLOR} onChange={setColor} />
-        <div className="flex items-center justify-between gap-2 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+        <div className="flex items-center justify-between gap-2 border-t border-white/10 pt-4">
           {mode === 'edit' ? (
             <button
-              className="btn border border-error-300 text-error-600 hover:bg-error-50 dark:hover:bg-error-900/20"
+              className="btn border border-red-500/30 text-red-400 hover:bg-red-500/10"
               disabled={busy}
               onClick={() => setConfirmDelete(true)}
             >
@@ -361,8 +361,8 @@ function GroupModal({
           </div>
         </div>
         {confirmDelete && (
-          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-900/30">
-            <p className="mb-2 text-amber-800 dark:text-amber-200">Delete this group? Its monitors will be ungrouped (not deleted).</p>
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
+            <p className="mb-2 text-amber-300">Delete this group? Its monitors will be ungrouped (not deleted).</p>
             <div className="flex justify-end gap-2">
               <button className="btn-secondary !py-1" onClick={() => setConfirmDelete(false)}>
                 Cancel
@@ -410,6 +410,7 @@ export default function Dashboard() {
   }, [period])
   const { report: periodSummary, loading: periodLoading } = useSummaryReport(periodRange.start, periodRange.end)
 
+  const [refreshedAt, setRefreshedAt] = useState(() => Date.now())
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [modal, setModal] = useState<{ mode: 'create' | 'edit'; group?: MonitorGroup } | null>(null)
@@ -425,12 +426,14 @@ export default function Dashboard() {
     const t = window.setInterval(() => {
       void refetch()
       void refetchGroups()
+      setRefreshedAt(Date.now())
     }, REFRESH_MS)
     return () => window.clearInterval(t)
   }, [refetch, refetchGroups])
 
   const refetchAll = useCallback(async () => {
     await Promise.all([refetch(), refetchGroups()])
+    setRefreshedAt(Date.now())
   }, [refetch, refetchGroups])
 
   // Live counts for the status card. "Paused" is a configuration state, so a
@@ -475,7 +478,7 @@ export default function Dashboard() {
   // One shimmer position per card, so the highlight follows the cursor on the
   // hovered card only.
   const shimmer = useCardShimmer([
-    'status',
+    'operational',
     'responseTime',
     'incidents',
     'agents',
@@ -564,158 +567,194 @@ export default function Dashboard() {
   const toggleTag = (t: string) =>
     setSelectedTags((cur) => (cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]))
 
-  const cardProps = { groups, onToggle: toggleCard, onChanged: () => void refetchAll(), push }
+  // The reference stamps the overview with when it last refreshed.
+  const lastUpdated = useMemo(
+    () => new Date(refreshedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    [refreshedAt]
+  )
+
+  // Two states only, as in the reference: emerald while everything answers,
+  // yellow the moment anything is down.
+  const anyDown = counts.down > 0
+  const mainCard = anyDown
+    ? {
+        bg: 'from-yellow-600/20',
+        border: 'border-yellow-500/30',
+        text: 'text-yellow-400',
+        glow: 'bg-yellow-500/10',
+      }
+    : {
+        bg: 'from-emerald-600/20',
+        border: 'border-emerald-500/30',
+        text: 'text-emerald-400',
+        glow: 'bg-emerald-500/10',
+      }
+  const periodHeading =
+    REPORT_PERIODS.find((pp) => pp.key === period)?.heading.toLowerCase() ?? 'last 30 days'
+  const periodUptime = periodSummary?.aggregate.avg_uptime
 
   return (
-    // The inner-scroll layout is a desktop affordance: below xl the sidebar
-    // stacks and the page scrolls normally, which suits a narrow screen better.
-    <div className="flex flex-col gap-4 xl:h-full">
+    <div className="space-y-8">
       {/* ---- Overview -------------------------------------------------- */}
-      <div className="shrink-0 space-y-4">
-        <div>
-          <h1 className="text-3xl font-light text-white">System Overview</h1>
-          <p className="mt-1 text-sm text-slate-400">
-            {counts.total} monitor{counts.total === 1 ? '' : 's'} &middot; {counts.active} active
-            {counts.paused > 0 && ` \u00b7 ${counts.paused} paused`}
-          </p>
-        </div>
+      <div>
+        <h1 className="text-4xl font-light text-white">System Overview</h1>
+        <p className="mt-2 text-sm text-slate-400">
+          {counts.total} service{counts.total === 1 ? '' : 's'} monitored &bull; Last updated{' '}
+          {lastUpdated}
+        </p>
+      </div>
 
-        {/* Headline status. Emerald when everything answers, yellow while some
-            are down, red only when nothing active is up. */}
-        <div
-          className={`relative overflow-hidden rounded-lg border p-6 backdrop-blur-sm transition-all group ${
-            counts.down === 0
-              ? 'border-emerald-500/30 bg-gradient-to-br from-emerald-600/15 to-slate-800/40'
-              : counts.up === 0
-                ? 'border-red-500/30 bg-gradient-to-br from-red-600/15 to-slate-800/40'
-                : 'border-yellow-500/30 bg-gradient-to-br from-yellow-600/15 to-slate-800/40'
-          }`}
-          onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'status')}
-          onMouseEnter={() => shimmer.handleCardMouseEnter('status')}
-          onMouseLeave={() => shimmer.handleCardMouseLeave('status')}
-        >
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* Left two thirds: headline status over the three stat cards. */}
+        <div className="space-y-4 lg:col-span-2">
           <div
-            className={`pointer-events-none absolute right-0 top-0 -mr-10 -mt-10 h-20 w-20 rounded-full blur-2xl transition-all ${
-              counts.down === 0
-                ? 'bg-emerald-500/10 group-hover:bg-emerald-500/20'
-                : counts.up === 0
-                  ? 'bg-red-500/10 group-hover:bg-red-500/20'
-                  : 'bg-yellow-500/10 group-hover:bg-yellow-500/20'
-            }`}
-          />
-          {shimmer.isShown('status') && (
-            <div
-              className="pointer-events-none absolute inset-0 rounded-lg transition-all duration-75"
-              style={shimmer.getShimmerStyle('status')}
-            />
-          )}
-          <div className="relative z-10 flex flex-wrap items-end justify-between gap-4">
-            <div>
+            className={`group relative overflow-hidden rounded-xl border bg-gradient-to-br ${mainCard.bg} via-slate-800/40 to-cyan-600/20 p-8 backdrop-blur-sm ${mainCard.border}`}
+            onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'operational')}
+            onMouseEnter={() => shimmer.handleCardMouseEnter('operational')}
+            onMouseLeave={() => shimmer.handleCardMouseLeave('operational')}
+          >
+            {/* Emerald-to-cyan wash across the card, under the content. */}
+            <div className="pointer-events-none absolute inset-0 rounded-xl bg-gradient-to-r from-emerald-500/0 via-emerald-500/10 to-cyan-500/0" />
+
+            {shimmer.isShown('operational') && (
               <div
-                className={`mb-2 text-xs font-semibold uppercase tracking-widest ${
-                  counts.down === 0
-                    ? 'text-emerald-400'
-                    : counts.up === 0
-                      ? 'text-red-400'
-                      : 'text-yellow-400'
-                }`}
-              >
-                System status
-              </div>
-              <div className="text-3xl font-light text-white">
-                {counts.down === 0 ? 'Operational' : counts.up === 0 ? 'Major outage' : 'Degraded'}
-              </div>
-            </div>
-            <div className="flex gap-6 text-sm">
+                className="pointer-events-none absolute inset-0 rounded-xl transition-all duration-75"
+                style={shimmer.getShimmerStyle('operational')}
+              />
+            )}
+
+            <div className="relative z-10 flex flex-wrap items-start justify-between gap-6">
               <div>
-                <div className="text-xs uppercase tracking-widest text-slate-400">Up</div>
-                <div className="text-2xl font-light text-emerald-400">{counts.up}</div>
+                <div
+                  className={`mb-4 text-xs font-semibold uppercase tracking-widest ${mainCard.text}`}
+                >
+                  All Services
+                </div>
+                <div className="mb-2 text-5xl font-light text-white">
+                  {counts.active === 0
+                    ? 'Idle'
+                    : anyDown
+                      ? counts.up === 0
+                        ? 'Major outage'
+                        : 'Degraded'
+                      : 'Operational'}
+                </div>
+                <div className="text-slate-300">
+                  {counts.up} of {counts.active} service{counts.active === 1 ? '' : 's'} are up
+                  {counts.paused > 0 && (
+                    <span className="text-slate-400"> &middot; {counts.paused} paused</span>
+                  )}
+                </div>
               </div>
-              <div>
-                <div className="text-xs uppercase tracking-widest text-slate-400">Down</div>
-                <div className="text-2xl font-light text-red-400">{counts.down}</div>
-              </div>
-              <div>
-                <div className="text-xs uppercase tracking-widest text-slate-400">Paused</div>
-                <div className="text-2xl font-light text-slate-300">{counts.paused}</div>
+              <div className="text-right">
+                <div className={`mb-2 text-4xl font-light ${mainCard.text}`}>
+                  {periodLoading && periodUptime == null
+                    ? '\u2014'
+                    : periodUptime != null
+                      ? `${periodUptime.toFixed(2)}%`
+                      : '\u2014'}
+                </div>
+                {/* The reference hard-codes "30-day uptime"; the window is
+                    selectable here, so the caption names the one in force. */}
+                <select
+                  value={period}
+                  onChange={(e) => setPeriod(e.target.value as ReportPeriod)}
+                  aria-label="Uptime reporting window"
+                  className="cursor-pointer rounded border border-white/10 bg-slate-900/60 px-2 py-1 text-xs text-slate-400 transition hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+                >
+                  {REPORT_PERIODS.map((pp) => (
+                    <option key={pp.key} value={pp.key}>
+                      {pp.heading} uptime
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Three stat cards, each with its own cursor highlight. */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <ShimmerStatCard
-            title="Avg Response Time"
-            value={overview.avgResponse > 0 ? `${overview.avgResponse}ms` : '\u2014'}
-            subtitle={
-              overview.timedCount > 0 ? `across ${overview.timedCount} monitors` : 'no data yet'
-            }
-            colorType="responseTime"
-            onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'responseTime')}
-            onMouseEnter={() => shimmer.handleCardMouseEnter('responseTime')}
-            onMouseLeave={() => shimmer.handleCardMouseLeave('responseTime')}
-            showShimmer={shimmer.isShown('responseTime')}
-            shimmerStyle={shimmer.getShimmerStyle('responseTime')}
-          />
-          <ShimmerStatCard
-            title="Total Incidents"
-            value={summary?.aggregate.total_incidents ?? 0}
-            subtitle="last 24 hours"
-            colorType="incidents"
-            onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'incidents')}
-            onMouseEnter={() => shimmer.handleCardMouseEnter('incidents')}
-            onMouseLeave={() => shimmer.handleCardMouseLeave('incidents')}
-            showShimmer={shimmer.isShown('incidents')}
-            shimmerStyle={shimmer.getShimmerStyle('incidents')}
-          />
-          {/* Agents are not implemented yet - see the Server Monitoring page.
-              Shown as zero with an explicit note rather than repurposing the
-              monitor count, which would read as a working feature. */}
-          <ShimmerStatCard
-            title="Monitoring Agents"
-            value={0}
-            subtitle="coming soon"
-            colorType="agents"
-            onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'agents')}
-            onMouseEnter={() => shimmer.handleCardMouseEnter('agents')}
-            onMouseLeave={() => shimmer.handleCardMouseLeave('agents')}
-            showShimmer={shimmer.isShown('agents')}
-            shimmerStyle={shimmer.getShimmerStyle('agents')}
-          />
-        </div>
-
-        {/* Type breakdown. Clicking a card filters the list below to that type. */}
-        <div className="grid gap-4 sm:grid-cols-2">
-          {byType.map((t) => (
-            <ShimmerTypeCard
-              key={t.key}
-              label={t.label}
-              count={t.count}
-              online={t.online}
-              colorType={t.key}
-              onClick={() => setTypeFilter(typeFilter === t.key ? 'all' : t.key)}
-              onMouseMove={(e) => shimmer.handleCardMouseMove(e, t.key)}
-              onMouseEnter={() => shimmer.handleCardMouseEnter(t.key)}
-              onMouseLeave={() => shimmer.handleCardMouseLeave(t.key)}
-              showShimmer={shimmer.isShown(t.key)}
-              shimmerStyle={shimmer.getShimmerStyle(t.key)}
+          {/* Three stat cards, each with its own cursor highlight. */}
+          <div className="grid gap-4 sm:grid-cols-3">
+            <ShimmerStatCard
+              title="Avg Response Time"
+              value={overview.avgResponse > 0 ? `${overview.avgResponse}ms` : '\u2014'}
+              subtitle={
+                overview.timedCount > 0 ? `across ${overview.timedCount}` : 'no data yet'
+              }
+              colorType="responseTime"
+              onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'responseTime')}
+              onMouseEnter={() => shimmer.handleCardMouseEnter('responseTime')}
+              onMouseLeave={() => shimmer.handleCardMouseLeave('responseTime')}
+              showShimmer={shimmer.isShown('responseTime')}
+              shimmerStyle={shimmer.getShimmerStyle('responseTime')}
             />
-          ))}
+            <ShimmerStatCard
+              title="Total Incidents"
+              value={periodSummary?.aggregate.total_incidents ?? 0}
+              subtitle={periodHeading}
+              colorType="incidents"
+              onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'incidents')}
+              onMouseEnter={() => shimmer.handleCardMouseEnter('incidents')}
+              onMouseLeave={() => shimmer.handleCardMouseLeave('incidents')}
+              showShimmer={shimmer.isShown('incidents')}
+              shimmerStyle={shimmer.getShimmerStyle('incidents')}
+            />
+            {/* Agents are not implemented yet - see the Server Monitoring page.
+                Shown as zero with an explicit note rather than repurposing the
+                monitor count, which would read as a working feature. */}
+            <ShimmerStatCard
+              title="Monitoring Agents"
+              value="0 online"
+              subtitle="coming soon"
+              colorType="agents"
+              onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'agents')}
+              onMouseEnter={() => shimmer.handleCardMouseEnter('agents')}
+              onMouseLeave={() => shimmer.handleCardMouseLeave('agents')}
+              showShimmer={shimmer.isShown('agents')}
+              shimmerStyle={shimmer.getShimmerStyle('agents')}
+            />
+          </div>
+        </div>
+
+        {/* Right third: one tile per monitor type in play. Clicking filters
+            the table below to that type. */}
+        <div className="lg:col-span-1">
+          <div className="grid grid-cols-2 gap-3">
+            {byType
+              .filter((t) => t.count > 0)
+              .map((t) => (
+                <ShimmerTypeCard
+                  key={t.key}
+                  label={t.label}
+                  count={t.count}
+                  online={t.online}
+                  colorType={t.key}
+                  active={typeFilter === t.key}
+                  onClick={() => setTypeFilter(typeFilter === t.key ? 'all' : t.key)}
+                  onMouseMove={(e) => shimmer.handleCardMouseMove(e, t.key)}
+                  onMouseEnter={() => shimmer.handleCardMouseEnter(t.key)}
+                  onMouseLeave={() => shimmer.handleCardMouseLeave(t.key)}
+                  showShimmer={shimmer.isShown(t.key)}
+                  shimmerStyle={shimmer.getShimmerStyle(t.key)}
+                />
+              ))}
+            {byType.every((t) => t.count === 0) && (
+              <div className="col-span-2 rounded-lg border border-white/10 bg-slate-800/40 p-4 text-sm text-slate-400 backdrop-blur-sm">
+                No monitors configured yet.
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Toolbar: everything needed to find a monitor, on one line. */}
-      <div className="flex shrink-0 flex-wrap items-center gap-2.5">
-        {/* normal-case overrides vs-title's uppercase: the title is set as
-            plain sentence-case text rather than an instrument label. */}
-        <h1 className="vs-title shrink-0 text-2xl normal-case">Monitors.</h1>
+      {/* ---- Monitored services ---------------------------------------- */}
+      <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <h2 className="shrink-0 text-sm font-medium uppercase tracking-wide text-white">
+          Monitored Services
+        </h2>
 
         <div className="relative min-w-[180px] flex-1">
-          <Search
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
-            style={{ color: 'var(--vs-text-dim)' }}
-          />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -726,8 +765,7 @@ export default function Dashboard() {
           {search && (
             <button
               onClick={() => setSearch('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5"
-              style={{ color: 'var(--vs-text-dim)' }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-slate-500 transition hover:text-white"
               aria-label="Clear search"
             >
               <X className="h-3.5 w-3.5" />
@@ -784,125 +822,107 @@ export default function Dashboard() {
       </div>
 
       {error && (
-        <div className="card flex shrink-0 items-center justify-between border-error-300 p-3">
-          <span className="text-error-700 dark:text-error-300">Failed to load monitors: {error.message}</span>
+        <div className="flex items-center justify-between rounded-lg border border-red-500/30 bg-red-500/10 p-3">
+          <span className="text-sm text-red-400">Failed to load monitors: {error.message}</span>
           <button className="btn-secondary" onClick={() => void refetch()}>
             Retry
           </button>
         </div>
       )}
 
-      {/* Body: the list owns the scroll so the toolbar and sidebar stay put. */}
-      <div className="flex flex-col gap-4 xl:min-h-0 xl:flex-1 xl:flex-row">
-        <aside className="order-first shrink-0 xl:order-last xl:w-72">
-          <StatusSidebar
-            down={counts.down}
-            up={counts.up}
-            paused={counts.paused}
-            active={counts.active}
-            total={counts.total}
-            period={period}
-            onPeriodChange={setPeriod}
-            summary={periodSummary}
-            summaryLoading={periodLoading}
-          />
-        </aside>
-
-        <div className="min-w-0 flex-1 xl:min-h-0 xl:overflow-y-auto xl:pr-1">
-          {loading && monitors.length === 0 ? (
-            <div className="space-y-2">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="rd-card h-[76px] animate-pulse" />
-              ))}
-            </div>
-          ) : monitors.length === 0 ? (
-            <div className="card flex flex-col items-center gap-3 p-12 text-center">
-              <div className="text-lg font-semibold">No monitors yet</div>
-              <p className="text-sm text-neutral-500 dark:text-neutral-400">
-                Create your first monitor to start tracking uptime.
-              </p>
-              <button className="btn-primary" onClick={() => navigate('/monitors/create')}>
-                <Plus className="h-4 w-4" /> Create Your First Monitor
-              </button>
-            </div>
-          ) : filterActive && filtered.length === 0 ? (
-            <div className="card p-8 text-center text-sm text-neutral-500 dark:text-neutral-400">
-              No monitors match the current search or filters.
-            </div>
-          ) : (
-            <div className="space-y-5">
-              {groups.map((g) => {
-                const members = monitorsByGroup.get(g.id) ?? []
-                if (filterActive && members.length === 0) return null
-                return (
-                  <GroupSection
-                    key={g.id}
-                    title={g.name}
-                    color={g.color}
-                    uptime={g.group_uptime}
-                    count={members.length}
-                    expanded={!collapsed[g.id]}
-                    onToggle={() => toggleGroup(g.id)}
-                    onEdit={() => setModal({ mode: 'edit', group: g })}
-                  >
-                    {members.length === 0 ? (
-                      <p className="px-2 py-1 text-sm text-neutral-400">
-                        No monitors in this group yet — assign one from a card’s Group dropdown.
-                      </p>
-                    ) : (
-                      members.map((m) => (
-                        <MonitorCard
-                          key={m.id}
-                          monitor={m}
-                          uptime24h={uptimeById.get(m.id) ?? null}
-                          expanded={expandedId === m.id}
-                          ownerUsername={usernameFor(m.owner_id)}
-                          {...cardProps}
-                        />
-                      ))
-                    )}
-                  </GroupSection>
-                )
-              })}
-
-              {ungrouped.length > 0 &&
-                (groups.length > 0 ? (
-                  <GroupSection
-                    title="Ungrouped"
-                    color={null}
-                    uptime={null}
-                    count={ungrouped.length}
-                    expanded={!collapsed.__ungrouped}
-                    onToggle={() => toggleGroup('__ungrouped')}
-                  >
-                    {ungrouped.map((m) => (
-                      <MonitorCard
-                        key={m.id}
-                        monitor={m}
-                        uptime24h={uptimeById.get(m.id) ?? null}
-                        expanded={expandedId === m.id}
-                        ownerUsername={usernameFor(m.owner_id)}
-                        {...cardProps}
-                      />
-                    ))}
-                  </GroupSection>
-                ) : (
-                  <div className="space-y-2.5">
-                    {ungrouped.map((m) => (
-                      <MonitorCard
-                        key={m.id}
-                        monitor={m}
-                        uptime24h={uptimeById.get(m.id) ?? null}
-                        expanded={expandedId === m.id}
-                        ownerUsername={usernameFor(m.owner_id)}
-                        {...cardProps}
-                      />
-                    ))}
-                  </div>
-                ))}
-            </div>
-          )}
+      {loading && monitors.length === 0 ? (
+        <div className="space-y-2">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-14 animate-pulse rounded-lg border border-white/10 bg-slate-800/40" />
+          ))}
         </div>
+      ) : monitors.length === 0 ? (
+        <div className="flex flex-col items-center gap-3 rounded-lg border border-white/10 bg-slate-800/40 p-12 text-center backdrop-blur-sm">
+          <div className="text-lg font-light text-white">No monitors yet</div>
+          <p className="text-sm text-slate-400">
+            Create your first monitor to start tracking uptime.
+          </p>
+          <button className="btn-primary" onClick={() => navigate('/monitors/create')}>
+            <Plus className="h-4 w-4" /> Create Your First Monitor
+          </button>
+        </div>
+      ) : filterActive && filtered.length === 0 ? (
+        <div className="rounded-lg border border-white/10 bg-slate-800/40 p-8 text-center text-sm text-slate-400 backdrop-blur-sm">
+          No monitors match the current search or filters.
+        </div>
+      ) : (
+        <div className="space-y-5">
+          {/* Groups keep their own heading, each carrying the reference's
+              table beneath it, so grouping survives the switch from cards. */}
+          {groups.map((g) => {
+            const members = monitorsByGroup.get(g.id) ?? []
+            if (filterActive && members.length === 0) return null
+            return (
+              <GroupSection
+                key={g.id}
+                title={g.name}
+                color={g.color}
+                uptime={g.group_uptime}
+                count={members.length}
+                expanded={!collapsed[g.id]}
+                onToggle={() => toggleGroup(g.id)}
+                onEdit={() => setModal({ mode: 'edit', group: g })}
+              >
+                {members.length === 0 ? (
+                  <p className="px-2 py-1 text-sm text-slate-400">
+                    No monitors in this group yet &mdash; assign one from a row&rsquo;s Group dropdown.
+                  </p>
+                ) : (
+                  <MonitorTable
+                    monitors={members}
+                    uptimeById={uptimeById}
+                    groups={groups}
+                    expandedId={expandedId}
+                    onToggle={toggleCard}
+                    usernameFor={usernameFor}
+                    onChanged={() => void refetchAll()}
+                    push={push}
+                  />
+                )}
+              </GroupSection>
+            )
+          })}
+
+          {ungrouped.length > 0 &&
+            (groups.length > 0 ? (
+              <GroupSection
+                title="Ungrouped"
+                color={null}
+                uptime={null}
+                count={ungrouped.length}
+                expanded={!collapsed.__ungrouped}
+                onToggle={() => toggleGroup('__ungrouped')}
+              >
+                <MonitorTable
+                  monitors={ungrouped}
+                  uptimeById={uptimeById}
+                  groups={groups}
+                  expandedId={expandedId}
+                  onToggle={toggleCard}
+                  usernameFor={usernameFor}
+                  onChanged={() => void refetchAll()}
+                  push={push}
+                />
+              </GroupSection>
+            ) : (
+              <MonitorTable
+                monitors={ungrouped}
+                uptimeById={uptimeById}
+                groups={groups}
+                expandedId={expandedId}
+                onToggle={toggleCard}
+                usernameFor={usernameFor}
+                onChanged={() => void refetchAll()}
+                push={push}
+              />
+            ))}
+        </div>
+      )}
       </div>
 
       {modal && (
