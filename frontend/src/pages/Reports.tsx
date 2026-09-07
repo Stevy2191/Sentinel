@@ -94,7 +94,7 @@ export default function Reports() {
     })
   }
 
-  const usePreset = (days: number) => {
+  const applyPreset = (days: number) => {
     const end = new Date()
     const start = new Date(end.getTime() - days * 86400_000)
     setDraftStart(dateInput(start))
@@ -114,7 +114,9 @@ export default function Reports() {
     applied.monitorIds.length ? applied.monitorIds : undefined
   )
 
-  const buckets = timeline?.timeline ?? []
+  // Memoised for the same reason as elsewhere: the `?? []` fallback would
+  // otherwise be a new array on every render and defeat the memo below.
+  const buckets = useMemo(() => timeline?.timeline ?? [], [timeline])
   const tlStats = useMemo(() => {
     if (buckets.length === 0) return null
     const totalChecks = buckets.reduce((s, b) => s + b.checks_total, 0)
@@ -209,7 +211,7 @@ export default function Reports() {
       <div className="card space-y-4 p-4">
         <div className="flex flex-wrap gap-2">
           {PRESETS.map((p) => (
-            <button key={p.label} className="btn-secondary !py-1" onClick={() => usePreset(p.days)}>
+            <button key={p.label} className="btn-secondary !py-1" onClick={() => applyPreset(p.days)}>
               {p.label}
             </button>
           ))}
