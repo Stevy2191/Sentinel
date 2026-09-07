@@ -47,20 +47,26 @@
 }
 
 @layer components {
+  /* Shared surface for every page. Restyling here rather than in each page is
+     what keeps Reports, Settings, Security, Status Pages and Monitor Detail
+     consistent with the Dashboard without rewriting them.
+     Note this commits the app to the dark scheme: the redesign's ground is
+     slate-950 and there is no light equivalent of these surfaces. */
   .card {
-    @apply rounded-lg border border-neutral-200 bg-white shadow-card dark:border-neutral-800 dark:bg-neutral-900;
+    @apply rounded-lg border border-white/10 bg-slate-800/40 backdrop-blur-sm;
   }
 
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:opacity-50 dark:focus:ring-offset-neutral-900;
   }
 
+  /* Primary actions carry the operational emerald, matching the Dashboard. */
   .btn-primary {
-    @apply btn bg-primary-600 text-white hover:bg-primary-700;
+    @apply btn bg-emerald-600 text-white hover:bg-emerald-500 focus:ring-emerald-500;
   }
 
   .btn-secondary {
-    @apply btn border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200 dark:hover:bg-neutral-700;
+    @apply btn border border-white/10 bg-slate-800/60 text-slate-200 hover:bg-slate-700/60 hover:text-white focus:ring-slate-500;
   }
 }
 
@@ -70,6 +76,22 @@
    re-skins in place; the look underneath is now a clinical monitor.
    ============================================================ */
 @layer components {
+  /* Every text control on the restyled pages. Scoped to .card so the
+     Dashboard's own bespoke controls are left alone. */
+  .card input:not([type='checkbox']):not([type='radio']),
+  .card select,
+  .card textarea {
+    @apply rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white placeholder-slate-500;
+  }
+  .card input:not([type='checkbox']):not([type='radio']):focus,
+  .card select:focus,
+  .card textarea:focus {
+    @apply border-emerald-500/60 outline-none ring-1 ring-emerald-500/40;
+  }
+  .card input[type='checkbox'] {
+    @apply accent-emerald-500;
+  }
+
   /* Silkscreen label — the little device captions above readouts. */
   .vs-eyebrow {
     font-family: theme('fontFamily.display');
@@ -163,8 +185,8 @@
   }
   /* Primary = "go / alive" — lit ECG-green key with a soft phosphor glow. */
   .rd-btn-primary {
-    background-color: var(--vs-ecg);
-    color: #06120c;
+    background-color: #10b981;
+    color: #04160f;
     border: 1px solid transparent;
     box-shadow: 0 0 0 1px rgba(55, 249, 138, 0.4), 0 0 18px -6px var(--vs-ecg);
   }
@@ -201,13 +223,16 @@
 
   /* Vital-sign row / readout tile: a well with a lit channel edge and a faint
      top/bottom bleed of the channel color. --rd-accent carries the status. */
+  /* Same surface as .card, keeping the accent rail that pages set through
+     --rd-accent so per-card status colour still works. */
   .rd-card {
     position: relative;
     overflow: hidden;
-    background-color: var(--vs-panel-2);
-    border: 1px solid var(--vs-line);
-    border-left: 3px solid var(--rd-accent, var(--vs-ecg));
-    border-radius: 14px;
+    background-color: rgb(30 41 59 / 0.4);
+    backdrop-filter: blur(4px);
+    border: 1px solid rgb(255 255 255 / 0.1);
+    border-left: 3px solid var(--rd-accent, #10b981);
+    border-radius: 12px;
   }
   .rd-card::before,
   .rd-card::after {
@@ -229,8 +254,8 @@
 
   .rd-input {
     width: 100%;
-    background-color: var(--vs-panel-2);
-    border: 1px solid var(--vs-line);
+    background-color: rgb(15 23 42 / 0.6);
+    border: 1px solid rgb(255 255 255 / 0.1);
     color: var(--vs-text);
     border-radius: 8px;
     font-family: theme('fontFamily.mono');
