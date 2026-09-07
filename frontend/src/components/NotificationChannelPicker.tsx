@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useNotificationConfigs, CHANNEL_META, CHANNEL_ORDER, type ChannelName } from '@/hooks/useNotificationConfig'
+import { useNotificationConfigs, CHANNEL_META } from '@/hooks/useNotificationConfig'
 
 /**
  * The three states a monitor's notify_channels can be in. They are distinct
@@ -43,16 +43,13 @@ export default function NotificationChannelPicker({ value, onChange }: Props) {
     else onChange(selected)
   }
 
-  // Only channels that are actually configured and switched on can deliver, so
-  // those are the only ones worth offering.
-  const available = CHANNEL_ORDER.filter((c) =>
-    configs.some((cfg) => cfg.channel === c && cfg.enabled)
-  )
+  // Only channels that are switched on can deliver, so those are the only ones
+  // worth offering. Selection is by id: an install may hold several channels of
+  // one type, and picking "Slack" would no longer say which.
+  const available = configs.filter((cfg) => cfg.enabled)
 
-  const toggle = (channel: ChannelName) => {
-    const next = selected.includes(channel)
-      ? selected.filter((c) => c !== channel)
-      : [...selected, channel]
+  const toggle = (id: string) => {
+    const next = selected.includes(id) ? selected.filter((c) => c !== id) : [...selected, id]
     onChange(next)
   }
 
@@ -97,7 +94,7 @@ export default function NotificationChannelPicker({ value, onChange }: Props) {
         title="All configured channels"
         detail={
           available.length > 0
-            ? `Currently: ${available.map((c) => CHANNEL_META[c].label).join(', ')}. Follows any channel you add later.`
+            ? `Currently: ${available.map((c) => c.name).join(', ')}. Follows any channel you add later.`
             : 'No channels are configured yet — alerts will start flowing once you set one up.'
         }
       />
@@ -120,10 +117,17 @@ export default function NotificationChannelPicker({ value, onChange }: Props) {
             </p>
           ) : (
             available.map((c) => (
-              <label key={c} className="flex cursor-pointer items-center gap-2 text-sm">
-                <input type="checkbox" checked={selected.includes(c)} onChange={() => toggle(c)} />
-                <span>{CHANNEL_META[c].emoji}</span>
-                <span style={{ color: 'var(--vs-text)' }}>{CHANNEL_META[c].label}</span>
+              <label key={c.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={selected.includes(c.id)}
+                  onChange={() => toggle(c.id)}
+                />
+                <span>{CHANNEL_META[c.channel].emoji}</span>
+                <span style={{ color: 'var(--vs-text)' }}>{c.name}</span>
+                <span className="text-xs" style={{ color: 'var(--vs-text-dim)' }}>
+                  {CHANNEL_META[c.channel].label}
+                </span>
               </label>
             ))
           )}

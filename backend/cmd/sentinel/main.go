@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/api"
@@ -171,13 +172,25 @@ func run() error {
 		}
 	}
 
-	// 4. Notification plugins. Env-configured channels register first (backward
-	// compatible); then database-backed channel configs are loaded and take
-	// precedence over env for the same channel.
-	registerNotificationPlugins(notificationManager)
+	// 4. Notification channels. The database is the only source; anything
+	// configured through the environment is imported into it on first run and
+	// is an ordinary channel from then on.
+	notifyCtx := context.Background()
+	if err := importEnvNotificationChannels(notifyCtx, db); err != nil {
+		// Not fatal: an install with channels already in the database does not
+		// need the import, and failing to start over it would be worse than
+		// starting without one env-configured channel.
+		log.Printf("warning: importing notification channels from the environment: %v", err)
+	}
 	notificationConfigService := services.NewNotificationConfigService(db, notificationManager)
-	if err := notificationManager.LoadFromDatabase(context.Background()); err != nil {
+	if err := notificationManager.LoadFromDatabase(notifyCtx); err != nil {
 		log.Printf("warning: loading notification configs from database: %v", err)
+	}
+	// Monitors selected channels by type before an install could hold several
+	// of one type. Rewrite those selections to ids now that the channels exist,
+	// so the stored value means one specific channel.
+	if err := normalizeMonitorNotifyChannels(notifyCtx, db); err != nil {
+		log.Printf("warning: normalising monitor notification selections: %v", err)
 	}
 
 	// 5. HTTP router + routes.
@@ -302,34 +315,206 @@ func run() error {
 	return nil
 }
 
-// registerNotificationPlugins builds each plugin from the environment and
-// registers those that are configured. A plugin whose environment is not set
-// returns an error from its constructor and is skipped rather than fatal.
-func registerNotificationPlugins(manager *notifications.NotificationManager) {
-	register := func(name string, plugin notifications.NotificationPlugin, err error) {
-		if err != nil {
-			log.Printf("notification plugin %q not configured: %v", name, err)
-			return
-		}
-		if err := manager.RegisterPlugin(plugin); err != nil {
-			log.Printf("failed to register %q plugin: %v", name, err)
-			return
-		}
-		log.Printf("%s notification plugin registered", name)
+// importEnvNotificationChannels seeds the notification_configs table from the
+// environment, once, for any channel type that has no row yet.
+//
+// Channels used to be registered straight from the environment, living entirely
+// outside the database. That stopped working when monitors began selecting
+// channels by id: an env-only channel has no id to select. Rather than keep two
+// kinds of channel, an env-configured one is imported into the table on first
+// run and is thereafter an ordinary channel — editable, disableable, deletable.
+//
+// This follows the same seed-once rule as app_name and base_url: the row wins
+// from then on, so an admin's edit is not overwritten by the next restart, and
+// deleting an imported channel does not resurrect it while the variable is
+// still set.
+func importEnvNotificationChannels(ctx context.Context, db *gorm.DB) error {
+	// Each entry builds a config from the environment. A nil return means the
+	// variables for that channel are not set, so there is nothing to import.
+	builders := []struct {
+		channel string
+		label   string
+		build   func() *models.NotificationConfig
+	}{
+		{"email", "Email", envEmailConfig},
+		{"slack", "Slack", envURLConfig("slack", "SLACK_WEBHOOK_URL")},
+		{"discord", "Discord", envURLConfig("discord", "DISCORD_WEBHOOK_URL")},
+		{"webhook", "Webhook", envURLConfig("webhook", "WEBHOOK_URL")},
+		{"telegram", "Telegram", envTelegramConfig},
+		{"ntfy", "Ntfy", envNtfyConfig},
 	}
 
-	email, err := notifications.NewEmailPlugin()
-	register("email", email, err)
-	ntfy, err := notifications.NewNtfyPlugin()
-	register("ntfy", ntfy, err)
-	slack, err := notifications.NewSlackPlugin()
-	register("slack", slack, err)
-	discord, err := notifications.NewDiscordPlugin()
-	register("discord", discord, err)
-	telegram, err := notifications.NewTelegramPlugin()
-	register("telegram", telegram, err)
-	webhook, err := notifications.NewWebhookPlugin()
-	register("webhook", webhook, err)
+	for _, b := range builders {
+		var count int64
+		if err := db.WithContext(ctx).Model(&models.NotificationConfig{}).
+			Where("channel = ?", b.channel).Count(&count).Error; err != nil {
+			return fmt.Errorf("checking existing %s channel: %w", b.channel, err)
+		}
+		if count > 0 {
+			continue // already managed in the database; the environment no longer applies
+		}
+		cfg := b.build()
+		if cfg == nil {
+			continue // not configured in the environment
+		}
+		cfg.ID = uuid.New()
+		cfg.Name = b.label + " (from env)"
+		cfg.Enabled = true
+		now := time.Now()
+		cfg.CreatedAt = now
+		cfg.UpdatedAt = now
+		if err := db.WithContext(ctx).Create(cfg).Error; err != nil {
+			return fmt.Errorf("importing %s channel from environment: %w", b.channel, err)
+		}
+		log.Printf("[notify] imported %s channel from the environment as %q", b.channel, cfg.Name)
+	}
+	return nil
+}
+
+// normalizeMonitorNotifyChannels rewrites channel *type* entries in every
+// monitor's notify_channels into the ids of the channels of that type.
+//
+// Selections were stored as type names ("slack") when a type could only have
+// one channel. Leaving them that way would work — dispatch still matches on
+// type as a fallback — but it would silently mean "every Slack channel", which
+// is not a choice anyone made. Rewriting once makes the stored value say what
+// it means.
+//
+// Idempotent: entries that are already ids are left alone, and an entry naming
+// a type with no channels is kept rather than dropped, so a selection is never
+// silently discarded because a channel is temporarily absent.
+func normalizeMonitorNotifyChannels(ctx context.Context, db *gorm.DB) error {
+	var configs []models.NotificationConfig
+	if err := db.WithContext(ctx).Find(&configs).Error; err != nil {
+		return fmt.Errorf("loading channels: %w", err)
+	}
+	byType := map[string][]string{}
+	for _, cfg := range configs {
+		byType[cfg.Channel] = append(byType[cfg.Channel], cfg.ID.String())
+	}
+	if len(byType) == 0 {
+		return nil
+	}
+
+	var monitors []models.Monitor
+	if err := db.WithContext(ctx).Find(&monitors).Error; err != nil {
+		return fmt.Errorf("loading monitors: %w", err)
+	}
+
+	converted := 0
+	for i := range monitors {
+		m := &monitors[i]
+		// nil means "every channel" and [] means "none"; neither names anything
+		// to rewrite.
+		if len(m.NotifyChannels) == 0 {
+			continue
+		}
+		next := make([]string, 0, len(m.NotifyChannels))
+		changed := false
+		seen := map[string]bool{}
+		for _, entry := range m.NotifyChannels {
+			if _, err := uuid.Parse(entry); err == nil {
+				if !seen[entry] {
+					seen[entry] = true
+					next = append(next, entry)
+				}
+				continue
+			}
+			ids, ok := byType[entry]
+			if !ok {
+				if !seen[entry] {
+					seen[entry] = true
+					next = append(next, entry)
+				}
+				continue
+			}
+			changed = true
+			for _, id := range ids {
+				if !seen[id] {
+					seen[id] = true
+					next = append(next, id)
+				}
+			}
+		}
+		if !changed {
+			continue
+		}
+		if err := db.WithContext(ctx).Model(&models.Monitor{}).Where("id = ?", m.ID).
+			Update("notify_channels", models.StringSlice(next)).Error; err != nil {
+			return fmt.Errorf("updating monitor %s: %w", m.ID, err)
+		}
+		converted++
+	}
+	if converted > 0 {
+		log.Printf("[notify] rewrote channel selections on %d monitor(s) from type names to ids", converted)
+	}
+	return nil
+}
+
+// strPtr returns a pointer to s, or nil when s is empty after trimming.
+func strPtr(s string) *string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func envEmailConfig() *models.NotificationConfig {
+	host := strPtr(os.Getenv("SMTP_HOST"))
+	if host == nil {
+		return nil
+	}
+	port := getenvInt("SMTP_PORT", 587)
+	cfg := &models.NotificationConfig{
+		Channel:      "email",
+		SMTPHost:     host,
+		SMTPPort:     &port,
+		SMTPUser:     strPtr(os.Getenv("SMTP_USER")),
+		SMTPPassword: strPtr(os.Getenv("SMTP_PASSWORD")),
+		SMTPFrom:     strPtr(os.Getenv("SMTP_FROM")),
+		SMTPSecurity: strPtr(os.Getenv("SMTP_SECURITY")),
+	}
+	cfg.SMTPSkipTLSVerify = getenvBool("SMTP_SKIP_TLS_VERIFY", false)
+	return cfg
+}
+
+// envURLConfig builds a webhook-style channel from a single URL variable.
+func envURLConfig(channel, envVar string) func() *models.NotificationConfig {
+	return func() *models.NotificationConfig {
+		url := strPtr(os.Getenv(envVar))
+		if url == nil {
+			return nil
+		}
+		return &models.NotificationConfig{Channel: channel, WebhookURL: url}
+	}
+}
+
+func envTelegramConfig() *models.NotificationConfig {
+	token := strPtr(os.Getenv("TELEGRAM_BOT_TOKEN"))
+	chat := strPtr(os.Getenv("TELEGRAM_CHAT_ID"))
+	if token == nil || chat == nil {
+		return nil
+	}
+	return &models.NotificationConfig{Channel: "telegram", TelegramBotToken: token, TelegramChatID: chat}
+}
+
+func envNtfyConfig() *models.NotificationConfig {
+	topic := strPtr(os.Getenv("NTFY_TOPIC"))
+	if topic == nil {
+		return nil
+	}
+	url := strPtr(os.Getenv("NTFY_URL"))
+	if url == nil {
+		def := "https://ntfy.sh"
+		url = &def
+	}
+	return &models.NotificationConfig{
+		Channel:       "ntfy",
+		NtfyURL:       url,
+		NtfyTopic:     topic,
+		NtfyAuthToken: strPtr(os.Getenv("NTFY_AUTH_TOKEN")),
+	}
 }
 
 // runMigrations applies any *.sql files in dir that have not yet been recorded

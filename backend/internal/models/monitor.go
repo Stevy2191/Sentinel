@@ -316,10 +316,13 @@ func (i *Incident) Status() string {
 // Notification is a record of an alert dispatched over a channel, optionally
 // tied to the incident that triggered it.
 type Notification struct {
-	ID           uuid.UUID  `json:"id" gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
-	MonitorID    uuid.UUID  `json:"monitor_id" gorm:"column:monitor_id;type:uuid;not null"`
-	IncidentID   *uuid.UUID `json:"incident_id" gorm:"column:incident_id;type:uuid"`
-	Channel      string     `json:"channel" gorm:"column:channel;not null"`
+	ID         uuid.UUID  `json:"id" gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
+	MonitorID  uuid.UUID  `json:"monitor_id" gorm:"column:monitor_id;type:uuid;not null"`
+	IncidentID *uuid.UUID `json:"incident_id" gorm:"column:incident_id;type:uuid"`
+	Channel    string     `json:"channel" gorm:"column:channel;not null"`
+	// ChannelID names which configured channel sent this, since several may
+	// share a type. Null for history whose channel has since been deleted.
+	ChannelID    *uuid.UUID `json:"channel_id" gorm:"column:channel_id;type:uuid"`
 	Status       string     `json:"status" gorm:"column:status;not null"`
 	ErrorMessage string     `json:"error_message" gorm:"column:error_message"`
 	SentAt       *time.Time `json:"sent_at" gorm:"column:sent_at"`

@@ -12,9 +12,15 @@ export type SMTPSecurity = 'none' | 'starttls' | 'ssltls'
 // list responses (see HideSecrets) and only present when fetching a single
 // config for editing.
 export interface NotificationConfig {
-  id?: string
+  id: string
+  /** Operator-facing label. Several channels may share a type, so this is what
+   *  identifies one to a person; `id` is what identifies it to the API. */
+  name: string
   channel: ChannelName
   enabled: boolean
+  /** Non-secret one-line summary of where this delivers, computed server-side
+   *  because the identifying fields are often the secret ones. */
+  details?: string
   // Email/SMTP
   smtp_host?: string | null
   smtp_port?: number | null
@@ -71,6 +77,8 @@ const BASE = '/settings/notification-channels'
 
 /** One channel as any authenticated user may see it: name and on/off, no config. */
 export interface AvailableChannel {
+  id: string
+  name: string
   channel: ChannelName
   enabled: boolean
 }
@@ -142,13 +150,13 @@ export function useNotificationConfigs() {
 
 /** Fetch a single channel's config (including secrets) for editing. A channel
  *  with no stored config yields config=null (not an error). */
-export function useNotificationConfig(channel: ChannelName | null) {
+export function useNotificationConfig(id: string | null) {
   const [config, setConfig] = useState<NotificationConfig | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!channel) {
+    if (!id) {
       setConfig(null)
       return
     }
@@ -156,7 +164,7 @@ export function useNotificationConfig(channel: ChannelName | null) {
     setLoading(true)
     setError(null)
     api
-      .get<{ data: NotificationConfig }>(`${BASE}/${channel}`)
+      .get<{ data: NotificationConfig }>(`${BASE}/${id}`)
       .then((res) => active && setConfig(res.data.data))
       .catch((err: ApiError) => {
         if (!active) return
@@ -170,22 +178,33 @@ export function useNotificationConfig(channel: ChannelName | null) {
     return () => {
       active = false
     }
-  }, [channel])
+  }, [id])
 
   return { config, loading, error }
 }
 
-/** Create or update a channel config. */
+/**
+ * Create a new channel, or update an existing one when an id is given.
+ *
+ * These are separate verbs on the API now that an install may hold several
+ * channels of one type: POST always adds, PUT always edits the named row. The
+ * old single endpoint upserted by type, which cannot express either.
+ */
 export function useSaveNotificationConfig() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const save = useCallback(
-    async (channel: ChannelName, configData: Partial<NotificationConfig>): Promise<NotificationConfig | null> => {
+    async (
+      id: string | null,
+      configData: Partial<NotificationConfig>
+    ): Promise<NotificationConfig | null> => {
       setLoading(true)
       setError(null)
       try {
-        const res = await api.post<{ data: NotificationConfig }>(`${BASE}/${channel}`, configData)
+        const res = id
+          ? await api.put<{ data: NotificationConfig }>(`${BASE}/${id}`, configData)
+          : await api.post<{ data: NotificationConfig }>(BASE, configData)
         return res.data.data
       } catch (err) {
         setError((err as ApiError).message || 'Failed to save configuration')
@@ -206,12 +225,12 @@ export function useTestNotificationConfig() {
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<TestResult | null>(null)
 
-  const test = useCallback(async (channel: ChannelName): Promise<TestResult | null> => {
+  const test = useCallback(async (id: string): Promise<TestResult | null> => {
     setLoading(true)
     setError(null)
     setResult(null)
     try {
-      const res = await api.post<{ data: TestResult }>(`${BASE}/${channel}/test`)
+      const res = await api.post<{ data: TestResult }>(`${BASE}/${id}/test`)
       setResult(res.data.data)
       return res.data.data
     } catch (err) {
@@ -225,18 +244,40 @@ export function useTestNotificationConfig() {
   return { test, loading, result, error }
 }
 
-/** Disable and clear a channel config. */
+/**
+ * Switch a channel on or off.
+ *
+ * Its own call rather than a full save: the list this is driven from has its
+ * secrets stripped, so sending that row back as an update would fail validation
+ * or blank the stored credential. This moves one column.
+ */
+export function useSetChannelEnabled() {
+  const [loading, setLoading] = useState(false)
+
+  const setEnabled = useCallback(async (id: string, enabled: boolean): Promise<void> => {
+    setLoading(true)
+    try {
+      await api.patch(`${BASE}/${id}/enabled`, { enabled })
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  return { setEnabled, loading }
+}
+
+/** Delete a channel. */
 export function useDeleteNotificationConfig() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const deleteConfig = useCallback(async (channel: ChannelName): Promise<void> => {
+  const deleteConfig = useCallback(async (id: string): Promise<void> => {
     setLoading(true)
     setError(null)
     try {
-      await api.delete(`${BASE}/${channel}`)
+      await api.delete(`${BASE}/${id}`)
     } catch (err) {
-      setError((err as ApiError).message || 'Failed to disable channel')
+      setError((err as ApiError).message || 'Failed to delete channel')
       throw err
     } finally {
       setLoading(false)

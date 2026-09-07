@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
-import { X, Loader2, Eye, EyeOff, ExternalLink, Trash2 } from 'lucide-react'
+import { format } from 'date-fns'
+import { X, Loader2, Eye, EyeOff, ExternalLink, Trash2, Pencil, Plus } from 'lucide-react'
 import { useToasts, Toaster } from '@/components/Toast'
-import NotificationConfigCard from '@/components/NotificationConfigCard'
 import {
   CHANNEL_META,
   CHANNEL_ORDER,
   useNotificationConfig,
   useNotificationConfigs,
   useSaveNotificationConfig,
+  useSetChannelEnabled,
   useTestNotificationConfig,
   useDeleteNotificationConfig,
   type ChannelName,
@@ -58,6 +59,7 @@ function parseHeaders(v: string): Record<string, string> | null {
 
 // ---------- form state ----------
 interface FormState {
+  name: string
   enabled: boolean
   smtp_host: string
   smtp_port: string
@@ -76,6 +78,7 @@ interface FormState {
 }
 
 const emptyForm: FormState = {
+  name: '',
   enabled: true,
   smtp_host: '',
   smtp_port: '587',
@@ -96,6 +99,7 @@ const emptyForm: FormState = {
 function formFromConfig(cfg: NotificationConfig | null): FormState {
   if (!cfg) return { ...emptyForm }
   return {
+    name: cfg.name ?? '',
     enabled: cfg.enabled ?? true,
     smtp_host: cfg.smtp_host ?? '',
     smtp_port: cfg.smtp_port != null ? String(cfg.smtp_port) : '587',
@@ -117,6 +121,11 @@ function formFromConfig(cfg: NotificationConfig | null): FormState {
 
 function validate(channel: ChannelName, f: FormState): Record<string, string> {
   const e: Record<string, string> = {}
+  // Checked ahead of the type-specific rules: several channels can share a
+  // type, so the name is what tells them apart in a list.
+  if (!f.name.trim()) e.name = 'A name is required'
+  else if (f.name.trim().length > 60) e.name = 'Must be 60 characters or fewer'
+
   switch (channel) {
     case 'email': {
       if (!f.smtp_host.trim()) e.smtp_host = 'SMTP host is required'
@@ -154,7 +163,7 @@ function validate(channel: ChannelName, f: FormState): Record<string, string> {
 }
 
 function buildPayload(channel: ChannelName, f: FormState): Partial<NotificationConfig> {
-  const p: Partial<NotificationConfig> = { channel, enabled: f.enabled }
+  const p: Partial<NotificationConfig> = { channel, name: f.name.trim(), enabled: f.enabled }
   switch (channel) {
     case 'email':
       p.smtp_host = f.smtp_host.trim()
@@ -260,18 +269,21 @@ function SecretInput({
 
 // ---------- config modal ----------
 function ConfigModal({
+  channelId,
   channel,
   onClose,
   onChanged,
   push,
 }: {
+  /** null when adding; the channel's id when editing an existing one. */
+  channelId: string | null
   channel: ChannelName
   onClose: () => void
   onChanged: () => void
   push: (msg: string, type?: 'success' | 'error' | 'info') => void
 }) {
   const meta = CHANNEL_META[channel]
-  const { config, loading: loadingConfig } = useNotificationConfig(channel)
+  const { config, loading: loadingConfig } = useNotificationConfig(channelId)
   const { save, loading: saving } = useSaveNotificationConfig()
   const { test, loading: testing } = useTestNotificationConfig()
   const { delete: deleteConfig, loading: deleting } = useDeleteNotificationConfig()
@@ -307,35 +319,39 @@ function ConfigModal({
   const markTouched = (key: string) => setTouched((t) => ({ ...t, [key]: true }))
   const errFor = (key: string) => (touched[key] || submitAttempted ? errors[key] : undefined)
 
-  // Persist the current form. Returns true on success.
-  const persist = async (): Promise<boolean> => {
+  // Persist the current form, returning the channel's id on success. A new
+  // channel has no id until the create call answers, which is why this hands
+  // one back rather than relying on the prop: testing straight after adding
+  // needs the id the server just assigned.
+  const persist = async (): Promise<string | null> => {
     setSubmitAttempted(true)
-    if (hasErrors) return false
+    if (hasErrors) return null
     try {
-      await save(channel, buildPayload(channel, form))
-      return true
+      const saved = await save(channelId, buildPayload(channel, form))
+      return saved?.id ?? channelId
     } catch (err) {
       push(`✗ Failed to save: ${(err as { message?: string }).message ?? 'error'}`, 'error')
-      return false
+      return null
     }
   }
 
   const handleSave = async () => {
-    if (await persist()) {
-      push(`✓ ${meta.label} configured successfully`, 'success')
-      onChanged()
-      onClose()
-    }
+    const id = await persist()
+    if (!id) return
+    push(`✓ ${form.name.trim() || meta.label} saved`, 'success')
+    onChanged()
+    onClose()
   }
 
-  // Test saves the current form first (the backend tests the stored config), then
-  // sends a test message through it.
+  // Test saves the current form first (the backend tests the stored config),
+  // then sends a test message through it.
   const handleTest = async () => {
-    if (!(await persist())) return
+    const id = await persist()
+    if (!id) return
     try {
-      const result = await test(channel)
+      const result = await test(id)
       if (result?.test_success) {
-        push(`✓ Test sent! Message delivered via ${meta.label}`, 'success')
+        push(`✓ Test sent! Message delivered via ${form.name.trim() || meta.label}`, 'success')
       } else {
         push(`✗ Test failed: ${result?.test_error ?? 'unknown error'}`, 'error')
       }
@@ -346,13 +362,14 @@ function ConfigModal({
   }
 
   const handleDelete = async () => {
+    if (!channelId) return
     try {
-      await deleteConfig(channel)
-      push(`✓ ${meta.label} disabled`, 'success')
+      await deleteConfig(channelId)
+      push(`✓ ${form.name.trim() || meta.label} deleted`, 'success')
       onChanged()
       onClose()
     } catch (err) {
-      push(`✗ Failed to disable: ${(err as { message?: string }).message ?? 'error'}`, 'error')
+      push(`✗ Failed to delete: ${(err as { message?: string }).message ?? 'error'}`, 'error')
     }
   }
 
@@ -364,7 +381,7 @@ function ConfigModal({
       >
         <div className="mb-4 flex items-start justify-between">
           <h3 className="flex items-center gap-2 text-lg font-semibold">
-            <span aria-hidden>{meta.emoji}</span> Configure {meta.label}
+            <span aria-hidden>{meta.emoji}</span> {channelId ? 'Edit' : 'Add'} {meta.label} channel
           </h3>
           <button className="text-slate-400 hover:text-slate-600" onClick={onClose} aria-label="Close">
             <X className="h-5 w-5" />
@@ -377,6 +394,22 @@ function ConfigModal({
           </div>
         ) : (
           <div className="space-y-4">
+            {/* Name comes first and applies to every type: it is what a person
+                picks this channel out by once several share a type. */}
+            <div>
+              <Label required>Name</Label>
+              <input
+                className={inputCls}
+                value={form.name}
+                onChange={(e) => set('name', e.target.value)}
+                onBlur={() => markTouched('name')}
+                placeholder={`e.g. Ops ${meta.label}`}
+                maxLength={60}
+              />
+              <FieldError msg={errFor('name')} />
+              <Helper>Shown in the channel list and when picking channels for a monitor.</Helper>
+            </div>
+
             {/* ---- EMAIL ---- */}
             {channel === 'email' && (
               <>
@@ -628,13 +661,18 @@ function ConfigModal({
 
             {/* Actions */}
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-4">
-              <button
-                className="btn border border-red-500/30 text-red-400 hover:bg-red-500/10"
-                disabled={busy}
-                onClick={() => setConfirmDelete(true)}
-              >
-                <Trash2 className="h-4 w-4" /> {deleting ? 'Disabling…' : 'Delete'}
-              </button>
+              {/* Nothing to delete until the channel has been saved once. */}
+              {channelId ? (
+                <button
+                  className="btn border border-red-500/30 text-red-400 hover:bg-red-500/10"
+                  disabled={busy}
+                  onClick={() => setConfirmDelete(true)}
+                >
+                  <Trash2 className="h-4 w-4" /> {deleting ? 'Deleting…' : 'Delete'}
+                </button>
+              ) : (
+                <span />
+              )}
               <div className="flex gap-2">
                 <button className="btn-secondary" disabled={busy} onClick={onClose}>
                   Cancel
@@ -661,9 +699,10 @@ function ConfigModal({
           }}
         >
           <div className="card w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold">Disable {meta.label}?</h3>
+            <h3 className="text-lg font-semibold">Delete {form.name.trim() || meta.label}?</h3>
             <p className="mt-2 text-sm text-slate-400">
-              This disables the channel and clears its stored settings. You can reconfigure it later.
+              This removes the channel. Monitors that alerted through it will stop doing so.
+              Delivery history is kept.
             </p>
             <div className="mt-6 flex justify-end gap-2">
               <button className="btn-secondary" onClick={() => setConfirmDelete(false)}>
@@ -688,82 +727,261 @@ function ConfigModal({
 }
 
 // ---------- page ----------
+/** One-or-two letter mark standing in for a channel logo. */
+const CHANNEL_MARK: Record<ChannelName, string> = {
+  email: '@',
+  slack: 'S',
+  discord: 'D',
+  telegram: 'TG',
+  ntfy: 'N',
+  webhook: 'W',
+}
+
+// Whole literal class strings — Tailwind only emits what it finds spelled out.
+const CHANNEL_TONE: Record<ChannelName, string> = {
+  email: 'bg-blue-500/15 text-blue-300 border-blue-500/30',
+  slack: 'bg-purple-500/15 text-purple-300 border-purple-500/30',
+  discord: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30',
+  telegram: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
+  ntfy: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+  webhook: 'bg-orange-500/15 text-orange-300 border-orange-500/30',
+}
+
 export default function NotificationSettings() {
   const { toasts, push } = useToasts()
   const { configs, loading, error, refetch } = useNotificationConfigs()
-  const { test } = useTestNotificationConfig()
+  const { setEnabled } = useSetChannelEnabled()
+  const { delete: deleteConfig } = useDeleteNotificationConfig()
 
-  const [modalChannel, setModalChannel] = useState<ChannelName | null>(null)
-  const [testingChannel, setTestingChannel] = useState<ChannelName | null>(null)
+  // null = closed. { id: null } opens the add form for a chosen type.
+  const [editing, setEditing] = useState<{ id: string | null; channel: ChannelName } | null>(null)
+  const [addingType, setAddingType] = useState(false)
+  const [confirm, setConfirm] = useState<NotificationConfig | null>(null)
+  const [togglingId, setTogglingId] = useState<string | null>(null)
 
-  const byChannel = useMemo(() => {
-    const m = new Map<ChannelName, NotificationConfig>()
-    for (const c of configs) m.set(c.channel, c)
-    return m
-  }, [configs])
-
-  const anyConfigured = configs.some((c) => c.enabled)
-
-  // Quick test straight from a card (tests the stored config).
-  const handleCardTest = async (channel: ChannelName) => {
-    setTestingChannel(channel)
+  // Flip enabled without opening the form. This must NOT round-trip the row as
+  // a full update: the list has its secrets stripped, so sending it back would
+  // fail validation or blank the credential.
+  const handleToggle = async (c: NotificationConfig) => {
+    setTogglingId(c.id)
     try {
-      const result = await test(channel)
-      if (result?.test_success) push(`✓ Test sent! Message delivered via ${CHANNEL_META[channel].label}`, 'success')
-      else push(`✗ Test failed: ${result?.test_error ?? 'unknown error'}`, 'error')
+      await setEnabled(c.id, !c.enabled)
+      push(`${c.name} ${c.enabled ? 'disabled' : 'enabled'}`, 'success')
       await refetch()
     } catch (err) {
-      push(`✗ Test failed: ${(err as { message?: string }).message ?? 'error'}`, 'error')
+      push(`Could not update ${c.name}: ${(err as { message?: string }).message ?? 'error'}`, 'error')
     } finally {
-      setTestingChannel(null)
+      setTogglingId(null)
+    }
+  }
+
+  const handleDelete = async (c: NotificationConfig) => {
+    try {
+      await deleteConfig(c.id)
+      push(`${c.name} deleted`, 'success')
+      await refetch()
+    } catch (err) {
+      push(`Could not delete ${c.name}: ${(err as { message?: string }).message ?? 'error'}`, 'error')
+    } finally {
+      setConfirm(null)
     }
   }
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-bold">Notification Channels</h2>
-        <p className="text-sm text-slate-400">
-          Configure how Sentinel sends you alerts.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold">Notification Channels</h2>
+          <p className="text-sm text-slate-400">
+            Where Sentinel sends alerts. You can add more than one of the same type.
+          </p>
+        </div>
+        <button className="btn-primary shrink-0" onClick={() => setAddingType(true)}>
+          <Plus className="h-4 w-4" /> Add Channel
+        </button>
       </div>
 
       {error && (
         <div className="card flex items-center justify-between p-4 text-sm">
-          <span className="text-red-500">{error}</span>
+          <span className="text-red-400">{error}</span>
           <button className="btn-secondary !py-1" onClick={() => void refetch()}>
             Retry
           </button>
         </div>
       )}
 
-      {!error && !loading && !anyConfigured && (
-        <p className="text-sm text-slate-400">
-          No notification channels are configured yet. Click <span className="font-medium">Configure</span> on
-          any channel below to get started.
-        </p>
+      {loading ? (
+        <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-slate-800/40 p-6 text-sm text-slate-400">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading channels…
+        </div>
+      ) : configs.length === 0 ? (
+        <div className="rounded-lg border border-white/10 bg-slate-800/40 p-10 text-center">
+          <p className="text-sm text-slate-300">No notification channels yet.</p>
+          <p className="mt-1 text-xs text-slate-500">
+            Add one and your monitors can start alerting through it.
+          </p>
+          <button className="btn-primary mx-auto mt-4" onClick={() => setAddingType(true)}>
+            <Plus className="h-4 w-4" /> Add Channel
+          </button>
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-white/10 bg-slate-800/40 backdrop-blur-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-white/10 bg-slate-800/20">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-400">Name</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-400">Type</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-400">Details</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-400">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-400">Created</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {configs.map((c, i) => (
+                  <tr
+                    key={c.id}
+                    className={`transition hover:bg-white/5 ${i % 2 ? 'bg-white/[0.02]' : ''}`}
+                  >
+                    <td className="px-4 py-3 font-medium text-slate-200">{c.name}</td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center gap-2">
+                        <span
+                          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border text-[11px] font-bold ${CHANNEL_TONE[c.channel]}`}
+                          aria-hidden
+                        >
+                          {CHANNEL_MARK[c.channel]}
+                        </span>
+                        <span className="text-slate-300">{CHANNEL_META[c.channel].label}</span>
+                      </span>
+                    </td>
+                    <td
+                      className="max-w-[240px] truncate px-4 py-3 text-slate-400"
+                      title={c.details ?? ''}
+                    >
+                      {c.details || 'not configured'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={c.enabled}
+                        aria-label={`${c.enabled ? 'Disable' : 'Enable'} ${c.name}`}
+                        disabled={togglingId === c.id}
+                        onClick={() => void handleToggle(c)}
+                        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-60 ${
+                          c.enabled ? 'bg-emerald-600' : 'bg-slate-600'
+                        }`}
+                      >
+                        <span
+                          className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+                            c.enabled ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">
+                      {c.created_at ? format(new Date(c.created_at), 'MMM d, yyyy') : '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          className="rounded p-1.5 text-slate-400 transition hover:bg-white/10 hover:text-white"
+                          aria-label={`Edit ${c.name}`}
+                          onClick={() => setEditing({ id: c.id, channel: c.channel })}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                          className="rounded p-1.5 text-red-400 transition hover:bg-red-500/10 hover:text-red-300"
+                          aria-label={`Delete ${c.name}`}
+                          onClick={() => setConfirm(c)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {CHANNEL_ORDER.map((channel) => (
-          <NotificationConfigCard
-            key={channel}
-            channel={channel}
-            config={byChannel.get(channel)}
-            testing={testingChannel === channel}
-            onConfigure={() => setModalChannel(channel)}
-            onTest={() => void handleCardTest(channel)}
-          />
-        ))}
-      </div>
+      {/* Adding starts by choosing a type; the form differs per channel. */}
+      {addingType && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setAddingType(false)}
+        >
+          <div className="card w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-start justify-between">
+              <h3 className="text-lg font-semibold">Add a channel</h3>
+              <button
+                className="text-slate-400 transition hover:text-white"
+                onClick={() => setAddingType(false)}
+                aria-label="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {CHANNEL_ORDER.map((ch) => (
+                <button
+                  key={ch}
+                  className="flex items-center gap-3 rounded-lg border border-white/10 bg-slate-800/40 p-3 text-left transition hover:border-white/25"
+                  onClick={() => {
+                    setAddingType(false)
+                    setEditing({ id: null, channel: ch })
+                  }}
+                >
+                  <span
+                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md border text-xs font-bold ${CHANNEL_TONE[ch]}`}
+                    aria-hidden
+                  >
+                    {CHANNEL_MARK[ch]}
+                  </span>
+                  <span className="text-sm font-medium text-white">{CHANNEL_META[ch].label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
-      {modalChannel && (
+      {editing && (
         <ConfigModal
-          channel={modalChannel}
-          onClose={() => setModalChannel(null)}
+          channelId={editing.id}
+          channel={editing.channel}
+          onClose={() => setEditing(null)}
           onChanged={() => void refetch()}
           push={push}
         />
+      )}
+
+      {confirm && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setConfirm(null)}
+        >
+          <div className="card w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold">Delete {confirm.name}?</h3>
+            <p className="mt-2 text-sm text-slate-400">
+              Monitors that alerted through this channel will stop doing so. Delivery history is
+              kept.
+            </p>
+            <div className="mt-6 flex justify-end gap-2">
+              <button className="btn-secondary" onClick={() => setConfirm(null)}>
+                Cancel
+              </button>
+              <button className="btn-danger" onClick={() => void handleDelete(confirm)}>
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <Toaster toasts={toasts} />

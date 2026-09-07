@@ -2,12 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { X, Loader2 } from 'lucide-react'
 import { useCreateMonitor } from '@/hooks/useMonitors'
-import {
-  useAvailableChannels,
-  CHANNEL_META,
-  CHANNEL_ORDER,
-  type ChannelName,
-} from '@/hooks/useNotificationConfig'
+import { useAvailableChannels, CHANNEL_META } from '@/hooks/useNotificationConfig'
 import { useAppConfig } from '@/context/AppConfigContext'
 import type { ApiError } from '@/services/api'
 import type { Monitor, MonitorType } from '@/types'
@@ -83,8 +78,8 @@ interface FormState {
   customInterval: string
   timeout: number
   retryAttempts: number
-  /** Channels this monitor alerts on. Empty means it alerts nowhere. */
-  selectedNotifications: ChannelName[]
+  /** Ids of the channels this monitor alerts on. Empty means it alerts nowhere. */
+  selectedNotifications: string[]
   enableSSLVerify: boolean
 }
 
@@ -196,21 +191,21 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
   // this section alerts everywhere — the behaviour before the section existed.
   // Keyed on the channel list so it re-seeds if the channels arrive after the
   // reset above has already run.
-  const availableKey = available.map((c) => c.channel).join(',')
+  const availableKey = available.map((c) => c.id).join(',')
   useEffect(() => {
     if (!isOpen) return
     setForm((f) => ({
       ...f,
-      selectedNotifications: availableKey ? (availableKey.split(',') as ChannelName[]) : [],
+      selectedNotifications: availableKey ? availableKey.split(',') : [],
     }))
   }, [isOpen, availableKey])
 
-  const toggleChannel = (channel: ChannelName) =>
+  const toggleChannel = (id: string) =>
     setForm((f) => ({
       ...f,
-      selectedNotifications: f.selectedNotifications.includes(channel)
-        ? f.selectedNotifications.filter((c) => c !== channel)
-        : [...f.selectedNotifications, channel],
+      selectedNotifications: f.selectedNotifications.includes(id)
+        ? f.selectedNotifications.filter((c) => c !== id)
+        : [...f.selectedNotifications, id],
     }))
 
   // Escape closes, and focus is kept inside the dialog while it is open.
@@ -618,25 +613,23 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
               </div>
             ) : (
               <div className="space-y-2">
-                {/* Ordered by CHANNEL_ORDER rather than however the API returned
-                    them, so the list does not reshuffle between opens. */}
-                {CHANNEL_ORDER.filter((c) => available.some((a) => a.channel === c)).map((channel) => (
+                {/* The API returns them grouped by type in a stable order, so
+                    the list does not reshuffle between opens. */}
+                {available.map((c) => (
                   <label
-                    key={channel}
+                    key={c.id}
                     className="flex cursor-pointer items-center gap-3 rounded-lg border border-white/10 bg-slate-800/40 p-3 transition hover:border-white/20"
                   >
                     <input
                       type="checkbox"
-                      checked={form.selectedNotifications.includes(channel)}
-                      onChange={() => toggleChannel(channel)}
+                      checked={form.selectedNotifications.includes(c.id)}
+                      onChange={() => toggleChannel(c.id)}
                       className="h-4 w-4 shrink-0 rounded accent-emerald-500"
                     />
                     <span className="min-w-0">
-                      <span className="block text-sm font-medium text-white">
-                        {CHANNEL_META[channel].label}
-                      </span>
+                      <span className="block truncate text-sm font-medium text-white">{c.name}</span>
                       <span className="block text-xs text-slate-500">
-                        {CHANNEL_META[channel].description}
+                        {CHANNEL_META[c.channel].label}
                       </span>
                     </span>
                   </label>

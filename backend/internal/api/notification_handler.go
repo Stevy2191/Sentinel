@@ -166,7 +166,9 @@ func SendTestNotificationHandler(manager *notifications.NotificationManager) gin
 			ResponseTimeMs: 0,
 		}
 
-		if err := manager.SendToChannel(c.Request.Context(), channel, message); err != nil {
+		// This endpoint names a channel type, not a specific channel; several
+		// may share a type, so send through the first loaded one of that type.
+		if err := manager.SendToChannelType(c.Request.Context(), channel, message); err != nil {
 			respondError(c, http.StatusBadRequest, err.Error())
 			return
 		}
