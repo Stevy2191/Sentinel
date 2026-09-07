@@ -6,7 +6,8 @@ import { useAuthContext } from '@/context/AuthContext'
 const nav = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/monitors', label: 'Monitors' },
-  { to: '/reports', label: 'Reports' },
+  { to: '/ssl', label: 'SSL & Domains' },
+  { to: '/server-monitoring', label: 'Server Monitoring' },
   { to: '/status-pages', label: 'Status Pages' },
 ]
 

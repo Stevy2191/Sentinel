@@ -13,6 +13,8 @@ import MonitorWizard from '@/pages/MonitorWizard'
 import BulkUpload from '@/pages/BulkUpload'
 import NetworkDiscovery from '@/pages/NetworkDiscovery'
 import Reports from '@/pages/Reports'
+import SSL from '@/pages/SSL'
+import ServerMonitoring from '@/pages/ServerMonitoring'
 import SavedReports from '@/pages/SavedReports'
 import SavedReportDetail from '@/pages/SavedReportDetail'
 import PublicReport from '@/pages/PublicReport'
@@ -72,6 +74,8 @@ export default function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/monitors" element={<Monitors />} />
+              <Route path="/ssl" element={<SSL />} />
+              <Route path="/server-monitoring" element={<ServerMonitoring />} />
               <Route path="/monitors/create" element={<MonitorDetail mode="create" />} />
               <Route path="/monitors/new/wizard" element={<MonitorWizard />} />
               <Route path="/monitors/bulk" element={<BulkUpload />} />
