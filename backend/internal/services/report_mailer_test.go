@@ -19,7 +19,7 @@ func TestBuildMIMEAttachesThePDF(t *testing.T) {
 		t.Fatalf("writing fixture: %v", err)
 	}
 
-	m := NewReportMailer(nil, "https://sentinel.example.com")
+	m := NewReportMailer(nil, staticBaseURL("https://sentinel.example.com"))
 	msg, err := m.buildMIME("sentinel@example.com", ReportEmail{
 		To:             []string{"ops@example.com"},
 		ReportName:     "Weekly Report",
@@ -61,7 +61,7 @@ func TestBuildMIMEAttachesThePDF(t *testing.T) {
 }
 
 func TestBuildMIMEWithoutAttachment(t *testing.T) {
-	m := NewReportMailer(nil, "")
+	m := NewReportMailer(nil, nil)
 	msg, err := m.buildMIME("sentinel@example.com", ReportEmail{
 		To: []string{"ops@example.com"}, ReportName: "No Attachment",
 	})
@@ -80,7 +80,7 @@ func TestBuildMIMEWithoutAttachment(t *testing.T) {
 }
 
 func TestBuildMIMEMissingAttachmentIsAnError(t *testing.T) {
-	m := NewReportMailer(nil, "")
+	m := NewReportMailer(nil, nil)
 	_, err := m.buildMIME("s@example.com", ReportEmail{
 		To: []string{"ops@example.com"}, ReportName: "Gone",
 		AttachmentPath: filepath.Join(t.TempDir(), "nope.pdf"),
@@ -137,4 +137,10 @@ func headOf(s string, n int) string {
 		return s
 	}
 	return s[:n]
+}
+
+// staticBaseURL returns a resolver that always yields the same URL, for tests
+// that do not care about runtime reconfiguration.
+func staticBaseURL(u string) BaseURLFunc {
+	return func() string { return u }
 }

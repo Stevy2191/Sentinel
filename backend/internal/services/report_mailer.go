@@ -34,16 +34,26 @@ const maxAttachmentBytes = 20 << 20 // 20 MiB
 // ReportMailer sends generated reports to a schedule's recipients.
 type ReportMailer struct {
 	db      *gorm.DB
-	baseURL string
+	baseURL BaseURLFunc
 }
 
-// NewReportMailer returns a mailer bound to db. baseURL is used to build the
-// "view online" link; an empty value falls back to SENTINEL_BASE_URL.
-func NewReportMailer(db *gorm.DB, baseURL string) *ReportMailer {
-	if baseURL == "" {
-		baseURL = strings.TrimRight(os.Getenv("SENTINEL_BASE_URL"), "/")
+// NewReportMailer returns a mailer bound to db. baseURL builds the "view
+// online" link and is resolved per message, so changing it in Settings ->
+// System affects the next report rather than requiring a restart. A nil
+// resolver, or one returning empty, falls back to SENTINEL_BASE_URL.
+func NewReportMailer(db *gorm.DB, baseURL BaseURLFunc) *ReportMailer {
+	return &ReportMailer{db: db, baseURL: baseURL}
+}
+
+// resolveBaseURL returns the base URL to build links from, without a trailing
+// slash. Empty means "no link can be built", which callers treat as "omit it".
+func (m *ReportMailer) resolveBaseURL() string {
+	if m.baseURL != nil {
+		if v := strings.TrimRight(strings.TrimSpace(m.baseURL()), "/"); v != "" {
+			return v
+		}
 	}
-	return &ReportMailer{db: db, baseURL: strings.TrimRight(baseURL, "/")}
+	return strings.TrimRight(strings.TrimSpace(os.Getenv("SENTINEL_BASE_URL")), "/")
 }
 
 // ReportEmail is one outgoing scheduled-report message.
@@ -339,10 +349,11 @@ func SummaryLines(data *ReportData) []string {
 	return lines
 }
 
-// reportBaseURL returns the configured base URL for building share links.
+// reportBaseURL returns the base URL for building share links, falling back to
+// the dev default when nothing is configured.
 func (m *ReportMailer) reportBaseURL() string {
-	if m.baseURL != "" {
-		return m.baseURL
+	if v := m.resolveBaseURL(); v != "" {
+		return v
 	}
 	return "http://localhost:3000"
 }

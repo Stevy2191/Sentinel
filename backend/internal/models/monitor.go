@@ -33,10 +33,12 @@ const (
 	StatusUnknown = "unknown"
 )
 
-// Validation bounds for a monitor's schedule.
+// Validation bounds for a monitor's schedule. The interval bounds alias the
+// exported ones in setting.go, so the value an admin may pick as the instance
+// default is by construction a value a monitor may actually hold.
 const (
-	minIntervalSeconds = 10
-	maxIntervalSeconds = 3600
+	minIntervalSeconds = MinCheckIntervalSeconds
+	maxIntervalSeconds = MaxCheckIntervalSeconds
 	minTimeoutSeconds  = 1
 	maxTimeoutSeconds  = 300
 )

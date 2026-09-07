@@ -2,6 +2,7 @@ import { useState } from 'react'
 import NotificationChannelPicker from '@/components/NotificationChannelPicker'
 import type { ApiError } from '@/services/api'
 import type { Monitor, MonitorInput, MonitorType } from '@/types'
+import { useAppConfig } from '@/context/AppConfigContext'
 
 export interface MonitorFormValues {
   name: string
@@ -162,8 +163,13 @@ export default function MonitorForm({
   submitLabel = 'Save Monitor',
   onCancel,
 }: Props) {
+  // A new monitor starts at the instance's configured interval (Settings →
+  // System), so the field agrees with what the API would apply if the value
+  // were omitted. An existing monitor's own value always wins over it.
+  const { defaultCheckInterval } = useAppConfig()
   const [values, setValues] = useState<MonitorFormValues>({
     ...emptyMonitorForm,
+    interval_seconds: defaultCheckInterval,
     ...initialValues,
   })
   const [errors, setErrors] = useState<Errors>({})

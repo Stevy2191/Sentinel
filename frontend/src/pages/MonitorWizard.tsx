@@ -23,6 +23,7 @@ import {
   type MonitorFormValues,
 } from '@/components/MonitorForm'
 import type { ApiResponse, MonitorType } from '@/types'
+import { useAppConfig } from '@/context/AppConfigContext'
 
 // What the wizard asks, in order. Kept as data so the stepper and the guards
 // below cannot drift from each other.
@@ -155,7 +156,12 @@ export default function MonitorWizard() {
   const { move } = useMoveMonitorToGroup()
 
   const [step, setStep] = useState<StepIndex>(0)
-  const [values, setValues] = useState<MonitorFormValues>({ ...emptyMonitorForm })
+  // Matches MonitorForm: a new monitor starts at the instance default.
+  const { defaultCheckInterval } = useAppConfig()
+  const [values, setValues] = useState<MonitorFormValues>({
+    ...emptyMonitorForm,
+    interval_seconds: defaultCheckInterval,
+  })
   const [groupId, setGroupId] = useState<string>('')
   const [testing, setTesting] = useState(false)
   const [outcome, setOutcome] = useState<TestOutcome | null>(null)

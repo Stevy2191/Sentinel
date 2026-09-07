@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/Stevy2191/Sentinel/backend/internal/models"
 	"github.com/Stevy2191/Sentinel/backend/internal/services"
 )
 
@@ -133,9 +134,16 @@ func RegisterHandler(authService *services.AuthService, settingsService *service
 
 // AuthStatusHandler handles GET /api/v1/auth/status (public). It exposes the
 // bits a login page needs before authenticating: whether self-registration is
-// open, and whether initial setup is still required (no accounts exist yet). The
-// UI shows the sign-up link when registration is open OR setup is required, so
-// the very first admin can always be created even with registration closed.
+// open, whether initial setup is still required (no accounts exist yet), and
+// the instance's display name. The UI shows the sign-up link when registration
+// is open OR setup is required, so the very first admin can always be created
+// even with registration closed.
+//
+// app_name is public on purpose: it is branding meant to be read on the
+// sign-in screen, before anyone has credentials. default_check_interval rides
+// along because the monitor-create form needs it and any authenticated user may
+// create a monitor, while /settings is admin-only; it is a UI default, not a
+// secret.
 func AuthStatusHandler(authService *services.AuthService, settingsService *services.SettingsService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
@@ -145,8 +153,10 @@ func AuthStatusHandler(authService *services.AuthService, settingsService *servi
 			return
 		}
 		respondSuccess(c, http.StatusOK, gin.H{
-			"registration_enabled": settingsService.RegistrationEnabled(ctx),
-			"setup_required":       !hasUsers,
+			"registration_enabled":   settingsService.RegistrationEnabled(ctx),
+			"setup_required":         !hasUsers,
+			"app_name":               settingsService.AppName(ctx),
+			"default_check_interval": settingsService.DefaultCheckInterval(ctx, models.DefaultMonitorCheckInterval),
 		})
 	}
 }

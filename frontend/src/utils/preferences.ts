@@ -1,19 +1,13 @@
 // Client-side user preferences persisted to localStorage under 'sentinel:*'.
 // (Theme mode is handled separately by ThemeContext under 'sentinel-theme'.)
-import { applyThemeColors } from '@/utils/themeUtils'
 
 export type FontSize = 'compact' | 'normal' | 'large'
-export type CardLayout = 'compact' | 'normal' | 'spacious'
 export type TimeFormat = '12h' | '24h'
 export type DateFormatPref = 'MMM DD, YYYY' | 'DD/MM/YYYY' | 'YYYY-MM-DD'
 export type ReportRange = '7d' | '30d' | '90d' | 'custom'
 
 export const PREF = {
-  primaryColor: 'sentinel:primaryColor',
-  accentColor: 'sentinel:accentColor',
   fontSize: 'sentinel:fontSize',
-  sidebarExpanded: 'sentinel:sidebarExpanded',
-  cardLayout: 'sentinel:cardLayout',
   soundAlerts: 'sentinel:soundAlerts',
   desktopNotifications: 'sentinel:desktopNotifications',
   timeFormat: 'sentinel:timeFormat',
@@ -24,11 +18,7 @@ export const PREF = {
 } as const
 
 export const DEFAULTS = {
-  primaryColor: '#10b981',
-  accentColor: '#f59e0b',
   fontSize: 'normal' as FontSize,
-  sidebarExpanded: true,
-  cardLayout: 'normal' as CardLayout,
   soundAlerts: false,
   desktopNotifications: false,
   timeFormat: '24h' as TimeFormat,
@@ -66,17 +56,15 @@ export function defaultTimezone(): string {
 }
 
 /** Apply the visual preferences that affect the whole document. Call at startup
- *  and whenever these prefs change. */
+ *  and whenever these prefs change.
+ *
+ *  Font size is all that is left here. Brand colours used to be applied from
+ *  this function, overriding the primary and accent CSS variables at runtime;
+ *  they are now fixed by the design system in styles/theme.css, so the static
+ *  values stand and nothing recolours the app after load. */
 export function applyStoredPreferences(): void {
   const font = getString(PREF.fontSize, DEFAULTS.fontSize) as FontSize
   document.documentElement.style.fontSize = FONT_SCALE[font] ?? '100%'
-  // Recolor the app from the locally-stored theme colors (instant, before the
-  // backend theme loads via /auth/me). applyThemeColors drives the Tailwind
-  // primary-*/accent-* utilities via CSS variables.
-  applyThemeColors(
-    getString(PREF.primaryColor, DEFAULTS.primaryColor),
-    getString(PREF.accentColor, DEFAULTS.accentColor)
-  )
 }
 
 /** Remove every sentinel:* preference key. */

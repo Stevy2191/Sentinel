@@ -42,6 +42,7 @@ type config struct {
 	ReportWorkers       int
 	BaseURL             string
 	RegistrationEnabled bool
+	AppName             string
 }
 
 func loadConfig() config {
@@ -61,6 +62,9 @@ func loadConfig() config {
 		// Closed by default for security; the first account can always be created
 		// (see RegisterHandler), and an admin can open registration at runtime.
 		RegistrationEnabled: getenvBool("REGISTRATION_ENABLED", false),
+		// Instance display name. Seeded into the settings table on first run;
+		// after that an admin edits it in Settings -> System.
+		AppName: getenv("APP_NAME", ""),
 	}
 }
 
@@ -96,8 +100,17 @@ func run() error {
 	statusPageService := services.NewStatusPageService(db)
 	notificationManager := notifications.NewNotificationManager(db)
 	authService := services.NewAuthService(db, resolveJWTSecret())
-	invitationService := services.NewInvitationService(db, authService)
 	settingsService := services.NewSettingsService(db)
+	// Resolved at each use, not captured here, so an admin editing the base URL
+	// in Settings -> System changes the next email rather than needing a restart.
+	// Falls back to SENTINEL_BASE_URL inside each consumer when unset.
+	resolveBaseURL := services.BaseURLFunc(func() string {
+		return settingsService.BaseURL(context.Background())
+	})
+	// The notifications package cannot import services (services imports it),
+	// so the lookup is injected rather than called directly.
+	notifications.SetBaseURLResolver(resolveBaseURL)
+	invitationService := services.NewInvitationService(db, authService, resolveBaseURL)
 	discoveryService := services.NewDiscoveryService()
 	reportAggregator := services.NewReportAggregatorService(db)
 	auditService := services.NewAuditService(db)
@@ -113,7 +126,7 @@ func run() error {
 	reportGenerator := services.NewReportGenerator(db, reportAggregator, pdfRenderer)
 	// Scheduled delivery sends through the same SMTP configuration as the email
 	// notification channel, so it inherits its connection-security settings.
-	reportMailer := services.NewReportMailer(db, cfg.BaseURL)
+	reportMailer := services.NewReportMailer(db, resolveBaseURL)
 	reportScheduler := services.NewReportSchedulerService(db, reportGenerator, reportMailer)
 	// Wired after construction: deleting a report must also stop its cron jobs.
 	reportBuilder.SetScheduler(reportScheduler)
@@ -125,6 +138,21 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("seeding settings: %w", err)
 	}
+	// The system settings follow the same seed-once rule: the environment
+	// provides the initial value, and from then on the stored value wins so an
+	// admin's edit in Settings -> System survives a restart. An unset env var
+	// seeds nothing, leaving the code default in force.
+	if _, err := settingsService.SeedString(settingsCtx, models.SettingAppName, cfg.AppName); err != nil {
+		return fmt.Errorf("seeding app name: %w", err)
+	}
+	if _, err := settingsService.SeedString(settingsCtx, models.SettingBaseURL, cfg.BaseURL); err != nil {
+		return fmt.Errorf("seeding base URL: %w", err)
+	}
+	if _, err := settingsService.SeedInt(settingsCtx, models.SettingDefaultCheckInterval,
+		models.DefaultMonitorCheckInterval); err != nil {
+		return fmt.Errorf("seeding default check interval: %w", err)
+	}
+
 	// Say so when the environment disagrees with what is stored. The stored
 	// value winning is deliberate - it is what lets an admin close registration
 	// from the UI and have it stick across restarts - but silently ignoring an
@@ -185,7 +213,7 @@ func run() error {
 	// All other /api/v1 routes require a valid JWT.
 	v1 := router.Group("/api/v1")
 	v1.Use(api.AuthMiddleware(authService))
-	api.RegisterMonitorRoutes(v1, monitorService, checkService)
+	api.RegisterMonitorRoutes(v1, monitorService, checkService, settingsService)
 	api.RegisterMonitorCreationRoutes(v1, monitorService, checkService)
 	api.RegisterDiscoveryRoutes(v1, discoveryService)
 	api.RegisterCheckRoutes(v1, checkService, incidentService, monitorService)
@@ -198,9 +226,8 @@ func run() error {
 	api.RegisterMonitorSharingRoutes(v1, monitorService, authService)
 	api.RegisterStatusPageRoutes(v1, statusPageService, incidentService)
 	api.RegisterNotificationRoutes(v1, notificationManager, monitorService)
-	api.RegisterSettingsRoutes(v1, settingsService)
+	api.RegisterSettingsRoutes(v1, settingsService, models.DefaultMonitorCheckInterval)
 	// Per-user theme (not admin-gated): only AuthMiddleware applies.
-	v1.PATCH("/settings/theme", api.UpdateUserThemeHandler(authService))
 	// Self password change (any authenticated user).
 	v1.POST("/auth/change-password", api.ChangeOwnPasswordHandler(authService))
 

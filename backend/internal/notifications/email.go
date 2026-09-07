@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
@@ -460,8 +461,37 @@ func statusStyle(status string) (color, label string) {
 	}
 }
 
+// baseURLResolver, when set, supplies the instance's base URL at send time.
+// This package cannot import internal/services (services imports this one), so
+// the settings-backed lookup is injected by main rather than called directly.
+//
+// Guarded because it is written once during startup but read by notification
+// sends that may already be running on other goroutines.
+var (
+	baseURLMu       sync.RWMutex
+	baseURLResolver func() string
+)
+
+// SetBaseURLResolver installs the function used to resolve the instance's base
+// URL for links in outgoing email. Passing nil restores the environment-only
+// behaviour. Safe to call at any time.
+func SetBaseURLResolver(f func() string) {
+	baseURLMu.Lock()
+	defer baseURLMu.Unlock()
+	baseURLResolver = f
+}
+
 // baseURL returns the configured Sentinel base URL for building action links.
+// The stored setting wins, then the environment, then a dev-friendly default.
 func baseURL() string {
+	baseURLMu.RLock()
+	resolve := baseURLResolver
+	baseURLMu.RUnlock()
+	if resolve != nil {
+		if v := strings.TrimSpace(resolve()); v != "" {
+			return strings.TrimRight(v, "/")
+		}
+	}
 	if v := strings.TrimSpace(os.Getenv("SENTINEL_BASE_URL")); v != "" {
 		return strings.TrimRight(v, "/")
 	}

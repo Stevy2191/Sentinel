@@ -19,4 +19,33 @@ func (Setting) TableName() string {
 const (
 	// SettingRegistrationEnabled controls whether new users may self-register.
 	SettingRegistrationEnabled = "registration_enabled"
+
+	// SettingAppName is the instance's display name, shown in the sidebar, on
+	// the sign-in screen, in the browser tab and in outgoing email.
+	SettingAppName = "app_name"
+	// SettingBaseURL is the absolute, externally reachable URL of this instance.
+	// Every link in outgoing email is built from it, so it has to be what a
+	// recipient can actually open, not what the container sees.
+	SettingBaseURL = "base_url"
+	// SettingDefaultCheckInterval is the check interval, in seconds, that new
+	// monitors are created with.
+	SettingDefaultCheckInterval = "default_check_interval"
+)
+
+// Bounds and defaults for the system settings above.
+const (
+	DefaultAppName = "Sentinel"
+	// DefaultMonitorCheckInterval is the interval a new monitor gets when the
+	// instance default has not been changed. Note this is unrelated to the
+	// DEFAULT_CHECK_INTERVAL environment variable, which sets how often the
+	// monitoring loop wakes to see which monitors are due — a scheduler tick,
+	// not a per-monitor setting.
+	DefaultMonitorCheckInterval = 60
+	// MaxAppNameLength keeps the name to something a sidebar can render.
+	MaxAppNameLength = 40
+	// MinCheckIntervalSeconds/MaxCheckIntervalSeconds mirror the bounds the
+	// monitor validator enforces, so a default can never be set to a value that
+	// would then be rejected on every monitor created from it.
+	MinCheckIntervalSeconds = 10
+	MaxCheckIntervalSeconds = 3600
 )
