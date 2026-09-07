@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { Suspense, lazy, useEffect } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { ThemeProvider } from '@/context/ThemeContext'
 import { AuthProvider, useAuthContext } from '@/context/AuthContext'
@@ -6,26 +6,43 @@ import { applyThemeColors } from '@/utils/themeUtils'
 import { PREF, setString } from '@/utils/preferences'
 import RequireAuth from '@/components/RequireAuth'
 import Layout from '@/components/Layout'
-import Dashboard from '@/pages/Dashboard'
-import Monitors from '@/pages/Monitors'
-import MonitorDetail from '@/pages/MonitorDetail'
-import MonitorWizard from '@/pages/MonitorWizard'
-import BulkUpload from '@/pages/BulkUpload'
-import NetworkDiscovery from '@/pages/NetworkDiscovery'
-import Reports from '@/pages/Reports'
-import SSL from '@/pages/SSL'
-import ServerMonitoring from '@/pages/ServerMonitoring'
-import SavedReports from '@/pages/SavedReports'
-import SavedReportDetail from '@/pages/SavedReportDetail'
-import PublicReport from '@/pages/PublicReport'
-import StatusPages from '@/pages/StatusPages'
-import Notifications from '@/pages/Notifications'
-import Settings from '@/pages/Settings'
-import SecuritySettings from '@/pages/SecuritySettings'
-import AdminUsers from '@/pages/AdminUsers'
-import PublicStatus from '@/pages/PublicStatus'
-import InvitationAccept from '@/pages/InvitationAccept'
 import Auth from '@/pages/Auth'
+
+// Route components load on demand. The app shipped as one ~950 KB chunk, so a
+// visitor downloaded every page - the report builder, the wizard, admin users -
+// before the login form could render. Splitting per route means a page's code
+// arrives when it is first visited.
+//
+// Auth, Layout and RequireAuth stay eager: they are on the first-paint path for
+// every visit, so deferring them would only add a spinner before the login form.
+const Dashboard = lazy(() => import('@/pages/Dashboard'))
+const Monitors = lazy(() => import('@/pages/Monitors'))
+const MonitorDetail = lazy(() => import('@/pages/MonitorDetail'))
+const MonitorWizard = lazy(() => import('@/pages/MonitorWizard'))
+const BulkUpload = lazy(() => import('@/pages/BulkUpload'))
+const NetworkDiscovery = lazy(() => import('@/pages/NetworkDiscovery'))
+const Reports = lazy(() => import('@/pages/Reports'))
+const SSL = lazy(() => import('@/pages/SSL'))
+const ServerMonitoring = lazy(() => import('@/pages/ServerMonitoring'))
+const SavedReports = lazy(() => import('@/pages/SavedReports'))
+const SavedReportDetail = lazy(() => import('@/pages/SavedReportDetail'))
+const PublicReport = lazy(() => import('@/pages/PublicReport'))
+const StatusPages = lazy(() => import('@/pages/StatusPages'))
+const Notifications = lazy(() => import('@/pages/Notifications'))
+const Settings = lazy(() => import('@/pages/Settings'))
+const SecuritySettings = lazy(() => import('@/pages/SecuritySettings'))
+const AdminUsers = lazy(() => import('@/pages/AdminUsers'))
+const PublicStatus = lazy(() => import('@/pages/PublicStatus'))
+const InvitationAccept = lazy(() => import('@/pages/InvitationAccept'))
+
+/** Shown while a route's chunk is fetched. */
+function RouteFallback() {
+  return (
+    <div className="flex min-h-64 items-center justify-center p-8 text-sm text-slate-400">
+      Loading\u2026
+    </div>
+  )
+}
 
 // ThemeSync applies the signed-in user's saved brand colours whenever they load
 // or change, so they follow the user across devices. Light/dark is not part of
@@ -52,7 +69,8 @@ export default function App() {
       <AuthProvider>
         <ThemeSync />
         <BrowserRouter>
-          <Routes>
+          <Suspense fallback={<RouteFallback />}>
+            <Routes>
             {/* Public routes. */}
             <Route path="/login" element={<Auth mode="login" />} />
             <Route path="/register" element={<Auth mode="register" />} />
@@ -98,7 +116,8 @@ export default function App() {
               {/* Admin-only page; AdminUsers itself redirects non-admins to /dashboard. */}
               <Route path="/admin/users" element={<AdminUsers />} />
             </Route>
-          </Routes>
+            </Routes>
+          </Suspense>
         </BrowserRouter>
       </AuthProvider>
     </ThemeProvider>

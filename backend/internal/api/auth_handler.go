@@ -161,7 +161,6 @@ func LoginHandler(authService *services.AuthService) gin.HandlerFunc {
 		}
 		log.Printf("User login attempt: %s", req.Username)
 
-
 		ip := c.ClientIP()
 		userKey := ip + ":" + strings.ToLower(req.Username)
 
