@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import {
   Shield,
@@ -9,8 +9,7 @@ import {
   Check,
   X,
   Monitor,
-  UserCheck,
-  UserX,
+  User,
 } from 'lucide-react'
 import api, { type ApiError } from '@/services/api'
 import { useAuthContext } from '@/context/AuthContext'
@@ -53,40 +52,11 @@ function legacyCopy(text: string): boolean {
   return ok
 }
 
-export default function SecuritySettings() {
+export default function Profile() {
   const { currentUser, getCurrentUser } = useAuthContext()
   const { toasts, push } = useToasts()
   const mfaEnabled = currentUser?.mfa_enabled ?? false
   const isAdmin = currentUser?.is_admin ?? false
-
-  // ---- User registration (admin only) ----
-  const [regEnabled, setRegEnabled] = useState<boolean | null>(null)
-  const [regBusy, setRegBusy] = useState(false)
-
-  useEffect(() => {
-    if (!isAdmin) return
-    let active = true
-    api
-      .get<{ data: { registration_enabled: boolean } }>('/settings')
-      .then((res) => active && setRegEnabled(res.data.data.registration_enabled))
-      .catch(() => active && setRegEnabled(null))
-    return () => {
-      active = false
-    }
-  }, [isAdmin])
-
-  const toggleRegistration = async (next: boolean) => {
-    setRegBusy(true)
-    try {
-      await api.patch('/settings/registration', { enabled: next })
-      setRegEnabled(next)
-      push('Registration settings updated', 'success')
-    } catch (err) {
-      push((err as ApiError).message || 'Failed to update registration setting', 'error')
-    } finally {
-      setRegBusy(false)
-    }
-  }
 
   // ---- Change password ----
   const [curPw, setCurPw] = useState('')
@@ -209,12 +179,35 @@ export default function SecuritySettings() {
   }
 
   return (
-    <div id="security" className="max-w-2xl space-y-6">
+    <div id="profile" className="max-w-2xl space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Security</h1>
-        <p className="text-sm text-slate-400">
-          Manage your account security and authentication
-        </p>
+        <h1 className="vs-title text-4xl">Profile</h1>
+        <p className="text-sm text-slate-400">Your account and how you sign in</p>
+      </div>
+
+      {/* Who you are. Read-only: a username is an identity other records point
+          at, so it is changed by an admin on the Users page, not here. */}
+      <div className="card flex items-center gap-4 p-5">
+        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-xl font-semibold text-slate-900">
+          {(currentUser?.username ?? '?').charAt(0).toUpperCase()}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-lg font-medium text-white">
+            {currentUser?.username ?? '\u2014'}
+          </div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
+            <span className="inline-flex items-center gap-1">
+              <User className="h-3.5 w-3.5" />
+              {isAdmin ? 'Administrator' : 'Member'}
+            </span>
+            <span className={mfaEnabled ? 'text-emerald-400' : 'text-slate-400'}>
+              {mfaEnabled ? 'Two-factor on' : 'Two-factor off'}
+            </span>
+            {currentUser?.last_login && (
+              <span>Last signed in {new Date(currentUser.last_login).toLocaleString()}</span>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Change password */}
@@ -305,43 +298,6 @@ export default function SecuritySettings() {
           </>
         )}
       </div>
-
-      {/* User registration (admin only) */}
-      {isAdmin && (
-        <div className="card space-y-4 p-5">
-          <div className="flex items-center justify-between">
-            <h2 className="font-semibold">User Registration</h2>
-            <span
-              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium ${
-                regEnabled
-                  ? 'bg-emerald-500/20 text-emerald-400'
-                  : 'bg-red-500/20 text-red-400'
-              }`}
-            >
-              {regEnabled ? <UserCheck className="h-3.5 w-3.5" /> : <UserX className="h-3.5 w-3.5" />}
-              {regEnabled === null ? 'Loading…' : regEnabled ? 'Enabled' : 'Disabled'}
-            </span>
-          </div>
-          <p className="text-sm text-slate-400">
-            Control whether new users can create accounts.
-          </p>
-          <label className="flex cursor-pointer items-center gap-3">
-            <input
-              type="checkbox"
-              className="h-4 w-4 rounded border-slate-300 text-primary-400 focus:ring-primary-500"
-              checked={!!regEnabled}
-              disabled={regEnabled === null || regBusy}
-              onChange={(e) => void toggleRegistration(e.target.checked)}
-            />
-            <span className="text-sm">Allow user registration</span>
-          </label>
-          {regEnabled === false && (
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
-              ⚠️ Disabled — only you and explicitly invited users can access Sentinel.
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Sessions */}
       <div className="card space-y-3 p-5">

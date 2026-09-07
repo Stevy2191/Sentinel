@@ -164,7 +164,7 @@ func run() error {
 				log.Printf("WARNING: REGISTRATION_ENABLED=%t is being IGNORED. Self-registration is %s, "+
 					"because the stored setting takes precedence after the first run.",
 					cfg.RegistrationEnabled, map[bool]string{true: "OPEN", false: "CLOSED"}[stored])
-				log.Printf("  To change it: Settings -> Security -> User Registration in the web UI,")
+				log.Printf("  To change it: Users -> User Registration in the web UI,")
 				log.Printf("  or: UPDATE settings SET value='%t', updated_at=now() WHERE key='%s';",
 					cfg.RegistrationEnabled, models.SettingRegistrationEnabled)
 			}
