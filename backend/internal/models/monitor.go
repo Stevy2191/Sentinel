@@ -181,7 +181,7 @@ func (Monitor) TableName() string {
 // "javascript:...") would allow a stored-XZZ payload disguised as a monitor
 // target.
 func validateHTTPURL(raw string) error {
-	u, err:= url.Parse(strings.TrimSpace(raw))
+	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return fmt.Errorf("invalid url: %w", err)
 	}
@@ -217,7 +217,11 @@ func (m *Monitor) Validate() error {
 		if err := validateHTTPURL(m.URL); err != nil {
 			return err
 		}
-		// valid; these targets are host[:port] strings, not URLs.
+	case MonitorTypeTCP, MonitorTypePing, MonitorTypeDNS:
+		// Valid, and deliberately not URL-checked: these targets are
+		// host[:port] strings, not URLs. Without this branch they fall through
+		// to default and are rejected as invalid types - by an error message
+		// that lists them as valid.
 	default:
 		return fmt.Errorf("invalid monitor type %q: must be one of http, tcp, ping, dns, webhook", m.Type)
 	}
