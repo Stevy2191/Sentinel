@@ -283,9 +283,11 @@ func (Check) TableName() string {
 // Incident represents a period of downtime for a monitor, opened when it goes
 // offline and closed when it recovers, enriched with human-authored context.
 type Incident struct {
-	ID              uuid.UUID  `json:"id" gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
-	MonitorID       uuid.UUID  `json:"monitor_id" gorm:"column:monitor_id;type:uuid;not null"`
-	StartTime       time.Time  `json:"start_time" gorm:"column:start_time;not null"`
+	ID        uuid.UUID `json:"id" gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
+	MonitorID uuid.UUID `json:"monitor_id" gorm:"column:monitor_id;type:uuid;not null"`
+	StartTime time.Time `json:"start_time" gorm:"column:start_time;not null"`
+	// IncidentType is how the check failed when the incident opened.
+	IncidentType    string     `json:"incident_type" gorm:"column:incident_type;default:down"`
 	EndTime         *time.Time `json:"end_time" gorm:"column:end_time"`
 	DurationSeconds int        `json:"duration_seconds" gorm:"column:duration_seconds"`
 	Severity        string     `json:"severity" gorm:"column:severity"`
@@ -304,13 +306,14 @@ func (Incident) TableName() string {
 	return "incidents"
 }
 
-// Status derives the incident's state. The incidents table has no status column;
-// an incident is open until it is given an end time.
+// Status derives the incident's state. The incidents table has no status column
+// on purpose: an incident is open until it is given an end time, and a stored
+// copy could disagree with the timestamps every duration is computed from.
 func (i *Incident) Status() string {
 	if i.EndTime == nil {
-		return "ongoing"
+		return IncidentStatusOngoing
 	}
-	return "resolved"
+	return IncidentStatusResolved
 }
 
 // Notification is a record of an alert dispatched over a channel, optionally
@@ -327,6 +330,46 @@ type Notification struct {
 	ErrorMessage string     `json:"error_message" gorm:"column:error_message"`
 	SentAt       *time.Time `json:"sent_at" gorm:"column:sent_at"`
 	CreatedAt    time.Time  `json:"created_at" gorm:"column:created_at;autoCreateTime"`
+}
+
+// Incident types.
+const (
+	IncidentTypeDown    = "down"
+	IncidentTypeTimeout = "timeout"
+	IncidentTypeError   = "error"
+)
+
+// Incident statuses, derived rather than stored.
+const (
+	IncidentStatusOngoing  = "ongoing"
+	IncidentStatusResolved = "resolved"
+)
+
+// Duration is how long the incident lasted, or how long it has been running.
+// An ongoing incident is measured against now, so the number keeps moving.
+func (i *Incident) Duration(now time.Time) time.Duration {
+	if i.EndTime != nil {
+		if i.DurationSeconds > 0 {
+			return time.Duration(i.DurationSeconds) * time.Second
+		}
+		return i.EndTime.Sub(i.StartTime)
+	}
+	return now.Sub(i.StartTime)
+}
+
+// IncidentTypeForCheck classifies a failing check. Only the two failure modes
+// the checker actually distinguishes are produced: inventing a "degraded" type
+// the rest of the system has no concept of would be a label with nothing
+// behind it.
+func IncidentTypeForCheck(checkStatus string) string {
+	switch checkStatus {
+	case "timeout":
+		return IncidentTypeTimeout
+	case "failed":
+		return IncidentTypeError
+	default:
+		return IncidentTypeDown
+	}
 }
 
 // TableName tells GORM which table backs the Notification model.

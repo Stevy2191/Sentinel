@@ -153,6 +153,10 @@ func run() error {
 		models.DefaultMonitorCheckInterval); err != nil {
 		return fmt.Errorf("seeding default check interval: %w", err)
 	}
+	if _, err := settingsService.SeedInt(settingsCtx, models.SettingIncidentRetentionDays,
+		models.DefaultIncidentRetentionDays); err != nil {
+		return fmt.Errorf("seeding incident retention: %w", err)
+	}
 
 	// Say so when the environment disagrees with what is stored. The stored
 	// value winning is deliberate - it is what lets an admin close registration
@@ -184,6 +188,7 @@ func run() error {
 	}
 	notificationConfigService := services.NewNotificationConfigService(db, notificationManager)
 	sslChecker := services.NewSSLCheckerService(db, notificationManager)
+	incidentRetention := services.NewIncidentRetentionService(db, settingsService)
 	if err := notificationManager.LoadFromDatabase(notifyCtx); err != nil {
 		log.Printf("warning: loading notification configs from database: %v", err)
 	}
@@ -268,6 +273,7 @@ func run() error {
 	loopCtx, cancelLoop := context.WithCancel(context.Background())
 	go StartMonitoringLoop(loopCtx, db, monitorService, checkService, incidentService, notificationManager, cfg.CheckInterval)
 	go StartSSLCheckLoop(loopCtx, sslChecker)
+	go incidentRetention.StartPurgeLoop(loopCtx)
 
 	// 9. HTTP server.
 	server := &http.Server{
@@ -738,8 +744,13 @@ func handleStatusChange(
 
 	switch {
 	case newStatus == models.StatusOffline && previous != models.StatusOffline:
-		// Newly offline: open an incident and alert.
-		if incident, err := incidentService.CreateIncident(ctx, monitor.ID, time.Now()); err != nil {
+		// Newly offline: open an incident and alert. The failing check's own
+		// status and message are carried across so the incident says what
+		// happened rather than only that something did.
+		if incident, err := incidentService.CreateIncidentFromCheck(
+			ctx, monitor.ID, time.Now(),
+			models.IncidentTypeForCheck(check.Status), check.ErrorMessage,
+		); err != nil {
 			log.Printf("opening incident for %s: %v", monitor.ID, err)
 		} else {
 			message.IncidentID = &incident.ID
