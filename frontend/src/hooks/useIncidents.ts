@@ -114,6 +114,10 @@ export function useIncidentDetail(id: string | null) {
   const [detail, setDetail] = useState<IncidentDetail | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Bumped to force a reload after an edit, without closing and reopening.
+  const [nonce, setNonce] = useState(0)
+
+  const reload = useCallback(() => setNonce((n) => n + 1), [])
 
   useEffect(() => {
     if (!id) {
@@ -131,9 +135,35 @@ export function useIncidentDetail(id: string | null) {
     return () => {
       active = false
     }
-  }, [id])
+  }, [id, nonce])
 
-  return { detail, loading, error }
+  return { detail, loading, error, reload }
+}
+
+/**
+ * Save an operator's notes on an incident.
+ *
+ * Only the two human-authored fields. root_cause is deliberately not editable
+ * from here: it holds the failing check's own error message, captured when the
+ * incident opened, and letting a note overwrite it would destroy the one piece
+ * of evidence about what actually happened.
+ */
+export function useUpdateIncident() {
+  const [saving, setSaving] = useState(false)
+
+  const save = useCallback(
+    async (id: string, patch: { notes?: string; resolution_notes?: string }) => {
+      setSaving(true)
+      try {
+        await api.patch(`/incidents/${id}`, patch)
+      } finally {
+        setSaving(false)
+      }
+    },
+    []
+  )
+
+  return { save, saving }
 }
 
 /** The retention window, in days, plus the bounds the API will accept. */
