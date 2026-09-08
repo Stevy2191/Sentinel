@@ -4,13 +4,18 @@ import { Menu, X, RefreshCw, Settings } from 'lucide-react'
 import { useAuthContext } from '@/context/AuthContext'
 import { useAppConfig } from '@/context/AppConfigContext'
 
+// Order matters: the three things Sentinel watches sit together, then what it
+// publishes, then what it reports after the fact. Incidents was splitting the
+// monitoring group in half.
 const nav = [
   { to: '/', label: 'Overview', end: true },
+  // What is being monitored.
   { to: '/uptime', label: 'Uptime Monitoring' },
-  { to: '/incidents', label: 'Incidents' },
   { to: '/ssl', label: 'SSL & Domains' },
   { to: '/server-monitoring', label: 'Server Monitoring' },
+  // What comes out of it.
   { to: '/status-pages', label: 'Status Pages' },
+  { to: '/incidents', label: 'Incidents' },
   { to: '/reports', label: 'Reports' },
 ]
 
