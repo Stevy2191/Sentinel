@@ -42,8 +42,9 @@ Key settings to configure:
 - `ADMINER_PORT` / `COMPOSE_PROFILES` — the optional Adminer database UI. Keep
   `COMPOSE_PROFILES=adminer` to run it (on `ADMINER_PORT`, default `8080`); set
   `COMPOSE_PROFILES=` (empty) to skip it. `install.sh` prompts for this.
-- Notification channels (optional): `SMTP_*`, `SLACK_WEBHOOK_URL`, etc. — see
-  [Setting Up Notifications](#setting-up-notifications-optional) below
+- `SMTP_*` (optional) — system email for user invitations and scheduled reports,
+  and the seed for an email alert channel. Other alert channels are added in the
+  app; see [Setting Up Notifications](#setting-up-notifications-optional)
 
 ### 3. Start Sentinel
 
@@ -94,48 +95,48 @@ incident history.
 
 ## Setting Up Notifications (Optional)
 
-Sentinel can alert you via **email, Slack, Discord, Telegram, ntfy, or custom
-webhooks**.
+Alert channels are configured in the app, under **Settings -> Notifications**.
+You can add as many as you like, including several of the same type — separate
+ntfy topics for different teams, say, or one Slack channel for production and
+another for staging.
 
-> **Channels are configured with environment variables**, not in the web UI.
-> Set the relevant variables in your `.env` file, then restart the backend
-> (`docker compose up -d`). Configured channels then appear as **Enabled** on the
-> **Notifications** page, where you can send a **Test** alert.
+1. Open **Settings -> Notifications** and click **Add Channel**
+2. Pick the type and fill in its details:
 
-### Email Alerts
+   | Channel  | What you need                                              |
+   | -------- | ---------------------------------------------------------- |
+   | Email    | SMTP host, port, username, password, and a from address     |
+   | Slack    | An [incoming webhook](https://api.slack.com/messaging/webhooks) URL |
+   | Discord  | A channel webhook URL                                       |
+   | Telegram | A bot token and a chat ID                                   |
+   | ntfy     | A topic, and a server URL if self-hosting                   |
+   | Webhook  | Any URL that accepts a POST                                 |
 
-1. In `.env`, set your SMTP details:
-   ```env
-   SMTP_HOST=smtp.gmail.com
-   SMTP_PORT=587
-   SMTP_USER=your-email@gmail.com
-   SMTP_PASSWORD=your-app-password   # an app password, not your login password
-   SMTP_FROM=alerts@example.com
-   ```
-2. Apply the change: `docker compose up -d`
-3. Open the **Notifications** page — "Email" should now show **Enabled**
-4. Click **Test** to send yourself a test alert
-5. When a monitor goes down, you'll get an email automatically
+3. Save, then click **Test** to send yourself a test alert
 
-### Slack Alerts
+Each monitor then chooses which of those channels it uses, in its own
+**Notifications** section — so a noisy staging check need not wake anyone.
+A monitor with notifications switched off still records incidents; it just does
+not alert.
 
-1. Create an [incoming webhook](https://api.slack.com/messaging/webhooks) in your
-   Slack workspace and copy its URL
-2. In `.env`, set `SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...`
-3. Apply: `docker compose up -d`
-4. Open the **Notifications** page and click **Test** on Slack
+Two channels cannot point at the same destination. Adding one that duplicates
+an existing channel is refused, naming the one already there, because the two
+would deliver every alert twice.
 
-The same pattern applies to the other channels:
+### A note for older installs
 
-| Channel  | Environment variable(s)                        |
-| -------- | ---------------------------------------------- |
-| Discord  | `DISCORD_WEBHOOK_URL`                           |
-| Telegram | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`        |
-| ntfy     | `NTFY_URL` (default `https://ntfy.sh`), `NTFY_TOPIC` |
-| Webhook  | `WEBHOOK_URL`                                   |
+Channels used to be configured with environment variables instead
+(`SLACK_WEBHOOK_URL`, `NTFY_TOPIC`, and so on). Those are still read on first
+run and imported as ordinary channels named "... (from env)", so upgrading
+changes nothing and you can edit or delete them like any other.
 
-When a monitor transitions to **down** (or recovers), Sentinel sends an alert to
-every configured channel automatically.
+They are no longer the documented route: a single variable per type cannot
+describe more than one channel of that type, and setting one in `.env` and then
+adding the same channel in the app left two channels on one destination.
+
+`SMTP_*` is the exception and stays in `.env`. Beyond seeding an email channel,
+Sentinel uses it directly for system email — user invitations and scheduled
+report delivery — which is not tied to any alert channel.
 
 ## Viewing Reports
 
