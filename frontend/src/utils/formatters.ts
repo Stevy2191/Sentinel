@@ -22,6 +22,25 @@ export function formatResponseTime(ms: number | null | undefined): string {
   return `${Math.round(ms)}ms`
 }
 
+/**
+ * Formats the response time of a monitor's last check, given its status.
+ *
+ * A check that got no reply stores 0 rather than null, so formatting the
+ * number alone renders "0ms" — an impossibly fast response — for a monitor
+ * that is in fact unreachable. Nothing was measured, so nothing is shown.
+ *
+ * The zero is only read as "no reply" when the monitor is down; a genuinely
+ * sub-millisecond check on a local target rounds to 0 too, and that one really
+ * did respond.
+ */
+export function formatLastResponseTime(
+  ms: number | null | undefined,
+  status: string | null | undefined,
+): string {
+  if (status === 'offline' && (ms === 0 || ms === null || ms === undefined)) return '—'
+  return formatResponseTime(ms)
+}
+
 /** Human-readable status with an indicator, e.g. "🟢 Online". */
 export function formatStatus(status: string): string {
   switch (status) {

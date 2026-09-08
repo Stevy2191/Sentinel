@@ -37,6 +37,7 @@ import { useToasts, Toaster } from '@/components/Toast'
 import {
   formatDatetime,
   formatResponseTime,
+  formatLastResponseTime,
   getStatusBgColor,
 } from '@/utils/formatters'
 import type { Check, MonitorInput } from '@/types'
@@ -463,7 +464,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
               {monitor.last_check_at ? formatDatetime(monitor.last_check_at) : 'Never'}
             </DetailRow>
             <DetailRow label="Last response">
-              {formatResponseTime(monitor.last_response_time_ms)}
+              {formatLastResponseTime(monitor.last_response_time_ms, monitor.current_status)}
             </DetailRow>
             <DetailRow label="Interval">{monitor.interval_seconds}s</DetailRow>
             <DetailRow label="Timeout">{monitor.timeout_seconds}s</DetailRow>

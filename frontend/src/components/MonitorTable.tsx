@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useMonitorUptime, type RecentCheck } from '@/hooks/useMonitorUptime'
 import DetailPanel, { uptimeColor } from '@/components/DetailPanel'
-import { formatResponseTime } from '@/utils/formatters'
+import { formatLastResponseTime } from '@/utils/formatters'
 import { monitorAccess, badgeToneClass } from '@/utils/monitorAccess'
 import type { Monitor, MonitorGroup } from '@/types'
 
@@ -189,7 +189,7 @@ function MonitorRow({
         </td>
 
         <td className={`px-4 py-3 tabular-nums ${responseColor(monitor.last_response_time_ms)}`}>
-          {formatResponseTime(monitor.last_response_time_ms)}
+          {formatLastResponseTime(monitor.last_response_time_ms, monitor.current_status)}
         </td>
 
         <td className="px-4 py-3">
