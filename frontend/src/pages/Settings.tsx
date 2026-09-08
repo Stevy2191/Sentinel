@@ -9,6 +9,7 @@ import TimezoneSelector from '@/components/TimezoneSelector'
 import NotificationSettings from '@/pages/NotificationSettings'
 import { useAuthContext } from '@/context/AuthContext'
 import { useAppConfig, DEFAULT_APP_NAME } from '@/context/AppConfigContext'
+import { useIncidentRetention } from '@/hooks/useIncidents'
 import {
   PREF,
   DEFAULTS,
@@ -147,6 +148,32 @@ export default function Settings() {
     [isAdmin]
   )
   const [tab, setTab] = useState<Tab>(() => (isAdmin ? 'system' : 'preferences'))
+
+  // ---- Incident retention (server-side, admin-only) ----
+  const { days: retentionDays, bounds: retentionBounds, save: saveRetention } = useIncidentRetention()
+  const [retention, setRetention] = useState<number | null>(null)
+  const [retentionSaving, setRetentionSaving] = useState(false)
+  // Seeded from the server once it answers, then owned by the field so typing
+  // is not overwritten by a later render.
+  useEffect(() => {
+    if (retentionDays != null) setRetention((r) => r ?? retentionDays)
+  }, [retentionDays])
+
+  const retentionValid =
+    retention != null && retention >= retentionBounds.min && retention <= retentionBounds.max
+
+  const persistRetention = async () => {
+    if (retention == null || !retentionValid) return
+    setRetentionSaving(true)
+    try {
+      await saveRetention(retention)
+      push(`Incident history kept for ${retention} days`, 'success')
+    } catch (err) {
+      push(apiMessage(err, 'Could not update retention'), 'error')
+    } finally {
+      setRetentionSaving(false)
+    }
+  }
 
   // ---- System (server-side, admin-only) ----
   const [system, setSystem] = useState<SystemSettings | null>(null)
@@ -380,6 +407,45 @@ export default function Settings() {
                     Must be between {MIN_INTERVAL} and {MAX_INTERVAL} seconds.
                   </p>
                 )}
+              </SettingsCard>
+
+              <SettingsCard
+                title="Data Retention"
+                description="Incidents older than this are deleted automatically. The purge runs nightly at 2 AM."
+              >
+                <label htmlFor="retention-days" className="block text-sm font-medium text-white">
+                  Keep incident history for
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="retention-days"
+                    type="number"
+                    min={retentionBounds.min}
+                    max={retentionBounds.max}
+                    value={retention ?? ''}
+                    onChange={(e) => setRetention(Number(e.target.value))}
+                    aria-label="Incident retention in days"
+                    className="w-32"
+                  />
+                  <span className="text-sm text-slate-400">days</span>
+                  <button
+                    className="btn-secondary !py-1"
+                    disabled={!retentionValid || retentionSaving || retention === retentionDays}
+                    onClick={() => void persistRetention()}
+                  >
+                    {retentionSaving ? 'Saving…' : 'Save'}
+                  </button>
+                </div>
+                {!retentionValid && retention != null && (
+                  <p className="text-xs text-red-400">
+                    Must be between {retentionBounds.min} and {retentionBounds.max} days.
+                  </p>
+                )}
+                {/* An ongoing incident is never purged however old it is: it is
+                    still happening, and is the one most likely to be looked at. */}
+                <p className="text-xs text-slate-500">
+                  Only resolved incidents are removed. An ongoing incident is kept until it ends.
+                </p>
               </SettingsCard>
 
               <div className="flex items-center justify-between border-t border-white/10 pt-4">

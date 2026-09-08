@@ -16,6 +16,7 @@ import Auth from '@/pages/Auth'
 // every visit, so deferring them would only add a spinner before the login form.
 const Overview = lazy(() => import('@/pages/Overview'))
 const UptimeMonitoring = lazy(() => import('@/pages/UptimeMonitoring'))
+const Incidents = lazy(() => import('@/pages/Incidents'))
 const Monitors = lazy(() => import('@/pages/Monitors'))
 const MonitorDetail = lazy(() => import('@/pages/MonitorDetail'))
 const MonitorWizard = lazy(() => import('@/pages/MonitorWizard'))
@@ -72,6 +73,7 @@ export default function App() {
               {/* Kept: bookmarks and in-app links still point at /dashboard. */}
               <Route path="/dashboard" element={<Navigate to="/" replace />} />
               <Route path="/uptime" element={<UptimeMonitoring />} />
+              <Route path="/incidents" element={<Incidents />} />
               <Route path="/monitors" element={<Monitors />} />
               <Route path="/ssl" element={<SSL />} />
               <Route path="/server-monitoring" element={<ServerMonitoring />} />
