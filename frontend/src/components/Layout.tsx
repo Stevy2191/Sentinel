@@ -5,8 +5,8 @@ import { useAuthContext } from '@/context/AuthContext'
 import { useAppConfig } from '@/context/AppConfigContext'
 
 const nav = [
-  { to: '/', label: 'Dashboard', end: true },
-  { to: '/monitors', label: 'Monitors' },
+  { to: '/', label: 'Overview', end: true },
+  { to: '/uptime', label: 'Uptime Monitoring' },
   { to: '/ssl', label: 'SSL & Domains' },
   { to: '/server-monitoring', label: 'Server Monitoring' },
   { to: '/status-pages', label: 'Status Pages' },

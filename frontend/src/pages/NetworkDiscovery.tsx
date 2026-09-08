@@ -51,7 +51,7 @@ export default function NetworkDiscovery() {
   const { scan, result, loading: scanning, error: scanError } = useScanSubnet()
 
   useEffect(() => {
-    if (currentUser && !isAdmin) navigate('/dashboard')
+    if (currentUser && !isAdmin) navigate('/')
   }, [currentUser, isAdmin, navigate])
 
   const [cidr, setCidr] = useState('192.168.1.0/24')
@@ -146,7 +146,7 @@ export default function NetworkDiscovery() {
           )}
         </div>
         <div className="flex gap-2">
-          <button className="rd-btn rd-btn-primary" onClick={() => navigate('/dashboard')}>
+          <button className="rd-btn rd-btn-primary" onClick={() => navigate('/uptime')}>
             Go to dashboard
           </button>
           <button className="rd-btn rd-btn-secondary" onClick={reset}>
@@ -162,7 +162,7 @@ export default function NetworkDiscovery() {
     <div className="mx-auto max-w-4xl space-y-5 pb-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="vs-title text-2xl">Network discovery</h1>
-        <button className="rd-btn rd-btn-secondary" onClick={() => navigate('/dashboard')}>
+        <button className="rd-btn rd-btn-secondary" onClick={() => navigate('/uptime')}>
           <X className="h-4 w-4" /> Cancel
         </button>
       </div>

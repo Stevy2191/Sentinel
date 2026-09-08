@@ -61,7 +61,7 @@ export default function InvitationAccept() {
 
   // Already signed in — nothing to accept here.
   useEffect(() => {
-    if (isAuthenticated) navigate('/dashboard')
+    if (isAuthenticated) navigate('/')
   }, [isAuthenticated, navigate])
 
   const [username, setUsername] = useState('')
@@ -86,7 +86,7 @@ export default function InvitationAccept() {
       await accept(token, username, password)
       setDone(true)
       await refreshAuth() // auto-login: backend already set the auth cookie
-      window.setTimeout(() => navigate('/dashboard'), 1000)
+      window.setTimeout(() => navigate('/'), 1000)
     } catch (err) {
       const msg = (err as { message?: string }).message ?? 'Failed to accept invitation'
       setSubmitError(msg)
