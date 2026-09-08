@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Search, X, ArrowUpDown, Eye, Loader2 } from 'lucide-react'
 import IncidentDetailModal from '@/components/IncidentDetailModal'
+import { useMonitors } from '@/hooks/useMonitors'
 import {
   useIncidents,
   formatDuration,
@@ -44,7 +45,14 @@ export default function Incidents() {
     setFilters((f) => ({ ...f, search: debouncedSearch, page: 1 }))
   }, [debouncedSearch])
 
+  const { monitors } = useMonitors()
   const { incidents, total, loading, error, refetch } = useIncidents(filters)
+
+  // Sorted by name so the list is scannable; the API filters by id.
+  const monitorOptions = useMemo(
+    () => [...monitors].sort((a, b) => a.name.localeCompare(b.name)),
+    [monitors]
+  )
 
   const pages = Math.max(1, Math.ceil(total / filters.limit))
   const from = total === 0 ? 0 : (filters.page - 1) * filters.limit + 1
@@ -101,6 +109,20 @@ export default function Incidents() {
         </div>
 
         <select
+          className="rd-select max-w-[200px]"
+          value={filters.monitorId ?? ''}
+          onChange={(e) => set('monitorId', e.target.value || undefined)}
+          aria-label="Filter by monitor"
+        >
+          <option value="">All monitors</option>
+          {monitorOptions.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+            </option>
+          ))}
+        </select>
+
+        <select
           className="rd-select"
           value={filters.status}
           onChange={(e) => set('status', e.target.value as IncidentFilters['status'])}
@@ -141,11 +163,11 @@ export default function Incidents() {
       ) : incidents.length === 0 ? (
         <div className="rounded-lg border border-white/10 bg-slate-800/40 p-12 text-center backdrop-blur-sm">
           <p className="text-sm text-slate-300">
-            {filters.search || filters.status !== 'all'
+            {filters.search || filters.status !== 'all' || filters.monitorId
               ? 'No incidents match these filters.'
               : 'No incidents recorded.'}
           </p>
-          {!filters.search && filters.status === 'all' && (
+          {!filters.search && filters.status === 'all' && !filters.monitorId && (
             <p className="mt-1 text-xs text-slate-500">
               An incident is opened when a monitor goes down and closed when it recovers.
             </p>
