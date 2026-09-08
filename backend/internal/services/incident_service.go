@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,6 +35,20 @@ func NewIncidentService(db *gorm.DB) *IncidentService {
 
 // CreateIncident opens a new, ongoing incident for a monitor.
 func (s *IncidentService) CreateIncident(ctx context.Context, monitorID uuid.UUID, startTime time.Time) (*models.Incident, error) {
+	return s.CreateIncidentFromCheck(ctx, monitorID, startTime, models.IncidentTypeDown, "")
+}
+
+// CreateIncidentFromCheck opens an incident and records how the check failed
+// and what it said. Without this an incident carried no explanation at all: the
+// error message lived on the check row and was never copied across, so the
+// incident list could say a monitor went down but never why.
+func (s *IncidentService) CreateIncidentFromCheck(
+	ctx context.Context,
+	monitorID uuid.UUID,
+	startTime time.Time,
+	incidentType string,
+	reason string,
+) (*models.Incident, error) {
 	if monitorID == uuid.Nil {
 		return nil, errors.New("monitor id is required")
 	}
@@ -49,6 +64,8 @@ func (s *IncidentService) CreateIncident(ctx context.Context, monitorID uuid.UUI
 		EndTime:         nil,
 		DurationSeconds: 0,
 		Severity:        defaultIncidentSeverity,
+		IncidentType:    incidentType,
+		RootCause:       reason,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
@@ -288,4 +305,125 @@ func (s *IncidentService) GetIncidentCount(ctx context.Context, monitorID uuid.U
 
 	s.logger.Printf("[incident] count monitor=%s range=[%s,%s] count=%d", monitorID, start.Format(time.RFC3339), end.Format(time.RFC3339), count)
 	return count, nil
+}
+
+// IncidentListOptions filters and paginates the incidents list.
+type IncidentListOptions struct {
+	Page   int
+	Limit  int
+	Status string // "", "all", "ongoing", "resolved"
+	// MonitorID restricts to one monitor. Nil means every monitor.
+	MonitorID *uuid.UUID
+	// Search matches the monitor's name, case-insensitively.
+	Search string
+	// SortBy is "started" (default) or "duration".
+	SortBy string
+	Desc   bool
+}
+
+// IncidentWithMonitor is a listed incident joined to the monitor it belongs to,
+// so the table can show a name without a request per row.
+type IncidentWithMonitor struct {
+	models.Incident
+	MonitorName string `json:"monitor_name" gorm:"column:monitor_name"`
+	MonitorURL  string `json:"monitor_url" gorm:"column:monitor_url"`
+	MonitorType string `json:"monitor_type" gorm:"column:monitor_type"`
+}
+
+// ListIncidents returns a page of incidents across all monitors, newest first
+// by default, with the total matching count for pagination.
+func (s *IncidentService) ListIncidents(ctx context.Context, opts IncidentListOptions) ([]IncidentWithMonitor, int64, error) {
+	if opts.Page < 1 {
+		opts.Page = 1
+	}
+	// Bounded so a crafted limit cannot ask for the whole table at once.
+	if opts.Limit < 1 || opts.Limit > 200 {
+		opts.Limit = 50
+	}
+
+	base := s.db.WithContext(ctx).
+		Table("incidents AS i").
+		Joins("JOIN monitors AS m ON m.id = i.monitor_id")
+
+	switch opts.Status {
+	case models.IncidentStatusOngoing:
+		base = base.Where("i.end_time IS NULL")
+	case models.IncidentStatusResolved:
+		base = base.Where("i.end_time IS NOT NULL")
+	}
+	if opts.MonitorID != nil {
+		base = base.Where("i.monitor_id = ?", *opts.MonitorID)
+	}
+	if q := strings.TrimSpace(opts.Search); q != "" {
+		base = base.Where("m.name ILIKE ?", "%"+q+"%")
+	}
+
+	var total int64
+	if err := base.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("counting incidents: %w", err)
+	}
+
+	dir := "ASC"
+	if opts.Desc {
+		dir = "DESC"
+	}
+	order := "i.start_time " + dir
+	if opts.SortBy == "duration" {
+		// An ongoing incident has no stored duration, so it is measured from
+		// its start instead; otherwise every open incident would sort as zero,
+		// which is the opposite of the truth.
+		order = "COALESCE(i.duration_seconds, EXTRACT(EPOCH FROM (now() - i.start_time))::int) " + dir
+	}
+
+	var rows []IncidentWithMonitor
+	err := base.Session(&gorm.Session{}).
+		Select("i.*, m.name AS monitor_name, m.url AS monitor_url, m.type AS monitor_type").
+		Order(order).
+		Limit(opts.Limit).
+		Offset((opts.Page - 1) * opts.Limit).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, 0, fmt.Errorf("listing incidents: %w", err)
+	}
+	return rows, total, nil
+}
+
+// GetIncidentByID returns one incident joined to its monitor.
+func (s *IncidentService) GetIncidentByID(ctx context.Context, id uuid.UUID) (*IncidentWithMonitor, error) {
+	var row IncidentWithMonitor
+	err := s.db.WithContext(ctx).
+		Table("incidents AS i").
+		Joins("JOIN monitors AS m ON m.id = i.monitor_id").
+		Select("i.*, m.name AS monitor_name, m.url AS monitor_url, m.type AS monitor_type").
+		Where("i.id = ?", id).
+		Scan(&row).Error
+	if err != nil {
+		return nil, fmt.Errorf("fetching incident %s: %w", id, err)
+	}
+	if row.ID == uuid.Nil {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return &row, nil
+}
+
+// ChecksDuringIncident returns the checks recorded while the incident was open,
+// oldest first, for the detail timeline. An ongoing incident runs to now.
+func (s *IncidentService) ChecksDuringIncident(ctx context.Context, inc *models.Incident, limit int) ([]models.Check, error) {
+	if limit < 1 || limit > 500 {
+		limit = 200
+	}
+	end := time.Now()
+	if inc.EndTime != nil {
+		end = *inc.EndTime
+	}
+	var checks []models.Check
+	err := s.db.WithContext(ctx).
+		Where("monitor_id = ? AND timestamp >= ? AND timestamp <= ?", inc.MonitorID, inc.StartTime, end).
+		Order("timestamp ASC").
+		Limit(limit).
+		Find(&checks).Error
+	if err != nil {
+		return nil, fmt.Errorf("loading checks for incident %s: %w", inc.ID, err)
+	}
+	return checks, nil
 }
