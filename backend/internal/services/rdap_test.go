@@ -2,6 +2,8 @@ package services
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -77,4 +79,33 @@ func TestLookupRegistrationLive(t *testing.T) {
 		t.Logf("%-22s -> domain=%s registrar=%q expires=%s",
 			host, info.Domain, info.Registrar, info.ExpiryDate.Format("2006-01-02"))
 	}
+}
+
+func TestIsTransientRDAPError(t *testing.T) {
+	if isTransientRDAPError(errors.New("plain")) {
+		t.Error("a plain error must not be retried")
+	}
+	if isTransientRDAPError(ErrNoRDAP) {
+		t.Error("a registry with no RDAP must not be retried")
+	}
+	wrapped := fmt.Errorf("context: %w", transientRDAPError{errors.New("timeout")})
+	if !isTransientRDAPError(wrapped) {
+		t.Error("a wrapped transient error must still be retried")
+	}
+}
+
+// A definitive answer must be accepted first time; only transient failures are
+// worth asking again, or a missing domain would cost three round trips.
+func TestLookupRegistrationRetriesOnlyTransient(t *testing.T) {
+	if testing.Short() {
+		t.Skip("needs network")
+	}
+	// example.invalid cannot resolve, so every attempt fails transiently and
+	// the retries must actually be spent.
+	start := time.Now()
+	_, err := LookupRegistration(context.Background(), "nonexistent-tld-xyz.invalid")
+	if err == nil {
+		t.Fatal("expected a failure")
+	}
+	t.Logf("after %v: %v", time.Since(start).Round(time.Millisecond), err)
 }

@@ -345,16 +345,34 @@ func (s *SSLCheckerService) alertExpiring(ctx context.Context, cert *models.SSLC
 // only clock that can be read at all.
 func (s *SSLCheckerService) CheckRegistration(ctx context.Context, cert *models.SSLCertificate) error {
 	now := time.Now()
-	info, err := LookupRegistration(ctx, cert.Domain)
+	// Detached from the caller's cancellation. On the create and check-now
+	// paths this is a request context, and a browser that navigates away would
+	// otherwise cancel the lookup and store the cancellation as the domain's
+	// error. The lookup bounds itself, and CheckAll re-checks ctx between
+	// domains, so shutdown still stops promptly.
+	info, err := LookupRegistration(context.WithoutCancel(ctx), cert.Domain)
 
 	updates := map[string]interface{}{"registration_checked_at": now, "updated_at": now}
 	if err != nil {
 		msg := err.Error()
-		// Previous values are kept: a lookup that failed today has not changed
-		// when the domain expires.
-		updates["domain_status"] = models.SSLStatusUnknown
+		// A failed lookup today does not change when the domain expires, so
+		// everything already known is kept — including the status, which is
+		// re-derived from the stored date. Resetting it to "unknown" would
+		// turn a healthy domain into a warning on one timeout and throw away
+		// the expiry date that is still perfectly good.
+		if cert.DomainExpiryDate != nil {
+			status, days := models.DeriveStatus(*cert.DomainExpiryDate, cert.ExpiryNotificationDays, now)
+			updates["domain_status"] = status
+			updates["domain_days_until_expiry"] = days
+			cert.DomainStatus = status
+			cert.DomainDaysUntilExpiry = &days
+		} else {
+			// Nothing was ever read for this domain, so there is genuinely
+			// nothing to report but the failure.
+			updates["domain_status"] = models.SSLStatusUnknown
+			cert.DomainStatus = models.SSLStatusUnknown
+		}
 		updates["registration_error"] = msg
-		cert.DomainStatus = models.SSLStatusUnknown
 		cert.RegistrationError = &msg
 	} else {
 		status, days := models.DeriveStatus(info.ExpiryDate, cert.ExpiryNotificationDays, now)
@@ -439,6 +457,18 @@ func (s *SSLCheckerService) alertDomainExpiring(ctx context.Context, cert *model
 	s.logger.Printf("[ssl] registration alert sent for %s (%d day(s) left)", name, days)
 }
 
+// Refresh re-reads both clocks for one domain and reports each result
+// separately.
+//
+// The two are independent on purpose: a certificate that cannot be read must
+// not stop the registration lookup, and vice versa. Every path that refreshes
+// a domain goes through here so none of them can quietly cover only one half.
+func (s *SSLCheckerService) Refresh(ctx context.Context, cert *models.SSLCertificate) (certErr, regErr error) {
+	certErr = s.CheckCertificate(ctx, cert)
+	regErr = s.CheckRegistration(ctx, cert)
+	return certErr, regErr
+}
+
 // CheckAll re-reads every enabled certificate, returning how many were checked
 // and how many failed. One bad domain never stops the sweep.
 func (s *SSLCheckerService) CheckAll(ctx context.Context) (checked, failed int, err error) {
@@ -511,11 +541,12 @@ func (s *SSLCheckerService) Create(ctx context.Context, cert *models.SSLCertific
 	// the check did not work, which is more useful than refusing to add it.
 	// This is what lets an apex domain be added even where an internal
 	// resolver breaks the TLS check — the registration clock still reads.
-	if err := s.CheckCertificate(ctx, cert); err != nil {
-		s.logger.Printf("[ssl] first certificate check of %s failed: %v", cert.Domain, err)
+	certErr, regErr := s.Refresh(ctx, cert)
+	if certErr != nil {
+		s.logger.Printf("[ssl] first certificate check of %s failed: %v", cert.Domain, certErr)
 	}
-	if err := s.CheckRegistration(ctx, cert); err != nil {
-		s.logger.Printf("[ssl] first registration check of %s failed: %v", cert.Domain, err)
+	if regErr != nil {
+		s.logger.Printf("[ssl] first registration check of %s failed: %v", cert.Domain, regErr)
 	}
 	return nil
 }

@@ -246,16 +246,27 @@ func CheckSSLCertificateNowHandler(svc *services.SSLCheckerService) gin.HandlerF
 			return
 		}
 
+		// Both clocks, so "Check now" means the whole row and not just its
+		// certificate half.
+		//
 		// A failed read is a result, not a request failure: the row records why,
 		// and the caller gets the updated certificate either way.
-		checkErr := svc.CheckCertificate(c.Request.Context(), cert)
-		var checkErrMsg *string
-		if checkErr != nil {
-			msg := checkErr.Error()
-			checkErrMsg = &msg
-		}
-		respondSuccess(c, http.StatusOK, gin.H{"certificate": cert, "check_error": checkErrMsg})
+		checkErr, regErr := svc.Refresh(c.Request.Context(), cert)
+		respondSuccess(c, http.StatusOK, gin.H{
+			"certificate":        cert,
+			"check_error":        errMessage(checkErr),
+			"registration_error": errMessage(regErr),
+		})
 	}
+}
+
+// errMessage renders an error for a JSON body, or nil when there was none.
+func errMessage(err error) *string {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	return &msg
 }
 
 // CheckAllSSLCertificatesHandler handles POST /api/v1/ssl-certificates/check-all.

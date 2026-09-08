@@ -17,8 +17,40 @@ import (
 // that publishes RDAP.
 const rdapBaseURL = "https://rdap.org/domain/"
 
-// rdapTimeout bounds the whole lookup including redirects.
-const rdapTimeout = 15 * time.Second
+// rdapTimeout bounds one attempt, including the bootstrap redirect.
+const rdapTimeout = 8 * time.Second
+
+// rdapAttempts is how many times a transient failure is retried, and it is
+// deliberately small. A failed lookup no longer discards what is already known
+// about a domain, so patience buys little: one extra try absorbs a momentary
+// stall, and anything worse is better reported quickly than waited out. Adding
+// or re-checking a domain is interactive, and nobody should watch a spinner for
+// a minute because a registry is down.
+const rdapAttempts = 2
+
+// rdapBudget is the ceiling on a whole lookup including retries and backoff,
+// so the interactive paths have a bound that does not move if the numbers
+// above are ever tuned.
+const rdapBudget = 20 * time.Second
+
+// rdapUserAgent identifies the client. Several registries throttle or refuse
+// the default Go user agent, which shows up as a timeout rather than as a
+// refusal, so it is worth setting explicitly.
+const rdapUserAgent = "Sentinel-Uptime-Monitor/1.0 (+https://github.com/Stevy2191/Sentinel)"
+
+// rdapClient is kept separate from http.DefaultClient so this lookup has its
+// own connection pool and its own ceiling, and cannot be affected by any
+// other caller's use of the default.
+var rdapClient = &http.Client{
+	Timeout: rdapTimeout,
+	Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		MaxIdleConnsPerHost:   4,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	},
+}
 
 // ErrNoRDAP means the registry does not publish RDAP for this domain. Not a
 // fault: plenty of country-code registries still only offer port-43 WHOIS, and
@@ -74,13 +106,55 @@ type rdapResponse struct {
 }
 
 // LookupRegistration fetches the registration record for a hostname's
-// registrable domain.
+// registrable domain, retrying transient failures.
 func LookupRegistration(ctx context.Context, host string) (*RegistrationInfo, error) {
 	domain, err := RegistrableDomain(host)
 	if err != nil {
 		return nil, err
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, rdapBudget)
+	defer cancel()
+
+	var lastErr error
+	for attempt := 0; attempt < rdapAttempts; attempt++ {
+		if attempt > 0 {
+			// Linear backoff. The failures worth retrying are rate limits and
+			// momentary stalls, both of which clear in seconds.
+			delay := time.Duration(attempt) * time.Second
+			select {
+			case <-ctx.Done():
+				return nil, fmt.Errorf("looking up %s: %w", domain, ctx.Err())
+			case <-time.After(delay):
+			}
+		}
+
+		info, err := lookupRegistrationOnce(ctx, domain)
+		if err == nil {
+			return info, nil
+		}
+		lastErr = err
+		// A definitive answer is not worth asking again: the record is
+		// absent, unparseable, or the registry does not publish RDAP at all.
+		if !isTransientRDAPError(err) {
+			return nil, err
+		}
+	}
+	return nil, lastErr
+}
+
+// transientRDAPError marks a failure worth retrying.
+type transientRDAPError struct{ err error }
+
+func (e transientRDAPError) Error() string { return e.err.Error() }
+func (e transientRDAPError) Unwrap() error { return e.err }
+
+func isTransientRDAPError(err error) bool {
+	var t transientRDAPError
+	return errors.As(err, &t)
+}
+
+func lookupRegistrationOnce(ctx context.Context, domain string) (*RegistrationInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, rdapTimeout)
 	defer cancel()
 
@@ -89,10 +163,12 @@ func LookupRegistration(ctx context.Context, host string) (*RegistrationInfo, er
 		return nil, fmt.Errorf("building RDAP request for %s: %w", domain, err)
 	}
 	req.Header.Set("Accept", "application/rdap+json")
+	req.Header.Set("User-Agent", rdapUserAgent)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := rdapClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("looking up %s: %w", domain, err)
+		// Network failures and timeouts are the retryable case.
+		return nil, transientRDAPError{fmt.Errorf("looking up %s: %w", domain, err)}
 	}
 	defer resp.Body.Close()
 
@@ -101,8 +177,15 @@ func LookupRegistration(ctx context.Context, host string) (*RegistrationInfo, er
 		// The bootstrap returns 404 both for "no such domain" and for a TLD it
 		// cannot route, which are indistinguishable from here.
 		return nil, fmt.Errorf("%s: no registration record found", domain)
-	case resp.StatusCode == http.StatusNotImplemented, resp.StatusCode == http.StatusBadGateway:
+	case resp.StatusCode == http.StatusNotImplemented:
 		return nil, ErrNoRDAP
+	case resp.StatusCode == http.StatusTooManyRequests,
+		resp.StatusCode == http.StatusBadGateway,
+		resp.StatusCode == http.StatusServiceUnavailable,
+		resp.StatusCode == http.StatusGatewayTimeout:
+		// 502 used to be read as "no RDAP here". It is more often the
+		// bootstrap failing to reach the registry, which clears on a retry.
+		return nil, transientRDAPError{fmt.Errorf("%s: registry returned %d", domain, resp.StatusCode)}
 	case resp.StatusCode != http.StatusOK:
 		return nil, fmt.Errorf("%s: registry returned %d", domain, resp.StatusCode)
 	}
