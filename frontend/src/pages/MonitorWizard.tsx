@@ -16,6 +16,7 @@ import { useCreateMonitor } from '@/hooks/useMonitors'
 import { useMonitorGroups, useMoveMonitorToGroup } from '@/hooks/useMonitorGroups'
 import { useToasts, Toaster } from '@/components/Toast'
 import NotificationChannelPicker from '@/components/NotificationChannelPicker'
+import { useAvailableChannels } from '@/hooks/useNotificationConfig'
 import {
   emptyMonitorForm,
   validateMonitorForm,
@@ -167,6 +168,11 @@ export default function MonitorWizard() {
   const [outcome, setOutcome] = useState<TestOutcome | null>(null)
 
   const kind = KINDS.find((k) => k.type === values.type) ?? KINDS[0]
+  // Named, not by id: the review step exists to be read back, and a list of
+  // UUIDs tells the reader nothing about where alerts will land.
+  const { available: allChannels } = useAvailableChannels(true)
+  const channelNames = (ids: string[]) =>
+    ids.map((id) => allChannels.find((c) => c.id === id)?.name ?? id).join(', ')
   const set = <K extends keyof MonitorFormValues>(key: K, value: MonitorFormValues[K]) =>
     setValues((v) => ({ ...v, [key]: value }))
 
@@ -489,7 +495,7 @@ export default function MonitorWizard() {
                     ? 'All configured channels'
                     : values.notify_channels.length === 0
                       ? 'None — silent monitoring'
-                      : values.notify_channels.join(', '),
+                      : channelNames(values.notify_channels),
                 ],
               ].map(([k, v]) => (
                 <div key={k} className="flex justify-between gap-4 border-b pb-2" style={{ borderColor: 'var(--vs-line)' }}>

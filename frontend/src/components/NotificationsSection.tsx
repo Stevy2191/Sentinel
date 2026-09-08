@@ -14,6 +14,11 @@ interface Props {
   silentNote: string
   /** Closes the dialog before the Settings link navigates away. */
   onNavigateAway?: () => void
+  /**
+   * Omit the heading where the surrounding form already provides one, so the
+   * word "Notifications" does not appear twice.
+   */
+  showHeading?: boolean
 }
 
 /**
@@ -30,18 +35,23 @@ export default function NotificationsSection({
   active = true,
   silentNote,
   onNavigateAway,
+  showHeading = true,
 }: Props) {
   const { available, loading, error } = useAvailableChannels(active)
   const none = !loading && !error && available.length === 0
 
   return (
     <section>
-      <h3 className="text-xs font-semibold uppercase tracking-widest text-slate-300">
-        Notifications
-      </h3>
-      <p className="mb-4 mt-1 text-xs text-slate-500">
-        Select which channels to notify for this service
-      </p>
+      {showHeading && (
+        <>
+          <h3 className="text-xs font-semibold uppercase tracking-widest text-slate-300">
+            Notifications
+          </h3>
+          <p className="mb-4 mt-1 text-xs text-slate-500">
+            Select which channels to notify for this service
+          </p>
+        </>
+      )}
 
       <div className="flex items-center justify-between gap-4 rounded-lg border border-white/10 bg-slate-800/40 p-4">
         <div className="min-w-0">
