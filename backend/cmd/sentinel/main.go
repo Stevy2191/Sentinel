@@ -183,6 +183,7 @@ func run() error {
 		log.Printf("warning: importing notification channels from the environment: %v", err)
 	}
 	notificationConfigService := services.NewNotificationConfigService(db, notificationManager)
+	sslChecker := services.NewSSLCheckerService(db, notificationManager)
 	if err := notificationManager.LoadFromDatabase(notifyCtx); err != nil {
 		log.Printf("warning: loading notification configs from database: %v", err)
 	}
@@ -240,6 +241,7 @@ func run() error {
 	api.RegisterStatusPageRoutes(v1, statusPageService, incidentService)
 	api.RegisterNotificationRoutes(v1, notificationManager, monitorService)
 	api.RegisterSettingsRoutes(v1, settingsService, models.DefaultMonitorCheckInterval)
+	api.RegisterSSLCertificateRoutes(v1, sslChecker)
 	// Per-user theme (not admin-gated): only AuthMiddleware applies.
 	// Self password change (any authenticated user).
 	v1.POST("/auth/change-password", api.ChangeOwnPasswordHandler(authService))
@@ -265,6 +267,7 @@ func run() error {
 	// 8. Monitoring loop.
 	loopCtx, cancelLoop := context.WithCancel(context.Background())
 	go StartMonitoringLoop(loopCtx, db, monitorService, checkService, incidentService, notificationManager, cfg.CheckInterval)
+	go StartSSLCheckLoop(loopCtx, sslChecker)
 
 	// 9. HTTP server.
 	server := &http.Server{
@@ -514,6 +517,54 @@ func envNtfyConfig() *models.NotificationConfig {
 		NtfyURL:       url,
 		NtfyTopic:     topic,
 		NtfyAuthToken: strPtr(os.Getenv("NTFY_AUTH_TOKEN")),
+	}
+}
+
+// StartSSLCheckLoop re-reads every watched certificate once a day.
+//
+// It sweeps shortly after startup as well as on the daily tick. An expiry date
+// only moves once a day, but a process that has been down for a week would
+// otherwise wait a further day before noticing a certificate expired while it
+// was off — and the first sweep is also what fills in rows whose initial check
+// failed.
+func StartSSLCheckLoop(ctx context.Context, checker *services.SSLCheckerService) {
+	const interval = models.SSLCheckIntervalSeconds * time.Second
+
+	// Long enough after boot that the first sweep does not compete with
+	// migrations and the initial monitor pass for the network.
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(30 * time.Second):
+	}
+
+	sweep := func() {
+		// Bounded independently of the loop: a sweep that hangs on one slow
+		// host must not delay tomorrow's.
+		sweepCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+		defer cancel()
+		checked, failed, err := checker.CheckAll(sweepCtx)
+		if err != nil {
+			log.Printf("[ssl] sweep failed: %v", err)
+			return
+		}
+		if checked > 0 {
+			log.Printf("[ssl] checked %d certificate(s), %d could not be read", checked, failed)
+		}
+	}
+	sweep()
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	log.Printf("[ssl] certificate check loop started (interval=%s)", interval)
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("[ssl] certificate check loop stopped")
+			return
+		case <-ticker.C:
+			sweep()
+		}
 	}
 }
 
