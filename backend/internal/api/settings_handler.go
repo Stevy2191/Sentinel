@@ -142,4 +142,6 @@ func RegisterSettingsRoutes(rg *gin.RouterGroup, settingsService *services.Setti
 	settings.GET("", GetSettingsHandler(settingsService, defaultInterval))
 	settings.PATCH("/registration", UpdateRegistrationHandler(settingsService))
 	settings.PATCH("/system", UpdateSystemSettingsHandler(settingsService))
+	settings.GET("/incident-retention-days", GetIncidentRetentionHandler(settingsService))
+	settings.PATCH("/incident-retention-days", UpdateIncidentRetentionHandler(settingsService))
 }
