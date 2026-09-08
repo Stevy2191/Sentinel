@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -40,10 +41,33 @@ func (s *NotificationConfigService) GetAllConfigs(ctx context.Context) ([]models
 	if err := s.db.WithContext(ctx).Order("channel ASC, created_at ASC").Find(&configs).Error; err != nil {
 		return nil, fmt.Errorf("listing notification configs: %w", err)
 	}
+	markDuplicates(configs)
 	for i := range configs {
 		configs[i].HideSecrets()
 	}
 	return configs, nil
+}
+
+// markDuplicates pairs up channels that deliver to the same destination.
+//
+// Run before HideSecrets, because a webhook URL is part of the identity and is
+// cleared by it.
+func markDuplicates(configs []models.NotificationConfig) {
+	// The first channel with a given destination is treated as the original;
+	// every later one points back at it, so the list reads as "this is a copy
+	// of that" rather than flagging both and saying neither.
+	firstByKey := make(map[string]string, len(configs))
+	for i := range configs {
+		key := configs[i].Channel + "\x00" + configs[i].DestinationKey()
+		if strings.Trim(configs[i].DestinationKey(), "|/") == "" {
+			continue
+		}
+		if name, seen := firstByKey[key]; seen {
+			configs[i].DuplicateOf = name
+			continue
+		}
+		firstByKey[key] = configs[i].Name
+	}
 }
 
 // GetConfig returns a single channel's config including secrets (for editing).
@@ -66,6 +90,9 @@ func (s *NotificationConfigService) CreateConfig(ctx context.Context, config *mo
 	if err := config.Validate(); err != nil {
 		return err
 	}
+	if err := s.checkDuplicate(ctx, config, uuid.Nil); err != nil {
+		return err
+	}
 	if config.ID == uuid.Nil {
 		config.ID = uuid.New()
 	}
@@ -79,6 +106,45 @@ func (s *NotificationConfigService) CreateConfig(ctx context.Context, config *mo
 	s.logger.Printf("[notify-config] channel created: %s (%s)", config.Name, config.Channel)
 	if err := s.manager.ReloadChannel(ctx, config.ID); err != nil {
 		s.logger.Printf("[notify-config] warning: reload of %s failed: %v", config.ID, err)
+	}
+	return nil
+}
+
+// ErrDuplicateDestination means another channel already delivers to the same
+// place, so saving this one would send every alert twice.
+var ErrDuplicateDestination = errors.New("duplicate notification destination")
+
+// checkDuplicate refuses a channel that would deliver to somewhere an existing
+// channel already covers, ignoring the row being edited.
+//
+// Worth refusing rather than merely warning: two channels on one destination
+// deliver every alert twice, and nothing about the list makes that visible —
+// the names differ, so the pair looks deliberate. The usual way to end up here
+// is configuring a channel in the environment, which is imported on first run,
+// and then adding the same one again through the UI without realising the
+// first came from env.
+func (s *NotificationConfigService) checkDuplicate(ctx context.Context, config *models.NotificationConfig, excludeID uuid.UUID) error {
+	key := config.DestinationKey()
+	// An incomplete configuration has no destination to collide with, and
+	// Validate already rejects the cases that matter.
+	if key == "" || strings.Trim(key, "|/") == "" {
+		return nil
+	}
+
+	var siblings []models.NotificationConfig
+	q := s.db.WithContext(ctx).Where("channel = ?", config.Channel)
+	if excludeID != uuid.Nil {
+		q = q.Where("id <> ?", excludeID)
+	}
+	if err := q.Find(&siblings).Error; err != nil {
+		return fmt.Errorf("checking for a duplicate %s channel: %w", config.Channel, err)
+	}
+
+	for i := range siblings {
+		if siblings[i].DestinationKey() == key {
+			return fmt.Errorf("%w: %q already sends to %s. Edit or delete it instead of adding a second channel to the same destination, or every alert will be delivered twice",
+				ErrDuplicateDestination, siblings[i].Name, siblings[i].Summary())
+		}
 	}
 	return nil
 }
@@ -97,6 +163,10 @@ func (s *NotificationConfigService) UpdateConfig(ctx context.Context, id uuid.UU
 			return ErrConfigNotFound
 		}
 		return fmt.Errorf("fetching notification channel %s: %w", id, err)
+	}
+
+	if err := s.checkDuplicate(ctx, config, id); err != nil {
+		return err
 	}
 
 	config.ID = existing.ID

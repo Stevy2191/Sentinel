@@ -21,6 +21,8 @@ export interface NotificationConfig {
   /** Non-secret one-line summary of where this delivers, computed server-side
    *  because the identifying fields are often the secret ones. */
   details?: string
+  /** Name of another channel delivering to the same place, if any. */
+  duplicate_of?: string
   // Email/SMTP
   smtp_host?: string | null
   smtp_port?: number | null

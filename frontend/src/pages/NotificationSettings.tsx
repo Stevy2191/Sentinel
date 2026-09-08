@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { format } from 'date-fns'
-import { X, Loader2, Eye, EyeOff, ExternalLink, Trash2, Pencil, Plus } from 'lucide-react'
+import { X, Loader2, Eye, EyeOff, ExternalLink, Trash2, Pencil, Plus, AlertTriangle } from 'lucide-react'
 import { useToasts, Toaster } from '@/components/Toast'
 import {
   CHANNEL_META,
@@ -856,11 +856,22 @@ export default function NotificationSettings() {
                         <span className="text-slate-300">{CHANNEL_META[c.channel].label}</span>
                       </span>
                     </td>
-                    <td
-                      className="max-w-[240px] truncate px-4 py-3 text-slate-400"
-                      title={c.details ?? ''}
-                    >
-                      {c.details || 'not configured'}
+                    <td className="max-w-[240px] px-4 py-3 text-slate-400">
+                      <div className="truncate" title={c.details ?? ''}>
+                        {c.details || 'not configured'}
+                      </div>
+                      {/* Two channels on one destination send every alert
+                          twice, and the differing names make the pair look
+                          deliberate. */}
+                      {c.duplicate_of && (
+                        <div
+                          className="mt-0.5 flex items-center gap-1 text-xs text-amber-400"
+                          title={`Also sent by "${c.duplicate_of}" — alerts go out twice. Delete one of the two.`}
+                        >
+                          <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
+                          <span className="truncate">same as “{c.duplicate_of}”</span>
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <button
