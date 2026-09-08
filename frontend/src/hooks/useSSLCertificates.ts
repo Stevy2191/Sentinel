@@ -19,6 +19,22 @@ export interface SSLCertificate {
   /** Which channels expiry warnings go to. null means every enabled channel. */
   notify_channels: string[] | null
 
+  // Read from the certificate itself; null until a check has succeeded.
+  subject_common_name: string | null
+  issuer_common_name: string | null
+  /** Hex octets, e.g. "A5:9E:BD:…". A string because a serial overflows a JS number. */
+  serial_number: string | null
+  signature_algorithm: string | null
+  public_key_algorithm: string | null
+  subject_alternative_names: string[] | null
+  valid_from: string | null
+  /** The address the handshake actually reached. */
+  resolved_ip: string | null
+  /** The whole issued window, not what is left of it. Server-derived. */
+  validity_period_days: number
+  /** When this certificate is next due. Server-derived; null before the first check. */
+  next_check: string | null
+
   // Domain registration — a separate clock from the certificate. A lapsed
   // registration takes the whole domain down and is renewed at the registrar,
   // not by reissuing a certificate.

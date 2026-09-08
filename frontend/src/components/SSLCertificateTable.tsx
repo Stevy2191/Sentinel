@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ArrowUpDown, Pencil, Trash2, RefreshCw } from 'lucide-react'
+import { ArrowUpDown, Pencil, Trash2, RefreshCw, Eye } from 'lucide-react'
 import { STATUS_STYLE, daysLeftClass } from '@/components/CreateSSLModal'
 import ErrorTooltip, { trimDomainPrefix } from '@/components/ErrorTooltip'
 import type { SSLCertificate } from '@/hooks/useSSLCertificates'
@@ -11,6 +11,7 @@ type SortKey = 'domain' | 'days' | 'expiry' | 'domain_days'
 interface Props {
   certificates: SSLCertificate[]
   search: string
+  onView: (cert: SSLCertificate) => void
   onEdit: (cert: SSLCertificate) => void
   onDelete: (cert: SSLCertificate) => void
   onCheckNow: (cert: SSLCertificate) => void
@@ -27,6 +28,7 @@ interface Props {
 export default function SSLCertificateTable({
   certificates,
   search,
+  onView,
   onEdit,
   onDelete,
   onCheckNow,
@@ -154,7 +156,14 @@ export default function SSLCertificateTable({
                   }`}
                 >
                   <td className="px-4 py-3">
-                    <div className="font-medium text-slate-200">{c.domain}</div>
+                    <button
+                      type="button"
+                      onClick={() => onView(c)}
+                      className="max-w-full truncate rounded text-left font-medium text-slate-200 underline-offset-2 transition hover:text-white hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+                      title={`View certificate details for ${c.domain}`}
+                    >
+                      {c.domain}
+                    </button>
                     {!c.enabled && <div className="text-xs text-slate-500">paused</div>}
                   </td>
                   <td className="px-4 py-3">
@@ -242,6 +251,14 @@ export default function SSLCertificateTable({
                         onClick={() => onCheckNow(c)}
                       >
                         <RefreshCw className={`h-4 w-4 ${checkingId === c.id ? 'animate-spin' : ''}`} />
+                      </button>
+                      <button
+                        className="rounded p-1.5 text-slate-400 transition hover:bg-white/10 hover:text-white"
+                        aria-label={`View details for ${c.domain}`}
+                        title="View details"
+                        onClick={() => onView(c)}
+                      >
+                        <Eye className="h-4 w-4" />
                       </button>
                       <button
                         className="rounded p-1.5 text-slate-400 transition hover:bg-white/10 hover:text-white"

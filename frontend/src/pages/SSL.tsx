@@ -4,6 +4,7 @@ import { useToasts, Toaster } from '@/components/Toast'
 import { useCardShimmer } from '@/hooks/useCardShimmer'
 import CreateSSLModal from '@/components/CreateSSLModal'
 import SSLCertificateTable from '@/components/SSLCertificateTable'
+import SSLCertificateDetailModal from '@/components/SSLCertificateDetailModal'
 import {
   useSSLCertificates,
   useSSLCertificateActions,
@@ -265,6 +266,7 @@ export default function SSL() {
 
   const [addOpen, setAddOpen] = useState(false)
   const [editing, setEditing] = useState<SSLCertificate | null>(null)
+  const [viewing, setViewing] = useState<SSLCertificate | null>(null)
   const [confirm, setConfirm] = useState<SSLCertificate | null>(null)
   const [checkingId, setCheckingId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
@@ -425,6 +427,7 @@ export default function SSL() {
         <SSLCertificateTable
           certificates={certificates}
           search={search}
+          onView={setViewing}
           onEdit={setEditing}
           onDelete={setConfirm}
           onCheckNow={(c) => void handleCheckNow(c)}
@@ -438,6 +441,17 @@ export default function SSL() {
         onCreated={() => void refetch()}
         push={push}
       />
+
+      {/* Kept fed from the live list, so a background re-check or a Refresh All
+          updates the open panel instead of freezing it at what it showed when
+          it was opened. */}
+      {viewing && (
+        <SSLCertificateDetailModal
+          certificate={certificates.find((c) => c.id === viewing.id) ?? viewing}
+          isOpen
+          onClose={() => setViewing(null)}
+        />
+      )}
 
       {editing && (
         <EditModal
