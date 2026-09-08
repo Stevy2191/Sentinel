@@ -7,6 +7,7 @@ import { useAppConfig } from '@/context/AppConfigContext'
 const nav = [
   { to: '/', label: 'Overview', end: true },
   { to: '/uptime', label: 'Uptime Monitoring' },
+  { to: '/incidents', label: 'Incidents' },
   { to: '/ssl', label: 'SSL & Domains' },
   { to: '/server-monitoring', label: 'Server Monitoring' },
   { to: '/status-pages', label: 'Status Pages' },
