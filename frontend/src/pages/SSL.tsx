@@ -123,11 +123,7 @@ function EditModal({
         className="w-full max-w-md rounded-xl border border-white/10 bg-slate-900/95 p-6"
       >
         <div className="mb-4 flex items-start justify-between">
-          <div>
-            <h3 className="text-lg font-semibold text-white">{cert.domain}</h3>
-            {/* Fixed, and said so rather than shown as a disabled input. */}
-            <p className="mt-1 text-xs text-slate-500">Checked once a day</p>
-          </div>
+          <h3 className="text-lg font-semibold text-white">Edit certificate</h3>
           <button
             onClick={onClose}
             className="rounded p-1 text-slate-400 transition hover:text-white"
@@ -135,6 +131,23 @@ function EditModal({
           >
             <X className="h-5 w-5" />
           </button>
+        </div>
+
+        {/* Shown as a labelled read-only field rather than a heading: as a
+            title it reads as decoration, and it needs to be obvious both which
+            certificate is being edited and that the domain is not one of the
+            things you can change here. */}
+        <div className="mb-5">
+          <span className="mb-1 block text-sm font-medium text-white">Domain</span>
+          <p
+            className="truncate rounded-lg border border-white/10 bg-slate-800/40 px-3 py-2 text-sm text-slate-300"
+            title={cert.domain}
+          >
+            {cert.domain}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            Checked once a day. To watch a different domain, add it as a new entry.
+          </p>
         </div>
 
         <label htmlFor="edit-days" className="mb-1 block text-sm font-medium text-white">
