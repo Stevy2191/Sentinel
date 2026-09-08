@@ -16,6 +16,22 @@ export interface SSLCertificate {
   /** Why the last read failed. Explains a status of "unknown". */
   last_error: string | null
   enabled: boolean
+  /** Which channels expiry warnings go to. null means every enabled channel. */
+  notify_channels: string[] | null
+
+  // Domain registration — a separate clock from the certificate. A lapsed
+  // registration takes the whole domain down and is renewed at the registrar,
+  // not by reissuing a certificate.
+  /** The registrable domain the registration belongs to, e.g. example.com. */
+  registrable_domain: string | null
+  registrar: string | null
+  domain_expiry_date: string | null
+  domain_days_until_expiry: number | null
+  domain_status: SSLStatus
+  registration_checked_at: string | null
+  /** Why the last registration lookup failed. Explains a domain_status of "unknown". */
+  registration_error: string | null
+
   created_at: string
   updated_at: string
 }
@@ -24,6 +40,8 @@ export interface SSLCertificateInput {
   domain: string
   expiry_notification_days?: number
   enabled?: boolean
+  /** Omit for every channel; send [] for none. */
+  notify_channels?: string[]
 }
 
 const BASE = '/ssl-certificates'
@@ -77,7 +95,10 @@ export function useSSLCertificateActions() {
   }, [])
 
   const update = useCallback(
-    async (id: string, patch: { expiry_notification_days?: number; enabled?: boolean }) => {
+    async (
+      id: string,
+      patch: { expiry_notification_days?: number; enabled?: boolean; notify_channels?: string[] },
+    ) => {
       setBusy(true)
       try {
         const res = await api.patch<{ data: SSLCertificate }>(`${BASE}/${id}`, patch)

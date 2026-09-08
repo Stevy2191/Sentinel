@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { X, Loader2 } from 'lucide-react'
 import { useCreateMonitor } from '@/hooks/useMonitors'
-import { useAvailableChannels, CHANNEL_META } from '@/hooks/useNotificationConfig'
+import { useAvailableChannels } from '@/hooks/useNotificationConfig'
+import ChannelChecklist from './ChannelChecklist'
 import { useAppConfig } from '@/context/AppConfigContext'
 import type { ApiError } from '@/services/api'
 import type { Monitor, MonitorType } from '@/types'
@@ -149,7 +149,7 @@ interface Props {
 export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }: Props) {
   const { defaultCheckInterval } = useAppConfig()
   const { create, loading } = useCreateMonitor()
-  const { available, loading: loadingChannels, error: channelsError } = useAvailableChannels(isOpen)
+  const { available } = useAvailableChannels(isOpen)
   const dialogRef = useRef<HTMLDivElement>(null)
   const firstFieldRef = useRef<HTMLInputElement>(null)
 
@@ -578,70 +578,14 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
 
           <div className="border-t border-white/10" />
 
-          <section>
-            <h3 className="text-xs font-semibold uppercase tracking-widest text-slate-300">
-              Notifications
-            </h3>
-            <p className="mb-4 mt-1 text-xs text-slate-500">
-              Select which channels to notify for this monitor
-            </p>
-
-            {loadingChannels ? (
-              <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-slate-800/40 p-4 text-sm text-slate-400">
-                <Loader2 className="h-4 w-4 animate-spin" /> Loading channels…
-              </div>
-            ) : channelsError ? (
-              <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400">
-                {channelsError}
-              </div>
-            ) : available.length === 0 ? (
-              <div className="rounded-lg border border-white/10 bg-slate-800/40 p-4 text-sm text-slate-400">
-                <p>
-                  No notification channels configured.{' '}
-                  <Link
-                    to="/settings"
-                    onClick={onClose}
-                    className="text-emerald-400 underline-offset-2 hover:underline"
-                  >
-                    Create one in Settings.
-                  </Link>
-                </p>
-                <p className="mt-1 text-xs text-slate-500">
-                  The monitor is still created and still records incidents — it just will not
-                  alert anyone.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {/* The API returns them grouped by type in a stable order, so
-                    the list does not reshuffle between opens. */}
-                {available.map((c) => (
-                  <label
-                    key={c.id}
-                    className="flex cursor-pointer items-center gap-3 rounded-lg border border-white/10 bg-slate-800/40 p-3 transition hover:border-white/20"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={form.selectedNotifications.includes(c.id)}
-                      onChange={() => toggleChannel(c.id)}
-                      className="h-4 w-4 shrink-0 rounded accent-emerald-500"
-                    />
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium text-white">{c.name}</span>
-                      <span className="block text-xs text-slate-500">
-                        {CHANNEL_META[c.channel].label}
-                      </span>
-                    </span>
-                  </label>
-                ))}
-                {form.selectedNotifications.length === 0 && (
-                  <p className="pt-1 text-xs text-amber-300">
-                    Nothing selected — this monitor will record incidents but not alert anyone.
-                  </p>
-                )}
-              </div>
-            )}
-          </section>
+          <ChannelChecklist
+            selected={form.selectedNotifications}
+            onToggle={toggleChannel}
+            enabled={isOpen}
+            description="Select which channels to notify for this monitor"
+            emptyNote="The monitor is still created and still records incidents — it just will not alert anyone."
+            onNavigateAway={onClose}
+          />
         </div>
 
         {/* Footer */}

@@ -29,6 +29,60 @@ type SSLCheckerService struct {
 	db      *gorm.DB
 	manager *notifications.NotificationManager
 	logger  *log.Logger
+
+	// resolverFunc reports the DNS server certificate checks should use, or ""
+	// for the host's own. Resolved per check rather than captured at
+	// construction so an admin's edit takes effect without a restart — the same
+	// reason BaseURLFunc works this way.
+	resolverFunc func(context.Context) string
+}
+
+// SetDNSResolverFunc supplies the resolver lookup. Safe to leave unset: the
+// host resolver is then used, which is the right default for everyone whose
+// DNS is not split-horizon.
+func (s *SSLCheckerService) SetDNSResolverFunc(fn func(context.Context) string) {
+	s.resolverFunc = fn
+}
+
+// netDialer returns the TCP dialer for certificate checks, pointed at the
+// configured resolver when there is one.
+//
+// The problem this solves: an Active Directory domain often shares its name
+// with the organisation's public domain, so the internal resolver answers for
+// the apex with a domain controller's address. A check for "example.com" then
+// opens TLS against a domain controller — the wrong host entirely — while
+// "www.example.com" works, because only the apex is overridden. Asking a public
+// resolver makes the check see what a visitor sees.
+func (s *SSLCheckerService) netDialer(ctx context.Context) *net.Dialer {
+	dialer := &net.Dialer{Timeout: sslHandshakeTimeout}
+	if s.resolverFunc != nil {
+		if addr := normalizeResolver(s.resolverFunc(ctx)); addr != "" {
+			dialer.Resolver = &net.Resolver{
+				PreferGo: true,
+				Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+					// network is inherited so UDP stays UDP and a truncated
+					// answer can still be retried over TCP.
+					return (&net.Dialer{Timeout: sslHandshakeTimeout}).DialContext(ctx, network, addr)
+				},
+			}
+		}
+	}
+	return dialer
+}
+
+// normalizeResolver accepts "1.1.1.1" or "1.1.1.1:53" and returns a dialable
+// address, or "" if the value is not a usable resolver.
+func normalizeResolver(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if _, _, err := net.SplitHostPort(raw); err == nil {
+		return raw
+	}
+	// A bare IPv6 literal has colons but no port, so it must be bracketed
+	// before a port is appended.
+	return net.JoinHostPort(raw, "53")
 }
 
 // NewSSLCheckerService returns a checker backed by the given database. manager
@@ -59,11 +113,16 @@ func (s *SSLCheckerService) FetchCertificate(ctx context.Context, domain string)
 		host, port = h, p
 	}
 
-	dialer := &net.Dialer{Timeout: sslHandshakeTimeout}
-	conn, err := tls.DialWithDialer(dialer, "tcp", net.JoinHostPort(host, port), &tls.Config{
-		ServerName: host,
-		MinVersion: tls.VersionTLS12,
-	})
+	handshakeCtx, cancel := context.WithTimeout(ctx, sslHandshakeTimeout)
+	defer cancel()
+	tlsDialer := &tls.Dialer{
+		NetDialer: s.netDialer(ctx),
+		Config: &tls.Config{
+			ServerName: host,
+			MinVersion: tls.VersionTLS12,
+		},
+	}
+	rawConn, err := tlsDialer.DialContext(handshakeCtx, "tcp", net.JoinHostPort(host, port))
 	if err != nil {
 		// An expired certificate is the case this feature exists to catch, so
 		// dig the certificate out of the verification error and report it as a
@@ -76,8 +135,9 @@ func (s *SSLCheckerService) FetchCertificate(ctx context.Context, domain string)
 				ExpiryDate: leaf.NotAfter,
 			}, nil
 		}
-		return nil, fmt.Errorf("%s: %w", domain, simplifyTLSError(err))
+		return nil, fmt.Errorf("%s: %w", domain, s.explainDialFailure(ctx, host, err))
 	}
+	conn := rawConn.(*tls.Conn)
 	defer conn.Close()
 
 	chain := conn.ConnectionState().PeerCertificates
@@ -114,6 +174,42 @@ func issuerName(commonName string, org []string) string {
 
 // simplifyTLSError turns a Go network error into something an operator can act
 // on, rather than a wrapped dial string.
+// explainDialFailure turns a dial error into something an operator can act on,
+// naming the address the check actually reached.
+//
+// The address is the whole point. When an internal resolver answers for a
+// public apex domain, the failure looks like a plain refused connection or a
+// certificate for the wrong host, and nothing on screen says why the subdomain
+// works while the apex does not. Seeing a private address next to a public
+// domain names the cause immediately.
+func (s *SSLCheckerService) explainDialFailure(ctx context.Context, host string, err error) error {
+	simple := simplifyTLSError(err)
+
+	// Only worth resolving when the name resolved at all; "no such host" has
+	// no address to report.
+	if strings.Contains(err.Error(), "no such host") {
+		return simple
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	resolver := s.netDialer(ctx).Resolver
+	if resolver == nil {
+		resolver = net.DefaultResolver
+	}
+	addrs, lookupErr := resolver.LookupIPAddr(lookupCtx, host)
+	if lookupErr != nil || len(addrs) == 0 {
+		return simple
+	}
+
+	ip := addrs[0].IP
+	if ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+		return fmt.Errorf("%w (resolved to the internal address %s — DNS here answers for this domain "+
+			"privately, so the check reached an internal host instead of the public one; "+
+			"set a public DNS resolver in Settings to check what visitors see)", simple, ip)
+	}
+	return fmt.Errorf("%w (resolved to %s)", simple, ip)
+}
+
 func simplifyTLSError(err error) error {
 	msg := err.Error()
 	switch {
@@ -216,6 +312,9 @@ func (s *SSLCheckerService) alertExpiring(ctx context.Context, cert *models.SSLC
 		Status:      "down",
 		Message:     message,
 		Timestamp:   now,
+		// nil means every enabled channel, an empty slice means none — the
+		// same contract a monitor's notify_channels carries.
+		Channels: cert.NotifyChannels,
 	}
 	if err := s.manager.SendNotification(ctx, msg); err != nil {
 		s.logger.Printf("[ssl] expiry alert for %s failed: %v", cert.Domain, err)
@@ -237,6 +336,109 @@ func (s *SSLCheckerService) alertExpiring(ctx context.Context, cert *models.SSLC
 	s.logger.Printf("[ssl] expiry alert sent for %s (%d day(s) left)", cert.Domain, days)
 }
 
+// CheckRegistration looks up the domain's registration and saves what it finds.
+//
+// Independent of the TLS check on purpose: RDAP is an HTTPS call to the
+// registry and never resolves the monitored domain, so it keeps working where
+// an internal resolver answers for a public domain and points the TLS check at
+// the wrong host. For an apex domain behind split-horizon DNS this is often the
+// only clock that can be read at all.
+func (s *SSLCheckerService) CheckRegistration(ctx context.Context, cert *models.SSLCertificate) error {
+	now := time.Now()
+	info, err := LookupRegistration(ctx, cert.Domain)
+
+	updates := map[string]interface{}{"registration_checked_at": now, "updated_at": now}
+	if err != nil {
+		msg := err.Error()
+		// Previous values are kept: a lookup that failed today has not changed
+		// when the domain expires.
+		updates["domain_status"] = models.SSLStatusUnknown
+		updates["registration_error"] = msg
+		cert.DomainStatus = models.SSLStatusUnknown
+		cert.RegistrationError = &msg
+	} else {
+		status, days := models.DeriveStatus(info.ExpiryDate, cert.ExpiryNotificationDays, now)
+		updates["registrable_domain"] = info.Domain
+		updates["registrar"] = info.Registrar
+		updates["domain_expiry_date"] = info.ExpiryDate
+		updates["domain_days_until_expiry"] = days
+		updates["domain_status"] = status
+		updates["registration_error"] = nil
+
+		cert.RegistrableDomain = &info.Domain
+		cert.Registrar = &info.Registrar
+		cert.DomainExpiryDate = &info.ExpiryDate
+		cert.DomainDaysUntilExpiry = &days
+		cert.DomainStatus = status
+		cert.RegistrationError = nil
+	}
+	cert.RegistrationCheckedAt = &now
+
+	if dbErr := s.db.WithContext(ctx).Model(&models.SSLCertificate{}).
+		Where("id = ?", cert.ID).Updates(updates).Error; dbErr != nil {
+		return fmt.Errorf("saving registration check for %s: %w", cert.Domain, dbErr)
+	}
+
+	if err == nil && cert.ShouldAlertDomain() {
+		s.alertDomainExpiring(ctx, cert, now)
+	}
+	return err
+}
+
+// alertDomainExpiring warns that the registration, not the certificate, is
+// running out. Worth saying plainly: a lapsed registration takes the whole
+// domain down, which is a bigger outage than an expired certificate and is
+// fixed somewhere else entirely — at the registrar.
+func (s *SSLCheckerService) alertDomainExpiring(ctx context.Context, cert *models.SSLCertificate, now time.Time) {
+	if s.manager == nil {
+		return
+	}
+	days := 0
+	if cert.DomainDaysUntilExpiry != nil {
+		days = *cert.DomainDaysUntilExpiry
+	}
+	name := cert.Domain
+	if cert.RegistrableDomain != nil {
+		name = *cert.RegistrableDomain
+	}
+
+	var message string
+	if cert.DomainStatus == models.SSLStatusExpired {
+		message = fmt.Sprintf("The domain registration for %s has EXPIRED.", name)
+	} else {
+		message = fmt.Sprintf("The domain registration for %s expires in %d day(s).", name, days)
+	}
+	if cert.DomainExpiryDate != nil {
+		message += fmt.Sprintf(" Expires %s.", cert.DomainExpiryDate.UTC().Format("2 Jan 2006"))
+	}
+	if cert.Registrar != nil && *cert.Registrar != "" {
+		message += fmt.Sprintf(" Renew at %s.", *cert.Registrar)
+	}
+
+	msg := &notifications.NotificationMessage{
+		MonitorName: name + " (domain registration)",
+		MonitorURL:  "https://" + name,
+		Status:      "down",
+		Message:     message,
+		Timestamp:   now,
+		Channels:    cert.NotifyChannels,
+	}
+	if err := s.manager.SendNotification(ctx, msg); err != nil {
+		s.logger.Printf("[ssl] registration alert for %s failed: %v", name, err)
+		return
+	}
+	if err := s.db.WithContext(ctx).Model(&models.SSLCertificate{}).
+		Where("id = ?", cert.ID).Updates(map[string]interface{}{
+		"domain_last_notified_at":   now,
+		"domain_last_notified_days": days,
+		"updated_at":                now,
+	}).Error; err != nil {
+		s.logger.Printf("[ssl] WARNING: could not record the registration alert for %s; it may repeat: %v", name, err)
+		return
+	}
+	s.logger.Printf("[ssl] registration alert sent for %s (%d day(s) left)", name, days)
+}
+
 // CheckAll re-reads every enabled certificate, returning how many were checked
 // and how many failed. One bad domain never stops the sweep.
 func (s *SSLCheckerService) CheckAll(ctx context.Context) (checked, failed int, err error) {
@@ -249,9 +451,17 @@ func (s *SSLCheckerService) CheckAll(ctx context.Context) (checked, failed int, 
 			return checked, failed, ctx.Err()
 		}
 		checked++
-		if err := s.CheckCertificate(ctx, &certs[i]); err != nil {
+		// Both clocks, independently. A certificate that cannot be read must
+		// not stop the registration lookup: for an apex domain behind an
+		// internal resolver, registration is often the only one that works.
+		certErr := s.CheckCertificate(ctx, &certs[i])
+		regErr := s.CheckRegistration(ctx, &certs[i])
+		if certErr != nil {
 			failed++
-			s.logger.Printf("[ssl] %s: %v", certs[i].Domain, err)
+			s.logger.Printf("[ssl] %s certificate: %v", certs[i].Domain, certErr)
+		}
+		if regErr != nil {
+			s.logger.Printf("[ssl] %s registration: %v", certs[i].Domain, regErr)
 		}
 	}
 	return checked, failed, nil
@@ -299,8 +509,13 @@ func (s *SSLCheckerService) Create(ctx context.Context, cert *models.SSLCertific
 	}
 	// A failure here is not a failure to create: the row exists and says why
 	// the check did not work, which is more useful than refusing to add it.
+	// This is what lets an apex domain be added even where an internal
+	// resolver breaks the TLS check — the registration clock still reads.
 	if err := s.CheckCertificate(ctx, cert); err != nil {
-		s.logger.Printf("[ssl] first check of %s failed: %v", cert.Domain, err)
+		s.logger.Printf("[ssl] first certificate check of %s failed: %v", cert.Domain, err)
+	}
+	if err := s.CheckRegistration(ctx, cert); err != nil {
+		s.logger.Printf("[ssl] first registration check of %s failed: %v", cert.Domain, err)
 	}
 	return nil
 }
@@ -308,7 +523,7 @@ func (s *SSLCheckerService) Create(ctx context.Context, cert *models.SSLCertific
 // Update changes only the two fields that are the operator's to choose. The
 // domain and the check interval are fixed after creation: changing the domain
 // would silently repoint the history, and the interval is not configurable.
-func (s *SSLCheckerService) Update(ctx context.Context, id uuid.UUID, notifyDays int, enabled bool) (*models.SSLCertificate, error) {
+func (s *SSLCheckerService) Update(ctx context.Context, id uuid.UUID, notifyDays int, enabled bool, channels models.StringSlice) (*models.SSLCertificate, error) {
 	cert, err := s.Get(ctx, id)
 	if err != nil {
 		return nil, err
@@ -317,15 +532,23 @@ func (s *SSLCheckerService) Update(ctx context.Context, id uuid.UUID, notifyDays
 	updates := map[string]interface{}{
 		"expiry_notification_days": notifyDays,
 		"enabled":                  enabled,
+		"notify_channels":          channels,
 		"updated_at":               time.Now(),
 	}
 	// The threshold decides what counts as "expiring soon", so a change to it
 	// has to re-derive the status; otherwise a row keeps a classification made
 	// under the old rule until the next daily sweep.
+	now := time.Now()
 	if cert.ExpiryDate != nil {
-		status, days := models.DeriveStatus(*cert.ExpiryDate, notifyDays, time.Now())
+		status, days := models.DeriveStatus(*cert.ExpiryDate, notifyDays, now)
 		updates["status"] = status
 		updates["days_until_expiry"] = days
+	}
+	// The same threshold governs both clocks, so both are re-derived.
+	if cert.DomainExpiryDate != nil {
+		status, days := models.DeriveStatus(*cert.DomainExpiryDate, notifyDays, now)
+		updates["domain_status"] = status
+		updates["domain_days_until_expiry"] = days
 	}
 	if err := s.db.WithContext(ctx).Model(&models.SSLCertificate{}).
 		Where("id = ?", id).Updates(updates).Error; err != nil {

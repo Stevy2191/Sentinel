@@ -54,6 +54,29 @@ type SSLCertificate struct {
 	LastNotifiedAt   *time.Time `json:"last_notified_at" gorm:"column:last_notified_at"`
 	LastNotifiedDays *int       `json:"last_notified_days" gorm:"column:last_notified_days"`
 
+	// ---- Domain registration -------------------------------------------
+	// A separate clock from the certificate: a domain can hold a freshly
+	// renewed certificate and still lapse at the registrar weeks later.
+
+	// RegistrableDomain is what the registration belongs to: example.com for
+	// sub.example.com. Stored rather than derived on read so a change in the
+	// public suffix list cannot silently repoint existing rows.
+	RegistrableDomain     *string    `json:"registrable_domain" gorm:"column:registrable_domain"`
+	Registrar             *string    `json:"registrar" gorm:"column:registrar"`
+	DomainExpiryDate      *time.Time `json:"domain_expiry_date" gorm:"column:domain_expiry_date"`
+	DomainDaysUntilExpiry *int       `json:"domain_days_until_expiry" gorm:"column:domain_days_until_expiry"`
+	DomainStatus          string     `json:"domain_status" gorm:"column:domain_status;default:unknown"`
+	RegistrationCheckedAt *time.Time `json:"registration_checked_at" gorm:"column:registration_checked_at"`
+	RegistrationError     *string    `json:"registration_error" gorm:"column:registration_error"`
+
+	DomainLastNotifiedAt   *time.Time `json:"domain_last_notified_at" gorm:"column:domain_last_notified_at"`
+	DomainLastNotifiedDays *int       `json:"domain_last_notified_days" gorm:"column:domain_last_notified_days"`
+
+	// NotifyChannels selects where expiry alerts go. nil means every enabled
+	// channel, matching how a monitor reads the same field; an empty slice
+	// means alert nowhere.
+	NotifyChannels StringSlice `json:"notify_channels" gorm:"column:notify_channels;type:jsonb"`
+
 	Enabled bool `json:"enabled" gorm:"column:enabled;default:true"`
 
 	CreatedAt time.Time `json:"created_at" gorm:"column:created_at;autoCreateTime"`
@@ -133,6 +156,22 @@ func DeriveStatus(expiry time.Time, notifyDays int, now time.Time) (status strin
 	default:
 		return SSLStatusValid, daysLeft
 	}
+}
+
+// ShouldAlertDomain is ShouldAlert for the registration clock. The two are
+// tracked separately so a certificate alert already sent does not suppress the
+// registration alert, which is about a different deadline entirely.
+func (c *SSLCertificate) ShouldAlertDomain() bool {
+	if !c.Enabled || c.DomainDaysUntilExpiry == nil {
+		return false
+	}
+	if c.DomainStatus != SSLStatusExpiringSoon && c.DomainStatus != SSLStatusExpired {
+		return false
+	}
+	if c.DomainLastNotifiedDays == nil {
+		return true
+	}
+	return *c.DomainDaysUntilExpiry < *c.DomainLastNotifiedDays
 }
 
 // ShouldAlert reports whether an expiry alert is due for this certificate.

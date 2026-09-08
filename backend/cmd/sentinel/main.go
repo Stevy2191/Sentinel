@@ -44,6 +44,7 @@ type config struct {
 	BaseURL             string
 	RegistrationEnabled bool
 	AppName             string
+	SSLDNSResolver      string
 }
 
 func loadConfig() config {
@@ -66,6 +67,9 @@ func loadConfig() config {
 		// Instance display name. Seeded into the settings table on first run;
 		// after that an admin edits it in Settings -> System.
 		AppName: getenv("APP_NAME", ""),
+		// Optional. Set where an internal resolver answers for a public domain
+		// and certificate checks must see what the internet sees.
+		SSLDNSResolver: getenv("SSL_DNS_RESOLVER", ""),
 	}
 }
 
@@ -153,6 +157,9 @@ func run() error {
 		models.DefaultMonitorCheckInterval); err != nil {
 		return fmt.Errorf("seeding default check interval: %w", err)
 	}
+	if _, err := settingsService.SeedString(settingsCtx, models.SettingSSLDNSResolver, cfg.SSLDNSResolver); err != nil {
+		log.Fatalf("seeding ssl dns resolver setting: %v", err)
+	}
 	if _, err := settingsService.SeedInt(settingsCtx, models.SettingIncidentRetentionDays,
 		models.DefaultIncidentRetentionDays); err != nil {
 		return fmt.Errorf("seeding incident retention: %w", err)
@@ -188,6 +195,11 @@ func run() error {
 	}
 	notificationConfigService := services.NewNotificationConfigService(db, notificationManager)
 	sslChecker := services.NewSSLCheckerService(db, notificationManager)
+	// Read per check, not captured here, so an admin's edit applies without a
+	// restart.
+	sslChecker.SetDNSResolverFunc(func(ctx context.Context) string {
+		return settingsService.SSLDNSResolver(ctx)
+	})
 	incidentRetention := services.NewIncidentRetentionService(db, settingsService)
 	if err := notificationManager.LoadFromDatabase(notifyCtx); err != nil {
 		log.Printf("warning: loading notification configs from database: %v", err)

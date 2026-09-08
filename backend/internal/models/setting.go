@@ -33,6 +33,9 @@ const (
 	// SettingIncidentRetentionDays is how long resolved incident history is
 	// kept before the nightly purge removes it.
 	SettingIncidentRetentionDays = "incident_retention_days"
+	// SettingSSLDNSResolver optionally names a DNS server for certificate
+	// checks, e.g. "1.1.1.1:53". Empty uses the host's own resolver.
+	SettingSSLDNSResolver = "ssl_dns_resolver"
 )
 
 // Bounds and defaults for the system settings above.

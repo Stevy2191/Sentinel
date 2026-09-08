@@ -1,10 +1,13 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -29,6 +32,7 @@ func GetSettingsHandler(settingsService *services.SettingsService, defaultInterv
 			"app_name":               settingsService.AppName(ctx),
 			"base_url":               settingsService.BaseURL(ctx),
 			"default_check_interval": settingsService.DefaultCheckInterval(ctx, defaultInterval),
+			"ssl_dns_resolver":       settingsService.SSLDNSResolver(ctx),
 		})
 	}
 }
@@ -40,6 +44,9 @@ type updateSystemRequest struct {
 	AppName              *string `json:"app_name"`
 	BaseURL              *string `json:"base_url"`
 	DefaultCheckInterval *int    `json:"default_check_interval"`
+	// SSLDNSResolver is an IP (optionally with a port) certificate checks
+	// should ask instead of the host's resolver. Empty means the host's.
+	SSLDNSResolver *string `json:"ssl_dns_resolver"`
 }
 
 // UpdateSystemSettingsHandler handles PATCH /api/v1/settings/system (admin).
@@ -87,6 +94,22 @@ func UpdateSystemSettingsHandler(settingsService *services.SettingsService) gin.
 			}
 		}
 
+		if req.SSLDNSResolver != nil {
+			raw := strings.TrimSpace(*req.SSLDNSResolver)
+			// Empty means "use the host's resolver", which is the default and
+			// the right answer for most deployments.
+			if raw != "" {
+				if err := validateResolver(raw); err != nil {
+					respondError(c, http.StatusBadRequest, err.Error())
+					return
+				}
+			}
+			if err := settingsService.SetString(ctx, models.SettingSSLDNSResolver, raw); err != nil {
+				respondInternal(c, "UpdateSystemSettingsHandler", err)
+				return
+			}
+		}
+
 		if req.DefaultCheckInterval != nil {
 			n := *req.DefaultCheckInterval
 			if n < models.MinCheckIntervalSeconds || n > models.MaxCheckIntervalSeconds {
@@ -107,9 +130,29 @@ func UpdateSystemSettingsHandler(settingsService *services.SettingsService) gin.
 			"app_name":               settingsService.AppName(ctx),
 			"base_url":               settingsService.BaseURL(ctx),
 			"default_check_interval": settingsService.DefaultCheckInterval(ctx, models.MinCheckIntervalSeconds),
+			"ssl_dns_resolver":       settingsService.SSLDNSResolver(ctx),
 			"message":                "System settings updated",
 		})
 	}
+}
+
+// validateResolver checks that a DNS resolver setting is an IP address, with an
+// optional port.
+//
+// A hostname is rejected on purpose: resolving the resolver's own name needs
+// the very resolver being replaced, which is the thing not to be trusted here.
+func validateResolver(raw string) error {
+	host := raw
+	if h, p, err := net.SplitHostPort(raw); err == nil {
+		host = h
+		if n, err := strconv.Atoi(p); err != nil || n < 1 || n > 65535 {
+			return errors.New("ssl_dns_resolver port must be between 1 and 65535")
+		}
+	}
+	if net.ParseIP(host) == nil {
+		return errors.New("ssl_dns_resolver must be an IP address, optionally with a port, e.g. 1.1.1.1 or 1.1.1.1:53")
+	}
+	return nil
 }
 
 // UpdateRegistrationHandler handles PATCH /api/v1/settings/registration (admin).
