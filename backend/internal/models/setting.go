@@ -30,6 +30,9 @@ const (
 	// SettingDefaultCheckInterval is the check interval, in seconds, that new
 	// monitors are created with.
 	SettingDefaultCheckInterval = "default_check_interval"
+	// SettingIncidentRetentionDays is how long resolved incident history is
+	// kept before the nightly purge removes it.
+	SettingIncidentRetentionDays = "incident_retention_days"
 )
 
 // Bounds and defaults for the system settings above.
@@ -48,4 +51,11 @@ const (
 	// would then be rejected on every monitor created from it.
 	MinCheckIntervalSeconds = 10
 	MaxCheckIntervalSeconds = 3600
+
+	// Incident retention bounds. The floor is a week because anything shorter
+	// would delete an incident before a person is likely to have looked at it;
+	// the ceiling is a year, past which the table grows without being read.
+	DefaultIncidentRetentionDays = 90
+	MinIncidentRetentionDays     = 7
+	MaxIncidentRetentionDays     = 365
 )

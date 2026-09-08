@@ -193,6 +193,19 @@ func (s *SettingsService) DefaultCheckInterval(ctx context.Context, fallback int
 	return s.GetInt(ctx, models.SettingDefaultCheckInterval, fallback)
 }
 
+// IncidentRetentionDays returns how many days of incident history to keep.
+func (s *SettingsService) IncidentRetentionDays(ctx context.Context) int {
+	days := s.GetInt(ctx, models.SettingIncidentRetentionDays, models.DefaultIncidentRetentionDays)
+	// Clamped on read as well as on write: a value edited directly in the
+	// database must not be able to make the purge delete everything.
+	if days < models.MinIncidentRetentionDays || days > models.MaxIncidentRetentionDays {
+		s.logger.Printf("[settings] stored %s=%d is out of range; using %d",
+			models.SettingIncidentRetentionDays, days, models.DefaultIncidentRetentionDays)
+		return models.DefaultIncidentRetentionDays
+	}
+	return days
+}
+
 // RegistrationEnabled reports whether new-user self-registration is currently
 // allowed. Defaults to false (closed) when unset.
 func (s *SettingsService) RegistrationEnabled(ctx context.Context) bool {
