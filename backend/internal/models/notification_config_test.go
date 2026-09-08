@@ -88,3 +88,39 @@ func TestHideSecretsKeepsSecurityFields(t *testing.T) {
 		t.Error("skip-verify flag must survive HideSecrets")
 	}
 }
+
+func TestDestinationKeyDistinguishesWebhooks(t *testing.T) {
+	str := func(s string) *string { return &s }
+
+	a := &NotificationConfig{Channel: "slack", WebhookURL: str("https://hooks.slack.com/services/T1/B1/aaa")}
+	b := &NotificationConfig{Channel: "slack", WebhookURL: str("https://hooks.slack.com/services/T2/B2/bbb")}
+	// Both summarise to "hooks.slack.com", so identity must not come from the
+	// display summary or two legitimate Slack channels would collide.
+	if a.Summary() != b.Summary() {
+		t.Fatalf("precondition: expected equal summaries, got %q and %q", a.Summary(), b.Summary())
+	}
+	if a.DestinationKey() == b.DestinationKey() {
+		t.Error("two different webhook URLs must not share a destination key")
+	}
+
+	same := &NotificationConfig{Channel: "slack", WebhookURL: str("https://hooks.slack.com/services/T1/B1/aaa/")}
+	if a.DestinationKey() != same.DestinationKey() {
+		t.Error("a trailing slash does not change where a webhook delivers")
+	}
+}
+
+func TestDestinationKeyNtfy(t *testing.T) {
+	str := func(s string) *string { return &s }
+
+	base := &NotificationConfig{Channel: "ntfy", NtfyURL: str("https://ntfy.sh"), NtfyTopic: str("alerts")}
+	// Case and a trailing slash do not change the destination.
+	variant := &NotificationConfig{Channel: "ntfy", NtfyURL: str("https://ntfy.sh/"), NtfyTopic: str("Alerts")}
+	if base.DestinationKey() != variant.DestinationKey() {
+		t.Errorf("expected the same key, got %q and %q", base.DestinationKey(), variant.DestinationKey())
+	}
+
+	other := &NotificationConfig{Channel: "ntfy", NtfyURL: str("https://ntfy.sh"), NtfyTopic: str("different")}
+	if base.DestinationKey() == other.DestinationKey() {
+		t.Error("different topics are different destinations")
+	}
+}

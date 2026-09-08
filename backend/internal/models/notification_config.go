@@ -106,6 +106,12 @@ type NotificationConfig struct {
 	// given. Not persisted.
 	Details string `json:"details,omitempty" gorm:"-"`
 
+	// DuplicateOf names another channel that delivers to the same place, when
+	// one exists. Rows created before duplicates were refused can still be
+	// paired up, and nothing else in the list makes that visible: the names
+	// differ, so the pair looks deliberate while every alert goes out twice.
+	DuplicateOf string `json:"duplicate_of,omitempty" gorm:"-"`
+
 	CreatedAt time.Time `json:"created_at" gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt time.Time `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
 }
@@ -252,6 +258,50 @@ func (nc *NotificationConfig) HideSecrets() {
 // disclosing anything that would let the reader deliver there themselves. For
 // URL-based channels that means the host only: the path of a Slack or Discord
 // webhook is the secret part.
+// DestinationKey identifies where this channel actually delivers, so two
+// configurations that would send the same alert to the same place can be
+// recognised as duplicates.
+//
+// Deliberately not Summary(): that is a display string and is lossy on
+// purpose — it shows only the host of a webhook, so two different Slack hooks
+// on hooks.slack.com share it. Treating that as identity would refuse a
+// legitimate second channel.
+//
+// Case and surrounding space are normalised because they do not change where a
+// message lands, and a trailing slash on a URL does not either.
+func derefIntOr(p *int, fallback int) int {
+	if p == nil {
+		return fallback
+	}
+	return *p
+}
+
+func (nc *NotificationConfig) DestinationKey() string {
+	norm := func(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
+
+	switch nc.Channel {
+	case "email":
+		// No recipient list exists on a channel, so a mail channel is
+		// identified by the server it sends through and the address it sends
+		// as. Two of those really are the same channel twice.
+		return strings.Join([]string{
+			norm(derefOr(nc.SMTPHost, "")),
+			fmt.Sprintf("%d", derefIntOr(nc.SMTPPort, 0)),
+			norm(derefOr(nc.SMTPUser, "")),
+			norm(derefOr(nc.SMTPFrom, "")),
+		}, "|")
+	case "telegram":
+		return norm(derefOr(nc.TelegramChatID, ""))
+	case "ntfy":
+		base := strings.TrimSuffix(norm(derefOr(nc.NtfyURL, "https://ntfy.sh")), "/")
+		return base + "/" + norm(derefOr(nc.NtfyTopic, ""))
+	default:
+		// The whole webhook URL, not just its host: the path is what
+		// distinguishes one hook from another.
+		return strings.TrimSuffix(norm(derefOr(nc.WebhookURL, "")), "/")
+	}
+}
+
 func (nc *NotificationConfig) Summary() string {
 	switch nc.Channel {
 	case "email":
