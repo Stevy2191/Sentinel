@@ -165,3 +165,30 @@ func TestFetchCertificateUnresolvable(t *testing.T) {
 	}
 	t.Logf("unresolvable -> %v", err)
 }
+
+// The issuer shown must be the name a person recognises. A modern DN looks
+// like "C=US, O=Google Trust Services, CN=WE1" — the CN identifies one
+// intermediate in the CA's rotation and is meaningless to a reader.
+func TestIssuerNamePrefersOrganisation(t *testing.T) {
+	cases := []struct {
+		name       string
+		commonName string
+		org        []string
+		want       string
+	}{
+		{"public CA: organisation wins", "WE1", []string{"Google Trust Services"}, "Google Trust Services"},
+		{"another public CA", "R11", []string{"Let's Encrypt"}, "Let's Encrypt"},
+		{"no organisation falls back to the common name", "Internal Root CA", nil, "Internal Root CA"},
+		{"blank organisation falls back too", "Internal Root CA", []string{"   "}, "Internal Root CA"},
+		{"organisation is padded", "WE1", []string{"  Google Trust Services  "}, "Google Trust Services"},
+		{"neither is present", "", nil, "Unknown"},
+		{"both blank", "  ", []string{""}, "Unknown"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := issuerName(tc.commonName, tc.org); got != tc.want {
+				t.Errorf("issuerName(%q, %v) = %q, want %q", tc.commonName, tc.org, got, tc.want)
+			}
+		})
+	}
+}
