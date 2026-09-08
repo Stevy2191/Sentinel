@@ -111,18 +111,20 @@ export default function SSLCertificateTable({
               {/* Two header rows because the table carries two independent
                   clocks. Without the grouping, "Expires" appears twice with no
                   indication that one is renewed by reissuing a certificate and
-                  the other by paying the registrar. */}
+                  the other by paying the registrar. The spanning labels carry
+                  that on their own; there are no vertical rules, so the table
+                  is divided horizontally only. */}
               <tr className="border-b border-white/5 bg-slate-800/30">
                 <th className="px-4 pb-1 pt-3" />
                 <th
                   colSpan={4}
-                  className="border-l border-white/10 px-4 pb-1 pt-3 text-left text-[11px] font-semibold uppercase tracking-widest text-slate-500"
+                  className="px-4 pb-1 pt-3 text-left text-[11px] font-semibold uppercase tracking-widest text-slate-500"
                 >
                   TLS Certificate
                 </th>
                 <th
                   colSpan={2}
-                  className="border-l border-white/10 px-4 pb-1 pt-3 text-left text-[11px] font-semibold uppercase tracking-widest text-slate-500"
+                  className="px-4 pb-1 pt-3 text-left text-[11px] font-semibold uppercase tracking-widest text-slate-500"
                 >
                   Domain Registration
                 </th>
@@ -130,13 +132,13 @@ export default function SSLCertificateTable({
               </tr>
               <tr className="border-b border-white/10 bg-slate-800/20">
                 <th className="px-4 pb-3 text-left">{header('domain', 'Domain')}</th>
-                <th className="border-l border-white/10 px-4 pb-3 text-left text-xs font-medium text-slate-400">
+                <th className="px-4 pb-3 text-left text-xs font-medium text-slate-400">
                   Status
                 </th>
                 <th className="px-4 pb-3 text-left text-xs font-medium text-slate-400">Issuer</th>
                 <th className="px-4 pb-3 text-left">{header('expiry', 'Valid Until')}</th>
                 <th className="px-4 pb-3 text-left">{header('days', 'Days Left')}</th>
-                <th className="border-l border-white/10 px-4 pb-3 text-left text-xs font-medium text-slate-400">
+                <th className="px-4 pb-3 text-left text-xs font-medium text-slate-400">
                   Registrar
                 </th>
                 <th className="px-4 pb-3 text-left">{header('domain_days', 'Expires')}</th>
@@ -155,7 +157,7 @@ export default function SSLCertificateTable({
                     <div className="font-medium text-slate-200">{c.domain}</div>
                     {!c.enabled && <div className="text-xs text-slate-500">paused</div>}
                   </td>
-                  <td className="border-l border-white/10 px-4 py-3">
+                  <td className="px-4 py-3">
                     {/* A status of "unknown" only ever means the read failed,
                         so the reason is the useful thing to show. The badge
                         would say "Unknown" and leave the reason to a column
@@ -185,7 +187,7 @@ export default function SSLCertificateTable({
                     {c.days_until_expiry ?? '—'}
                   </td>
                   <td
-                    className="max-w-[180px] border-l border-white/10 px-4 py-3 text-slate-400"
+                    className="max-w-[180px] px-4 py-3 text-slate-400"
                     title={c.registrar ?? ''}
                   >
                     {c.registration_error ? (
