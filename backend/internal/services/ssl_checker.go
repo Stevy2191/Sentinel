@@ -91,14 +91,23 @@ func (s *SSLCheckerService) FetchCertificate(ctx context.Context, domain string)
 	}, nil
 }
 
-// issuerName picks the most useful name available: the CA's common name, or its
-// organisation when the common name is absent.
+// issuerName picks the most recognisable name for the issuing CA.
+//
+// Organisation first, common name second. A modern issuer DN looks like
+// "C=US, O=Google Trust Services, CN=WE1": the CN is an opaque label for one
+// intermediate in the CA's rotation and means nothing to a reader, while the O
+// is the name people know the CA by. Preferring the CN — as this did — showed
+// "WE1" where "Google Trust Services" belonged.
 func issuerName(commonName string, org []string) string {
+	if len(org) > 0 {
+		if o := strings.TrimSpace(org[0]); o != "" {
+			return o
+		}
+	}
+	// Self-signed and internal CAs often carry no organisation at all, so the
+	// common name is the only name there is.
 	if cn := strings.TrimSpace(commonName); cn != "" {
 		return cn
-	}
-	if len(org) > 0 && strings.TrimSpace(org[0]) != "" {
-		return strings.TrimSpace(org[0])
 	}
 	return "Unknown"
 }
