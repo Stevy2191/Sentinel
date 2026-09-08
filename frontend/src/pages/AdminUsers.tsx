@@ -118,7 +118,7 @@ export default function AdminUsers() {
 
   // Redirect non-admins away.
   useEffect(() => {
-    if (currentUser && !isAdmin) navigate('/dashboard')
+    if (currentUser && !isAdmin) navigate('/')
   }, [currentUser, isAdmin, navigate])
 
   const [tab, setTab] = useState<'create' | 'invite' | 'pending'>('create')

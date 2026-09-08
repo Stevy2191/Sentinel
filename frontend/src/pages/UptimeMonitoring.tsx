@@ -33,7 +33,6 @@ import { REPORT_PERIODS, type ReportPeriod } from '@/utils/reportPeriods'
 import type { Monitor, MonitorGroup } from '@/types'
 import { useCardShimmer } from '@/hooks/useCardShimmer'
 import ShimmerStatCard from '@/components/ShimmerStatCard'
-import ShimmerTypeCard from '@/components/ShimmerTypeCard'
 
 const REFRESH_MS = 30_000
 const DEFAULT_GROUP_COLOR = '#10b981'
@@ -381,7 +380,7 @@ function GroupModal({
 }
 
 // ---------- page ----------
-export default function Dashboard() {
+export default function UptimeMonitoring() {
   const { currentUser } = useAuthContext()
   const isAdmin = currentUser?.is_admin ?? false
   const navigate = useNavigate()
@@ -404,13 +403,13 @@ export default function Dashboard() {
   }, [summary])
 
   // The sidebar's reporting window is independently selectable.
-  const [period, setPeriod] = useState<ReportPeriod>('30d')
+  const [period] = useState<ReportPeriod>('30d')
   const periodRange = useMemo(() => {
     const hours = REPORT_PERIODS.find((p) => p.key === period)?.hours ?? 24 * 30
     const end = new Date()
     return { start: new Date(end.getTime() - hours * 3600e3).toISOString(), end: end.toISOString() }
   }, [period])
-  const { report: periodSummary, loading: periodLoading } = useSummaryReport(periodRange.start, periodRange.end)
+  const { report: periodSummary } = useSummaryReport(periodRange.start, periodRange.end)
 
   const [createOpen, setCreateOpen] = useState(false)
   const [refreshedAt, setRefreshedAt] = useState(() => Date.now())
@@ -464,32 +463,9 @@ export default function Dashboard() {
     return { avgResponse, timedCount: timed.length }
   }, [monitors])
 
-  // Counts per monitor type, for the four type cards.
-  const byType = useMemo(() => {
-    const keys = ['dns', 'http', 'ping', 'tcp'] as const
-    return keys.map((key) => {
-      const of = monitors.filter((m) => m.type === key)
-      return {
-        key,
-        label: key.toUpperCase(),
-        count: of.length,
-        online: of.filter((m) => m.enabled && m.current_status === 'online').length,
-      }
-    })
-  }, [monitors])
-
   // One shimmer position per card, so the highlight follows the cursor on the
   // hovered card only.
-  const shimmer = useCardShimmer([
-    'operational',
-    'responseTime',
-    'incidents',
-    'agents',
-    'dns',
-    'http',
-    'ping',
-    'tcp',
-  ])
+  const shimmer = useCardShimmer(['monitoring', 'responseTime', 'incidents', 'agents'])
 
   const allTags = useMemo(() => {
     const s = new Set<string>()
@@ -570,201 +546,83 @@ export default function Dashboard() {
   const toggleTag = (t: string) =>
     setSelectedTags((cur) => (cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]))
 
-  // The reference stamps the overview with when it last refreshed.
-  const lastUpdated = useMemo(
-    () => new Date(refreshedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    [refreshedAt]
-  )
-
-  // Two states only, as in the reference: emerald while everything answers,
-  // yellow the moment anything is down.
-  const anyDown = counts.down > 0
-  const mainCard = anyDown
-    ? {
-        bg: 'from-yellow-600/20',
-        border: 'border-yellow-500/30',
-        text: 'text-yellow-400',
-        glow: 'bg-yellow-500/10',
-      }
-    : {
-        bg: 'from-emerald-600/20',
-        border: 'border-emerald-500/30',
-        text: 'text-emerald-400',
-        glow: 'bg-emerald-500/10',
-      }
   const periodHeading =
     REPORT_PERIODS.find((pp) => pp.key === period)?.heading.toLowerCase() ?? 'last 30 days'
-  const periodUptime = periodSummary?.aggregate.avg_uptime
 
   return (
     <div className="space-y-8">
-      {/* ---- Overview -------------------------------------------------- */}
-      <div>
-        <h1 className="text-4xl font-light text-white">System Overview</h1>
-        <p className="mt-2 text-sm text-slate-400">
-          {counts.total} service{counts.total === 1 ? '' : 's'} monitored &bull; Last updated{' '}
-          {lastUpdated}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-4xl font-light text-white">Uptime Monitoring</h1>
+          <p className="mt-2 text-sm text-slate-400">
+            Monitor your services with HTTP/S, DNS, PING, TCP
+          </p>
+        </div>
+        <NewMenu
+          onSingle={() => setCreateOpen(true)}
+          onWizard={() => navigate('/monitors/new/wizard')}
+          onBulk={() => navigate('/monitors/bulk')}
+          onDiscover={() => navigate('/monitors/discover')}
+          onGroup={() => setModal({ mode: 'create' })}
+          isAdmin={isAdmin}
+        />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* Left two thirds: headline status over the three stat cards. */}
-        <div className="space-y-4 lg:col-span-2">
-          <div
-            className={`group relative overflow-hidden rounded-xl border bg-gradient-to-br ${mainCard.bg} via-slate-800/40 to-cyan-600/20 p-8 backdrop-blur-sm ${mainCard.border}`}
-            onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'operational')}
-            onMouseEnter={() => shimmer.handleCardMouseEnter('operational')}
-            onMouseLeave={() => shimmer.handleCardMouseLeave('operational')}
-          >
-            {/* Emerald-to-cyan wash across the card, under the content. */}
-            <div className="pointer-events-none absolute inset-0 rounded-xl bg-gradient-to-r from-emerald-500/0 via-emerald-500/10 to-cyan-500/0" />
-
-            {shimmer.isShown('operational') && (
-              <div
-                className="pointer-events-none absolute inset-0 rounded-xl transition-all duration-75"
-                style={shimmer.getShimmerStyle('operational')}
-              />
-            )}
-
-            <div className="relative z-10 flex flex-wrap items-start justify-between gap-6">
-              <div>
-                <div
-                  className={`mb-4 text-xs font-semibold uppercase tracking-widest ${mainCard.text}`}
-                >
-                  All Services
-                </div>
-                <div className="mb-2 text-5xl font-light text-white">
-                  {counts.active === 0
-                    ? 'Idle'
-                    : anyDown
-                      ? counts.up === 0
-                        ? 'Major outage'
-                        : 'Degraded'
-                      : 'Operational'}
-                </div>
-                <div className="text-slate-300">
-                  {counts.up} of {counts.active} service{counts.active === 1 ? '' : 's'} are up
-                  {counts.paused > 0 && (
-                    <span className="text-slate-400"> &middot; {counts.paused} paused</span>
-                  )}
-                </div>
-              </div>
-              <div className="text-right">
-                <div className={`mb-2 text-4xl font-light ${mainCard.text}`}>
-                  {periodLoading && periodUptime == null
-                    ? '\u2014'
-                    : periodUptime != null
-                      ? `${periodUptime.toFixed(2)}%`
-                      : '\u2014'}
-                </div>
-                {/* The reference hard-codes "30-day uptime"; the window is
-                    selectable here, so the caption names the one in force. */}
-                <select
-                  value={period}
-                  onChange={(e) => setPeriod(e.target.value as ReportPeriod)}
-                  aria-label="Uptime reporting window"
-                  className="cursor-pointer rounded border border-white/10 bg-slate-900/60 px-2 py-1 text-xs text-slate-400 transition hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-                >
-                  {REPORT_PERIODS.map((pp) => (
-                    <option key={pp.key} value={pp.key}>
-                      {pp.heading} uptime
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </div>
-
-          {/* Three stat cards, each with its own cursor highlight. */}
-          <div className="grid gap-4 sm:grid-cols-3">
-            <ShimmerStatCard
-              title="Avg Response Time"
-              value={overview.avgResponse > 0 ? `${overview.avgResponse}ms` : '\u2014'}
-              subtitle={
-                overview.timedCount > 0 ? `across ${overview.timedCount}` : 'no data yet'
-              }
-              colorType="responseTime"
-              onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'responseTime')}
-              onMouseEnter={() => shimmer.handleCardMouseEnter('responseTime')}
-              onMouseLeave={() => shimmer.handleCardMouseLeave('responseTime')}
-              showShimmer={shimmer.isShown('responseTime')}
-              shimmerStyle={shimmer.getShimmerStyle('responseTime')}
-            />
-            <ShimmerStatCard
-              title="Total Incidents"
-              value={periodSummary?.aggregate.total_incidents ?? 0}
-              subtitle={periodHeading}
-              colorType="incidents"
-              onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'incidents')}
-              onMouseEnter={() => shimmer.handleCardMouseEnter('incidents')}
-              onMouseLeave={() => shimmer.handleCardMouseLeave('incidents')}
-              showShimmer={shimmer.isShown('incidents')}
-              shimmerStyle={shimmer.getShimmerStyle('incidents')}
-            />
-            {/* Agents are not implemented yet - see the Server Monitoring page.
-                Shown as zero with an explicit note rather than repurposing the
-                monitor count, which would read as a working feature. */}
-            <ShimmerStatCard
-              title="Monitoring Agents"
-              value="0 online"
-              subtitle="coming soon"
-              colorType="agents"
-              onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'agents')}
-              onMouseEnter={() => shimmer.handleCardMouseEnter('agents')}
-              onMouseLeave={() => shimmer.handleCardMouseLeave('agents')}
-              showShimmer={shimmer.isShown('agents')}
-              shimmerStyle={shimmer.getShimmerStyle('agents')}
-            />
-          </div>
-        </div>
-
-        {/* Right third: creating a monitor sits above one tile per type in
-            play. Clicking a tile filters the table below to that type. */}
-        <div className="space-y-3 lg:col-span-1">
-          <NewMenu
-            fullWidth
-            onSingle={() => setCreateOpen(true)}
-            onWizard={() => navigate('/monitors/new/wizard')}
-            onBulk={() => navigate('/monitors/bulk')}
-            onDiscover={() => navigate('/monitors/discover')}
-            onGroup={() => setModal({ mode: 'create' })}
-            isAdmin={isAdmin}
-          />
-          <div className="grid grid-cols-2 gap-3">
-            {byType
-              .filter((t) => t.count > 0)
-              .map((t) => (
-                <ShimmerTypeCard
-                  key={t.key}
-                  label={t.label}
-                  count={t.count}
-                  online={t.online}
-                  colorType={t.key}
-                  active={typeFilter === t.key}
-                  onClick={() => setTypeFilter(typeFilter === t.key ? 'all' : t.key)}
-                  onMouseMove={(e) => shimmer.handleCardMouseMove(e, t.key)}
-                  onMouseEnter={() => shimmer.handleCardMouseEnter(t.key)}
-                  onMouseLeave={() => shimmer.handleCardMouseLeave(t.key)}
-                  showShimmer={shimmer.isShown(t.key)}
-                  shimmerStyle={shimmer.getShimmerStyle(t.key)}
-                />
-              ))}
-            {byType.every((t) => t.count === 0) && (
-              <div className="col-span-2 rounded-lg border border-white/10 bg-slate-800/40 p-4 text-sm text-slate-400 backdrop-blur-sm">
-                No monitors configured yet.
-              </div>
-            )}
-          </div>
-        </div>
+      {/* Four readings across the monitors this page manages. Each carries its
+          own cursor highlight, as on the Overview. */}
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <ShimmerStatCard
+          title="Currently Monitoring"
+          value={counts.active}
+          subtitle={counts.paused > 0 ? `${counts.paused} paused` : 'all active'}
+          colorType="monitoring"
+          onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'monitoring')}
+          onMouseEnter={() => shimmer.handleCardMouseEnter('monitoring')}
+          onMouseLeave={() => shimmer.handleCardMouseLeave('monitoring')}
+          showShimmer={shimmer.isShown('monitoring')}
+          shimmerStyle={shimmer.getShimmerStyle('monitoring')}
+        />
+        <ShimmerStatCard
+          title="Avg Response Time"
+          value={overview.avgResponse > 0 ? `${overview.avgResponse}ms` : '\u2014'}
+          subtitle={overview.timedCount > 0 ? `across ${overview.timedCount}` : 'no data yet'}
+          colorType="responseTime"
+          onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'responseTime')}
+          onMouseEnter={() => shimmer.handleCardMouseEnter('responseTime')}
+          onMouseLeave={() => shimmer.handleCardMouseLeave('responseTime')}
+          showShimmer={shimmer.isShown('responseTime')}
+          shimmerStyle={shimmer.getShimmerStyle('responseTime')}
+        />
+        <ShimmerStatCard
+          title="Total Incidents"
+          value={periodSummary?.aggregate.total_incidents ?? 0}
+          subtitle={periodHeading}
+          colorType="incidents"
+          onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'incidents')}
+          onMouseEnter={() => shimmer.handleCardMouseEnter('incidents')}
+          onMouseLeave={() => shimmer.handleCardMouseLeave('incidents')}
+          showShimmer={shimmer.isShown('incidents')}
+          shimmerStyle={shimmer.getShimmerStyle('incidents')}
+        />
+        {/* Agents are not implemented yet - see Server Monitoring. Shown as
+            zero with a note rather than repurposing the monitor count, which
+            would read as a working feature. */}
+        <ShimmerStatCard
+          title="Monitoring Agents"
+          value="0 online"
+          subtitle="coming soon"
+          colorType="agents"
+          onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'agents')}
+          onMouseEnter={() => shimmer.handleCardMouseEnter('agents')}
+          onMouseLeave={() => shimmer.handleCardMouseLeave('agents')}
+          showShimmer={shimmer.isShown('agents')}
+          shimmerStyle={shimmer.getShimmerStyle('agents')}
+        />
       </div>
 
       {/* ---- Monitored services ---------------------------------------- */}
       <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2.5">
-        <h2 className="shrink-0 text-sm font-medium uppercase tracking-wide text-white">
-          Monitored Services
-        </h2>
-
         <div className="relative min-w-[180px] flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
           <input
