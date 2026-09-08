@@ -2,7 +2,7 @@
 // the templates that shape them. These mirror the backend models in
 // internal/models/report.go and report_schedule.go.
 
-export type ReportScopeType = 'monitors' | 'tags' | 'groups'
+export type ReportScopeType = 'monitors' | 'tags' | 'groups' | 'types'
 export type ScheduleType = 'daily' | 'weekly' | 'monthly' | 'custom'
 
 export interface ReportTemplate {

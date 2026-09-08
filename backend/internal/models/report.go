@@ -15,6 +15,11 @@ const (
 	ScopeTypeMonitors = "monitors"
 	ScopeTypeTags     = "tags"
 	ScopeTypeGroups   = "groups"
+	// ScopeTypeTypes covers every monitor of a given check type. Distinct from
+	// tags: a tag is something a person applied, a type is what the monitor
+	// inherently is, so "all DNS monitors" needs no upkeep as monitors come and
+	// go.
+	ScopeTypeTypes = "types"
 )
 
 // ValidScopeTypes lists the accepted scope_type values.
@@ -22,6 +27,7 @@ var ValidScopeTypes = map[string]bool{
 	ScopeTypeMonitors: true,
 	ScopeTypeTags:     true,
 	ScopeTypeGroups:   true,
+	ScopeTypeTypes:    true,
 }
 
 // Report section names a template may include.
@@ -55,6 +61,8 @@ type ReportScope struct {
 	MonitorIDs []uuid.UUID `json:"monitor_ids,omitempty"`
 	Tags       []string    `json:"tags,omitempty"`
 	GroupIDs   []uuid.UUID `json:"group_ids,omitempty"`
+	// Types holds monitor check types: http, tcp, ping, dns.
+	Types []string `json:"types,omitempty"`
 }
 
 // Value serializes the scope to JSON for storage.
@@ -91,6 +99,18 @@ func (s ReportScope) Validate(scopeType string) error {
 	case ScopeTypeGroups:
 		if len(s.GroupIDs) == 0 {
 			return errors.New("scope_data.group_ids is required when scope_type is \"groups\"")
+		}
+	case ScopeTypeTypes:
+		if len(s.Types) == 0 {
+			return errors.New("scope_data.types is required when scope_type is \"types\"")
+		}
+		// Checked here rather than left to the query: an unknown type would
+		// silently resolve to no monitors and produce an empty report that
+		// looks like "nothing happened".
+		for _, t := range s.Types {
+			if !ReportableMonitorTypes[t] {
+				return errors.New("unknown monitor type in scope_data.types: " + t)
+			}
 		}
 	default:
 		return errors.New("unknown scope_type: " + scopeType)

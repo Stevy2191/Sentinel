@@ -20,6 +20,10 @@ const STEPS = [
   { number: 4, title: 'Details' },
 ] as const
 
+// The check types a report may be scoped to, in the order the app shows them.
+// Webhook is absent: it receives rather than checks, so it has no incidents.
+const REPORTABLE_TYPES = ['http', 'dns', 'ping', 'tcp']
+
 const RANGE_PRESETS = [
   { value: 1, label: '24 hours' },
   { value: 7, label: '7 days' },
@@ -76,13 +80,26 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
   const options = useMemo(() => {
     if (scopeType === 'monitors') return monitors.map((m) => ({ id: m.id, name: m.name }))
     if (scopeType === 'groups') return groups.map((g) => ({ id: g.id, name: g.name }))
+    if (scopeType === 'types') {
+      // Only types that have monitors. Offering "PING" with no ping monitors
+      // would build a report that is empty for a reason the reader cannot see.
+      const counts = new Map<string, number>()
+      for (const m of monitors) {
+        if (REPORTABLE_TYPES.includes(m.type)) counts.set(m.type, (counts.get(m.type) ?? 0) + 1)
+      }
+      return REPORTABLE_TYPES.filter((t) => counts.has(t)).map((t) => ({
+        id: t,
+        name: `${t.toUpperCase()} (${counts.get(t)} monitor${counts.get(t) === 1 ? '' : 's'})`,
+      }))
+    }
     return tags.map((t) => ({ id: t, name: t }))
   }, [scopeType, monitors, groups, tags])
 
   const optionsLoading =
     (scopeType === 'monitors' && monitorsLoading) ||
     (scopeType === 'groups' && groupsLoading) ||
-    (scopeType === 'tags' && tagsLoading)
+    (scopeType === 'tags' && tagsLoading) ||
+    (scopeType === 'types' && monitorsLoading)
 
   const changeScopeType = (type: ReportScopeType) => {
     setScopeType(type)
@@ -96,7 +113,9 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
   const stepError = useMemo(() => {
     if (step === 1) {
       if (!name.trim()) return 'Give the report a name'
-      if (selection.length === 0) return `Select at least one ${scopeType.slice(0, -1)}`
+      if (selection.length === 0) {
+        return `Select at least one ${scopeType === 'types' ? 'monitor type' : scopeType.slice(0, -1)}`
+      }
     }
     if (step === 2 && (timeRangeDays < 1 || timeRangeDays > 365)) {
       return 'The period must be between 1 and 365 days'
@@ -113,7 +132,9 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
           ? { monitor_ids: selection }
           : scopeType === 'tags'
             ? { tags: selection }
-            : { group_ids: selection }
+            : scopeType === 'types'
+              ? { types: selection }
+              : { group_ids: selection }
 
       const result = await createReport({
         name: name.trim(),
@@ -196,7 +217,7 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
           <div>
             <span className="vs-eyebrow mb-2 block">Scope</span>
             <div className="mb-3 flex gap-1 border-b" style={{ borderColor: 'var(--vs-line)' }}>
-              {(['monitors', 'tags', 'groups'] as const).map((type) => (
+              {(['monitors', 'types', 'groups', 'tags'] as const).map((type) => (
                 <button
                   key={type}
                   type="button"
@@ -221,8 +242,9 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
               )}
               {!optionsLoading && options.length === 0 && (
                 <p className="text-sm" style={{ color: 'var(--vs-text-dim)' }}>
-                  No {scopeType} available.
+                  No {scopeType === 'types' ? 'monitor types' : scopeType} available.
                   {scopeType === 'tags' && ' Tag a monitor first to scope a report by tag.'}
+                  {scopeType === 'types' && ' Create a monitor first.'}
                 </p>
               )}
               {!optionsLoading &&

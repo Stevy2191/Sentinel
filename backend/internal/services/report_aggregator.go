@@ -179,6 +179,17 @@ func (s *ReportAggregatorService) getMonitorIDsForScope(ctx context.Context, sco
 		}
 		return ids, nil
 
+	case models.ScopeTypeTypes:
+		// Resolved at generation time, not stored, so a report scoped to "all
+		// DNS monitors" picks up monitors added since it was defined.
+		var ids []uuid.UUID
+		if err := s.db.WithContext(ctx).Model(&models.Monitor{}).
+			Where("type IN ?", scope.Types).
+			Pluck("id", &ids).Error; err != nil {
+			return nil, fmt.Errorf("resolving type scope: %w", err)
+		}
+		return ids, nil
+
 	default:
 		return nil, fmt.Errorf("unknown scope_type %q", scopeType)
 	}

@@ -86,7 +86,7 @@ func actorFrom(c *gin.Context) services.Actor {
 type GenerateReportRequest struct {
 	Name              string             `json:"name" binding:"required"`
 	TemplateID        uuid.UUID          `json:"template_id" binding:"required"`
-	ScopeType         string             `json:"scope_type" binding:"required,oneof=monitors tags groups"`
+	ScopeType         string             `json:"scope_type" binding:"required,oneof=monitors tags groups types"`
 	ScopeData         models.ReportScope `json:"scope_data" binding:"required"`
 	TimeRangeDays     int                `json:"time_range_days" binding:"required,min=1,max=365"`
 	CustomTitle       *string            `json:"custom_title"`

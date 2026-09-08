@@ -26,6 +26,16 @@ const (
 	MonitorTypeWebhook = "webhook"
 )
 
+// ReportableMonitorTypes are the check types a report may be scoped to.
+// Webhook is excluded: it is an inbound receiver, not something Sentinel
+// checks, so it has no uptime or incidents to report on.
+var ReportableMonitorTypes = map[string]bool{
+	MonitorTypeHTTP: true,
+	MonitorTypeTCP:  true,
+	MonitorTypePing: true,
+	MonitorTypeDNS:  true,
+}
+
 // Monitor status values (current_status).
 const (
 	StatusOnline  = "online"
