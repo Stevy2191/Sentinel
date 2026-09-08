@@ -2,7 +2,11 @@ package services
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/rsa"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log"
@@ -95,6 +99,72 @@ func NewSSLCheckerService(db *gorm.DB, manager *notifications.NotificationManage
 type CertificateInfo struct {
 	Issuer     string
 	ExpiryDate time.Time
+
+	SubjectCommonName  string
+	IssuerCommonName   string
+	SerialNumber       string
+	SignatureAlgorithm string
+	PublicKeyAlgorithm string
+	SubjectAltNames    []string
+	ValidFrom          time.Time
+	// ResolvedIP is the address the handshake reached, empty if the connection
+	// never got that far.
+	ResolvedIP string
+}
+
+// describeCertificate reads the fields of a leaf certificate that the detail
+// view shows.
+func describeCertificate(leaf *x509.Certificate) CertificateInfo {
+	return CertificateInfo{
+		Issuer:             issuerName(leaf.Issuer.CommonName, leaf.Issuer.Organization),
+		ExpiryDate:         leaf.NotAfter,
+		ValidFrom:          leaf.NotBefore,
+		SubjectCommonName:  strings.TrimSpace(leaf.Subject.CommonName),
+		IssuerCommonName:   strings.TrimSpace(leaf.Issuer.CommonName),
+		SerialNumber:       serialString(leaf),
+		SignatureAlgorithm: leaf.SignatureAlgorithm.String(),
+		PublicKeyAlgorithm: publicKeyDescription(leaf),
+		SubjectAltNames:    leaf.DNSNames,
+	}
+}
+
+// serialString renders the serial number as text.
+//
+// A serial is up to 20 octets, so it fits neither an int64 nor a JSON number:
+// a consumer that parses it as a float renders it in scientific notation and
+// silently drops digits. Hex is also how openssl and browsers print it, which
+// makes it comparable with what an operator sees elsewhere.
+func serialString(leaf *x509.Certificate) string {
+	if leaf.SerialNumber == nil {
+		return ""
+	}
+	h := strings.ToUpper(leaf.SerialNumber.Text(16))
+	if len(h)%2 == 1 {
+		h = "0" + h
+	}
+	// Grouped in octets, as openssl prints it.
+	var b strings.Builder
+	for i := 0; i < len(h); i += 2 {
+		if i > 0 {
+			b.WriteByte(':')
+		}
+		b.WriteString(h[i : i+2])
+	}
+	return b.String()
+}
+
+// publicKeyDescription names the key type and its size, e.g. "ECDSA 256-bit".
+func publicKeyDescription(leaf *x509.Certificate) string {
+	switch key := leaf.PublicKey.(type) {
+	case *rsa.PublicKey:
+		return fmt.Sprintf("RSA %d-bit", key.N.BitLen())
+	case *ecdsa.PublicKey:
+		return fmt.Sprintf("ECDSA %d-bit", key.Curve.Params().BitSize)
+	case ed25519.PublicKey:
+		return "Ed25519"
+	default:
+		return leaf.PublicKeyAlgorithm.String()
+	}
 }
 
 // FetchCertificate opens a TLS connection to the domain and reads the leaf
@@ -129,11 +199,8 @@ func (s *SSLCheckerService) FetchCertificate(ctx context.Context, domain string)
 		// real expiry rather than as a connection problem.
 		var invalid *tls.CertificateVerificationError
 		if errors.As(err, &invalid) && len(invalid.UnverifiedCertificates) > 0 {
-			leaf := invalid.UnverifiedCertificates[0]
-			return &CertificateInfo{
-				Issuer:     issuerName(leaf.Issuer.CommonName, leaf.Issuer.Organization),
-				ExpiryDate: leaf.NotAfter,
-			}, nil
+			info := describeCertificate(invalid.UnverifiedCertificates[0])
+			return &info, nil
 		}
 		return nil, fmt.Errorf("%s: %w", domain, s.explainDialFailure(ctx, host, err))
 	}
@@ -144,11 +211,11 @@ func (s *SSLCheckerService) FetchCertificate(ctx context.Context, domain string)
 	if len(chain) == 0 {
 		return nil, fmt.Errorf("%s presented no certificate", domain)
 	}
-	leaf := chain[0]
-	return &CertificateInfo{
-		Issuer:     issuerName(leaf.Issuer.CommonName, leaf.Issuer.Organization),
-		ExpiryDate: leaf.NotAfter,
-	}, nil
+	info := describeCertificate(chain[0])
+	if addr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
+		info.ResolvedIP = addr.IP.String()
+	}
+	return &info, nil
 }
 
 // issuerName picks the most recognisable name for the issuing CA.
@@ -260,6 +327,41 @@ func (s *SSLCheckerService) CheckCertificate(ctx context.Context, cert *models.S
 		cert.DaysUntilExpiry = &days
 		cert.Status = status
 		cert.LastError = nil
+
+		// The rest of what the handshake told us. Written through a helper
+		// because each field has to land in both the update map and the
+		// in-memory row, and the caller is handed that row back.
+		setStr := func(col string, v string, dst **string) {
+			if v == "" {
+				updates[col] = nil
+				*dst = nil
+				return
+			}
+			val := v
+			updates[col] = val
+			*dst = &val
+		}
+		setStr("subject_common_name", info.SubjectCommonName, &cert.SubjectCommonName)
+		setStr("issuer_common_name", info.IssuerCommonName, &cert.IssuerCommonName)
+		setStr("serial_number", info.SerialNumber, &cert.SerialNumber)
+		setStr("signature_algorithm", info.SignatureAlgorithm, &cert.SignatureAlgorithm)
+		setStr("public_key_algorithm", info.PublicKeyAlgorithm, &cert.PublicKeyAlgorithm)
+		// Only overwritten when known: an expired certificate is read from the
+		// verification error, which carries no connection to take an address
+		// from, and forgetting the last known address would be a loss.
+		if info.ResolvedIP != "" {
+			setStr("resolved_ip", info.ResolvedIP, &cert.ResolvedIP)
+		}
+
+		sans := models.StringSlice(info.SubjectAltNames)
+		updates["subject_alternative_names"] = sans
+		cert.SubjectAltNames = sans
+
+		if !info.ValidFrom.IsZero() {
+			updates["valid_from"] = info.ValidFrom
+			vf := info.ValidFrom
+			cert.ValidFrom = &vf
+		}
 	}
 	cert.LastChecked = &now
 

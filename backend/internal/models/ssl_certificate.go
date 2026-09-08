@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"regexp"
@@ -43,6 +44,23 @@ type SSLCertificate struct {
 	DaysUntilExpiry *int   `json:"days_until_expiry" gorm:"column:days_until_expiry"`
 	Status          string `json:"status" gorm:"column:status;not null;default:unknown"`
 
+	// ---- Read from the certificate itself -------------------------------
+	// All nil until a check succeeds, and left alone by a check that fails so
+	// a transient outage does not blank what the last good read found.
+
+	SubjectCommonName *string `json:"subject_common_name" gorm:"column:subject_common_name"`
+	IssuerCommonName  *string `json:"issuer_common_name" gorm:"column:issuer_common_name"`
+	// SerialNumber is a string, not a number: a serial is up to 20 octets and
+	// overflows both int64 and a JSON consumer's float, which renders it in
+	// scientific notation and loses digits.
+	SerialNumber       *string     `json:"serial_number" gorm:"column:serial_number"`
+	SignatureAlgorithm *string     `json:"signature_algorithm" gorm:"column:signature_algorithm"`
+	PublicKeyAlgorithm *string     `json:"public_key_algorithm" gorm:"column:public_key_algorithm"`
+	SubjectAltNames    StringSlice `json:"subject_alternative_names" gorm:"column:subject_alternative_names;type:jsonb"`
+	ValidFrom          *time.Time  `json:"valid_from" gorm:"column:valid_from"`
+	// ResolvedIP is the address the handshake actually reached.
+	ResolvedIP *string `json:"resolved_ip" gorm:"column:resolved_ip"`
+
 	CheckInterval          int `json:"check_interval" gorm:"column:check_interval;default:86400"`
 	ExpiryNotificationDays int `json:"expiry_notification_days" gorm:"column:expiry_notification_days;default:7"`
 
@@ -81,6 +99,51 @@ type SSLCertificate struct {
 
 	CreatedAt time.Time `json:"created_at" gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt time.Time `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
+}
+
+// MarshalJSON adds the two values that are derived rather than stored, so a
+// client never has to recompute them and cannot disagree with the server about
+// how long a certificate was issued for or when it is next due.
+func (c SSLCertificate) MarshalJSON() ([]byte, error) {
+	// The alias sheds the method set, so marshalling the embedded value does
+	// not call back into this function forever.
+	type alias SSLCertificate
+	return json.Marshal(struct {
+		alias
+		ValidityPeriodDays int        `json:"validity_period_days"`
+		NextCheck          *time.Time `json:"next_check"`
+	}{
+		alias:              alias(c),
+		ValidityPeriodDays: c.ValidityPeriodDays(),
+		NextCheck:          c.NextCheckAt(),
+	})
+}
+
+// ValidityPeriodDays is how long the certificate was issued for: the whole
+// window, not what is left of it. Zero when either end is unknown.
+func (c *SSLCertificate) ValidityPeriodDays() int {
+	if c.ValidFrom == nil || c.ExpiryDate == nil {
+		return 0
+	}
+	d := int(c.ExpiryDate.Sub(*c.ValidFrom).Hours() / 24)
+	if d < 0 {
+		return 0
+	}
+	return d
+}
+
+// NextCheckAt is when this certificate is next due. Nil until it has been
+// checked once, since there is no schedule to project from before that.
+func (c *SSLCertificate) NextCheckAt() *time.Time {
+	if c.LastChecked == nil {
+		return nil
+	}
+	interval := c.CheckInterval
+	if interval <= 0 {
+		interval = SSLCheckIntervalSeconds
+	}
+	next := c.LastChecked.Add(time.Duration(interval) * time.Second)
+	return &next
 }
 
 // TableName tells GORM which table backs the model.
