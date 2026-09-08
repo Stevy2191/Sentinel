@@ -190,13 +190,28 @@ export default function SSLCertificateTable({
                     className="max-w-[180px] px-4 py-3 text-slate-400"
                     title={c.registrar ?? ''}
                   >
-                    {c.registration_error ? (
+                    {/* A failed lookup does not invalidate what was read
+                        before, so a known registrar stays visible and the
+                        failure is a small staleness marker beside it. The bare
+                        icon is only for a domain nothing has ever been read
+                        for, where there is nothing else to show. */}
+                    {c.registrar ? (
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate">{c.registrar}</span>
+                        {c.registration_error && (
+                          <ErrorTooltip
+                            message={`Last lookup failed, so this may be out of date: ${trimDomainPrefix(c.registration_error, c.domain)}`}
+                            label={`Registration lookup for ${c.domain} is out of date`}
+                          />
+                        )}
+                      </div>
+                    ) : c.registration_error ? (
                       <ErrorTooltip
                         message={trimDomainPrefix(c.registration_error, c.domain)}
                         label={`Registration lookup failed for ${c.domain}`}
                       />
                     ) : (
-                      <div className="truncate">{c.registrar ?? '—'}</div>
+                      <div className="truncate">—</div>
                     )}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
