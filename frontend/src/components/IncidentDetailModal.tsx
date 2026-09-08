@@ -1,7 +1,12 @@
-import { useEffect } from 'react'
-import { X, Loader2, ExternalLink } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { X, Loader2, ExternalLink, Check } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { useIncidentDetail, formatDuration, type Incident } from '@/hooks/useIncidents'
+import {
+  useIncidentDetail,
+  useUpdateIncident,
+  formatDuration,
+  type Incident,
+} from '@/hooks/useIncidents'
 
 const STATUS_STYLE: Record<Incident['status'], string> = {
   ongoing: 'border-red-500/30 bg-red-500/20 text-red-400',
@@ -28,6 +33,8 @@ function when(iso: string | null): string {
 interface Props {
   incidentId: string | null
   onClose: () => void
+  /** Called after a successful save, so a list behind the modal can refresh. */
+  onSaved?: () => void
 }
 
 /**
@@ -35,12 +42,58 @@ interface Props {
  * open, so "it was down for two hours" can be read as the sequence of failures
  * that actually happened.
  */
-export default function IncidentDetailModal({ incidentId, onClose }: Props) {
-  const { detail, loading, error } = useIncidentDetail(incidentId)
+export default function IncidentDetailModal({ incidentId, onClose, onSaved }: Props) {
+  const { detail, loading, error, reload } = useIncidentDetail(incidentId)
+  const { save, saving } = useUpdateIncident()
+
+  const [notes, setNotes] = useState('')
+  const [resolution, setResolution] = useState('')
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [justSaved, setJustSaved] = useState(false)
+
+  // Seeded from whatever loaded, and re-seeded when a different incident is
+  // opened. Keyed on the incident's id rather than the object so a background
+  // reload does not discard something half-typed.
+  const loadedId = detail?.incident.id
+  useEffect(() => {
+    if (!detail) return
+    setNotes(detail.incident.notes ?? '')
+    setResolution(detail.incident.resolution_notes ?? '')
+    setSaveError(null)
+    setJustSaved(false)
+  }, [loadedId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const dirty =
+    !!detail &&
+    (notes !== (detail.incident.notes ?? '') ||
+      resolution !== (detail.incident.resolution_notes ?? ''))
+
+  const persist = async () => {
+    if (!detail || !dirty) return
+    setSaveError(null)
+    try {
+      await save(detail.incident.id, { notes, resolution_notes: resolution })
+      setJustSaved(true)
+      reload()
+      onSaved?.()
+    } catch (err) {
+      const e = err as { status?: number; message?: string }
+      setSaveError(
+        e.status === 403
+          ? 'You do not have permission to edit this monitor'
+          : e.message || 'Could not save the notes'
+      )
+    }
+  }
 
   useEffect(() => {
     if (!incidentId) return
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    const onKey = (e: KeyboardEvent) => {
+      // Escape closes, but not over unsaved text: losing a paragraph of
+      // incident notes to a stray keypress is not a fair trade for the
+      // convenience of the shortcut.
+      if (e.key === 'Escape' && !dirty) onClose()
+    }
     document.addEventListener('keydown', onKey)
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -48,7 +101,7 @@ export default function IncidentDetailModal({ incidentId, onClose }: Props) {
       document.removeEventListener('keydown', onKey)
       document.body.style.overflow = prev
     }
-  }, [incidentId, onClose])
+  }, [incidentId, onClose, dirty])
 
   if (!incidentId) return null
 
@@ -58,7 +111,7 @@ export default function IncidentDetailModal({ incidentId, onClose }: Props) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
-      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+      onMouseDown={(e) => e.target === e.currentTarget && !dirty && onClose()}
     >
       <div
         role="dialog"
@@ -194,20 +247,52 @@ export default function IncidentDetailModal({ incidentId, onClose }: Props) {
                 )}
               </div>
 
-              {(inc.notes || inc.resolution_notes) && (
-                <div>
-                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-300">
-                    Notes
-                  </h3>
-                  {inc.notes && <p className="text-sm text-slate-300">{inc.notes}</p>}
-                  {inc.resolution_notes && (
-                    <p className="mt-2 text-sm text-slate-400">
-                      <span className="text-slate-500">Resolution: </span>
-                      {inc.resolution_notes}
-                    </p>
-                  )}
-                </div>
-              )}
+              <div>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-300">
+                  Notes
+                </h3>
+
+                <label htmlFor="incident-notes" className="mb-1 block text-sm font-medium text-white">
+                  What happened
+                </label>
+                <textarea
+                  id="incident-notes"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={3}
+                  placeholder="Context worth keeping — what you found, what you ruled out…"
+                  className="w-full resize-none rounded-lg border border-white/10 bg-slate-800/50 px-3 py-2 text-sm text-white placeholder-slate-500 transition focus:border-white/30 focus:outline-none"
+                />
+
+                <label
+                  htmlFor="incident-resolution"
+                  className="mb-1 mt-4 block text-sm font-medium text-white"
+                >
+                  How it was resolved
+                </label>
+                <textarea
+                  id="incident-resolution"
+                  value={resolution}
+                  onChange={(e) => setResolution(e.target.value)}
+                  rows={2}
+                  placeholder={
+                    inc.status === 'ongoing'
+                      ? 'Fill this in once it is fixed'
+                      : 'What actually fixed it'
+                  }
+                  className="w-full resize-none rounded-lg border border-white/10 bg-slate-800/50 px-3 py-2 text-sm text-white placeholder-slate-500 transition focus:border-white/30 focus:outline-none"
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  Both appear in reports. The reason above is what the check itself returned and is
+                  not editable.
+                </p>
+
+                {saveError && (
+                  <p className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-400">
+                    {saveError}
+                  </p>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -224,9 +309,24 @@ export default function IncidentDetailModal({ incidentId, onClose }: Props) {
           ) : (
             <span />
           )}
-          <button className="btn-secondary" onClick={onClose}>
-            Close
-          </button>
+          <div className="flex items-center gap-3">
+            {justSaved && !dirty && (
+              <span className="inline-flex items-center gap-1 text-xs text-emerald-400">
+                <Check className="h-3.5 w-3.5" /> Saved
+              </span>
+            )}
+            {dirty && <span className="text-xs text-amber-300">Unsaved changes</span>}
+            <button className="btn-secondary" onClick={onClose}>
+              {dirty ? 'Discard' : 'Close'}
+            </button>
+            <button
+              className="btn-primary"
+              disabled={!dirty || saving}
+              onClick={() => void persist()}
+            >
+              {saving ? 'Saving…' : 'Save notes'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

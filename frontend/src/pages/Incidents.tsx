@@ -255,7 +255,11 @@ export default function Incidents() {
         </div>
       )}
 
-      <IncidentDetailModal incidentId={openId} onClose={() => setOpenId(null)} />
+      <IncidentDetailModal
+        incidentId={openId}
+        onClose={() => setOpenId(null)}
+        onSaved={() => void refetch()}
+      />
     </div>
   )
 }
