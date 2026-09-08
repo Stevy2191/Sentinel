@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { X, Loader2 } from 'lucide-react'
 import { useCreateMonitor } from '@/hooks/useMonitors'
-import { useAvailableChannels } from '@/hooks/useNotificationConfig'
-import ChannelChecklist from './ChannelChecklist'
+import NotificationsSection from './NotificationsSection'
 import { useAppConfig } from '@/context/AppConfigContext'
 import type { ApiError } from '@/services/api'
 import type { Monitor, MonitorType } from '@/types'
@@ -79,6 +78,7 @@ interface FormState {
   timeout: number
   retryAttempts: number
   /** Ids of the channels this monitor alerts on. Empty means it alerts nowhere. */
+  enableNotifications: boolean
   selectedNotifications: string[]
   enableSSLVerify: boolean
 }
@@ -149,7 +149,6 @@ interface Props {
 export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }: Props) {
   const { defaultCheckInterval } = useAppConfig()
   const { create, loading } = useCreateMonitor()
-  const { available } = useAvailableChannels(isOpen)
   const dialogRef = useRef<HTMLDivElement>(null)
   const firstFieldRef = useRef<HTMLInputElement>(null)
 
@@ -165,6 +164,9 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
       customInterval: '',
       timeout: 10,
       retryAttempts: 3,
+      // Notifications are opt-in: a monitor is created silent unless the
+      // switch is turned on and channels are chosen.
+      enableNotifications: false,
       selectedNotifications: [],
       // Off by default. It is an opt-in check on the certificate, not on
       // whether the service is up, and turning it on for a host with a
@@ -186,27 +188,6 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
     const t = window.setTimeout(() => firstFieldRef.current?.focus(), 50)
     return () => window.clearTimeout(t)
   }, [isOpen, blank])
-
-  // Every available channel starts ticked, so a monitor created without opening
-  // this section alerts everywhere — the behaviour before the section existed.
-  // Keyed on the channel list so it re-seeds if the channels arrive after the
-  // reset above has already run.
-  const availableKey = available.map((c) => c.id).join(',')
-  useEffect(() => {
-    if (!isOpen) return
-    setForm((f) => ({
-      ...f,
-      selectedNotifications: availableKey ? availableKey.split(',') : [],
-    }))
-  }, [isOpen, availableKey])
-
-  const toggleChannel = (id: string) =>
-    setForm((f) => ({
-      ...f,
-      selectedNotifications: f.selectedNotifications.includes(id)
-        ? f.selectedNotifications.filter((c) => c !== id)
-        : [...f.selectedNotifications, id],
-    }))
 
   // Escape closes, and focus is kept inside the dialog while it is open.
   useEffect(() => {
@@ -310,9 +291,9 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
         // Sent only for HTTP, the one type it affects. Other types are left to
         // the column default rather than storing a value the form never showed.
         ...(form.type === 'http' ? { ssl_verify: form.enableSSLVerify } : {}),
-        // The explicit set that was ticked. [] means this monitor alerts
-        // nowhere, which the API reads exactly that way.
-        notify_channels: form.selectedNotifications,
+        // The switch decides: off sends an empty set, which the API reads as
+        // "alert nobody" rather than as "not specified".
+        notify_channels: form.enableNotifications ? form.selectedNotifications : [],
       })
       push(`Monitor "${created.name}" created`, 'success')
       setForm(blank)
@@ -578,12 +559,21 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
 
           <div className="border-t border-white/10" />
 
-          <ChannelChecklist
+          <NotificationsSection
+            enabled={form.enableNotifications}
+            onEnabledChange={(v) =>
+              setForm((f) => ({
+                ...f,
+                enableNotifications: v,
+                // Turning it off clears the selection, so what is stored
+                // always matches what the switch says.
+                selectedNotifications: v ? f.selectedNotifications : [],
+              }))
+            }
             selected={form.selectedNotifications}
-            onToggle={toggleChannel}
-            enabled={isOpen}
-            description="Select which channels to notify for this monitor"
-            emptyNote="The monitor is still created and still records incidents — it just will not alert anyone."
+            onSelectedChange={(ids) => setForm((f) => ({ ...f, selectedNotifications: ids }))}
+            active={isOpen}
+            silentNote="Track this monitor silently. Incidents are still recorded."
             onNavigateAway={onClose}
           />
         </div>

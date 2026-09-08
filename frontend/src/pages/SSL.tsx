@@ -10,7 +10,7 @@ import {
   type SSLCertificate,
 } from '@/hooks/useSSLCertificates'
 import type { ApiError } from '@/services/api'
-import ChannelChecklist, { toggleChannelID } from '@/components/ChannelChecklist'
+import NotificationsSection from '@/components/NotificationsSection'
 import { useAvailableChannels } from '@/hooks/useNotificationConfig'
 
 const MIN_DAYS = 1
@@ -111,10 +111,14 @@ function EditModal({
   const invalid = days < MIN_DAYS || days > MAX_DAYS
 
   const { available } = useAvailableChannels(true)
-  // null means "every channel, including any added later", so it is shown as
-  // everything ticked. The field is only sent if the picker is touched, which
-  // keeps that meaning intact for anyone who came here to change the threshold.
+  // An empty stored list means the domain was deliberately silenced, so the
+  // switch reflects that. null means "every channel, including any added
+  // later" and shows as on with everything selected.
+  const [notifyEnabled, setNotifyEnabled] = useState(cert.notify_channels?.length !== 0)
   const [channels, setChannels] = useState<string[]>(cert.notify_channels ?? [])
+  // The field is only sent if something was actually changed, which keeps the
+  // "follow every channel" meaning intact for anyone who came here to edit the
+  // threshold and never touched this section.
   const [channelsTouched, setChannelsTouched] = useState(false)
   const availableKey = available.map((c) => c.id).join(',')
   useEffect(() => {
@@ -128,7 +132,7 @@ function EditModal({
       await update(cert.id, {
         expiry_notification_days: days,
         enabled,
-        notify_channels: channelsTouched ? channels : undefined,
+        notify_channels: channelsTouched ? (notifyEnabled ? channels : []) : undefined,
       })
       push(`${cert.domain} updated`, 'success')
       onSaved()
@@ -223,14 +227,19 @@ function EditModal({
         </label>
 
         <div className="mt-6 border-t border-white/10 pt-5">
-          <ChannelChecklist
-            selected={channels}
-            onToggle={(id) => {
+          <NotificationsSection
+            enabled={notifyEnabled}
+            onEnabledChange={(v) => {
               setChannelsTouched(true)
-              setChannels((c) => toggleChannelID(c, id))
+              setNotifyEnabled(v)
+              if (!v) setChannels([])
             }}
-            description="Select which channels to notify about this domain"
-            emptyNote="The domain is still watched — it just will not alert anyone."
+            selected={channels}
+            onSelectedChange={(ids) => {
+              setChannelsTouched(true)
+              setChannels(ids)
+            }}
+            silentNote="Track this domain silently. Expiry is still tracked and shown."
             onNavigateAway={onClose}
           />
         </div>
