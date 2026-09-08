@@ -19,7 +19,7 @@ import {
 import { useToasts, Toaster } from '@/components/Toast'
 import CreateMonitorModal from '@/components/CreateMonitorModal'
 import { useUsers } from '@/hooks/useUsers'
-import { formatResponseTime, formatDate } from '@/utils/formatters'
+import { formatLastResponseTime, formatDate } from '@/utils/formatters'
 import { monitorAccess, badgeToneClass } from '@/utils/monitorAccess'
 import type { Monitor, MonitorStatus, MonitorType } from '@/types'
 import MonitorTypeBadge from '@/components/MonitorTypeBadge'
@@ -280,7 +280,7 @@ export default function Monitors() {
                       {m.last_check_at ? formatDate(m.last_check_at) : 'Never'}
                     </td>
                     <td className={`px-4 py-3 font-medium ${responseColor(m.last_response_time_ms)}`}>
-                      {formatResponseTime(m.last_response_time_ms)}
+                      {formatLastResponseTime(m.last_response_time_ms, m.current_status)}
                     </td>
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <div className="flex justify-end gap-1">
