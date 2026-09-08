@@ -6,8 +6,7 @@ import {
   type SSLStatus,
 } from '@/hooks/useSSLCertificates'
 import type { ApiError } from '@/services/api'
-import ChannelChecklist, { toggleChannelID } from './ChannelChecklist'
-import { useAvailableChannels } from '@/hooks/useNotificationConfig'
+import NotificationsSection from './NotificationsSection'
 
 const MIN_DAYS = 1
 const MAX_DAYS = 365
@@ -74,13 +73,10 @@ export default function CreateSSLModal({ isOpen, onClose, onCreated, push }: Pro
   const [touched, setTouched] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<SSLCertificate | null>(null)
+  // Notifications are opt-in, matching the monitor dialog: a domain is added
+  // silent unless the switch is turned on and channels are chosen.
+  const [notifyEnabled, setNotifyEnabled] = useState(false)
   const [channels, setChannels] = useState<string[]>([])
-  // Whether the picker was actually touched. Left alone, the field is omitted
-  // so the row stores null — "every channel, including ones added later" —
-  // rather than pinning today's list, which looks identical but silently
-  // excludes any channel configured afterwards.
-  const [channelsTouched, setChannelsTouched] = useState(false)
-  const { available } = useAvailableChannels(isOpen)
 
   useEffect(() => {
     if (!isOpen) return
@@ -93,15 +89,11 @@ export default function CreateSSLModal({ isOpen, onClose, onCreated, push }: Pro
     return () => window.clearTimeout(t)
   }, [isOpen])
 
-  // Every channel starts ticked, so a domain added without opening the section
-  // warns everywhere. Keyed on the list so it re-seeds if the channels arrive
-  // after the reset above has run.
-  const availableKey = available.map((c) => c.id).join(',')
   useEffect(() => {
     if (!isOpen) return
-    setChannels(availableKey ? availableKey.split(',') : [])
-    setChannelsTouched(false)
-  }, [isOpen, availableKey])
+    setNotifyEnabled(false)
+    setChannels([])
+  }, [isOpen])
 
   useEffect(() => {
     if (!isOpen) return
@@ -138,7 +130,9 @@ export default function CreateSSLModal({ isOpen, onClose, onCreated, push }: Pro
         domain: domain.trim(),
         expiry_notification_days: notifyDays,
         enabled: true,
-        notify_channels: channelsTouched ? channels : undefined,
+        // The switch decides: off sends an empty set, which the API reads as
+        // "alert nobody" rather than as "not specified".
+        notify_channels: notifyEnabled ? channels : [],
       })
       setResult(cert)
       onCreated(cert)
@@ -241,15 +235,16 @@ export default function CreateSSLModal({ isOpen, onClose, onCreated, push }: Pro
 
           <div className="border-t border-white/10" />
 
-          <ChannelChecklist
-            selected={channels}
-            onToggle={(id) => {
-              setChannelsTouched(true)
-              setChannels((c) => toggleChannelID(c, id))
+          <NotificationsSection
+            enabled={notifyEnabled}
+            onEnabledChange={(v) => {
+              setNotifyEnabled(v)
+              if (!v) setChannels([])
             }}
-            enabled={isOpen}
-            description="Select which channels to notify about this domain"
-            emptyNote="The domain is still watched — it just will not alert anyone."
+            selected={channels}
+            onSelectedChange={setChannels}
+            active={isOpen}
+            silentNote="Track this domain silently. Expiry is still tracked and shown."
             onNavigateAway={onClose}
           />
 
