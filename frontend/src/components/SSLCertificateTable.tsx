@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
-import { ArrowUpDown, Pencil, Trash2, RefreshCw, AlertCircle } from 'lucide-react'
+import { ArrowUpDown, Pencil, Trash2, RefreshCw } from 'lucide-react'
 import { STATUS_STYLE, daysLeftClass } from '@/components/CreateSSLModal'
+import ErrorTooltip, { trimDomainPrefix } from '@/components/ErrorTooltip'
 import type { SSLCertificate } from '@/hooks/useSSLCertificates'
 
 const PER_PAGE = 10
@@ -153,22 +154,24 @@ export default function SSLCertificateTable({
                   <td className="px-4 py-3">
                     <div className="font-medium text-slate-200">{c.domain}</div>
                     {!c.enabled && <div className="text-xs text-slate-500">paused</div>}
-                    {c.last_error && (
-                      <div
-                        className="mt-0.5 flex items-center gap-1 text-xs text-amber-400"
-                        title={c.last_error}
-                      >
-                        <AlertCircle className="h-3 w-3 shrink-0" />
-                        <span className="truncate">{c.last_error}</span>
-                      </div>
-                    )}
                   </td>
                   <td className="border-l border-white/10 px-4 py-3">
-                    <span
-                      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${STATUS_STYLE[c.status].cls}`}
-                    >
-                      {STATUS_STYLE[c.status].label}
-                    </span>
+                    {/* A status of "unknown" only ever means the read failed,
+                        so the reason is the useful thing to show. The badge
+                        would say "Unknown" and leave the reason to a column
+                        wide enough to wreck the table. */}
+                    {c.status === 'unknown' && c.last_error ? (
+                      <ErrorTooltip
+                        message={trimDomainPrefix(c.last_error, c.domain)}
+                        label={`Certificate check failed for ${c.domain}`}
+                      />
+                    ) : (
+                      <span
+                        className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${STATUS_STYLE[c.status].cls}`}
+                      >
+                        {STATUS_STYLE[c.status].label}
+                      </span>
+                    )}
                   </td>
                   <td className="max-w-[220px] truncate px-4 py-3 text-slate-400" title={c.issuer ?? ''}>
                     {c.issuer ?? '—'}
@@ -185,15 +188,13 @@ export default function SSLCertificateTable({
                     className="max-w-[180px] border-l border-white/10 px-4 py-3 text-slate-400"
                     title={c.registrar ?? ''}
                   >
-                    <div className="truncate">{c.registrar ?? '—'}</div>
-                    {c.registration_error && (
-                      <div
-                        className="mt-0.5 flex items-center gap-1 text-xs text-amber-400"
-                        title={c.registration_error}
-                      >
-                        <AlertCircle className="h-3 w-3 shrink-0" />
-                        <span className="truncate">lookup failed</span>
-                      </div>
+                    {c.registration_error ? (
+                      <ErrorTooltip
+                        message={trimDomainPrefix(c.registration_error, c.domain)}
+                        label={`Registration lookup failed for ${c.domain}`}
+                      />
+                    ) : (
+                      <div className="truncate">{c.registrar ?? '—'}</div>
                     )}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
