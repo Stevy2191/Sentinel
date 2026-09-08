@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -28,6 +29,9 @@ type createSSLRequest struct {
 	// Nil takes the default week's warning.
 	ExpiryNotificationDays *int  `json:"expiry_notification_days"`
 	Enabled                *bool `json:"enabled"`
+	// Which channels expiry warnings go to. Omitted or null means every
+	// enabled channel; an empty list means none.
+	NotifyChannels *[]string `json:"notify_channels"`
 }
 
 // CreateSSLCertificateHandler handles POST /api/v1/ssl-certificates. It stores
@@ -66,6 +70,7 @@ func CreateSSLCertificateHandler(svc *services.SSLCheckerService) gin.HandlerFun
 			Domain:                 domain,
 			ExpiryNotificationDays: notifyDays,
 			Enabled:                enabled,
+			NotifyChannels:         normalizeChannelIDs(req.NotifyChannels),
 		}
 		if err := svc.Create(c.Request.Context(), cert); err != nil {
 			// A duplicate domain is the caller's mistake, not a server fault.
@@ -74,6 +79,28 @@ func CreateSSLCertificateHandler(svc *services.SSLCheckerService) gin.HandlerFun
 		}
 		respondSuccess(c, http.StatusCreated, cert)
 	}
+}
+
+// normalizeChannelIDs cleans a submitted channel selection.
+//
+// nil in, nil out, and the distinction matters: null means "every channel",
+// while an empty list means "none". Collapsing the two would silently turn a
+// deliberate opt-out into alerts everywhere.
+func normalizeChannelIDs(raw *[]string) models.StringSlice {
+	if raw == nil {
+		return nil
+	}
+	out := make(models.StringSlice, 0, len(*raw))
+	seen := make(map[string]bool, len(*raw))
+	for _, id := range *raw {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
 }
 
 // ListSSLCertificatesHandler handles GET /api/v1/ssl-certificates.
@@ -115,8 +142,9 @@ type updateSSLRequest struct {
 	Enabled                *bool `json:"enabled"`
 	// Present only so a client that echoes the whole row back gets told rather
 	// than silently having its change ignored.
-	Domain        *string `json:"domain"`
-	CheckInterval *int    `json:"check_interval"`
+	Domain         *string   `json:"domain"`
+	CheckInterval  *int      `json:"check_interval"`
+	NotifyChannels *[]string `json:"notify_channels"`
 }
 
 // UpdateSSLCertificateHandler handles PATCH /api/v1/ssl-certificates/:id.
@@ -168,7 +196,12 @@ func UpdateSSLCertificateHandler(svc *services.SSLCheckerService) gin.HandlerFun
 			enabled = *req.Enabled
 		}
 
-		updated, err := svc.Update(c.Request.Context(), id, notifyDays, enabled)
+		channels := current.NotifyChannels
+		if req.NotifyChannels != nil {
+			channels = normalizeChannelIDs(req.NotifyChannels)
+		}
+
+		updated, err := svc.Update(c.Request.Context(), id, notifyDays, enabled, channels)
 		if err != nil {
 			respondInternal(c, "UpdateSSLCertificateHandler", err)
 			return

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Plus, RefreshCw, Search, X, Loader2 } from 'lucide-react'
 import { useToasts, Toaster } from '@/components/Toast'
 import { useCardShimmer } from '@/hooks/useCardShimmer'
@@ -10,6 +10,8 @@ import {
   type SSLCertificate,
 } from '@/hooks/useSSLCertificates'
 import type { ApiError } from '@/services/api'
+import ChannelChecklist, { toggleChannelID } from '@/components/ChannelChecklist'
+import { useAvailableChannels } from '@/hooks/useNotificationConfig'
 
 const MIN_DAYS = 1
 const MAX_DAYS = 365
@@ -81,6 +83,14 @@ const TONES = {
     text: 'text-red-400',
     glow: 'bg-red-500/10 group-hover:bg-red-500/20',
   },
+  // Registration gets its own hue so the two clocks never read as one number.
+  registration: {
+    bg: 'from-purple-600/15',
+    border: 'border-purple-500/30',
+    hover: 'hover:border-purple-500/50',
+    text: 'text-purple-400',
+    glow: 'bg-purple-500/10 group-hover:bg-purple-500/20',
+  },
 }
 
 /** Edit dialog: only the two fields the operator owns. */
@@ -100,10 +110,26 @@ function EditModal({
   const [enabled, setEnabled] = useState(cert.enabled)
   const invalid = days < MIN_DAYS || days > MAX_DAYS
 
+  const { available } = useAvailableChannels(true)
+  // null means "every channel, including any added later", so it is shown as
+  // everything ticked. The field is only sent if the picker is touched, which
+  // keeps that meaning intact for anyone who came here to change the threshold.
+  const [channels, setChannels] = useState<string[]>(cert.notify_channels ?? [])
+  const [channelsTouched, setChannelsTouched] = useState(false)
+  const availableKey = available.map((c) => c.id).join(',')
+  useEffect(() => {
+    if (cert.notify_channels != null) return
+    setChannels(availableKey ? availableKey.split(',') : [])
+  }, [availableKey, cert.notify_channels])
+
   const save = async () => {
     if (invalid) return
     try {
-      await update(cert.id, { expiry_notification_days: days, enabled })
+      await update(cert.id, {
+        expiry_notification_days: days,
+        enabled,
+        notify_channels: channelsTouched ? channels : undefined,
+      })
       push(`${cert.domain} updated`, 'success')
       onSaved()
       onClose()
@@ -120,7 +146,7 @@ function EditModal({
       <div
         role="dialog"
         aria-modal="true"
-        className="w-full max-w-md rounded-xl border border-white/10 bg-slate-900/95 p-6"
+        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-xl border border-white/10 bg-slate-900/95 p-6"
       >
         <div className="mb-4 flex items-start justify-between">
           <h3 className="text-lg font-semibold text-white">Edit certificate</h3>
@@ -151,7 +177,7 @@ function EditModal({
         </div>
 
         <label htmlFor="edit-days" className="mb-1 block text-sm font-medium text-white">
-          Alert when the certificate expires in
+          Alert when the certificate or registration expires in
         </label>
         <div className="flex items-center gap-2">
           <input
@@ -196,6 +222,19 @@ function EditModal({
           </button>
         </label>
 
+        <div className="mt-6 border-t border-white/10 pt-5">
+          <ChannelChecklist
+            selected={channels}
+            onToggle={(id) => {
+              setChannelsTouched(true)
+              setChannels((c) => toggleChannelID(c, id))
+            }}
+            description="Select which channels to notify about this domain"
+            emptyNote="The domain is still watched — it just will not alert anyone."
+            onNavigateAway={onClose}
+          />
+        </div>
+
         <div className="mt-6 flex justify-end gap-2">
           <button className="btn-secondary" onClick={onClose} disabled={busy}>
             Cancel
@@ -225,12 +264,22 @@ export default function SSL() {
     let valid = 0
     let expiring = 0
     let expired = 0
+    // Counted separately: a registration lapsing takes the whole domain down,
+    // and it is renewed at the registrar rather than by reissuing anything.
+    let domainsDue = 0
     for (const c of certificates) {
       if (c.status === 'valid') valid++
       else if (c.status === 'expiring_soon') expiring++
       else if (c.status === 'expired') expired++
+      if (c.domain_status === 'expiring_soon' || c.domain_status === 'expired') domainsDue++
     }
-    return { valid, expiring, expired, unknown: certificates.length - valid - expiring - expired }
+    return {
+      valid,
+      expiring,
+      expired,
+      domainsDue,
+      unknown: certificates.length - valid - expiring - expired,
+    }
   }, [certificates])
 
   const handleCheckNow = async (cert: SSLCertificate) => {
@@ -292,7 +341,7 @@ export default function SSL() {
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           id="valid"
           title="Valid Certificates"
@@ -315,6 +364,14 @@ export default function SSL() {
           value={counts.expired}
           subtitle="acting now"
           tone={TONES.expired}
+          shimmer={shimmer}
+        />
+        <StatCard
+          id="registration"
+          title="Domains Due"
+          value={counts.domainsDue}
+          subtitle="renew at registrar"
+          tone={TONES.registration}
           shimmer={shimmer}
         />
       </div>

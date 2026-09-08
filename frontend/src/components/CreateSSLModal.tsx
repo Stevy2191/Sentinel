@@ -6,6 +6,8 @@ import {
   type SSLStatus,
 } from '@/hooks/useSSLCertificates'
 import type { ApiError } from '@/services/api'
+import ChannelChecklist, { toggleChannelID } from './ChannelChecklist'
+import { useAvailableChannels } from '@/hooks/useNotificationConfig'
 
 const MIN_DAYS = 1
 const MAX_DAYS = 365
@@ -72,6 +74,13 @@ export default function CreateSSLModal({ isOpen, onClose, onCreated, push }: Pro
   const [touched, setTouched] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<SSLCertificate | null>(null)
+  const [channels, setChannels] = useState<string[]>([])
+  // Whether the picker was actually touched. Left alone, the field is omitted
+  // so the row stores null — "every channel, including ones added later" —
+  // rather than pinning today's list, which looks identical but silently
+  // excludes any channel configured afterwards.
+  const [channelsTouched, setChannelsTouched] = useState(false)
+  const { available } = useAvailableChannels(isOpen)
 
   useEffect(() => {
     if (!isOpen) return
@@ -83,6 +92,16 @@ export default function CreateSSLModal({ isOpen, onClose, onCreated, push }: Pro
     const t = window.setTimeout(() => firstFieldRef.current?.focus(), 50)
     return () => window.clearTimeout(t)
   }, [isOpen])
+
+  // Every channel starts ticked, so a domain added without opening the section
+  // warns everywhere. Keyed on the list so it re-seeds if the channels arrive
+  // after the reset above has run.
+  const availableKey = available.map((c) => c.id).join(',')
+  useEffect(() => {
+    if (!isOpen) return
+    setChannels(availableKey ? availableKey.split(',') : [])
+    setChannelsTouched(false)
+  }, [isOpen, availableKey])
 
   useEffect(() => {
     if (!isOpen) return
@@ -119,6 +138,7 @@ export default function CreateSSLModal({ isOpen, onClose, onCreated, push }: Pro
         domain: domain.trim(),
         expiry_notification_days: notifyDays,
         enabled: true,
+        notify_channels: channelsTouched ? channels : undefined,
       })
       setResult(cert)
       onCreated(cert)
@@ -198,7 +218,7 @@ export default function CreateSSLModal({ isOpen, onClose, onCreated, push }: Pro
               Notification Settings
             </h3>
             <label htmlFor="ssl-days" className="mb-1 block text-sm font-medium text-white">
-              Alert when the certificate expires in
+              Alert when the certificate or registration expires in
             </label>
             <div className="flex items-center gap-2">
               <input
@@ -214,9 +234,24 @@ export default function CreateSSLModal({ isOpen, onClose, onCreated, push }: Pro
               <span className="text-sm text-slate-400">days</span>
             </div>
             <p className={`mt-1 text-xs ${daysError ? 'text-red-400' : 'text-slate-500'}`}>
-              {daysError ?? 'For example, 7 sends the alert a week before it expires.'}
+              {daysError ??
+                'For example, 7 sends the alert a week before either expires. Both clocks are watched: the TLS certificate, and the domain registration at the registrar.'}
             </p>
           </section>
+
+          <div className="border-t border-white/10" />
+
+          <ChannelChecklist
+            selected={channels}
+            onToggle={(id) => {
+              setChannelsTouched(true)
+              setChannels((c) => toggleChannelID(c, id))
+            }}
+            enabled={isOpen}
+            description="Select which channels to notify about this domain"
+            emptyNote="The domain is still watched — it just will not alert anyone."
+            onNavigateAway={onClose}
+          />
 
           {error && (
             <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
@@ -269,6 +304,66 @@ export default function CreateSSLModal({ isOpen, onClose, onCreated, push }: Pro
                         </dd>
                       </div>
                     </dl>
+                  </div>
+                )}
+              </section>
+
+              <section>
+                <h3 className="mb-4 text-xs font-semibold uppercase tracking-widest text-slate-300">
+                  Domain Registration
+                </h3>
+                {/* Shown even when the certificate could not be read: this
+                    lookup asks the registry directly and never resolves the
+                    domain, so it still answers where local DNS gets in the
+                    way. */}
+                {result.domain_expiry_date ? (
+                  <div className="rounded-lg border border-white/10 bg-slate-800/40 p-4">
+                    <div className="mb-3">
+                      <span
+                        className={`rounded-full border px-2.5 py-1 text-xs font-medium ${STATUS_STYLE[result.domain_status].cls}`}
+                      >
+                        {STATUS_STYLE[result.domain_status].label}
+                      </span>
+                    </div>
+                    <dl className="space-y-1.5 text-sm">
+                      <div className="flex justify-between gap-4">
+                        <dt className="text-slate-500">Registered domain</dt>
+                        <dd className="truncate text-right text-slate-200">
+                          {result.registrable_domain ?? '—'}
+                        </dd>
+                      </div>
+                      <div className="flex justify-between gap-4">
+                        <dt className="text-slate-500">Registrar</dt>
+                        <dd className="truncate text-right text-slate-200">
+                          {result.registrar ?? '—'}
+                        </dd>
+                      </div>
+                      <div className="flex justify-between gap-4">
+                        <dt className="text-slate-500">Expires</dt>
+                        <dd className="text-slate-200">
+                          {new Date(result.domain_expiry_date).toLocaleDateString()}
+                        </dd>
+                      </div>
+                      <div className="flex justify-between gap-4">
+                        <dt className="text-slate-500">Days until expiry</dt>
+                        <dd
+                          className={`font-medium ${daysLeftClass(result.domain_days_until_expiry)}`}
+                        >
+                          {result.domain_days_until_expiry ?? '—'}
+                        </dd>
+                      </div>
+                    </dl>
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-300">
+                    <p className="font-medium">The registration could not be looked up.</p>
+                    <p className="mt-1 text-xs">
+                      {result.registration_error ?? 'No further detail.'}
+                    </p>
+                    <p className="mt-2 text-xs text-slate-400">
+                      Some registries do not publish expiry dates. The certificate is still
+                      watched.
+                    </p>
                   </div>
                 )}
               </section>

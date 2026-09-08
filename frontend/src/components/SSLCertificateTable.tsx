@@ -5,7 +5,7 @@ import type { SSLCertificate } from '@/hooks/useSSLCertificates'
 
 const PER_PAGE = 10
 
-type SortKey = 'domain' | 'days' | 'expiry'
+type SortKey = 'domain' | 'days' | 'expiry' | 'domain_days'
 
 interface Props {
   certificates: SSLCertificate[]
@@ -40,7 +40,9 @@ export default function SSLCertificateTable({
     const rows = q
       ? certificates.filter(
           (c) =>
-            c.domain.toLowerCase().includes(q) || (c.issuer ?? '').toLowerCase().includes(q)
+            c.domain.toLowerCase().includes(q) ||
+            (c.issuer ?? '').toLowerCase().includes(q) ||
+            (c.registrar ?? '').toLowerCase().includes(q)
         )
       : certificates
 
@@ -53,6 +55,11 @@ export default function SSLCertificateTable({
           // Unknown expiry sorts to the end either way: it is not "very soon".
           const av = a.expiry_date ? Date.parse(a.expiry_date) : Number.POSITIVE_INFINITY
           const bv = b.expiry_date ? Date.parse(b.expiry_date) : Number.POSITIVE_INFINITY
+          return dir * (av - bv)
+        }
+        case 'domain_days': {
+          const av = a.domain_days_until_expiry ?? Number.POSITIVE_INFINITY
+          const bv = b.domain_days_until_expiry ?? Number.POSITIVE_INFINITY
           return dir * (av - bv)
         }
         default: {
@@ -100,16 +107,39 @@ export default function SSLCertificateTable({
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-white/10 bg-slate-800/20">
-                <th className="px-4 py-3 text-left">{header('domain', 'Domain')}</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-slate-400">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-slate-400">Issuer</th>
-                <th className="px-4 py-3 text-left">{header('expiry', 'Valid Until')}</th>
-                <th className="px-4 py-3 text-left">{header('days', 'Days Left')}</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-slate-400">
-                  Check Interval
+              {/* Two header rows because the table carries two independent
+                  clocks. Without the grouping, "Expires" appears twice with no
+                  indication that one is renewed by reissuing a certificate and
+                  the other by paying the registrar. */}
+              <tr className="border-b border-white/5 bg-slate-800/30">
+                <th className="px-4 pb-1 pt-3" />
+                <th
+                  colSpan={4}
+                  className="border-l border-white/10 px-4 pb-1 pt-3 text-left text-[11px] font-semibold uppercase tracking-widest text-slate-500"
+                >
+                  TLS Certificate
                 </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">Actions</th>
+                <th
+                  colSpan={2}
+                  className="border-l border-white/10 px-4 pb-1 pt-3 text-left text-[11px] font-semibold uppercase tracking-widest text-slate-500"
+                >
+                  Domain Registration
+                </th>
+                <th className="px-4 pb-1 pt-3" />
+              </tr>
+              <tr className="border-b border-white/10 bg-slate-800/20">
+                <th className="px-4 pb-3 text-left">{header('domain', 'Domain')}</th>
+                <th className="border-l border-white/10 px-4 pb-3 text-left text-xs font-medium text-slate-400">
+                  Status
+                </th>
+                <th className="px-4 pb-3 text-left text-xs font-medium text-slate-400">Issuer</th>
+                <th className="px-4 pb-3 text-left">{header('expiry', 'Valid Until')}</th>
+                <th className="px-4 pb-3 text-left">{header('days', 'Days Left')}</th>
+                <th className="border-l border-white/10 px-4 pb-3 text-left text-xs font-medium text-slate-400">
+                  Registrar
+                </th>
+                <th className="px-4 pb-3 text-left">{header('domain_days', 'Expires')}</th>
+                <th className="px-4 pb-3 text-right text-xs font-medium text-slate-400">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
@@ -133,7 +163,7 @@ export default function SSLCertificateTable({
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="border-l border-white/10 px-4 py-3">
                     <span
                       className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${STATUS_STYLE[c.status].cls}`}
                     >
@@ -151,7 +181,39 @@ export default function SSLCertificateTable({
                   >
                     {c.days_until_expiry ?? '—'}
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">1 day</td>
+                  <td
+                    className="max-w-[180px] border-l border-white/10 px-4 py-3 text-slate-400"
+                    title={c.registrar ?? ''}
+                  >
+                    <div className="truncate">{c.registrar ?? '—'}</div>
+                    {c.registration_error && (
+                      <div
+                        className="mt-0.5 flex items-center gap-1 text-xs text-amber-400"
+                        title={c.registration_error}
+                      >
+                        <AlertCircle className="h-3 w-3 shrink-0" />
+                        <span className="truncate">lookup failed</span>
+                      </div>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    {c.domain_expiry_date ? (
+                      <>
+                        <div className="text-slate-300">
+                          {new Date(c.domain_expiry_date).toLocaleDateString()}
+                        </div>
+                        <div
+                          className={`text-xs font-medium tabular-nums ${daysLeftClass(c.domain_days_until_expiry)}`}
+                        >
+                          {c.domain_days_until_expiry != null
+                            ? `${c.domain_days_until_expiry} days left`
+                            : '—'}
+                        </div>
+                      </>
+                    ) : (
+                      <span className="text-slate-500">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">
                       <button
