@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import api, { type ApiError } from '@/services/api'
 
 export type AgentStatus = 'pending' | 'active' | 'offline'
@@ -192,6 +192,37 @@ export function useAgentMetrics(agentID: string | null, duration = '1h') {
   }, [agentID, duration])
 
   return { metrics, loading }
+}
+
+/**
+ * The Monitoring Agents figure for a dashboard card.
+ *
+ * Shared rather than derived per page so the Overview and Uptime cards cannot
+ * disagree about the same fleet, and counted from the agent rows themselves so
+ * both always match the Server Monitoring page.
+ */
+export function useAgentSummary(): { value: string; subtitle: string } {
+  const { agents, loading } = useAgents()
+
+  return useMemo(() => {
+    if (loading) return { value: '—', subtitle: 'loading' }
+    // A bare zero says nothing about why. Nothing can be reported until an
+    // agent is installed somewhere, so the card says that instead.
+    if (agents.length === 0) return { value: 'None yet', subtitle: 'add a server agent' }
+
+    const active = agents.filter((a) => a.status === 'active').length
+    const offline = agents.filter((a) => a.status === 'offline').length
+    const pending = agents.filter((a) => a.status === 'pending').length
+
+    // Leads with whatever needs attention: an agent that has stopped reporting
+    // matters more than the total, and one still to be installed is work
+    // outstanding rather than a fault.
+    let subtitle = `of ${agents.length} registered`
+    if (offline > 0) subtitle = `${offline} not reporting`
+    else if (pending > 0) subtitle = `${pending} awaiting install`
+
+    return { value: `${active} online`, subtitle }
+  }, [agents, loading])
 }
 
 export function useAgentActions() {
