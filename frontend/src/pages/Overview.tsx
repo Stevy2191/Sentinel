@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMonitors } from '@/hooks/useMonitors'
+import { useAgentSummary } from '@/hooks/useAgents'
 import { useSummaryReport } from '@/hooks/useReports'
 import { useCardShimmer } from '@/hooks/useCardShimmer'
 import ShimmerStatCard from '@/components/ShimmerStatCard'
@@ -17,6 +18,7 @@ const REFRESH_MS = 30_000
  */
 export default function Overview() {
   const { monitors, refetch } = useMonitors()
+  const agentSummary = useAgentSummary()
   const [refreshedAt, setRefreshedAt] = useState(() => Date.now())
   const [period, setPeriod] = useState<ReportPeriod>('30d')
 
@@ -201,8 +203,8 @@ export default function Overview() {
             />
             <ShimmerStatCard
               title="Monitoring Agents"
-              value="0 online"
-              subtitle="coming soon"
+              value={agentSummary.value}
+              subtitle={agentSummary.subtitle}
               colorType="agents"
               onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'agents')}
               onMouseEnter={() => shimmer.handleCardMouseEnter('agents')}

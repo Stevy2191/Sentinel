@@ -16,6 +16,7 @@ import {
   Radar,
 } from 'lucide-react'
 import { useMonitors } from '@/hooks/useMonitors'
+import { useAgentSummary } from '@/hooks/useAgents'
 import {
   useMonitorGroups,
   useCreateMonitorGroup,
@@ -385,6 +386,7 @@ export default function UptimeMonitoring() {
   const isAdmin = currentUser?.is_admin ?? false
   const navigate = useNavigate()
   const { monitors, loading, error, refetch } = useMonitors()
+  const agentSummary = useAgentSummary()
   const { groups, refetch: refetchGroups } = useMonitorGroups()
   const { usernameFor } = useUsers()
   const { toasts, push } = useToasts()
@@ -604,13 +606,10 @@ export default function UptimeMonitoring() {
           showShimmer={shimmer.isShown('incidents')}
           shimmerStyle={shimmer.getShimmerStyle('incidents')}
         />
-        {/* Agents are not implemented yet - see Server Monitoring. Shown as
-            zero with a note rather than repurposing the monitor count, which
-            would read as a working feature. */}
         <ShimmerStatCard
           title="Monitoring Agents"
-          value="0 online"
-          subtitle="coming soon"
+          value={agentSummary.value}
+          subtitle={agentSummary.subtitle}
           colorType="agents"
           onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'agents')}
           onMouseEnter={() => shimmer.handleCardMouseEnter('agents')}
