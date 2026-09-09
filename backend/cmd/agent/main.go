@@ -140,7 +140,11 @@ func run(ctx context.Context, cfg config, collector *Collector, docker *DockerCo
 	// let the first reported cycle carry a real utilisation figure.
 	collector.Collect()
 
-	if err := client.heartbeat(ctx, hostname(), osVersion()); err != nil {
+	sysInfo := collectSystemInfo(docker.Available())
+	log.Printf("host: %s, %s, %s, %d core(s), %d MB",
+		sysInfo.Hostname, sysInfo.OSVersion, sysInfo.Architecture, sysInfo.CPUCores, sysInfo.MemoryTotalMB)
+
+	if err := client.heartbeat(ctx, sysInfo); err != nil {
 		// Not fatal. A server that is down at the moment the agent starts is
 		// exactly the situation the retry and queue logic exists for.
 		log.Printf("initial heartbeat failed (will keep trying): %v", err)
@@ -181,7 +185,9 @@ func run(ctx context.Context, cfg config, collector *Collector, docker *DockerCo
 			queue = flush(ctx, client, queue)
 
 		case <-heartbeatTicker.C:
-			if err := client.heartbeat(ctx, hostname(), osVersion()); err != nil {
+			// Re-read rather than reusing what was collected at startup, so a
+			// kernel upgrade or added memory shows up without a restart.
+			if err := client.heartbeat(ctx, collectSystemInfo(docker.Available())); err != nil {
 				log.Printf("heartbeat failed: %v", err)
 			}
 		}
@@ -213,14 +219,17 @@ type apiClient struct {
 	http    *http.Client
 }
 
-func (c *apiClient) heartbeat(ctx context.Context, host, osver string) error {
-	body := map[string]string{
-		"agent_id":      c.agentID,
-		"hostname":      host,
-		"os_version":    osver,
-		"agent_version": version,
+func (c *apiClient) heartbeat(ctx context.Context, info SystemInfo) error {
+	type heartbeatBody struct {
+		SystemInfo
+		AgentID      string `json:"agent_id"`
+		AgentVersion string `json:"agent_version"`
 	}
-	return c.post(ctx, "/api/v1/agents/heartbeat", body)
+	return c.post(ctx, "/api/v1/agents/heartbeat", heartbeatBody{
+		SystemInfo:   info,
+		AgentID:      c.agentID,
+		AgentVersion: version,
+	})
 }
 
 func (c *apiClient) sendMetrics(ctx context.Context, m Metrics) error {

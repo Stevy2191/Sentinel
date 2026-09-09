@@ -157,9 +157,25 @@ func (s *AgentService) Delete(ctx context.Context, agentID string) error {
 	return nil
 }
 
+// AgentSystemInfo is what a host tells us about itself on a heartbeat.
+type AgentSystemInfo struct {
+	IPAddress    string
+	Hostname     string
+	OSVersion    string
+	AgentVersion string
+
+	KernelVersion   string
+	Architecture    string
+	CPUModel        string
+	CPUCores        int
+	MemoryTotalMB   int64
+	GoVersion       string
+	DockerAvailable *bool
+}
+
 // Heartbeat records that an agent is alive and refreshes what it reports about
 // itself.
-func (s *AgentService) Heartbeat(ctx context.Context, agent *models.Agent, ip, hostname, osVersion, agentVersion string) error {
+func (s *AgentService) Heartbeat(ctx context.Context, agent *models.Agent, info AgentSystemInfo) error {
 	now := time.Now()
 	updates := map[string]interface{}{
 		"last_heartbeat": now,
@@ -173,10 +189,25 @@ func (s *AgentService) Heartbeat(ctx context.Context, agent *models.Agent, ip, h
 			updates[col] = strings.TrimSpace(v)
 		}
 	}
-	setIf("ip_address", ip)
-	setIf("hostname", hostname)
-	setIf("os_version", osVersion)
-	setIf("agent_version", agentVersion)
+	setIf("ip_address", info.IPAddress)
+	setIf("hostname", info.Hostname)
+	setIf("os_version", info.OSVersion)
+	setIf("agent_version", info.AgentVersion)
+	setIf("kernel_version", info.KernelVersion)
+	setIf("architecture", info.Architecture)
+	setIf("cpu_model", info.CPUModel)
+	setIf("go_version", info.GoVersion)
+	// Numbers use the same rule: zero means the agent could not read it, so
+	// the value already on record is left alone.
+	if info.CPUCores > 0 {
+		updates["cpu_cores"] = info.CPUCores
+	}
+	if info.MemoryTotalMB > 0 {
+		updates["memory_total_mb"] = info.MemoryTotalMB
+	}
+	if info.DockerAvailable != nil {
+		updates["docker_available"] = *info.DockerAvailable
+	}
 
 	if err := s.db.WithContext(ctx).Model(&models.Agent{}).
 		Where("id = ?", agent.ID).Updates(updates).Error; err != nil {
