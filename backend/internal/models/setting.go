@@ -33,6 +33,15 @@ const (
 	// SettingIncidentRetentionDays is how long resolved incident history is
 	// kept before the nightly purge removes it.
 	SettingIncidentRetentionDays = "incident_retention_days"
+	// SettingSentinelExternalURL is the address install commands download
+	// from — what a browser used to reach Sentinel. Empty means derive it from
+	// the request.
+	SettingSentinelExternalURL = "sentinel_external_url"
+	// SettingSentinelInternalURL is the address agents report metrics to.
+	// Differs from the external one only behind a reverse proxy. Empty means
+	// use the external URL.
+	SettingSentinelInternalURL = "sentinel_internal_url"
+
 	// SettingCheckRetentionDays bounds how long individual check results are
 	// kept. Without it the checks table grows without limit.
 	SettingCheckRetentionDays = "check_retention_days"

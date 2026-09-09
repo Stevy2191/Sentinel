@@ -238,7 +238,7 @@ func run() error {
 	api.RegisterAgentIngestRoutes(router, agentService)
 	// Installer endpoints: the agent binary and the two scripts. Public,
 	// because a host being provisioned has an agent token but no user session.
-	api.RegisterAgentInstallRoutes(router, resolveBaseURL)
+	api.RegisterAgentInstallRoutes(router, settingsService)
 
 	// All other /api/v1 routes require a valid JWT.
 	v1 := router.Group("/api/v1")
@@ -258,7 +258,7 @@ func run() error {
 	api.RegisterNotificationRoutes(v1, notificationManager, monitorService)
 	api.RegisterSettingsRoutes(v1, settingsService, models.DefaultMonitorCheckInterval, authService)
 	api.RegisterSSLCertificateRoutes(v1, sslChecker, authService)
-	api.RegisterAgentRoutes(v1, agentService, resolveBaseURL, authService)
+	api.RegisterAgentRoutes(v1, agentService, settingsService, authService)
 	// Per-user theme (not admin-gated): only AuthMiddleware applies.
 	// Self password change (any authenticated user).
 	v1.POST("/auth/change-password", api.ChangeOwnPasswordHandler(authService))

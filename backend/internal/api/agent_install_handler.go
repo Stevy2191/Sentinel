@@ -9,6 +9,8 @@ import (
 	"text/template"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/Stevy2191/Sentinel/backend/internal/services"
 )
 
 // agentDistDir holds the cross-built agent binaries, placed there by the
@@ -66,23 +68,17 @@ var installScripts = map[string]*template.Template{
 }
 
 // ServeInstallScriptHandler serves an installation script.
-func ServeInstallScriptHandler(baseURL func() string) gin.HandlerFunc {
+func ServeInstallScriptHandler(settings *services.SettingsService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tmpl, ok := installScripts[c.Param("script")]
 		if !ok {
 			respondError(c, http.StatusNotFound, "no such install script")
 			return
 		}
-		url := strings.TrimRight(strings.TrimSpace(baseURL()), "/")
-		if url == "" {
-			// Falls back to the requesting host so the script is still usable
-			// on an install where base_url has not been set yet.
-			scheme := "http"
-			if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
-				scheme = "https"
-			}
-			url = fmt.Sprintf("%s://%s", scheme, c.Request.Host)
-		}
+		// The internal address, because this value becomes the agent's
+		// SENTINEL_URL — where it reports back — not where the script was
+		// downloaded from. Behind a proxy those differ.
+		url := resolveSentinelURLs(c, settings).Internal
 
 		c.Header("Content-Type", "text/x-shellscript; charset=utf-8")
 		if err := tmpl.Execute(c.Writer, map[string]string{"SentinelURL": url}); err != nil {
@@ -95,7 +91,7 @@ func ServeInstallScriptHandler(baseURL func() string) gin.HandlerFunc {
 
 // RegisterAgentInstallRoutes mounts the unauthenticated installer endpoints on
 // the router, outside the API group that requires a user session.
-func RegisterAgentInstallRoutes(router *gin.Engine, baseURL func() string) {
+func RegisterAgentInstallRoutes(router *gin.Engine, settings *services.SettingsService) {
 	router.GET("/agent/download/linux/:arch", DownloadAgentBinaryHandler())
-	router.GET("/scripts/:script", ServeInstallScriptHandler(baseURL))
+	router.GET("/scripts/:script", ServeInstallScriptHandler(settings))
 }
