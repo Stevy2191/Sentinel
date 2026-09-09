@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"strings"
@@ -486,19 +487,45 @@ func AuthMiddleware(authService *services.AuthService) gin.HandlerFunc {
 	}
 }
 
-// RequireAdmin is a middleware that rejects non-admin users with 403. It must be
-// mounted after AuthMiddleware, which populates the is_admin context value.
-func RequireAdmin() gin.HandlerFunc {
+// RequireAdmin rejects non-admin users with 403. It must be mounted after
+// AuthMiddleware, which populates the user id and is_admin context values.
+//
+// The token's claim is checked first and the account is then confirmed against
+// the database. A token is valid for a day, so the claim alone would let a
+// demoted or deleted administrator keep administrative access for that long
+// after the change. The extra read only happens on administrative routes,
+// which are a small share of traffic, and is a primary-key lookup.
+//
+// adminChecker is satisfied by *services.AuthService. Taking an interface
+// keeps this testable without a database.
+func RequireAdmin(users adminChecker) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if _, _, isAdmin, ok := GetUserFromContext(c); !ok || !isAdmin {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"success": false,
-				"error":   gin.H{"code": http.StatusForbidden, "message": "administrator access required"},
-			})
+		userID, _, isAdmin, ok := GetUserFromContext(c)
+		if !ok || !isAdmin {
+			respondAuthError(c, http.StatusForbidden, "administrator access required")
+			return
+		}
+		user, err := users.GetUserByID(c.Request.Context(), userID)
+		if err != nil {
+			// Cannot confirm the account, so the request does not proceed:
+			// failing open here would defeat the check entirely.
+			log.Printf("[auth] admin check for %s failed: %v", userID, err)
+			respondAuthError(c, http.StatusForbidden, "administrator access required")
+			return
+		}
+		if !user.IsAdmin {
+			log.Printf("[auth] stale admin claim rejected for %s", user.Username)
+			respondAuthError(c, http.StatusForbidden, "administrator access required")
 			return
 		}
 		c.Next()
 	}
+}
+
+// adminChecker looks a user up by id, so RequireAdmin can confirm the account
+// still exists and is still an administrator.
+type adminChecker interface {
+	GetUserByID(ctx context.Context, id uuid.UUID) (*models.User, error)
 }
 
 // GetUserFromContext returns the authenticated user's id, username, and admin

@@ -200,20 +200,23 @@ func (s *AuthService) RefreshJWT(ctx context.Context, oldTokenString string) (st
 		return "", err
 	}
 	userIDStr, _ := claims["user_id"].(string)
-	username, _ := claims["username"].(string)
-	isAdmin, _ := claims["is_admin"].(bool)
-
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
 		return "", fmt.Errorf("invalid user_id in token: %w", err)
 	}
-	// Confirm the user still exists.
-	if _, err := s.GetUserByID(ctx, userID); err != nil {
+
+	// Re-read the user rather than carrying the old token's claims forward.
+	// Copying is_admin from the expiring token meant a demoted administrator
+	// kept administrator rights for as long as they kept refreshing, which is
+	// indefinitely. The row is already being fetched to confirm the account
+	// still exists, so this costs nothing.
+	user, err := s.GetUserByID(ctx, userID)
+	if err != nil {
 		return "", err
 	}
 
-	s.logger.Printf("[auth] JWT refreshed for: %s", username)
-	return s.GenerateJWT(userID, username, isAdmin)
+	s.logger.Printf("[auth] JWT refreshed for: %s", user.Username)
+	return s.GenerateJWT(user.ID, user.Username, user.IsAdmin)
 }
 
 // SetupMFA generates a TOTP secret and backup codes for a user and enables MFA.

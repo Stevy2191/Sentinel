@@ -29,6 +29,7 @@ func GetSettingsHandler(settingsService *services.SettingsService, defaultInterv
 			"app_name":               settingsService.AppName(ctx),
 			"base_url":               settingsService.BaseURL(ctx),
 			"default_check_interval": settingsService.DefaultCheckInterval(ctx, defaultInterval),
+			"check_retention_days":   settingsService.CheckRetentionDays(ctx),
 		})
 	}
 }
@@ -40,6 +41,8 @@ type updateSystemRequest struct {
 	AppName              *string `json:"app_name"`
 	BaseURL              *string `json:"base_url"`
 	DefaultCheckInterval *int    `json:"default_check_interval"`
+	// CheckRetentionDays bounds how long individual check results are kept.
+	CheckRetentionDays *int `json:"check_retention_days"`
 }
 
 // UpdateSystemSettingsHandler handles PATCH /api/v1/settings/system (admin).
@@ -101,12 +104,27 @@ func UpdateSystemSettingsHandler(settingsService *services.SettingsService) gin.
 			}
 		}
 
+		if req.CheckRetentionDays != nil {
+			n := *req.CheckRetentionDays
+			if n < models.MinCheckRetentionDays || n > models.MaxCheckRetentionDays {
+				respondError(c, http.StatusBadRequest,
+					fmt.Sprintf("check_retention_days must be between %d and %d",
+						models.MinCheckRetentionDays, models.MaxCheckRetentionDays))
+				return
+			}
+			if err := settingsService.SetInt(ctx, models.SettingCheckRetentionDays, n); err != nil {
+				respondInternal(c, "UpdateSystemSettingsHandler", err)
+				return
+			}
+		}
+
 		_, username, _, _ := GetUserFromContext(c)
 		log.Printf("System settings updated by %s", username)
 		respondSuccess(c, http.StatusOK, gin.H{
 			"app_name":               settingsService.AppName(ctx),
 			"base_url":               settingsService.BaseURL(ctx),
 			"default_check_interval": settingsService.DefaultCheckInterval(ctx, models.MinCheckIntervalSeconds),
+			"check_retention_days":   settingsService.CheckRetentionDays(ctx),
 			"message":                "System settings updated",
 		})
 	}
@@ -136,9 +154,9 @@ func UpdateRegistrationHandler(settingsService *services.SettingsService) gin.Ha
 
 // RegisterSettingsRoutes mounts admin-only settings endpoints on the given group
 // (already protected by AuthMiddleware); RequireAdmin further restricts them.
-func RegisterSettingsRoutes(rg *gin.RouterGroup, settingsService *services.SettingsService, defaultInterval int) {
+func RegisterSettingsRoutes(rg *gin.RouterGroup, settingsService *services.SettingsService, defaultInterval int, users adminChecker) {
 	settings := rg.Group("/settings")
-	settings.Use(RequireAdmin())
+	settings.Use(RequireAdmin(users))
 	settings.GET("", GetSettingsHandler(settingsService, defaultInterval))
 	settings.PATCH("/registration", UpdateRegistrationHandler(settingsService))
 	settings.PATCH("/system", UpdateSystemSettingsHandler(settingsService))

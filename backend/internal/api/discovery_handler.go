@@ -75,8 +75,8 @@ func classifyDiscoveryError(err error) int {
 // RegisterDiscoveryRoutes mounts the network discovery endpoint. Admin-only:
 // a scan makes the backend originate traffic toward any subnet the caller
 // names, which is a meaningful capability to hand to a non-admin invited user.
-func RegisterDiscoveryRoutes(rg *gin.RouterGroup, discoveryService *services.DiscoveryService) {
+func RegisterDiscoveryRoutes(rg *gin.RouterGroup, discoveryService *services.DiscoveryService, users adminChecker) {
 	discovery := rg.Group("/discovery")
-	discovery.Use(RequireAdmin())
+	discovery.Use(RequireAdmin(users))
 	discovery.POST("/scan", ScanSubnetHandler(discoveryService))
 }
