@@ -193,6 +193,7 @@ func run() error {
 	notificationConfigService := services.NewNotificationConfigService(db, notificationManager)
 	sslChecker := services.NewSSLCheckerService(db, notificationManager)
 	incidentRetention := services.NewIncidentRetentionService(db, settingsService)
+	agentService := services.NewAgentService(db)
 	if err := notificationManager.LoadFromDatabase(notifyCtx); err != nil {
 		log.Printf("warning: loading notification configs from database: %v", err)
 	}
@@ -232,6 +233,12 @@ func run() error {
 	// Share-token report access: public by design, so outside the authenticated
 	// v1 group (same split as the public status pages above).
 	api.RegisterPublicReportRoutes(router, reportBuilder)
+	// Agents authenticate with their own token, so their ingest routes sit
+	// outside the group behind the user session middleware.
+	api.RegisterAgentIngestRoutes(router, agentService)
+	// Installer endpoints: the agent binary and the two scripts. Public,
+	// because a host being provisioned has an agent token but no user session.
+	api.RegisterAgentInstallRoutes(router, resolveBaseURL)
 
 	// All other /api/v1 routes require a valid JWT.
 	v1 := router.Group("/api/v1")
@@ -251,6 +258,7 @@ func run() error {
 	api.RegisterNotificationRoutes(v1, notificationManager, monitorService)
 	api.RegisterSettingsRoutes(v1, settingsService, models.DefaultMonitorCheckInterval, authService)
 	api.RegisterSSLCertificateRoutes(v1, sslChecker, authService)
+	api.RegisterAgentRoutes(v1, agentService, resolveBaseURL, authService)
 	// Per-user theme (not admin-gated): only AuthMiddleware applies.
 	// Self password change (any authenticated user).
 	v1.POST("/auth/change-password", api.ChangeOwnPasswordHandler(authService))
@@ -278,6 +286,9 @@ func run() error {
 	go StartMonitoringLoop(loopCtx, db, monitorService, checkService, incidentService, notificationManager, cfg.CheckInterval)
 	go StartSSLCheckLoop(loopCtx, sslChecker)
 	go incidentRetention.StartPurgeLoop(loopCtx)
+	// Agents report in rather than being polled, so a separate sweep notices
+	// when one stops reporting.
+	go agentService.StartOfflineSweep(loopCtx)
 
 	// 9. HTTP server.
 	server := &http.Server{
