@@ -25,6 +25,7 @@ const NetworkDiscovery = lazy(() => import('@/pages/NetworkDiscovery'))
 const Reports = lazy(() => import('@/pages/Reports'))
 const SSL = lazy(() => import('@/pages/SSL'))
 const ServerMonitoring = lazy(() => import('@/pages/ServerMonitoring'))
+const ServerDetail = lazy(() => import('@/pages/ServerDetail'))
 const SavedReports = lazy(() => import('@/pages/SavedReports'))
 const SavedReportDetail = lazy(() => import('@/pages/SavedReportDetail'))
 const PublicReport = lazy(() => import('@/pages/PublicReport'))
@@ -76,7 +77,11 @@ export default function App() {
               <Route path="/incidents" element={<Incidents />} />
               <Route path="/monitors" element={<Monitors />} />
               <Route path="/ssl" element={<SSL />} />
-              <Route path="/server-monitoring" element={<ServerMonitoring />} />
+              <Route path="/servers" element={<ServerMonitoring />} />
+              <Route path="/servers/:agentID" element={<ServerDetail />} />
+              {/* The page moved to /servers; the old path is kept so existing
+                  links and bookmarks still land somewhere useful. */}
+              <Route path="/server-monitoring" element={<Navigate to="/servers" replace />} />
               <Route path="/monitors/create" element={<MonitorDetail mode="create" />} />
               <Route path="/monitors/new/wizard" element={<MonitorWizard />} />
               <Route path="/monitors/bulk" element={<BulkUpload />} />
