@@ -47,10 +47,6 @@ func displayUptime(uptimePct float64, currentlyOffline bool) float64 {
 
 // GetMonitorReportHandler handles GET /api/v1/monitors/:id/report, producing an
 // uptime/SLA report over a date range (default: last 30 days).
-//
-// Note: the status breakdown and average response time load all checks in the
-// range via GetChecksInRange. For very long ranges on high-frequency monitors,
-// add DB-level status aggregation (GROUP BY status, AVG) to CheckService.
 func GetMonitorReportHandler(
 	monitorService *services.MonitorService,
 	checkService *services.CheckService,
@@ -111,39 +107,17 @@ func GetMonitorReportHandler(
 		currentlyOffline := monitor.CurrentStatus == "offline"
 		ongoing = ongoing || currentlyOffline
 
-		// Total count comes straight from the database for the exact range, so
-		// it is accurate regardless of how many checks exist (not capped).
-		totalChecks, err := checkService.CountChecks(ctx, id, start, end)
+		// Breakdown, total and average all come from one aggregate query over
+		// the exact range, so the figures are accurate however many checks
+		// exist without any of them being loaded.
+		summary, err := checkService.SummariseRange(ctx, id, start, end)
 		if err != nil {
 			respondInternal(c, "GetMonitorReportHandler", err)
 			return
 		}
-
-		// Pull every check within the range (limit 0 = no limit) to compute the
-		// status breakdown and average response time accurately over the full
-		// range rather than only the most recent checks.
-		rangeChecks, err := checkService.GetChecksInRange(ctx, id, start, end, 0, 0)
-		if err != nil {
-			respondInternal(c, "GetMonitorReportHandler", err)
-			return
-		}
-
-		var success, failed, timeout, sumResponse int
-		for _, ch := range rangeChecks {
-			switch ch.Status {
-			case "success":
-				success++
-				sumResponse += ch.ResponseTimeMs
-			case "failed":
-				failed++
-			case "timeout":
-				timeout++
-			}
-		}
-		avgResponse := 0
-		if success > 0 {
-			avgResponse = sumResponse / success
-		}
+		totalChecks := int64(summary.Total)
+		success, failed, timeout := summary.Success, summary.Failed, summary.Timeout
+		avgResponse := summary.AvgResponseMs
 
 		respondSuccess(c, http.StatusOK, gin.H{
 			"monitor": gin.H{

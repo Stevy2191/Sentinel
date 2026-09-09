@@ -35,6 +35,8 @@ const GITHUB_URL = 'https://github.com/Stevy2191/Sentinel'
 // here is always a value a monitor may actually hold.
 const MIN_INTERVAL = 10
 const MAX_INTERVAL = 3600
+const MIN_CHECK_RETENTION = 1
+const MAX_CHECK_RETENTION = 3650
 const MAX_APP_NAME = 40
 
 const TAB_LABEL: Record<Tab, string> = {
@@ -54,6 +56,8 @@ interface SystemSettings {
   app_name: string
   base_url: string
   default_check_interval: number
+  /** How long individual check results are kept. */
+  check_retention_days: number
 }
 
 function Toggle({
@@ -193,6 +197,7 @@ export default function Settings() {
           app_name: r.data.data.app_name || DEFAULT_APP_NAME,
           base_url: r.data.data.base_url ?? '',
           default_check_interval: r.data.data.default_check_interval,
+          check_retention_days: r.data.data.check_retention_days,
         })
         setSystemError(null)
       })
@@ -211,6 +216,7 @@ export default function Settings() {
         app_name: system.app_name.trim(),
         base_url: system.base_url.trim(),
         default_check_interval: system.default_check_interval,
+        check_retention_days: system.check_retention_days,
       })
       // Re-read the public config so the sidebar, sign-in screen and browser tab
       // pick up a renamed instance without a reload.
@@ -302,6 +308,11 @@ export default function Settings() {
     Number.isFinite(system?.default_check_interval) &&
     (system?.default_check_interval ?? 0) >= MIN_INTERVAL &&
     (system?.default_check_interval ?? 0) <= MAX_INTERVAL
+  const checkRetentionValid =
+    !system ||
+    (Number.isFinite(system.check_retention_days) &&
+      system.check_retention_days >= MIN_CHECK_RETENTION &&
+      system.check_retention_days <= MAX_CHECK_RETENTION)
   const nameValid = !!system && system.app_name.trim().length > 0 && system.app_name.trim().length <= MAX_APP_NAME
 
   return (
@@ -412,8 +423,36 @@ export default function Settings() {
 
               <SettingsCard
                 title="Data Retention"
-                description="Incidents older than this are deleted automatically. The purge runs nightly at 2 AM."
+                description="Old history is deleted automatically. The purge runs nightly at 2 AM."
               >
+                {/* Two windows, because a check is a measurement and an
+                    incident is a conclusion drawn from many of them. Checks
+                    arrive one per monitor per interval, so they are far more
+                    numerous and rarely worth keeping as long. */}
+                <label htmlFor="check-retention-days" className="block text-sm font-medium text-white">
+                  Keep check history for
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="check-retention-days"
+                    type="number"
+                    min={MIN_CHECK_RETENTION}
+                    max={MAX_CHECK_RETENTION}
+                    value={system.check_retention_days}
+                    onChange={(e) =>
+                      setSystem({ ...system, check_retention_days: Number(e.target.value) })
+                    }
+                    aria-label="Check retention in days"
+                    className="w-32"
+                  />
+                  <span className="text-sm text-slate-400">days</span>
+                </div>
+                <p className={`mb-4 mt-1 text-xs ${checkRetentionValid ? 'text-slate-500' : 'text-red-400'}`}>
+                  {checkRetentionValid
+                    ? 'Every check is recorded, so this is the largest table by far — one monitor checked each minute adds over half a million rows a year. Response-time graphs and reports only reach back this far. Saved with the other system settings.'
+                    : `Must be between ${MIN_CHECK_RETENTION} and ${MAX_CHECK_RETENTION} days.`}
+                </p>
+
                 <label htmlFor="retention-days" className="block text-sm font-medium text-white">
                   Keep incident history for
                 </label>
@@ -459,7 +498,7 @@ export default function Settings() {
                 </p>
                 <button
                   className="btn-primary"
-                  disabled={systemSaving || !nameValid || !intervalValid}
+                  disabled={systemSaving || !nameValid || !intervalValid || !checkRetentionValid}
                   onClick={() => void saveSystem()}
                 >
                   {systemSaving ? 'Saving…' : 'Save System Settings'}

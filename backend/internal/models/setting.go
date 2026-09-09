@@ -33,6 +33,9 @@ const (
 	// SettingIncidentRetentionDays is how long resolved incident history is
 	// kept before the nightly purge removes it.
 	SettingIncidentRetentionDays = "incident_retention_days"
+	// SettingCheckRetentionDays bounds how long individual check results are
+	// kept. Without it the checks table grows without limit.
+	SettingCheckRetentionDays = "check_retention_days"
 )
 
 // Bounds and defaults for the system settings above.
@@ -55,6 +58,14 @@ const (
 	// Incident retention bounds. The floor is a week because anything shorter
 	// would delete an incident before a person is likely to have looked at it;
 	// the ceiling is a year, past which the table grows without being read.
+	// DefaultCheckRetentionDays keeps a quarter of history, which covers the
+	// 90-day reporting range while bounding a table that gains a row per
+	// monitor per check interval — 525,600 rows a year for a single monitor
+	// checked every minute.
+	DefaultCheckRetentionDays = 90
+	MinCheckRetentionDays     = 1
+	MaxCheckRetentionDays     = 3650
+
 	DefaultIncidentRetentionDays = 90
 	MinIncidentRetentionDays     = 7
 	MaxIncidentRetentionDays     = 365
