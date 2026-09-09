@@ -16,7 +16,11 @@ import (
 
 // respondAuthError writes the nested auth error envelope.
 func respondAuthError(c *gin.Context, code int, message string) {
-	c.JSON(code, gin.H{
+	// Aborts, not just writes. Gin runs the next handler in the chain whenever
+	// a middleware returns without aborting, so a middleware that only wrote a
+	// 401 or 403 still let the handler it was guarding run: the caller saw the
+	// refusal while the action went ahead anyway.
+	c.AbortWithStatusJSON(code, gin.H{
 		"success": false,
 		"error":   gin.H{"code": code, "message": message},
 	})
