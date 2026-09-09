@@ -107,7 +107,7 @@ func validateAgentSettings(c *gin.Context, name, osType string, interval, retrie
 }
 
 // CreateAgentHandler handles POST /api/v1/agents.
-func CreateAgentHandler(agents *services.AgentService, baseURL services.BaseURLFunc) gin.HandlerFunc {
+func CreateAgentHandler(agents *services.AgentService, settings *services.SettingsService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req createAgentRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -144,9 +144,14 @@ func CreateAgentHandler(agents *services.AgentService, baseURL services.BaseURLF
 
 		// The token is returned here and nowhere else in a list response: this
 		// is the moment the operator needs it to build the install command.
+		urls := resolveSentinelURLs(c, settings)
 		respondSuccess(c, http.StatusCreated, gin.H{
 			"agent":        agent,
-			"sentinel_url": strings.TrimRight(baseURL(), "/"),
+			"external_url": urls.External,
+			"internal_url": urls.Internal,
+			// Kept as an alias so a client written against the earlier shape
+			// keeps working.
+			"sentinel_url": urls.External,
 		})
 	}
 }
@@ -169,16 +174,19 @@ func ListAgentsHandler(agents *services.AgentService) gin.HandlerFunc {
 // GetAgentHandler handles GET /api/v1/agents/:agent_id. Admin-only, and the
 // one place the token can be read back — the install command cannot be
 // rebuilt without it.
-func GetAgentHandler(agents *services.AgentService, baseURL services.BaseURLFunc) gin.HandlerFunc {
+func GetAgentHandler(agents *services.AgentService, settings *services.SettingsService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		agent, err := agents.Get(c.Request.Context(), c.Param("agent_id"))
 		if err != nil {
 			respondAgentError(c, err)
 			return
 		}
+		urls := resolveSentinelURLs(c, settings)
 		respondSuccess(c, http.StatusOK, gin.H{
 			"agent":        agent,
-			"sentinel_url": strings.TrimRight(baseURL(), "/"),
+			"external_url": urls.External,
+			"internal_url": urls.Internal,
+			"sentinel_url": urls.External,
 		})
 	}
 }
@@ -496,7 +504,7 @@ func respondAgentError(c *gin.Context, err error) {
 
 // RegisterAgentRoutes mounts the management routes, which are admin-gated by
 // the caller's group.
-func RegisterAgentRoutes(rg *gin.RouterGroup, agents *services.AgentService, baseURL services.BaseURLFunc, users adminChecker) {
+func RegisterAgentRoutes(rg *gin.RouterGroup, agents *services.AgentService, settings *services.SettingsService, users adminChecker) {
 	// Reading agents and their metrics is available to any signed-in user, the
 	// same as monitors: it is dashboard data. Registering, changing and
 	// removing an agent are administrative.
@@ -506,12 +514,15 @@ func RegisterAgentRoutes(rg *gin.RouterGroup, agents *services.AgentService, bas
 	g.GET("/:agent_id/status", GetAgentStatusHandler(agents))
 
 	admin := rg.Group("/agents", RequireAdmin(users))
-	admin.POST("", CreateAgentHandler(agents, baseURL))
+	admin.POST("", CreateAgentHandler(agents, settings))
 	// Returns the token, so it is admin-only and sits apart from the read
 	// routes above.
-	admin.GET("/:agent_id", GetAgentHandler(agents, baseURL))
+	admin.GET("/:agent_id", GetAgentHandler(agents, settings))
 	admin.PATCH("/:agent_id", UpdateAgentHandler(agents))
 	admin.DELETE("/:agent_id", DeleteAgentHandler(agents))
+	// Reachability check for the configured URLs, so an operator finds out
+	// here rather than from an agent that silently never reports.
+	admin.POST("/urls/test", TestSentinelURLsHandler(settings))
 }
 
 // RegisterAgentIngestRoutes mounts the routes agents themselves call. They are

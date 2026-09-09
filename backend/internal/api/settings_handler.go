@@ -30,6 +30,8 @@ func GetSettingsHandler(settingsService *services.SettingsService, defaultInterv
 			"base_url":               settingsService.BaseURL(ctx),
 			"default_check_interval": settingsService.DefaultCheckInterval(ctx, defaultInterval),
 			"check_retention_days":   settingsService.CheckRetentionDays(ctx),
+			"sentinel_external_url":  settingsService.GetString(ctx, models.SettingSentinelExternalURL, ""),
+			"sentinel_internal_url":  settingsService.GetString(ctx, models.SettingSentinelInternalURL, ""),
 		})
 	}
 }
@@ -43,6 +45,10 @@ type updateSystemRequest struct {
 	DefaultCheckInterval *int    `json:"default_check_interval"`
 	// CheckRetentionDays bounds how long individual check results are kept.
 	CheckRetentionDays *int `json:"check_retention_days"`
+	// SentinelExternalURL is where agent install commands download from, and
+	// SentinelInternalURL is where agents report back. Empty means derive.
+	SentinelExternalURL *string `json:"sentinel_external_url"`
+	SentinelInternalURL *string `json:"sentinel_internal_url"`
 }
 
 // UpdateSystemSettingsHandler handles PATCH /api/v1/settings/system (admin).
@@ -118,6 +124,28 @@ func UpdateSystemSettingsHandler(settingsService *services.SettingsService) gin.
 			}
 		}
 
+		for _, u := range []struct {
+			value *string
+			key   string
+			label string
+		}{
+			{req.SentinelExternalURL, models.SettingSentinelExternalURL, "sentinel_external_url"},
+			{req.SentinelInternalURL, models.SettingSentinelInternalURL, "sentinel_internal_url"},
+		} {
+			if u.value == nil {
+				continue
+			}
+			raw := trimURL(*u.value)
+			if err := validateSentinelURL(raw); err != nil {
+				respondError(c, http.StatusBadRequest, u.label+" "+err.Error())
+				return
+			}
+			if err := settingsService.SetString(ctx, u.key, raw); err != nil {
+				respondInternal(c, "UpdateSystemSettingsHandler", err)
+				return
+			}
+		}
+
 		_, username, _, _ := GetUserFromContext(c)
 		log.Printf("System settings updated by %s", username)
 		respondSuccess(c, http.StatusOK, gin.H{
@@ -125,6 +153,8 @@ func UpdateSystemSettingsHandler(settingsService *services.SettingsService) gin.
 			"base_url":               settingsService.BaseURL(ctx),
 			"default_check_interval": settingsService.DefaultCheckInterval(ctx, models.MinCheckIntervalSeconds),
 			"check_retention_days":   settingsService.CheckRetentionDays(ctx),
+			"sentinel_external_url":  settingsService.GetString(ctx, models.SettingSentinelExternalURL, ""),
+			"sentinel_internal_url":  settingsService.GetString(ctx, models.SettingSentinelInternalURL, ""),
 			"message":                "System settings updated",
 		})
 	}
