@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import { Plus, Trash2, Terminal, RefreshCw, Loader2 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Plus, Trash2, Terminal, Loader2, ChevronRight } from 'lucide-react'
 import { useToasts, Toaster } from '@/components/Toast'
 import { useCardShimmer } from '@/hooks/useCardShimmer'
 import ShimmerStatCard from '@/components/ShimmerStatCard'
@@ -77,15 +78,14 @@ export default function ServerMonitoring() {
   const { currentUser } = useAuthContext()
   const isAdmin = !!currentUser?.is_admin
 
+  const navigate = useNavigate()
   const { agents, loading, error, refetch } = useAgents()
   const { getWithToken, remove, busy } = useAgentActions()
 
   const [addOpen, setAddOpen] = useState(false)
   const [instructionsFor, setInstructionsFor] = useState<CreatedAgent | null>(null)
-  const [selected, setSelected] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<Agent | null>(null)
 
-  const { detail } = useAgentStatus(selected)
 
   const counts = useMemo(() => {
     let active = 0
@@ -116,7 +116,6 @@ export default function ServerMonitoring() {
     try {
       await remove(confirmDelete.agent_id)
       push(`${confirmDelete.name} unregistered`, 'success')
-      if (selected === confirmDelete.agent_id) setSelected(null)
       setConfirmDelete(null)
       await refetch()
     } catch (err) {
@@ -235,8 +234,7 @@ export default function ServerMonitoring() {
                     key={a.id}
                     agent={a}
                     striped={i % 2 === 1}
-                    selected={selected === a.agent_id}
-                    onSelect={() => setSelected(selected === a.agent_id ? null : a.agent_id)}
+                    onOpen={() => navigate(`/servers/${a.agent_id}`)}
                     isAdmin={isAdmin}
                     onInstructions={() => void showInstructions(a)}
                     onDelete={() => setConfirmDelete(a)}
@@ -248,9 +246,6 @@ export default function ServerMonitoring() {
         </div>
       )}
 
-      {selected && detail && (
-        <AgentDetail detail={detail} onClose={() => setSelected(null)} />
-      )}
 
       <AddServerAgentModal
         isOpen={addOpen}
@@ -296,16 +291,14 @@ export default function ServerMonitoring() {
 function AgentRow({
   agent,
   striped,
-  selected,
-  onSelect,
+  onOpen,
   isAdmin,
   onInstructions,
   onDelete,
 }: {
   agent: Agent
   striped: boolean
-  selected: boolean
-  onSelect: () => void
+  onOpen: () => void
   isAdmin: boolean
   onInstructions: () => void
   onDelete: () => void
@@ -316,13 +309,14 @@ function AgentRow({
 
   return (
     <tr
-      className={`cursor-pointer transition hover:bg-white/5 ${striped ? 'bg-white/[0.02]' : ''} ${
-        selected ? 'bg-white/[0.04]' : ''
-      }`}
-      onClick={onSelect}
+      className={`cursor-pointer transition hover:bg-white/5 ${striped ? 'bg-white/[0.02]' : ''}`}
+      onClick={onOpen}
     >
       <td className="px-4 py-3">
-        <div className="font-medium text-slate-200">{agent.name}</div>
+        <div className="flex items-center gap-1 font-medium text-slate-200">
+          {agent.name}
+          <ChevronRight className="h-3.5 w-3.5 text-slate-600" aria-hidden />
+        </div>
         <div className="text-xs text-slate-500">
           {agent.hostname ?? agent.agent_id}
           {agent.os_version ? ` · ${agent.os_version}` : ''}
@@ -384,93 +378,4 @@ function AgentRow({
   )
 }
 
-function AgentDetail({
-  detail,
-  onClose,
-}: {
-  detail: NonNullable<ReturnType<typeof useAgentStatus>['detail']>
-  onClose: () => void
-}) {
-  const { agent, latest: m, containers } = detail
 
-  return (
-    <div className="rounded-lg border border-white/10 bg-slate-800/40 p-6 backdrop-blur-sm">
-      <div className="mb-4 flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-medium text-white">{agent.name}</h2>
-          <p className="text-xs text-slate-500">
-            {agent.hostname ?? '—'} · {agent.ip_address ?? 'no address'} · agent{' '}
-            {agent.agent_version ?? '—'}
-          </p>
-        </div>
-        <button onClick={onClose} className="text-xs text-slate-400 transition hover:text-white">
-          Close
-        </button>
-      </div>
-
-      {!m ? (
-        <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-slate-800/40 p-4 text-sm text-slate-400">
-          <RefreshCw className="h-4 w-4" />
-          No metrics yet. They appear once the agent has run one collection cycle.
-        </div>
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Metric label="Load average" value={`${m.load_average_1m?.toFixed(2) ?? '—'} / ${m.load_average_5m?.toFixed(2) ?? '—'} / ${m.load_average_15m?.toFixed(2) ?? '—'}`} hint="1m / 5m / 15m" />
-          <Metric label="Uptime" value={uptime(m.uptime_seconds)} hint="since boot" />
-          <Metric label="Network in" value={`${((m.network_in_bytes ?? 0) / 1e9).toFixed(1)} GB`} hint="since boot" />
-          <Metric label="Network out" value={`${((m.network_out_bytes ?? 0) / 1e9).toFixed(1)} GB`} hint="since boot" />
-        </div>
-      )}
-
-      <div className="mt-6">
-        <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-300">
-          Containers {containers.length > 0 && `(${containers.length})`}
-        </h3>
-        {containers.length === 0 ? (
-          <p className="text-sm text-slate-500">
-            No containers reported. The agent lists them when it can reach a Docker socket.
-          </p>
-        ) : (
-          <div className="overflow-x-auto rounded-lg border border-white/10">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-white/10 bg-slate-800/30 text-xs font-medium text-slate-400">
-                  <th className="px-4 py-2 text-left">Name</th>
-                  <th className="px-4 py-2 text-left">Image</th>
-                  <th className="px-4 py-2 text-left">Status</th>
-                  <th className="px-4 py-2 text-left">CPU</th>
-                  <th className="px-4 py-2 text-left">Memory</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {containers.map((c) => (
-                  <tr key={c.id}>
-                    <td className="px-4 py-2 text-slate-200">{c.container_name || c.container_id}</td>
-                    <td className="max-w-[220px] truncate px-4 py-2 text-slate-400" title={c.image}>
-                      {c.image}
-                    </td>
-                    <td className="px-4 py-2 text-slate-400">{c.status}</td>
-                    <td className={`px-4 py-2 tabular-nums ${usageClass(c.cpu_percent)}`}>
-                      {c.cpu_percent.toFixed(2)}%
-                    </td>
-                    <td className="px-4 py-2 tabular-nums text-slate-300">{c.memory_used_mb} MB</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function Metric({ label, value, hint }: { label: string; value: string; hint: string }) {
-  return (
-    <div className="rounded-lg border border-white/10 bg-slate-800/40 p-4">
-      <p className="text-xs text-slate-500">{label}</p>
-      <p className="mt-1 text-lg font-light text-white">{value}</p>
-      <p className="text-xs text-slate-600">{hint}</p>
-    </div>
-  )
-}

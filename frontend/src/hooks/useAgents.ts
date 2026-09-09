@@ -19,6 +19,17 @@ export interface Agent {
   hostname: string | null
   os_version: string | null
   agent_version: string | null
+
+  // What the host reports about itself, refreshed on each heartbeat.
+  kernel_version: string | null
+  architecture: string | null
+  cpu_model: string | null
+  cpu_cores: number | null
+  memory_total_mb: number | null
+  go_version: string | null
+  /** null until the agent has reported, so it stays distinct from "no Docker". */
+  docker_available: boolean | null
+
   created_at: string
   updated_at: string
 }

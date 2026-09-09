@@ -12,7 +12,7 @@ const nav = [
   // What is being monitored.
   { to: '/uptime', label: 'Uptime Monitoring' },
   { to: '/ssl', label: 'SSL & Domains' },
-  { to: '/server-monitoring', label: 'Server Monitoring' },
+  { to: '/servers', label: 'Server Monitoring' },
   // What comes out of it.
   { to: '/status-pages', label: 'Status Pages' },
   { to: '/incidents', label: 'Incidents' },
