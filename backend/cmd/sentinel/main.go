@@ -153,6 +153,10 @@ func run() error {
 		models.DefaultMonitorCheckInterval); err != nil {
 		return fmt.Errorf("seeding default check interval: %w", err)
 	}
+	if _, err := settingsService.SeedInt(settingsCtx, models.SettingCheckRetentionDays,
+		models.DefaultCheckRetentionDays); err != nil {
+		log.Fatalf("seeding check retention setting: %v", err)
+	}
 	if _, err := settingsService.SeedInt(settingsCtx, models.SettingIncidentRetentionDays,
 		models.DefaultIncidentRetentionDays); err != nil {
 		return fmt.Errorf("seeding incident retention: %w", err)
@@ -234,7 +238,7 @@ func run() error {
 	v1.Use(api.AuthMiddleware(authService))
 	api.RegisterMonitorRoutes(v1, monitorService, checkService, settingsService)
 	api.RegisterMonitorCreationRoutes(v1, monitorService, checkService)
-	api.RegisterDiscoveryRoutes(v1, discoveryService)
+	api.RegisterDiscoveryRoutes(v1, discoveryService, authService)
 	api.RegisterCheckRoutes(v1, checkService, incidentService, monitorService)
 	api.RegisterReportRoutes(v1, monitorService, checkService, incidentService)
 	// Saved-report builder: definitions, PDF generation, history, sharing.
@@ -245,8 +249,8 @@ func run() error {
 	api.RegisterMonitorSharingRoutes(v1, monitorService, authService)
 	api.RegisterStatusPageRoutes(v1, statusPageService, incidentService)
 	api.RegisterNotificationRoutes(v1, notificationManager, monitorService)
-	api.RegisterSettingsRoutes(v1, settingsService, models.DefaultMonitorCheckInterval)
-	api.RegisterSSLCertificateRoutes(v1, sslChecker)
+	api.RegisterSettingsRoutes(v1, settingsService, models.DefaultMonitorCheckInterval, authService)
+	api.RegisterSSLCertificateRoutes(v1, sslChecker, authService)
 	// Per-user theme (not admin-gated): only AuthMiddleware applies.
 	// Self password change (any authenticated user).
 	v1.POST("/auth/change-password", api.ChangeOwnPasswordHandler(authService))
@@ -254,11 +258,11 @@ func run() error {
 	// Admin-only user management + invitations (admin invitation routes here,
 	// public accept/details routes registered on the router).
 	admin := v1.Group("")
-	admin.Use(api.RequireAdmin())
+	admin.Use(api.RequireAdmin(authService))
 	api.RegisterUserManagementRoutes(admin, authService)
 	api.RegisterAuditRoutes(admin, auditService)
 	api.RegisterInvitationRoutes(admin, router, invitationService, authService)
-	api.RegisterNotificationConfigRoutes(v1, notificationConfigService)
+	api.RegisterNotificationConfigRoutes(v1, notificationConfigService, authService)
 
 	// 6. Report render workers.
 	reportJobs.Start(context.Background())

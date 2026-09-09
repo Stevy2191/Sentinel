@@ -193,6 +193,16 @@ func (s *SettingsService) DefaultCheckInterval(ctx context.Context, fallback int
 	return s.GetInt(ctx, models.SettingDefaultCheckInterval, fallback)
 }
 
+// CheckRetentionDays returns how long individual check results are kept,
+// clamped to a sane range.
+func (s *SettingsService) CheckRetentionDays(ctx context.Context) int {
+	days := s.GetInt(ctx, models.SettingCheckRetentionDays, models.DefaultCheckRetentionDays)
+	if days < models.MinCheckRetentionDays || days > models.MaxCheckRetentionDays {
+		return models.DefaultCheckRetentionDays
+	}
+	return days
+}
+
 // IncidentRetentionDays returns how many days of incident history to keep.
 func (s *SettingsService) IncidentRetentionDays(ctx context.Context) int {
 	days := s.GetInt(ctx, models.SettingIncidentRetentionDays, models.DefaultIncidentRetentionDays)

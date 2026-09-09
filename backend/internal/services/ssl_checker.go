@@ -18,6 +18,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
+	"github.com/Stevy2191/Sentinel/backend/internal/netguard"
 	"github.com/Stevy2191/Sentinel/backend/internal/notifications"
 )
 
@@ -149,7 +150,12 @@ func (s *SSLCheckerService) FetchCertificate(ctx context.Context, domain string)
 		resolvedIP = ip
 		handshakeCtx, cancel := context.WithTimeout(ctx, sslHandshakeTimeout)
 		dialer := &tls.Dialer{
-			NetDialer: &net.Dialer{Timeout: sslHandshakeTimeout},
+			// Guarded like every other outbound check: the address comes from
+			// DNS for a name an operator supplied, so it is exactly the input
+			// an SSRF lockdown is meant to constrain. Permissive by default,
+			// so watching an internal host still works unless the deployment
+			// has turned that off.
+			NetDialer: netguard.SafeDialer(sslHandshakeTimeout),
 			Config: &tls.Config{
 				// The name, not the address: SNI and certificate verification
 				// are both about the host being checked, while the connection
