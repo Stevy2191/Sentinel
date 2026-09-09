@@ -54,50 +54,6 @@ interface SystemSettings {
   app_name: string
   base_url: string
   default_check_interval: number
-  /** IP, optionally with a port. Empty means the host's own resolver. */
-  ssl_dns_resolver: string
-}
-
-/**
- * Whether a string is an IP address with an optional port, matching the check
- * the API applies. Validating here only saves a round trip — the server still
- * decides.
- */
-function isIPWithOptionalPort(raw: string): boolean {
-  let host = raw
-  const bracketed = raw.match(/^\[(.+)\](?::(\d+))?$/)
-  if (bracketed) {
-    host = bracketed[1]
-    if (bracketed[2] && !validPort(bracketed[2])) return false
-  } else {
-    // A bare IPv6 literal has colons but no port, so only split when there is
-    // exactly one colon — anything more is an address, not host:port.
-    const parts = raw.split(':')
-    if (parts.length === 2) {
-      host = parts[0]
-      if (!validPort(parts[1])) return false
-    }
-  }
-  return isIPv4(host) || isIPv6(host)
-}
-
-function validPort(p: string): boolean {
-  const n = Number(p)
-  return /^\d+$/.test(p) && n >= 1 && n <= 65535
-}
-
-function isIPv4(host: string): boolean {
-  const parts = host.split('.')
-  return (
-    parts.length === 4 &&
-    parts.every((p) => /^\d{1,3}$/.test(p) && Number(p) <= 255)
-  )
-}
-
-function isIPv6(host: string): boolean {
-  // Loose on purpose: the server is the authority, and rejecting a valid
-  // address here would block a legitimate setting.
-  return host.includes(':') && /^[0-9a-fA-F:.]+$/.test(host)
 }
 
 function Toggle({
@@ -237,7 +193,6 @@ export default function Settings() {
           app_name: r.data.data.app_name || DEFAULT_APP_NAME,
           base_url: r.data.data.base_url ?? '',
           default_check_interval: r.data.data.default_check_interval,
-          ssl_dns_resolver: r.data.data.ssl_dns_resolver ?? '',
         })
         setSystemError(null)
       })
@@ -256,7 +211,6 @@ export default function Settings() {
         app_name: system.app_name.trim(),
         base_url: system.base_url.trim(),
         default_check_interval: system.default_check_interval,
-        ssl_dns_resolver: system.ssl_dns_resolver.trim(),
       })
       // Re-read the public config so the sidebar, sign-in screen and browser tab
       // pick up a renamed instance without a reload.
@@ -349,10 +303,6 @@ export default function Settings() {
     (system?.default_check_interval ?? 0) >= MIN_INTERVAL &&
     (system?.default_check_interval ?? 0) <= MAX_INTERVAL
   const nameValid = !!system && system.app_name.trim().length > 0 && system.app_name.trim().length <= MAX_APP_NAME
-  // Empty is valid and means "use the host's resolver". A hostname is not: the
-  // resolver's own name would need resolving by the very resolver being
-  // replaced.
-  const resolverValid = !system || system.ssl_dns_resolver.trim() === '' || isIPWithOptionalPort(system.ssl_dns_resolver.trim())
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -459,33 +409,6 @@ export default function Settings() {
                 )}
               </SettingsCard>
 
-              <SettingsCard
-                title="Certificate Check DNS"
-                description="Which DNS server certificate checks ask. Leave empty to use this server's own resolver."
-              >
-                <input
-                  type="text"
-                  value={system.ssl_dns_resolver}
-                  onChange={(e) => setSystem({ ...system, ssl_dns_resolver: e.target.value })}
-                  placeholder="1.1.1.1"
-                  aria-label="DNS resolver for certificate checks"
-                  className="w-full"
-                />
-                {resolverValid ? (
-                  <p className="text-xs text-slate-500">
-                    Set this if an internal DNS server answers for a domain you also host publicly
-                    — an Active Directory domain sharing its name with your website is the usual
-                    cause. Without it, a check for the bare domain reaches an internal server
-                    instead of the public one, and fails while the www subdomain works. Domain
-                    registration lookups are unaffected either way.
-                  </p>
-                ) : (
-                  <p className="text-xs text-red-400">
-                    Must be an IP address, optionally with a port — for example 1.1.1.1 or
-                    8.8.8.8:53.
-                  </p>
-                )}
-              </SettingsCard>
 
               <SettingsCard
                 title="Data Retention"
@@ -536,7 +459,7 @@ export default function Settings() {
                 </p>
                 <button
                   className="btn-primary"
-                  disabled={systemSaving || !nameValid || !intervalValid || !resolverValid}
+                  disabled={systemSaving || !nameValid || !intervalValid}
                   onClick={() => void saveSystem()}
                 >
                   {systemSaving ? 'Saving…' : 'Save System Settings'}

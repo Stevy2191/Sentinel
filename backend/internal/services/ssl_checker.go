@@ -33,60 +33,6 @@ type SSLCheckerService struct {
 	db      *gorm.DB
 	manager *notifications.NotificationManager
 	logger  *log.Logger
-
-	// resolverFunc reports the DNS server certificate checks should use, or ""
-	// for the host's own. Resolved per check rather than captured at
-	// construction so an admin's edit takes effect without a restart — the same
-	// reason BaseURLFunc works this way.
-	resolverFunc func(context.Context) string
-}
-
-// SetDNSResolverFunc supplies the resolver lookup. Safe to leave unset: the
-// host resolver is then used, which is the right default for everyone whose
-// DNS is not split-horizon.
-func (s *SSLCheckerService) SetDNSResolverFunc(fn func(context.Context) string) {
-	s.resolverFunc = fn
-}
-
-// netDialer returns the TCP dialer for certificate checks, pointed at the
-// configured resolver when there is one.
-//
-// The problem this solves: an Active Directory domain often shares its name
-// with the organisation's public domain, so the internal resolver answers for
-// the apex with a domain controller's address. A check for "example.com" then
-// opens TLS against a domain controller — the wrong host entirely — while
-// "www.example.com" works, because only the apex is overridden. Asking a public
-// resolver makes the check see what a visitor sees.
-func (s *SSLCheckerService) netDialer(ctx context.Context) *net.Dialer {
-	dialer := &net.Dialer{Timeout: sslHandshakeTimeout}
-	if s.resolverFunc != nil {
-		if addr := normalizeResolver(s.resolverFunc(ctx)); addr != "" {
-			dialer.Resolver = &net.Resolver{
-				PreferGo: true,
-				Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-					// network is inherited so UDP stays UDP and a truncated
-					// answer can still be retried over TCP.
-					return (&net.Dialer{Timeout: sslHandshakeTimeout}).DialContext(ctx, network, addr)
-				},
-			}
-		}
-	}
-	return dialer
-}
-
-// normalizeResolver accepts "1.1.1.1" or "1.1.1.1:53" and returns a dialable
-// address, or "" if the value is not a usable resolver.
-func normalizeResolver(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-	if _, _, err := net.SplitHostPort(raw); err == nil {
-		return raw
-	}
-	// A bare IPv6 literal has colons but no port, so it must be bracketed
-	// before a port is appended.
-	return net.JoinHostPort(raw, "53")
 }
 
 // NewSSLCheckerService returns a checker backed by the given database. manager
@@ -182,29 +128,66 @@ func (s *SSLCheckerService) FetchCertificate(ctx context.Context, domain string)
 	if h, p, err := net.SplitHostPort(domain); err == nil {
 		host, port = h, p
 	}
+	// The address the check actually reached, recorded even when the
+	// handshake then fails: it is what shows a lookup landed on the wrong host.
+	var resolvedIP string
 
-	handshakeCtx, cancel := context.WithTimeout(ctx, sslHandshakeTimeout)
-	defer cancel()
-	tlsDialer := &tls.Dialer{
-		NetDialer: s.netDialer(ctx),
-		Config: &tls.Config{
-			ServerName: host,
-			MinVersion: tls.VersionTLS12,
-		},
-	}
-	rawConn, err := tlsDialer.DialContext(handshakeCtx, "tcp", net.JoinHostPort(host, port))
+	resolved, err := resolveHost(ctx, host)
 	if err != nil {
+		return nil, fmt.Errorf("%s: %w", domain, err)
+	}
+
+	// Every address the winning resolver returned is tried, not just the
+	// first. A host commonly publishes several, and one of them being
+	// unreachable is not the same as the service being down.
+	var conn *tls.Conn
+	var dialErr error
+	for _, ip := range resolved.IPs {
+		// Recorded before the attempt, not after it succeeds: the address is
+		// most useful precisely when the connection fails, since naming it is
+		// what shows the lookup landed somewhere unexpected.
+		resolvedIP = ip
+		handshakeCtx, cancel := context.WithTimeout(ctx, sslHandshakeTimeout)
+		dialer := &tls.Dialer{
+			NetDialer: &net.Dialer{Timeout: sslHandshakeTimeout},
+			Config: &tls.Config{
+				// The name, not the address: SNI and certificate verification
+				// are both about the host being checked, while the connection
+				// goes to the address DNS gave us.
+				ServerName: host,
+				MinVersion: tls.VersionTLS12,
+			},
+		}
+		raw, err := dialer.DialContext(handshakeCtx, "tcp", net.JoinHostPort(ip, port))
+		cancel()
+		if err == nil {
+			conn = raw.(*tls.Conn)
+			dialErr = nil
+			break
+		}
+		dialErr = err
+		// A certificate that fails verification is a finding about that host,
+		// not a reason to try another address: the next one would report the
+		// same thing.
+		var invalid *tls.CertificateVerificationError
+		if errors.As(err, &invalid) {
+			break
+		}
+	}
+
+	if conn == nil {
+		err := dialErr
 		// An expired certificate is the case this feature exists to catch, so
 		// dig the certificate out of the verification error and report it as a
 		// real expiry rather than as a connection problem.
 		var invalid *tls.CertificateVerificationError
 		if errors.As(err, &invalid) && len(invalid.UnverifiedCertificates) > 0 {
 			info := describeCertificate(invalid.UnverifiedCertificates[0])
+			info.ResolvedIP = resolvedIP
 			return &info, nil
 		}
-		return nil, fmt.Errorf("%s: %w", domain, s.explainDialFailure(ctx, host, err))
+		return nil, fmt.Errorf("%s: %w", domain, explainDialFailure(host, resolvedIP, resolved.Via, err))
 	}
-	conn := rawConn.(*tls.Conn)
 	defer conn.Close()
 
 	chain := conn.ConnectionState().PeerCertificates
@@ -212,9 +195,7 @@ func (s *SSLCheckerService) FetchCertificate(ctx context.Context, domain string)
 		return nil, fmt.Errorf("%s presented no certificate", domain)
 	}
 	info := describeCertificate(chain[0])
-	if addr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
-		info.ResolvedIP = addr.IP.String()
-	}
+	info.ResolvedIP = resolvedIP
 	return &info, nil
 }
 
@@ -242,39 +223,26 @@ func issuerName(commonName string, org []string) string {
 // simplifyTLSError turns a Go network error into something an operator can act
 // on, rather than a wrapped dial string.
 // explainDialFailure turns a dial error into something an operator can act on,
-// naming the address the check actually reached.
+// naming the address the check reached and which resolver supplied it.
 //
-// The address is the whole point. When an internal resolver answers for a
-// public apex domain, the failure looks like a plain refused connection or a
-// certificate for the wrong host, and nothing on screen says why the subdomain
-// works while the apex does not. Seeing a private address next to a public
-// domain names the cause immediately.
-func (s *SSLCheckerService) explainDialFailure(ctx context.Context, host string, err error) error {
+// The address is the point. A refused connection or a certificate for the wrong
+// host says nothing about why, and a private address next to a public domain
+// names the cause immediately: the answer came from local DNS. Since public
+// resolvers are tried first, reaching that state means public DNS did not
+// answer at all, which is worth saying rather than leaving to be guessed.
+func explainDialFailure(host, ip, via string, err error) error {
 	simple := simplifyTLSError(err)
-
-	// Only worth resolving when the name resolved at all; "no such host" has
-	// no address to report.
-	if strings.Contains(err.Error(), "no such host") {
-		return simple
-	}
-	lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	resolver := s.netDialer(ctx).Resolver
-	if resolver == nil {
-		resolver = net.DefaultResolver
-	}
-	addrs, lookupErr := resolver.LookupIPAddr(lookupCtx, host)
-	if lookupErr != nil || len(addrs) == 0 {
+	if ip == "" {
 		return simple
 	}
 
-	ip := addrs[0].IP
-	if ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
-		return fmt.Errorf("%w (resolved to the internal address %s — DNS here answers for this domain "+
-			"privately, so the check reached an internal host instead of the public one; "+
-			"set a public DNS resolver in Settings to check what visitors see)", simple, ip)
+	parsed := net.ParseIP(ip)
+	if parsed != nil && (parsed.IsPrivate() || parsed.IsLoopback() || parsed.IsLinkLocalUnicast()) {
+		return fmt.Errorf("%w (reached the internal address %s, from %s — public DNS did not answer "+
+			"for %s, so the check fell back to local DNS and landed on an internal host)",
+			simple, ip, via, host)
 	}
-	return fmt.Errorf("%w (resolved to %s)", simple, ip)
+	return fmt.Errorf("%w (reached %s, from %s)", simple, ip, via)
 }
 
 func simplifyTLSError(err error) error {

@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -194,84 +195,40 @@ func TestIssuerNamePrefersOrganisation(t *testing.T) {
 	}
 }
 
-func TestNormalizeResolver(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"", ""},
-		{"   ", ""},
-		{"1.1.1.1", "1.1.1.1:53"},
-		{"1.1.1.1:53", "1.1.1.1:53"},
-		{"8.8.8.8:5353", "8.8.8.8:5353"},
-		// A bare IPv6 literal has colons but no port, so it must come back
-		// bracketed rather than being mistaken for host:port.
-		{"2606:4700:4700::1111", "[2606:4700:4700::1111]:53"},
-		{"[2606:4700:4700::1111]:53", "[2606:4700:4700::1111]:53"},
-	}
-	for _, c := range cases {
-		if got := normalizeResolver(c.in); got != c.want {
-			t.Errorf("normalizeResolver(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
-// A checker with no resolver configured must keep using the host's, which is
-// the right default for everyone whose DNS is not split-horizon.
-func TestNetDialerDefaultsToHostResolver(t *testing.T) {
-	s := NewSSLCheckerService(nil, nil)
-	if d := s.netDialer(context.Background()); d.Resolver != nil {
-		t.Errorf("expected the host resolver (nil), got %#v", d.Resolver)
-	}
-
-	s.SetDNSResolverFunc(func(context.Context) string { return "" })
-	if d := s.netDialer(context.Background()); d.Resolver != nil {
-		t.Errorf("an empty setting must mean the host resolver, got %#v", d.Resolver)
-	}
-
-	s.SetDNSResolverFunc(func(context.Context) string { return "1.1.1.1" })
-	if d := s.netDialer(context.Background()); d.Resolver == nil {
-		t.Error("a configured resolver was ignored")
-	}
-}
-
-// Proves the configured resolver is genuinely used for certificate checks
-// rather than silently ignored — the whole point of the split-horizon fix.
-func TestFetchCertificateUsesConfiguredResolver(t *testing.T) {
+// Certificate checks must resolve through public DNS automatically, with no
+// configuration, and still read the same certificate for an apex and its www.
+func TestFetchCertificateResolvesAutomatically(t *testing.T) {
 	if testing.Short() {
 		t.Skip("needs network")
 	}
 	ctx := context.Background()
-
-	// 1. A public resolver: the apex must read like any other host.
 	s := NewSSLCheckerService(nil, nil)
-	s.SetDNSResolverFunc(func(context.Context) string { return "1.1.1.1" })
+
 	for _, d := range []string{"wacounty.com", "www.wacounty.com"} {
 		info, err := s.FetchCertificate(ctx, d)
 		if err != nil {
-			t.Fatalf("%s via 1.1.1.1: %v", d, err)
+			t.Fatalf("%s: %v", d, err)
 		}
-		t.Logf("%-20s issuer=%q expires=%s", d, info.Issuer, info.ExpiryDate.Format("2006-01-02"))
+		if info.ResolvedIP == "" {
+			t.Errorf("%s: expected the reached address to be recorded", d)
+		}
+		t.Logf("%-20s issuer=%q expires=%s ip=%s",
+			d, info.Issuer, info.ExpiryDate.Format("2006-01-02"), info.ResolvedIP)
+	}
+}
+
+// The diagnostic has to name the address and say public DNS did not answer,
+// which is what points at split-horizon DNS rather than at a dead service.
+func TestExplainDialFailureNamesInternalAddress(t *testing.T) {
+	err := explainDialFailure("example.com", "10.1.10.4", "system DNS", errors.New("connection refused"))
+	for _, want := range []string{"10.1.10.4", "system DNS", "public DNS did not answer"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected %q in: %v", want, err)
+		}
 	}
 
-	// 2. A resolver that answers nothing. If the setting were ignored, this
-	//    would still succeed via the host's resolver — so a failure here is
-	//    the proof that the setting takes effect.
-	bogus := NewSSLCheckerService(nil, nil)
-	bogus.SetDNSResolverFunc(func(context.Context) string { return "203.0.113.253" })
-	if _, err := bogus.FetchCertificate(ctx, "wacounty.com"); err == nil {
-		t.Fatal("expected failure through a dead resolver; the setting is being ignored")
-	} else {
-		t.Logf("dead resolver correctly failed: %v", err)
-	}
-
-	// 3. The diagnostic: a domain resolving to a private address must say so,
-	//    which is what tells an operator their DNS is answering internally.
-	priv := NewSSLCheckerService(nil, nil)
-	_, err := priv.FetchCertificate(ctx, "localtest.me") // resolves to 127.0.0.1
-	if err == nil {
-		t.Skip("localtest.me unexpectedly served TLS; cannot exercise the diagnostic")
-	}
-	if !strings.Contains(err.Error(), "internal address") {
-		t.Errorf("expected the split-horizon hint, got: %v", err)
-	} else {
-		t.Logf("diagnostic: %v", err)
+	pub := explainDialFailure("example.com", "93.184.216.34", "Google Public DNS", errors.New("connection refused"))
+	if strings.Contains(pub.Error(), "internal") {
+		t.Errorf("a public address must not be described as internal: %v", pub)
 	}
 }
