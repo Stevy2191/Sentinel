@@ -259,6 +259,17 @@ type heartbeatRequest struct {
 	IPAddress    string `json:"ip_address"`
 	OSVersion    string `json:"os_version"`
 	AgentVersion string `json:"agent_version"`
+
+	// What the host reports about itself. Carried on the heartbeat rather than
+	// with metrics because these change when a machine is rebuilt, not every
+	// collection cycle.
+	KernelVersion   string `json:"kernel_version"`
+	Architecture    string `json:"architecture"`
+	CPUModel        string `json:"cpu_model"`
+	CPUCores        int    `json:"cpu_cores"`
+	MemoryTotalMB   int64  `json:"memory_total_mb"`
+	GoVersion       string `json:"go_version"`
+	DockerAvailable *bool  `json:"docker_available"`
 }
 
 // HeartbeatHandler handles POST /api/v1/agents/heartbeat, authenticated by the
@@ -289,7 +300,20 @@ func HeartbeatHandler(agents *services.AgentService) gin.HandlerFunc {
 			// records something useful without having to discover its own.
 			ip = c.ClientIP()
 		}
-		if err := agents.Heartbeat(c.Request.Context(), agent, ip, req.Hostname, req.OSVersion, req.AgentVersion); err != nil {
+		info := services.AgentSystemInfo{
+			IPAddress:       ip,
+			Hostname:        req.Hostname,
+			OSVersion:       req.OSVersion,
+			AgentVersion:    req.AgentVersion,
+			KernelVersion:   req.KernelVersion,
+			Architecture:    req.Architecture,
+			CPUModel:        truncate(req.CPUModel, 255),
+			CPUCores:        req.CPUCores,
+			MemoryTotalMB:   req.MemoryTotalMB,
+			GoVersion:       req.GoVersion,
+			DockerAvailable: req.DockerAvailable,
+		}
+		if err := agents.Heartbeat(c.Request.Context(), agent, info); err != nil {
 			respondInternal(c, "HeartbeatHandler", err)
 			return
 		}

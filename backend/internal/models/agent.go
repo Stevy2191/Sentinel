@@ -73,6 +73,17 @@ type Agent struct {
 	OSVersion     *string    `json:"os_version" gorm:"column:os_version"`
 	AgentVersion  *string    `json:"agent_version" gorm:"column:agent_version"`
 
+	// ---- What the host reports about itself ----------------------------
+	// Refreshed on each heartbeat rather than stored per sample: these change
+	// when a machine is rebuilt, not every cycle.
+	KernelVersion   *string `json:"kernel_version" gorm:"column:kernel_version"`
+	Architecture    *string `json:"architecture" gorm:"column:architecture"`
+	CPUModel        *string `json:"cpu_model" gorm:"column:cpu_model"`
+	CPUCores        *int    `json:"cpu_cores" gorm:"column:cpu_cores"`
+	MemoryTotalMB   *int64  `json:"memory_total_mb" gorm:"column:memory_total_mb"`
+	GoVersion       *string `json:"go_version" gorm:"column:go_version"`
+	DockerAvailable *bool   `json:"docker_available" gorm:"column:docker_available"`
+
 	CreatedAt time.Time `json:"created_at" gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt time.Time `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
 }
