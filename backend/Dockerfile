@@ -1,5 +1,5 @@
 # Build stage. Go version must satisfy go.mod (go 1.25).
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 # Module source and network behaviour, overridable at build time:
 #   --build-arg GOPROXY=https://your-mirror/,direct
