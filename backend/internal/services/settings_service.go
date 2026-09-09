@@ -206,19 +206,6 @@ func (s *SettingsService) IncidentRetentionDays(ctx context.Context) int {
 	return days
 }
 
-// SSLDNSResolver returns the DNS server certificate checks should use, or an
-// empty string to use the host's own resolver.
-//
-// Exists for split-horizon DNS. Where an internal resolver answers for a public
-// domain — an Active Directory domain sharing its name with the public one is
-// the usual cause — a certificate check follows that answer to a domain
-// controller and fails, or reads the wrong certificate entirely. Pointing the
-// check at a public resolver makes it see what a visitor on the internet sees,
-// which is the thing being monitored.
-func (s *SettingsService) SSLDNSResolver(ctx context.Context) string {
-	return strings.TrimSpace(s.GetString(ctx, models.SettingSSLDNSResolver, ""))
-}
-
 // RegistrationEnabled reports whether new-user self-registration is currently
 // allowed. Defaults to false (closed) when unset.
 func (s *SettingsService) RegistrationEnabled(ctx context.Context) bool {
