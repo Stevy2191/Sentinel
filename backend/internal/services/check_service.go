@@ -45,18 +45,16 @@ const (
 // CheckService executes monitor checks across all supported protocols and
 // persists their results.
 type CheckService struct {
-	db         *gorm.DB
-	httpClient *http.Client
-	logger     *log.Logger
+	db     *gorm.DB
+	logger *log.Logger
 }
 
 // NewCheckService returns a CheckService backed by the given database, with an
 // HTTP client using a 30-second default timeout.
 func NewCheckService(db *gorm.DB) *CheckService {
 	return &CheckService{
-		db:         db,
-		httpClient: &http.Client{Timeout: defaultHTTPClientTimeout},
-		logger:     log.Default(),
+		db:     db,
+		logger: log.Default(),
 	}
 }
 
@@ -414,6 +412,54 @@ func (s *CheckService) GetChecksInRange(ctx context.Context, monitorID uuid.UUID
 	s.logger.Printf("[check] retrieved %d checks for monitor %s from %s to %s",
 		len(checks), monitorID, start.Format(time.RFC3339), end.Format(time.RFC3339))
 	return checks, nil
+}
+
+// CheckRangeSummary is the status breakdown and average response time over a
+// range, computed by the database.
+type CheckRangeSummary struct {
+	Success int
+	Failed  int
+	Timeout int
+	Total   int
+	// AvgResponseMs averages successful checks only. A failed check records a
+	// response time of zero, and counting those would report a latency nobody
+	// experienced.
+	AvgResponseMs int
+}
+
+// SummariseRange returns the status breakdown and average response time for a
+// monitor over [start, end].
+//
+// Aggregated in SQL rather than by loading the rows. A report covering the
+// full retention window on a monitor checked every minute spans well over a
+// hundred thousand checks, and reading all of them into memory to produce four
+// numbers is the expensive way to compute a sum. This returns one row.
+func (s *CheckService) SummariseRange(ctx context.Context, monitorID uuid.UUID, start, end time.Time) (CheckRangeSummary, error) {
+	var row struct {
+		Success       int
+		Failed        int
+		Timeout       int
+		Total         int
+		AvgResponseMs float64
+	}
+	err := s.db.WithContext(ctx).Model(&models.Check{}).
+		Select(`COUNT(*) FILTER (WHERE status = 'success') AS success,
+		        COUNT(*) FILTER (WHERE status = 'failed')  AS failed,
+		        COUNT(*) FILTER (WHERE status = 'timeout') AS timeout,
+		        COUNT(*)                                   AS total,
+		        COALESCE(AVG(response_time_ms) FILTER (WHERE status = 'success'), 0) AS avg_response_ms`).
+		Where("monitor_id = ? AND timestamp >= ? AND timestamp <= ?", monitorID, start, end).
+		Scan(&row).Error
+	if err != nil {
+		return CheckRangeSummary{}, fmt.Errorf("summarising checks for monitor %s: %w", monitorID, err)
+	}
+	return CheckRangeSummary{
+		Success:       row.Success,
+		Failed:        row.Failed,
+		Timeout:       row.Timeout,
+		Total:         row.Total,
+		AvgResponseMs: int(row.AvgResponseMs),
+	}, nil
 }
 
 // CountChecks returns the number of checks for a monitor whose timestamp falls

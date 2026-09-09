@@ -259,13 +259,13 @@ func DeleteNotificationConfigHandler(service *services.NotificationConfigService
 
 // RegisterNotificationConfigRoutes mounts the notification-channel endpoints on
 // the given group (already behind AuthMiddleware).
-func RegisterNotificationConfigRoutes(rg *gin.RouterGroup, service *services.NotificationConfigService) {
+func RegisterNotificationConfigRoutes(rg *gin.RouterGroup, service *services.NotificationConfigService, users adminChecker) {
 	// Readable by any authenticated user: choosing where a monitor's alerts go
 	// is part of creating a monitor, which is not an admin-only action.
 	rg.GET("/notification-channels", ListAvailableChannelsHandler(service))
 
 	g := rg.Group("/settings/notification-channels")
-	g.Use(RequireAdmin())
+	g.Use(RequireAdmin(users))
 	g.GET("", GetNotificationConfigsHandler(service))
 	g.POST("", CreateNotificationConfigHandler(service))
 	g.GET("/:id", GetNotificationConfigHandler(service))

@@ -288,14 +288,14 @@ func CheckAllSSLCertificatesHandler(svc *services.SSLCheckerService) gin.Handler
 // RegisterSSLCertificateRoutes mounts the certificate endpoints. Reading is
 // open to any authenticated user, as with monitors; changing what the instance
 // watches is admin-only.
-func RegisterSSLCertificateRoutes(rg *gin.RouterGroup, svc *services.SSLCheckerService) {
+func RegisterSSLCertificateRoutes(rg *gin.RouterGroup, svc *services.SSLCheckerService, users adminChecker) {
 	g := rg.Group("/ssl-certificates")
 	g.GET("", ListSSLCertificatesHandler(svc))
 	// Registered before "/:id" so "check-all" is not read as an id.
-	g.POST("/check-all", RequireAdmin(), CheckAllSSLCertificatesHandler(svc))
+	g.POST("/check-all", RequireAdmin(users), CheckAllSSLCertificatesHandler(svc))
 	g.GET("/:id", GetSSLCertificateHandler(svc))
 
-	admin := g.Group("", RequireAdmin())
+	admin := g.Group("", RequireAdmin(users))
 	admin.POST("", CreateSSLCertificateHandler(svc))
 	admin.PATCH("/:id", UpdateSSLCertificateHandler(svc))
 	admin.DELETE("/:id", DeleteSSLCertificateHandler(svc))

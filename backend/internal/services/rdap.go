@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Stevy2191/Sentinel/backend/internal/netguard"
+
 	"golang.org/x/net/publicsuffix"
 )
 
@@ -44,11 +46,23 @@ const rdapUserAgent = "Sentinel-Uptime-Monitor/1.0 (+https://github.com/Stevy219
 var rdapClient = &http.Client{
 	Timeout: rdapTimeout,
 	Transport: &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
+		Proxy: http.ProxyFromEnvironment,
+		// Guarded because this request follows redirects. The bootstrap sends
+		// the query on to whichever registry holds the domain, and that target
+		// is chosen by a third party rather than by us — so it is not somewhere
+		// to follow blindly into a private network.
+		DialContext:           netguard.SafeDialer(rdapTimeout).DialContext,
 		MaxIdleConnsPerHost:   4,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
+	},
+	// A registry that redirects endlessly must not hold the check open.
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return fmt.Errorf("stopped after %d redirects", len(via))
+		}
+		return nil
 	},
 }
 
