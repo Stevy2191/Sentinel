@@ -52,12 +52,25 @@ const dateFmtMap: Record<DateFormatPref, string> = {
   'YYYY-MM-DD': 'yyyy-MM-dd',
 }
 
+/** One address's reachability result from the server-side probe. */
+interface UrlProbe {
+  url: string
+  reachable: boolean
+  status?: number
+  error?: string
+  source: string
+}
+
 interface SystemSettings {
   app_name: string
   base_url: string
   default_check_interval: number
   /** How long individual check results are kept. */
   check_retention_days: number
+  /** Where agent install commands download from. Empty means derive it. */
+  sentinel_external_url: string
+  /** Where agents report metrics. Empty means use the external URL. */
+  sentinel_internal_url: string
 }
 
 function Toggle({
@@ -198,6 +211,8 @@ export default function Settings() {
           base_url: r.data.data.base_url ?? '',
           default_check_interval: r.data.data.default_check_interval,
           check_retention_days: r.data.data.check_retention_days,
+          sentinel_external_url: r.data.data.sentinel_external_url ?? '',
+          sentinel_internal_url: r.data.data.sentinel_internal_url ?? '',
         })
         setSystemError(null)
       })
@@ -217,6 +232,8 @@ export default function Settings() {
         base_url: system.base_url.trim(),
         default_check_interval: system.default_check_interval,
         check_retention_days: system.check_retention_days,
+        sentinel_external_url: system.sentinel_external_url.trim(),
+        sentinel_internal_url: system.sentinel_internal_url.trim(),
       })
       // Re-read the public config so the sidebar, sign-in screen and browser tab
       // pick up a renamed instance without a reload.
@@ -313,6 +330,48 @@ export default function Settings() {
     (Number.isFinite(system.check_retention_days) &&
       system.check_retention_days >= MIN_CHECK_RETENTION &&
       system.check_retention_days <= MAX_CHECK_RETENTION)
+  // Validated the same way the server does, so the button does not offer to
+  // save something that will be refused.
+  const urlOK = (v: string) => {
+    const raw = v.trim().replace(/\/+$/, '')
+    if (raw === '') return true
+    try {
+      const u = new URL(raw)
+      return (u.protocol === 'http:' || u.protocol === 'https:') && !!u.host && (u.pathname === '' || u.pathname === '/')
+    } catch {
+      return false
+    }
+  }
+  const urlsValid =
+    !system || (urlOK(system.sentinel_external_url) && urlOK(system.sentinel_internal_url))
+
+  const [urlTesting, setUrlTesting] = useState(false)
+  const [urlTest, setUrlTest] = useState<{
+    external: UrlProbe
+    internal: UrlProbe
+  } | null>(null)
+
+  const testURLs = async () => {
+    if (!system) return
+    setUrlTesting(true)
+    try {
+      const res = await api.post<{ data: { external: UrlProbe; internal: UrlProbe } }>(
+        '/agents/urls/test',
+        {
+          // The values on screen, not the saved ones, so a URL can be checked
+          // before it is committed.
+          external_url: system.sentinel_external_url.trim(),
+          internal_url: system.sentinel_internal_url.trim(),
+        },
+      )
+      setUrlTest(res.data.data)
+    } catch (err) {
+      push(apiMessage(err, 'Could not test the URLs'), 'error')
+    } finally {
+      setUrlTesting(false)
+    }
+  }
+
   const nameValid = !!system && system.app_name.trim().length > 0 && system.app_name.trim().length <= MAX_APP_NAME
 
   return (
@@ -422,6 +481,70 @@ export default function Settings() {
 
 
               <SettingsCard
+                title="Sentinel URLs"
+                description="How monitored servers reach Sentinel. Leave both empty unless a reverse proxy makes the address a browser uses different from the one an agent can reach."
+              >
+                <label htmlFor="external-url" className="block text-sm font-medium text-white">
+                  External URL — where install scripts download from
+                </label>
+                <input
+                  id="external-url"
+                  type="text"
+                  value={system.sentinel_external_url}
+                  onChange={(e) => setSystem({ ...system, sentinel_external_url: e.target.value })}
+                  placeholder={`auto: ${window.location.origin}`}
+                  className="w-full"
+                />
+                <label htmlFor="internal-url" className="mt-3 block text-sm font-medium text-white">
+                  Internal URL — where agents report metrics
+                </label>
+                <input
+                  id="internal-url"
+                  type="text"
+                  value={system.sentinel_internal_url}
+                  onChange={(e) => setSystem({ ...system, sentinel_internal_url: e.target.value })}
+                  placeholder="same as the external URL"
+                  className="w-full"
+                />
+                <p className={`text-xs ${urlsValid ? 'text-slate-500' : 'text-red-400'}`}>
+                  {urlsValid
+                    ? 'Empty means Sentinel works the address out from your browser, which is right when there is no proxy. Include the scheme and port but no path, e.g. http://10.1.20.10:3001.'
+                    : 'Each URL must include a scheme and host and no path, e.g. https://sentinel.example.com or http://10.1.20.10:3001.'}
+                </p>
+
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <button
+                    className="btn-secondary !py-1"
+                    disabled={urlTesting || !urlsValid}
+                    onClick={() => void testURLs()}
+                  >
+                    {urlTesting ? 'Testing…' : 'Test both URLs'}
+                  </button>
+                  <span className="text-xs text-slate-500">
+                    Checked from the Sentinel server, which is what an agent has to reach
+                  </span>
+                </div>
+
+                {urlTest && (
+                  <div className="space-y-1">
+                    {(['external', 'internal'] as const).map((k) => {
+                      const probe = urlTest[k]
+                      return (
+                        <p
+                          key={k}
+                          className={`text-xs ${probe.reachable ? 'text-emerald-400' : 'text-amber-300'}`}
+                        >
+                          {probe.reachable ? '✓' : '✕'} {k}: {probe.url || '(none)'} —{' '}
+                          {probe.reachable ? `responded ${probe.status}` : probe.error}
+                          <span className="text-slate-600"> ({probe.source})</span>
+                        </p>
+                      )
+                    })}
+                  </div>
+                )}
+              </SettingsCard>
+
+              <SettingsCard
                 title="Data Retention"
                 description="Old history is deleted automatically. The purge runs nightly at 2 AM."
               >
@@ -498,7 +621,7 @@ export default function Settings() {
                 </p>
                 <button
                   className="btn-primary"
-                  disabled={systemSaving || !nameValid || !intervalValid || !checkRetentionValid}
+                  disabled={systemSaving || !nameValid || !intervalValid || !checkRetentionValid || !urlsValid}
                   onClick={() => void saveSystem()}
                 >
                   {systemSaving ? 'Saving…' : 'Save System Settings'}

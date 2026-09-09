@@ -66,10 +66,20 @@ export interface CreateAgentInput {
   retry_attempts: number
 }
 
-/** What the server returns when an agent is registered. */
+/**
+ * What the server returns when an agent is registered.
+ *
+ * Two addresses, because they answer different questions. external_url is
+ * where a browser reached Sentinel and so where an install command should
+ * download from; internal_url is where the agent should report back. Behind a
+ * reverse proxy they differ, and using one for both breaks the install.
+ */
 export interface CreatedAgent {
   agent: Agent
-  sentinel_url: string
+  external_url: string
+  internal_url: string
+  /** Alias of external_url, kept for older clients. */
+  sentinel_url?: string
 }
 
 const BASE = '/agents'

@@ -373,29 +373,35 @@ function InstallStep({
   tab: Tab
   setTab: (t: Tab) => void
 }) {
-  const { agent, sentinel_url: url } = created
+  const { agent } = created
+  // Downloads come from the external address, the agent reports to the
+  // internal one. They are the same unless a proxy sits in front.
+  const downloadURL = created.external_url || created.sentinel_url || ''
+  const reportURL = created.internal_url || downloadURL
+  const proxied = reportURL !== downloadURL
+
   const env = [
     `SERVER_TOKEN="${agent.server_token ?? ''}"`,
     `AGENT_ID="${agent.agent_id}"`,
-    `SENTINEL_URL="${url}"`,
+    `SENTINEL_URL="${reportURL}"`,
     `SERVER_NAME="${agent.name}"`,
     `OS_TYPE="${agent.os_type}"`,
     `CHECK_INTERVAL="${agent.check_interval}"`,
     `RETRY_ATTEMPTS="${agent.retry_attempts}"`,
   ].join(' \\\n  ')
 
-  const bashInstall = `curl -L -o server-agent.sh "${url}/scripts/server-agent.sh"
+  const bashInstall = `curl -L -o server-agent.sh "${downloadURL}/scripts/server-agent.sh"
 chmod +x server-agent.sh
 ${env} \\
   sudo -E bash ./server-agent.sh`
 
-  const dockerInstall = `curl -L -o server-docker-agent.sh "${url}/scripts/server-docker-agent.sh"
+  const dockerInstall = `curl -L -o server-docker-agent.sh "${downloadURL}/scripts/server-docker-agent.sh"
 chmod +x server-docker-agent.sh
 ${env} \\
   sudo -E bash ./server-docker-agent.sh`
 
   const directDocker = `# Build the agent image from the binary this Sentinel serves
-curl -L -o sentinel-agent "${url}/agent/download/linux/amd64"
+curl -L -o sentinel-agent "${downloadURL}/agent/download/linux/amd64"
 chmod +x sentinel-agent
 printf 'FROM alpine:latest\\nRUN apk --no-cache add ca-certificates\\nCOPY sentinel-agent /usr/local/bin/sentinel-agent\\nENTRYPOINT ["/usr/local/bin/sentinel-agent"]\\n' > Dockerfile
 docker build -t sentinel-agent:local .
@@ -413,7 +419,7 @@ docker run -d \\
   -e HOST_PROC=/host/proc \\
   -e HOST_ETC=/host/etc \\
   -e DISK_PATH=/hostfs \\
-  -e SENTINEL_URL="${url}" \\
+  -e SENTINEL_URL="${reportURL}" \\
   -e AGENT_ID="${agent.agent_id}" \\
   -e SERVER_TOKEN="${agent.server_token ?? ''}" \\
   -e SERVER_NAME="${agent.name}" \\
@@ -435,6 +441,16 @@ docker run -d \\
           </p>
         </div>
       </div>
+
+      {/* Only shown when the two differ, since that is the case worth
+          explaining: the commands look inconsistent otherwise. */}
+      {proxied && (
+        <div className="rounded-lg border border-white/10 bg-slate-800/40 p-4 text-xs text-slate-400">
+          Scripts download from <span className="text-slate-200">{downloadURL}</span> and the agent
+          reports to <span className="text-slate-200">{reportURL}</span>. Both addresses must be
+          reachable from the server you are installing on. Change them under Settings → System.
+        </div>
+      )}
 
       {/* Horizontally scrollable so four tabs do not wrap on a phone. */}
       <div className="-mx-1 flex gap-1 overflow-x-auto border-b border-white/10 px-1">
@@ -489,14 +505,14 @@ docker run -d \\
             <h4 className="mb-2 text-sm font-medium text-white">Prerequisites</h4>
             <ul className="list-inside list-disc space-y-1 text-sm text-slate-400">
               <li>A 64-bit Linux host (x86-64 or ARM64)</li>
-              <li>Network access from the host to {url}</li>
+              <li>Network access from the host to {reportURL}</li>
               <li>Root, to install the binary and the service</li>
               <li>Docker, only if you want container metrics as well as host metrics</li>
             </ul>
           </div>
           <Command
             label="1. Download the binary"
-            value={`curl -L -o sentinel-agent "${url}/agent/download/linux/amd64"`}
+            value={`curl -L -o sentinel-agent "${downloadURL}/agent/download/linux/amd64"`}
           />
           <Command
             label="2. Install it"
