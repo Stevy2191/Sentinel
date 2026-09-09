@@ -29,6 +29,18 @@ COPY . .
 # -trimpath drops absolute build paths; -s -w strips the symbol table.
 RUN --mount=type=cache,target=/go/pkg/mod     --mount=type=cache,target=/root/.cache/go-build     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o sentinel ./cmd/sentinel
 
+# The monitoring agent, cross-built for the architectures a host is likely to
+# be. Built here so the server can hand the binary to an installer rather than
+# depending on a release host being reachable from the monitored machine.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    mkdir -p /app/agent-dist && \
+    for arch in amd64 arm64; do \
+      CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath \
+        -ldflags="-s -w -X main.version=${AGENT_VERSION:-1.0.0}" \
+        -o /app/agent-dist/sentinel-agent-linux-$arch ./cmd/agent; \
+    done
+
 # Runtime stage.
 FROM alpine:latest
 # curl is used by the docker-compose healthcheck; tzdata for time zones.
@@ -36,6 +48,7 @@ RUN apk --no-cache add ca-certificates tzdata curl
 WORKDIR /app
 COPY --from=builder /app/sentinel .
 COPY migrations/ ./migrations/
+COPY --from=builder /app/agent-dist/ ./agent-dist/
 # Generated report PDFs land here. Mount it as a volume in compose, or reports
 # are lost whenever the container is replaced.
 #
