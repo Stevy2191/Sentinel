@@ -6,6 +6,7 @@ import api from '@/services/api'
 import { useToasts, Toaster } from '@/components/Toast'
 import SettingsCard from '@/components/SettingsCard'
 import BackupRestore from '@/components/BackupRestore'
+import ReconnectAgent from '@/components/ReconnectAgent'
 import TimezoneSelector from '@/components/TimezoneSelector'
 import NotificationSettings from '@/pages/NotificationSettings'
 import { useAuthContext } from '@/context/AuthContext'
@@ -611,6 +612,8 @@ export default function Settings() {
                   Only resolved incidents are removed. An ongoing incident is kept until it ends.
                 </p>
               </SettingsCard>
+
+              <ReconnectAgent push={push} />
 
               <BackupRestore push={push} />
 

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -142,6 +143,19 @@ func (a *Agent) DeriveStatus(now time.Time) string {
 func ValidateAgentOS(os string) error {
 	if !agentOSTypes[strings.ToLower(strings.TrimSpace(os))] {
 		return fmt.Errorf("os_type must be one of ubuntu, debian, centos, rhel, windows, linux")
+	}
+	return nil
+}
+
+// agentIDPattern is the shape NewAgentID produces. Reconnecting accepts an id
+// from the caller, so it is checked against this rather than taken on trust —
+// otherwise an agent row could be created under any name somebody chose.
+var agentIDPattern = regexp.MustCompile(`^agent_[0-9a-f]{10}$`)
+
+// ValidateAgentID reports whether an id is one this server could have issued.
+func ValidateAgentID(id string) error {
+	if !agentIDPattern.MatchString(strings.TrimSpace(id)) {
+		return fmt.Errorf("agent id must look like agent_1a2b3c4d5e")
 	}
 	return nil
 }
