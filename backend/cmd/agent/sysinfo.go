@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"net"
 	"os"
 	"runtime"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 // repeating them thousands of times a day would be waste.
 type SystemInfo struct {
 	Hostname        string `json:"hostname,omitempty"`
+	IPAddress       string `json:"ip_address,omitempty"`
 	OSVersion       string `json:"os_version,omitempty"`
 	KernelVersion   string `json:"kernel_version,omitempty"`
 	Architecture    string `json:"architecture,omitempty"`
@@ -30,6 +32,7 @@ type SystemInfo struct {
 func collectSystemInfo(dockerAvailable bool) SystemInfo {
 	info := SystemInfo{
 		Hostname:        hostname(),
+		IPAddress:       detectIPAddress(),
 		OSVersion:       osVersion(),
 		KernelVersion:   kernelVersion(),
 		Architecture:    runtime.GOARCH,
@@ -110,4 +113,57 @@ func parseIntOr(raw string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+// detectIPAddress works out the address this host should be recorded under.
+//
+// Private addresses are preferred over public ones. A monitored host is
+// normally reached across an internal network, so 192.168.1.50 is the useful
+// answer even when the machine also holds a routable address — and on a host
+// behind NAT the public address it can see is not one anything can connect
+// back to.
+//
+// Returns an empty string when nothing suitable is found, which leaves the
+// server free to fall back to the address the request arrived from.
+func detectIPAddress() string {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+
+	var public string
+	for _, iface := range interfaces {
+		// Loopback tells us nothing, and an interface that is down cannot be
+		// how anything reaches this host.
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		if isVirtualInterface(iface.Name) {
+			continue
+		}
+
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip := ipNet.IP
+			// IPv4 only: these values are read by people and pasted into
+			// terminals, and a link-local IPv6 address is neither.
+			if ip == nil || ip.To4() == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+				continue
+			}
+			if ip.IsPrivate() {
+				return ip.String()
+			}
+			if public == "" {
+				public = ip.String()
+			}
+		}
+	}
+	return public
 }

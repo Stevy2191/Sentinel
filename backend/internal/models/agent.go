@@ -3,6 +3,7 @@ package models
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -68,10 +69,15 @@ type Agent struct {
 
 	Status        string     `json:"status" gorm:"column:status;not null;default:pending"`
 	LastHeartbeat *time.Time `json:"last_heartbeat" gorm:"column:last_heartbeat"`
-	IPAddress     *string    `json:"ip_address" gorm:"column:ip_address"`
-	Hostname      *string    `json:"hostname" gorm:"column:hostname"`
-	OSVersion     *string    `json:"os_version" gorm:"column:os_version"`
-	AgentVersion  *string    `json:"agent_version" gorm:"column:agent_version"`
+	// IPAddress is what the agent detected about itself. Named for the column
+	// it has always used; the value callers should display is EffectiveIP.
+	IPAddress *string `json:"detected_ip_address" gorm:"column:ip_address"`
+	// IPAddressOverride is an address an operator pinned. When set it is what
+	// gets displayed, whatever the host detected.
+	IPAddressOverride *string `json:"ip_address_override" gorm:"column:ip_address_override"`
+	Hostname          *string `json:"hostname" gorm:"column:hostname"`
+	OSVersion         *string `json:"os_version" gorm:"column:os_version"`
+	AgentVersion      *string `json:"agent_version" gorm:"column:agent_version"`
 
 	// ---- What the host reports about itself ----------------------------
 	// Refreshed on each heartbeat rather than stored per sample: these change
@@ -86,6 +92,25 @@ type Agent struct {
 
 	CreatedAt time.Time `json:"created_at" gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt time.Time `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
+}
+
+// EffectiveIP is the address to show: the override when an operator set one,
+// otherwise what the agent detected.
+func (a *Agent) EffectiveIP() *string {
+	if a.IPAddressOverride != nil && strings.TrimSpace(*a.IPAddressOverride) != "" {
+		return a.IPAddressOverride
+	}
+	return a.IPAddress
+}
+
+// MarshalJSON adds the resolved address under ip_address, so a caller can read
+// one field without having to know the precedence rule.
+func (a Agent) MarshalJSON() ([]byte, error) {
+	type alias Agent
+	return json.Marshal(struct {
+		alias
+		IPAddress *string `json:"ip_address"`
+	}{alias: alias(a), IPAddress: a.EffectiveIP()})
 }
 
 // TableName pins the table, since GORM would otherwise pluralise to "agents"

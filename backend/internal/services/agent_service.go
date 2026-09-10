@@ -124,7 +124,7 @@ func safePrefix(s string, n int) string {
 
 // Update changes the settings an operator owns. Credentials are not among
 // them: rotating a token would silently break the installed agent.
-func (s *AgentService) Update(ctx context.Context, agentID string, name string, osType string, interval, retries int) (*models.Agent, error) {
+func (s *AgentService) Update(ctx context.Context, agentID string, name string, osType string, interval, retries int, ipOverride *string) (*models.Agent, error) {
 	agent, err := s.Get(ctx, agentID)
 	if err != nil {
 		return nil, err
@@ -134,7 +134,9 @@ func (s *AgentService) Update(ctx context.Context, agentID string, name string, 
 		"os_type":        osType,
 		"check_interval": interval,
 		"retry_attempts": retries,
-		"updated_at":     time.Now(),
+		// nil clears it, which is how an operator goes back to detection.
+		"ip_address_override": ipOverride,
+		"updated_at":          time.Now(),
 	}
 	if err := s.db.WithContext(ctx).Model(&models.Agent{}).
 		Where("id = ?", agent.ID).Updates(updates).Error; err != nil {

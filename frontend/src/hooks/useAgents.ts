@@ -15,7 +15,12 @@ export interface Agent {
   retry_attempts: number
   status: AgentStatus
   last_heartbeat: string | null
+  /** The address to display: the override when set, else what was detected. */
   ip_address: string | null
+  /** What the agent saw of itself. */
+  detected_ip_address: string | null
+  /** An address an operator pinned, or null to use what is detected. */
+  ip_address_override: string | null
   hostname: string | null
   os_version: string | null
   agent_version: string | null
@@ -75,6 +80,8 @@ export interface CreateAgentInput {
   os_type: AgentOS
   check_interval: number
   retry_attempts: number
+  /** Empty or omitted lets the agent detect its own address. */
+  ip_address_override?: string
 }
 
 /**

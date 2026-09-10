@@ -237,6 +237,12 @@ export default function ServerDetail() {
               />
               <InfoRow label="Go version" value={agent.go_version} />
               <InfoRow label="IP" value={agent.ip_address} />
+              {/* Only when the two differ, which is the case worth seeing: it
+                  shows the displayed address is pinned rather than observed,
+                  and what the host actually sees of itself. */}
+              {agent.ip_address_override && agent.detected_ip_address !== agent.ip_address_override && (
+                <InfoRow label="Detected IP" value={agent.detected_ip_address} />
+              )}
               <InfoRow label="Hostname" value={agent.hostname} />
               <InfoRow
                 label="Docker"

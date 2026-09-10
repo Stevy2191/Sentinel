@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -79,6 +80,9 @@ type createAgentRequest struct {
 	OSType        string `json:"os_type"`
 	CheckInterval *int   `json:"check_interval"`
 	RetryAttempts *int   `json:"retry_attempts"`
+	// IPAddressOverride pins the address this host is recorded under. Empty
+	// means use whatever the agent detects.
+	IPAddressOverride *string `json:"ip_address_override"`
 }
 
 // validateAgentSettings applies the shared bounds for create and update.
@@ -106,6 +110,27 @@ func validateAgentSettings(c *gin.Context, name, osType string, interval, retrie
 	return true
 }
 
+// parseIPOverride validates an operator-supplied address.
+//
+// Empty is valid and means "detect it", which is the default. Anything else
+// has to be a real address: a hostname here would be recorded and displayed as
+// though it were one, and never resolve.
+func parseIPOverride(c *gin.Context, raw *string) (*string, bool) {
+	if raw == nil {
+		return nil, true
+	}
+	value := strings.TrimSpace(*raw)
+	if value == "" {
+		return nil, true
+	}
+	if net.ParseIP(value) == nil {
+		respondError(c, http.StatusBadRequest,
+			"ip_address_override must be an IP address, e.g. 192.168.1.50")
+		return nil, false
+	}
+	return &value, true
+}
+
 // CreateAgentHandler handles POST /api/v1/agents.
 func CreateAgentHandler(agents *services.AgentService, settings *services.SettingsService) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -131,11 +156,17 @@ func CreateAgentHandler(agents *services.AgentService, settings *services.Settin
 			return
 		}
 
+		override, ok := parseIPOverride(c, req.IPAddressOverride)
+		if !ok {
+			return
+		}
+
 		agent := &models.Agent{
-			Name:          name,
-			OSType:        osType,
-			CheckInterval: interval,
-			RetryAttempts: retries,
+			Name:              name,
+			OSType:            osType,
+			CheckInterval:     interval,
+			RetryAttempts:     retries,
+			IPAddressOverride: override,
 		}
 		if err := agents.Register(c.Request.Context(), agent); err != nil {
 			respondInternal(c, "CreateAgentHandler", err)
@@ -192,10 +223,11 @@ func GetAgentHandler(agents *services.AgentService, settings *services.SettingsS
 }
 
 type updateAgentRequest struct {
-	Name          *string `json:"name"`
-	OSType        *string `json:"os_type"`
-	CheckInterval *int    `json:"check_interval"`
-	RetryAttempts *int    `json:"retry_attempts"`
+	Name              *string `json:"name"`
+	OSType            *string `json:"os_type"`
+	CheckInterval     *int    `json:"check_interval"`
+	RetryAttempts     *int    `json:"retry_attempts"`
+	IPAddressOverride *string `json:"ip_address_override"`
 }
 
 // UpdateAgentHandler handles PATCH /api/v1/agents/:agent_id.
@@ -230,7 +262,16 @@ func UpdateAgentHandler(agents *services.AgentService) gin.HandlerFunc {
 			return
 		}
 
-		updated, err := agents.Update(c.Request.Context(), current.AgentID, name, osType, interval, retries)
+		override := current.IPAddressOverride
+		if req.IPAddressOverride != nil {
+			parsed, ok := parseIPOverride(c, req.IPAddressOverride)
+			if !ok {
+				return
+			}
+			override = parsed
+		}
+
+		updated, err := agents.Update(c.Request.Context(), current.AgentID, name, osType, interval, retries, override)
 		if err != nil {
 			respondAgentError(c, err)
 			return
