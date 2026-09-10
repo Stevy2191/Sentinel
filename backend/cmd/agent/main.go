@@ -140,6 +140,10 @@ func run(ctx context.Context, cfg config, collector *Collector, docker *DockerCo
 	// let the first reported cycle carry a real utilisation figure.
 	collector.Collect()
 
+	// Always what the host detected. An operator's override is applied by the
+	// server when displaying, not here: keeping both means the two can be
+	// compared when one looks wrong, and the override can be changed without
+	// touching the monitored host.
 	sysInfo := collectSystemInfo(docker.Available())
 	log.Printf("host: %s, %s, %s, %d core(s), %d MB",
 		sysInfo.Hostname, sysInfo.OSVersion, sysInfo.Architecture, sysInfo.CPUCores, sysInfo.MemoryTotalMB)

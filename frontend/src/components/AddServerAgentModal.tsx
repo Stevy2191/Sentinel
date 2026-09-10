@@ -28,6 +28,22 @@ const OS_OPTIONS: { value: AgentOS; label: string }[] = [
 const TABS = ['One-Click Install', 'Docker One-Click', 'Direct Docker Run', 'Manual'] as const
 type Tab = (typeof TABS)[number]
 
+/**
+ * Whether a string is an IP address, matching what the server accepts.
+ *
+ * Both families, because an agent on an IPv6-only network has no IPv4 address
+ * to give.
+ */
+function isIPAddress(value: string): boolean {
+  const v4 = value.split('.')
+  if (v4.length === 4) {
+    return v4.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255)
+  }
+  // Loose on the IPv6 side: the server is the authority, and rejecting a valid
+  // address here would block a legitimate value.
+  return value.includes(':') && /^[0-9a-fA-F:.]+$/.test(value)
+}
+
 const field =
   'w-full rounded-lg border border-white/10 bg-slate-800/50 px-4 py-2 text-white placeholder-slate-500 transition focus:border-white/30 focus:outline-none'
 
@@ -90,6 +106,7 @@ export default function AddServerAgentModal({ isOpen, onClose, onCreated, push, 
 
   const [name, setName] = useState('')
   const [osType, setOSType] = useState<AgentOS>('ubuntu')
+  const [ipOverride, setIPOverride] = useState('')
   const [interval, setInterval] = useState(60)
   const [retries, setRetries] = useState(3)
   const [touched, setTouched] = useState(false)
@@ -104,6 +121,7 @@ export default function AddServerAgentModal({ isOpen, onClose, onCreated, push, 
     if (!isOpen) return
     setName('')
     setOSType('ubuntu')
+    setIPOverride('')
     setInterval(60)
     setRetries(3)
     setTouched(false)
@@ -133,14 +151,18 @@ export default function AddServerAgentModal({ isOpen, onClose, onCreated, push, 
   if (!isOpen) return null
 
   const nameError = touched && !name.trim() ? 'A server name is required' : undefined
+  const ipError =
+    ipOverride.trim() !== '' && !isIPAddress(ipOverride.trim())
+      ? 'Must be an IP address, e.g. 192.168.1.50'
+      : undefined
   const intervalError =
     interval < 1 || interval > 3600 ? 'Must be between 1 and 3600 seconds' : undefined
   const retriesError = retries < 1 || retries > 10 ? 'Must be between 1 and 10' : undefined
-  const canSubmit = !busy && name.trim() !== '' && !intervalError && !retriesError
+  const canSubmit = !busy && name.trim() !== '' && !intervalError && !retriesError && !ipError
 
   const submit = async () => {
     setTouched(true)
-    if (!name.trim() || intervalError || retriesError) return
+    if (!name.trim() || intervalError || retriesError || ipError) return
     setError(null)
     try {
       const result = await create({
@@ -148,6 +170,7 @@ export default function AddServerAgentModal({ isOpen, onClose, onCreated, push, 
         os_type: osType,
         check_interval: interval,
         retry_attempts: retries,
+        ip_address_override: ipOverride.trim(),
       })
       setCreated(result)
       onCreated()
@@ -197,6 +220,9 @@ export default function AddServerAgentModal({ isOpen, onClose, onCreated, push, 
               nameError={nameError}
               osType={osType}
               setOSType={setOSType}
+              ipOverride={ipOverride}
+              setIPOverride={setIPOverride}
+              ipError={ipError}
               interval={interval}
               setInterval={setInterval}
               intervalError={intervalError}
@@ -241,6 +267,9 @@ function ConfigureStep(props: {
   nameError?: string
   osType: AgentOS
   setOSType: (v: AgentOS) => void
+  ipOverride: string
+  setIPOverride: (v: string) => void
+  ipError?: string
   interval: number
   setInterval: (v: number) => void
   intervalError?: string
@@ -270,6 +299,23 @@ function ConfigureStep(props: {
             />
             <p className={`mt-1 text-xs ${props.nameError ? 'text-red-400' : 'text-slate-500'}`}>
               {props.nameError ?? 'How this host appears in Sentinel'}
+            </p>
+          </div>
+
+          <div>
+            <label htmlFor="agent-ip" className="mb-1 block text-sm font-medium text-white">
+              IP Address
+            </label>
+            <input
+              id="agent-ip"
+              value={props.ipOverride}
+              onChange={(e) => props.setIPOverride(e.target.value)}
+              placeholder="Auto-detect (optional)"
+              className={`${field} ${props.ipError ? 'border-red-500/60' : ''}`}
+            />
+            <p className={`mt-1 text-xs ${props.ipError ? 'text-red-400' : 'text-slate-500'}`}>
+              {props.ipError ??
+                'Leave blank to auto-detect, or enter the internal address this host is reached on (e.g. 192.168.1.10). Useful when the host sits behind NAT and detects an address nothing can connect back to.'}
             </p>
           </div>
 
