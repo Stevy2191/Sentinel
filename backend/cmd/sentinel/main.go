@@ -194,6 +194,22 @@ func run() error {
 	sslChecker := services.NewSSLCheckerService(db, notificationManager)
 	incidentRetention := services.NewIncidentRetentionService(db, settingsService)
 	agentService := services.NewAgentService(db)
+	// pg_dump and psql read the same settings the pool does, so a backup goes
+	// to the database the application is actually using rather than to
+	// whatever a second set of variables happens to point at.
+	backupService := services.NewBackupService(
+		getenv("BACKUP_DIR", "/var/lib/sentinel/backups"),
+		services.DBConfig{
+			Host:     getenv("DB_HOST", "localhost"),
+			Port:     getenv("DB_PORT", "5432"),
+			User:     getenv("DB_USER", "sentinel"),
+			Password: os.Getenv("DB_PASSWORD"),
+			Name:     getenv("DB_NAME", "sentinel"),
+		},
+	)
+	if err := backupService.Available(); err != nil {
+		log.Printf("warning: database backup is unavailable: %v", err)
+	}
 	if err := notificationManager.LoadFromDatabase(notifyCtx); err != nil {
 		log.Printf("warning: loading notification configs from database: %v", err)
 	}
@@ -259,6 +275,7 @@ func run() error {
 	api.RegisterSettingsRoutes(v1, settingsService, models.DefaultMonitorCheckInterval, authService)
 	api.RegisterSSLCertificateRoutes(v1, sslChecker, authService)
 	api.RegisterAgentRoutes(v1, agentService, settingsService, authService)
+	api.RegisterBackupRoutes(v1, backupService, auditService, authService)
 	// Per-user theme (not admin-gated): only AuthMiddleware applies.
 	// Self password change (any authenticated user).
 	v1.POST("/auth/change-password", api.ChangeOwnPasswordHandler(authService))

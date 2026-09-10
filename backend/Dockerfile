@@ -44,7 +44,13 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # Runtime stage.
 FROM alpine:latest
 # curl is used by the docker-compose healthcheck; tzdata for time zones.
-RUN apk --no-cache add ca-certificates tzdata curl
+#
+# postgresql16-client supplies pg_dump and psql for database backup and
+# restore. The major version is pinned to the server's rather than tracking
+# "latest": pg_dump refuses to dump a server newer than itself, and a client
+# ahead of the server writes archives the server cannot read back. Change this
+# in step with the postgres image in docker-compose.
+RUN apk --no-cache add ca-certificates tzdata curl postgresql16-client
 WORKDIR /app
 COPY --from=builder /app/sentinel .
 COPY migrations/ ./migrations/
