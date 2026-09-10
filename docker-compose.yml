@@ -94,6 +94,8 @@ services:
       # Tuning knobs that previously had no way in from .env.
       DEFAULT_CHECK_INTERVAL: ${DEFAULT_CHECK_INTERVAL:-30}
       REPORT_WORKERS: ${REPORT_WORKERS:-2}
+      # Where database backups are written. Must match the volume below.
+      BACKUP_DIR: ${BACKUP_DIR:-/var/lib/sentinel/backups}
     ports:
       - "${BACKEND_PORT:-3001}:3001"
     volumes:
@@ -101,6 +103,11 @@ services:
       # Generated report PDFs, kept on the host so they survive a container
       # replacement. REPORTS_DIR must match the container-side path.
       - ./reports:/app/reports
+      # Database backups. A named volume rather than a bind mount: these files
+      # contain every credential in the database, and a named volume keeps the
+      # restrictive permissions the backend sets instead of inheriting whatever
+      # the host directory allows.
+      - sentinel_backups:/var/lib/sentinel/backups
     # CAP_NET_RAW lets the backend open raw ICMP sockets for ping monitor
     # checks and network discovery scans. Without it, both fall back to
     # unprivileged ICMP (if the host's ping_group_range allows it) or a TCP
@@ -177,4 +184,8 @@ services:
     restart: unless-stopped
 
 volumes:
+  # Database backups. A named volume rather than a bind mount so the files
+  # keep their restrictive permissions and are not readable by whoever happens
+  # to own the host directory.
+  sentinel_backups:
   postgres_data:

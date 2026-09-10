@@ -5,6 +5,7 @@ import { Volume2, ExternalLink, Loader2 } from 'lucide-react'
 import api from '@/services/api'
 import { useToasts, Toaster } from '@/components/Toast'
 import SettingsCard from '@/components/SettingsCard'
+import BackupRestore from '@/components/BackupRestore'
 import TimezoneSelector from '@/components/TimezoneSelector'
 import NotificationSettings from '@/pages/NotificationSettings'
 import { useAuthContext } from '@/context/AuthContext'
@@ -610,6 +611,8 @@ export default function Settings() {
                   Only resolved incidents are removed. An ongoing incident is kept until it ends.
                 </p>
               </SettingsCard>
+
+              <BackupRestore push={push} />
 
               <div className="flex items-center justify-between border-t border-white/10 pt-4">
                 <p className="text-xs text-slate-500">
