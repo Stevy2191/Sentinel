@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { X, Copy, Check, Loader2, ServerCog } from 'lucide-react'
-import {
-  useAgentActions,
-  type AgentOS,
-  type CreatedAgent,
-} from '@/hooks/useAgents'
+import { useAgentActions, type CreatedAgent } from '@/hooks/useAgents'
+import AgentSettingsFields, {
+  validateAgentSettings,
+  type AgentSettings,
+} from '@/components/AgentSettingsFields'
 import type { ApiError } from '@/services/api'
 
 interface Props {
@@ -16,36 +16,17 @@ interface Props {
   existing?: CreatedAgent | null
 }
 
-const OS_OPTIONS: { value: AgentOS; label: string }[] = [
-  { value: 'ubuntu', label: 'Ubuntu' },
-  { value: 'debian', label: 'Debian' },
-  { value: 'centos', label: 'CentOS' },
-  { value: 'rhel', label: 'RHEL' },
-  { value: 'windows', label: 'Windows' },
-  { value: 'linux', label: 'Linux (Generic)' },
-]
+/** A fresh form. */
+const BLANK: AgentSettings = {
+  name: '',
+  osType: 'ubuntu',
+  ipOverride: '',
+  interval: 60,
+  retries: 3,
+}
 
 const TABS = ['One-Click Install', 'Docker One-Click', 'Direct Docker Run', 'Manual'] as const
 type Tab = (typeof TABS)[number]
-
-/**
- * Whether a string is an IP address, matching what the server accepts.
- *
- * Both families, because an agent on an IPv6-only network has no IPv4 address
- * to give.
- */
-function isIPAddress(value: string): boolean {
-  const v4 = value.split('.')
-  if (v4.length === 4) {
-    return v4.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255)
-  }
-  // Loose on the IPv6 side: the server is the authority, and rejecting a valid
-  // address here would block a legitimate value.
-  return value.includes(':') && /^[0-9a-fA-F:.]+$/.test(value)
-}
-
-const field =
-  'w-full rounded-lg border border-white/10 bg-slate-800/50 px-4 py-2 text-white placeholder-slate-500 transition focus:border-white/30 focus:outline-none'
 
 /** A command block with its own copy button. */
 function Command({ label, value }: { label?: string; value: string }) {
@@ -104,11 +85,7 @@ export default function AddServerAgentModal({ isOpen, onClose, onCreated, push, 
   const { create, busy } = useAgentActions()
   const firstFieldRef = useRef<HTMLInputElement>(null)
 
-  const [name, setName] = useState('')
-  const [osType, setOSType] = useState<AgentOS>('ubuntu')
-  const [ipOverride, setIPOverride] = useState('')
-  const [interval, setInterval] = useState(60)
-  const [retries, setRetries] = useState(3)
+  const [values, setValues] = useState<AgentSettings>(BLANK)
   const [touched, setTouched] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Seeded from the prop rather than only in the effect below, so opening
@@ -119,11 +96,7 @@ export default function AddServerAgentModal({ isOpen, onClose, onCreated, push, 
 
   useEffect(() => {
     if (!isOpen) return
-    setName('')
-    setOSType('ubuntu')
-    setIPOverride('')
-    setInterval(60)
-    setRetries(3)
+    setValues(BLANK)
     setTouched(false)
     setError(null)
     setTab('One-Click Install')
@@ -150,27 +123,20 @@ export default function AddServerAgentModal({ isOpen, onClose, onCreated, push, 
 
   if (!isOpen) return null
 
-  const nameError = touched && !name.trim() ? 'A server name is required' : undefined
-  const ipError =
-    ipOverride.trim() !== '' && !isIPAddress(ipOverride.trim())
-      ? 'Must be an IP address, e.g. 192.168.1.50'
-      : undefined
-  const intervalError =
-    interval < 1 || interval > 3600 ? 'Must be between 1 and 3600 seconds' : undefined
-  const retriesError = retries < 1 || retries > 10 ? 'Must be between 1 and 10' : undefined
-  const canSubmit = !busy && name.trim() !== '' && !intervalError && !retriesError && !ipError
+  const { errors, valid } = validateAgentSettings(values, touched)
+  const canSubmit = !busy && valid
 
   const submit = async () => {
     setTouched(true)
-    if (!name.trim() || intervalError || retriesError || ipError) return
+    if (!valid) return
     setError(null)
     try {
       const result = await create({
-        name: name.trim(),
-        os_type: osType,
-        check_interval: interval,
-        retry_attempts: retries,
-        ip_address_override: ipOverride.trim(),
+        name: values.name.trim(),
+        os_type: values.osType,
+        check_interval: values.interval,
+        retry_attempts: values.retries,
+        ip_address_override: values.ipOverride.trim(),
       })
       setCreated(result)
       onCreated()
@@ -213,24 +179,31 @@ export default function AddServerAgentModal({ isOpen, onClose, onCreated, push, 
 
         <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-6">
           {!created ? (
-            <ConfigureStep
-              firstFieldRef={firstFieldRef}
-              name={name}
-              setName={setName}
-              nameError={nameError}
-              osType={osType}
-              setOSType={setOSType}
-              ipOverride={ipOverride}
-              setIPOverride={setIPOverride}
-              ipError={ipError}
-              interval={interval}
-              setInterval={setInterval}
-              intervalError={intervalError}
-              retries={retries}
-              setRetries={setRetries}
-              retriesError={retriesError}
-              error={error}
-            />
+            <>
+              <AgentSettingsFields
+                values={values}
+                onChange={setValues}
+                errors={errors}
+                firstFieldRef={firstFieldRef}
+              />
+              {/* Only shown while creating: it explains credentials that do
+                  not exist yet, which is meaningless when editing. */}
+              <div className="rounded-lg border border-white/10 bg-slate-800/40 p-4">
+                <div className="flex items-start gap-3">
+                  <ServerCog className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+                  <p className="text-xs text-slate-400">
+                    The agent id and access token are generated when you create the agent. The
+                    token is shown once here — it can be read again later from this agent&apos;s
+                    install instructions, but it is never listed alongside the other agents.
+                  </p>
+                </div>
+              </div>
+              {error && (
+                <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
+                  {error}
+                </div>
+              )}
+            </>
           ) : (
             <InstallStep created={created} tab={tab} setTab={setTab} />
           )}
@@ -257,156 +230,6 @@ export default function AddServerAgentModal({ isOpen, onClose, onCreated, push, 
         </div>
       </div>
     </div>
-  )
-}
-
-function ConfigureStep(props: {
-  firstFieldRef: React.RefObject<HTMLInputElement>
-  name: string
-  setName: (v: string) => void
-  nameError?: string
-  osType: AgentOS
-  setOSType: (v: AgentOS) => void
-  ipOverride: string
-  setIPOverride: (v: string) => void
-  ipError?: string
-  interval: number
-  setInterval: (v: number) => void
-  intervalError?: string
-  retries: number
-  setRetries: (v: number) => void
-  retriesError?: string
-  error: string | null
-}) {
-  return (
-    <>
-      <section>
-        <h3 className="mb-4 text-xs font-semibold uppercase tracking-widest text-slate-300">
-          Server
-        </h3>
-        <div className="space-y-4">
-          <div>
-            <label htmlFor="agent-name" className="mb-1 block text-sm font-medium text-white">
-              Server Name
-            </label>
-            <input
-              id="agent-name"
-              ref={props.firstFieldRef}
-              value={props.name}
-              onChange={(e) => props.setName(e.target.value)}
-              placeholder="e.g. web-server-01"
-              className={`${field} ${props.nameError ? 'border-red-500/60' : ''}`}
-            />
-            <p className={`mt-1 text-xs ${props.nameError ? 'text-red-400' : 'text-slate-500'}`}>
-              {props.nameError ?? 'How this host appears in Sentinel'}
-            </p>
-          </div>
-
-          <div>
-            <label htmlFor="agent-ip" className="mb-1 block text-sm font-medium text-white">
-              IP Address
-            </label>
-            <input
-              id="agent-ip"
-              value={props.ipOverride}
-              onChange={(e) => props.setIPOverride(e.target.value)}
-              placeholder="Auto-detect (optional)"
-              className={`${field} ${props.ipError ? 'border-red-500/60' : ''}`}
-            />
-            <p className={`mt-1 text-xs ${props.ipError ? 'text-red-400' : 'text-slate-500'}`}>
-              {props.ipError ??
-                'Leave blank to auto-detect, or enter the internal address this host is reached on (e.g. 192.168.1.10). Useful when the host sits behind NAT and detects an address nothing can connect back to.'}
-            </p>
-          </div>
-
-          <div>
-            <label htmlFor="agent-os" className="mb-1 block text-sm font-medium text-white">
-              Operating System
-            </label>
-            <select
-              id="agent-os"
-              value={props.osType}
-              onChange={(e) => props.setOSType(e.target.value as AgentOS)}
-              className={`${field} cursor-pointer appearance-none`}
-            >
-              {OS_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-xs text-slate-500">
-              Chooses which install commands are shown. The agent itself is the same build.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <div className="border-t border-white/10" />
-
-      <section>
-        <h3 className="mb-4 text-xs font-semibold uppercase tracking-widest text-slate-300">
-          Collection
-        </h3>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label htmlFor="agent-interval" className="mb-1 block text-sm font-medium text-white">
-              Check Interval
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                id="agent-interval"
-                type="number"
-                min={1}
-                max={3600}
-                value={props.interval}
-                onChange={(e) => props.setInterval(Number(e.target.value))}
-                className={`w-32 ${field} ${props.intervalError ? 'border-red-500/60' : ''}`}
-              />
-              <span className="text-sm text-slate-400">seconds</span>
-            </div>
-            <p className={`mt-1 text-xs ${props.intervalError ? 'text-red-400' : 'text-slate-500'}`}>
-              {props.intervalError ?? 'How often metrics are collected'}
-            </p>
-          </div>
-
-          <div>
-            <label htmlFor="agent-retries" className="mb-1 block text-sm font-medium text-white">
-              Retry Attempts
-            </label>
-            <input
-              id="agent-retries"
-              type="number"
-              min={1}
-              max={10}
-              value={props.retries}
-              onChange={(e) => props.setRetries(Number(e.target.value))}
-              className={`w-32 ${field} ${props.retriesError ? 'border-red-500/60' : ''}`}
-            />
-            <p className={`mt-1 text-xs ${props.retriesError ? 'text-red-400' : 'text-slate-500'}`}>
-              {props.retriesError ?? 'Before a submission is queued for later'}
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <div className="rounded-lg border border-white/10 bg-slate-800/40 p-4">
-        <div className="flex items-start gap-3">
-          <ServerCog className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
-          <p className="text-xs text-slate-400">
-            The agent id and access token are generated when you create the agent. The token is
-            shown once here — it can be read again later from this agent&apos;s install
-            instructions, but it is never listed alongside the other agents.
-          </p>
-        </div>
-      </div>
-
-      {props.error && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
-          {props.error}
-        </div>
-      )}
-    </>
   )
 }
 

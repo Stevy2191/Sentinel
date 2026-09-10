@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Server, Loader2, Terminal, Trash2 } from 'lucide-react'
+import { ArrowLeft, Server, Loader2, Terminal, Trash2, Pencil } from 'lucide-react'
 import { useToasts, Toaster } from '@/components/Toast'
 import ServerStatusCards from '@/components/ServerStatusCards'
 import HistoricalPerformance, { type RangeValue } from '@/components/HistoricalPerformance'
 import AddServerAgentModal from '@/components/AddServerAgentModal'
+import EditServerAgentModal from '@/components/EditServerAgentModal'
 import {
   useAgentStatus,
   useAgentMetrics,
@@ -33,13 +34,14 @@ export default function ServerDetail() {
   const { appName } = useAppConfig()
   const isAdmin = !!currentUser?.is_admin
 
-  const { detail, loading, error } = useAgentStatus(agentID)
+  const { detail, loading, error, refetch } = useAgentStatus(agentID)
   const [range, setRange] = useState<RangeValue>('1h')
   const { metrics, loading: metricsLoading } = useAgentMetrics(agentID, range)
   const { getWithToken, remove, busy } = useAgentActions()
 
   const [instructions, setInstructions] = useState<CreatedAgent | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [editing, setEditing] = useState(false)
 
   const agent = detail?.agent
   const latest = detail?.latest ?? null
@@ -118,6 +120,9 @@ export default function ServerDetail() {
         </div>
         {isAdmin && (
           <div className="flex items-center gap-2">
+            <button className="btn-secondary !py-1.5" onClick={() => setEditing(true)}>
+              <Pencil className="h-4 w-4" /> Edit
+            </button>
             <button className="btn-secondary !py-1.5" onClick={() => void showInstructions()}>
               <Terminal className="h-4 w-4" /> Install instructions
             </button>
@@ -255,6 +260,17 @@ export default function ServerDetail() {
           </div>
         </aside>
       </div>
+
+      <EditServerAgentModal
+        agent={agent}
+        isOpen={editing}
+        onClose={() => setEditing(false)}
+        // Re-read rather than patching local state, so what is shown is what
+        // the server stored — including the address it resolved from the new
+        // override.
+        onSaved={() => void refetch()}
+        push={push}
+      />
 
       <AddServerAgentModal
         isOpen={!!instructions}
