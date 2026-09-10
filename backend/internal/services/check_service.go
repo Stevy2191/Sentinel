@@ -175,32 +175,76 @@ func (s *CheckService) httpAttempt(ctx context.Context, monitor *models.Monitor,
 
 // ExecuteTCPCheck opens a TCP connection to the monitor's host:port and reports
 // whether it succeeds within the timeout.
+// retryProbe runs a probe up to the monitor's configured attempts, returning
+// the first success or the last failure.
+//
+// Shared by the TCP and DNS checks. Both previously ran once whatever the
+// monitor's retry setting said, so a single dropped SYN or a single slow
+// resolver answer opened an incident and alerted, exactly as a single lost
+// ICMP packet did.
+func (s *CheckService) retryProbe(
+	ctx context.Context,
+	monitor *models.Monitor,
+	kind string,
+	probe func(ctx context.Context, budget time.Duration) *models.Check,
+) *models.Check {
+	attempts := probeAttempts(monitor)
+	budget := probeBudget(s.checkTimeout(monitor), attempts)
+
+	var last *models.Check
+	for attempt := 0; attempt < attempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return s.timeoutCheck(monitor, 0, ctx.Err())
+			case <-time.After(retryBackoff(attempt)):
+			}
+		}
+
+		check := probe(ctx, budget)
+		if check.Status == checkSuccess {
+			if attempt > 0 {
+				s.logger.Printf("[%s] monitor=%s succeeded on attempt %d of %d",
+					kind, monitor.ID, attempt+1, attempts)
+			}
+			return check
+		}
+		last = check
+	}
+
+	if last != nil && attempts > 1 {
+		last.ErrorMessage = fmt.Sprintf("failed %d attempts: %s", attempts, last.ErrorMessage)
+	}
+	return last
+}
+
 func (s *CheckService) ExecuteTCPCheck(ctx context.Context, monitor *models.Monitor) (*models.Check, error) {
-	timeout := s.checkTimeout(monitor)
 	address, err := hostPort(monitor.URL, "")
 	if err != nil {
 		return s.failedCheck(monitor, 0, 0, err.Error()), nil
 	}
 
-	dialCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+	return s.retryProbe(ctx, monitor, "tcp", func(ctx context.Context, budget time.Duration) *models.Check {
+		dialCtx, cancel := context.WithTimeout(ctx, budget)
+		defer cancel()
 
-	dialer := netguard.SafeDialer(timeout)
-	start := time.Now()
-	conn, err := dialer.DialContext(dialCtx, "tcp", address)
-	elapsed := time.Since(start)
-	if err != nil {
-		if isTimeout(err) {
-			s.logger.Printf("[tcp] monitor=%s addr=%s timeout after %s", monitor.ID, address, elapsed)
-			return s.timeoutCheck(monitor, int(elapsed.Milliseconds()), err), nil
+		dialer := netguard.SafeDialer(budget)
+		start := time.Now()
+		conn, err := dialer.DialContext(dialCtx, "tcp", address)
+		elapsed := time.Since(start)
+		if err != nil {
+			if isTimeout(err) {
+				s.logger.Printf("[tcp] monitor=%s addr=%s timeout after %s", monitor.ID, address, elapsed)
+				return s.timeoutCheck(monitor, int(elapsed.Milliseconds()), err)
+			}
+			s.logger.Printf("[tcp] monitor=%s addr=%s error=%v", monitor.ID, address, err)
+			return s.failedCheck(monitor, elapsed, 0, err.Error())
 		}
-		s.logger.Printf("[tcp] monitor=%s addr=%s error=%v", monitor.ID, address, err)
-		return s.failedCheck(monitor, elapsed, 0, err.Error()), nil
-	}
-	_ = conn.Close()
+		_ = conn.Close()
 
-	s.logger.Printf("[tcp] monitor=%s addr=%s connected in %dms", monitor.ID, address, elapsed.Milliseconds())
-	return s.successCheck(monitor, elapsed, 0), nil
+		s.logger.Printf("[tcp] monitor=%s addr=%s connected in %dms", monitor.ID, address, elapsed.Milliseconds())
+		return s.successCheck(monitor, elapsed, 0)
+	}), nil
 }
 
 // ExecutePingCheck resolves the monitor's host and sends an ICMP echo request.
@@ -226,18 +270,52 @@ func (s *CheckService) ExecutePingCheck(ctx context.Context, monitor *models.Mon
 		return s.failedCheck(monitor, 0, 0, "target address is not allowed (blocked network range)"), nil
 	}
 
-	check, err := s.icmpPing(ctx, monitor, target, timeout)
-	if err != nil {
-		s.logger.Printf("[ping] monitor=%s ICMP unavailable (%v); falling back to TCP:80", monitor.ID, err)
-		return s.tcpConnect(ctx, monitor, net.JoinHostPort(host, "80"), timeout)
+	// One lost packet is not an outage. ICMP is unreliable by design and
+	// routers deprioritise it, so a small amount of loss on a long path is
+	// normal — a single probe made every such loss look like the host was
+	// down. Several probes are sent and any reply counts, which is what
+	// `ping -c 3` does and what an operator checking by hand would accept.
+	attempts := probeAttempts(monitor)
+	budget := probeBudget(timeout, attempts)
+
+	var last *models.Check
+	for attempt := 0; attempt < attempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return s.timeoutCheck(monitor, 0, ctx.Err()), nil
+			case <-time.After(retryBackoff(attempt)):
+			}
+		}
+
+		check, err := s.icmpPing(ctx, monitor, target, budget, attempt)
+		if err != nil {
+			s.logger.Printf("[ping] monitor=%s ICMP unavailable (%v); falling back to TCP:80", monitor.ID, err)
+			return s.tcpConnect(ctx, monitor, net.JoinHostPort(host, "80"), timeout)
+		}
+		if check.Status == checkSuccess {
+			if attempt > 0 {
+				s.logger.Printf("[ping] monitor=%s host=%s replied on probe %d of %d",
+					monitor.ID, target, attempt+1, attempts)
+			}
+			return check, nil
+		}
+		last = check
 	}
-	return check, nil
+
+	// Every probe went unanswered. The message says how many, so a reader can
+	// tell a single lost packet from a host that is not answering at all.
+	if last != nil && attempts > 1 {
+		last.ErrorMessage = fmt.Sprintf("no reply to %d probes: %s", attempts, last.ErrorMessage)
+	}
+	s.logger.Printf("[ping] monitor=%s host=%s no reply to %d probe(s)", monitor.ID, target, attempts)
+	return last, nil
 }
 
 // icmpPing sends a single ICMP echo request to ipAddr and waits for a reply. A
 // setup error (e.g. insufficient privileges) is returned so the caller can fall
 // back; a completed probe is returned as a Check with a nil error.
-func (s *CheckService) icmpPing(ctx context.Context, monitor *models.Monitor, ipAddr string, timeout time.Duration) (*models.Check, error) {
+func (s *CheckService) icmpPing(ctx context.Context, monitor *models.Monitor, ipAddr string, timeout time.Duration, seq int) (*models.Check, error) {
 	privileged := false
 	conn, err := icmp.ListenPacket("udp4", "0.0.0.0")
 	if err != nil {
@@ -263,8 +341,10 @@ func (s *CheckService) icmpPing(ctx context.Context, monitor *models.Monitor, ip
 		Type: ipv4.ICMPTypeEcho,
 		Code: 0,
 		Body: &icmp.Echo{
-			ID:   os.Getpid() & 0xffff,
-			Seq:  1,
+			ID: os.Getpid() & 0xffff,
+			// Distinct per probe, so a reply to an earlier attempt that
+			// arrived late is not mistaken for a reply to this one.
+			Seq:  seq & 0xffff,
 			Data: []byte("SENTINEL-PING"),
 		},
 	}
@@ -302,6 +382,23 @@ func (s *CheckService) icmpPing(ctx context.Context, monitor *models.Monitor, ip
 			continue
 		}
 		if parsed.Type == ipv4.ICMPTypeEchoReply {
+			// Match the reply to the probe. A raw ICMP socket receives every
+			// echo reply arriving at the host, including replies to other
+			// processes and to this monitor's own earlier attempts, so
+			// accepting any of them would report a success that never
+			// happened. The unprivileged socket has the kernel rewrite the id,
+			// so only the sequence number is checked there.
+			echo, ok := parsed.Body.(*icmp.Echo)
+			if !ok {
+				continue
+			}
+			if echo.Seq != (seq & 0xffff) {
+				continue
+			}
+			if privileged && echo.ID != (os.Getpid()&0xffff) {
+				continue
+			}
+
 			elapsed := time.Since(start)
 			s.logger.Printf("[ping] monitor=%s host=%s rtt=%dms", monitor.ID, ipAddr, elapsed.Milliseconds())
 			return s.successCheck(monitor, elapsed, 0), nil
@@ -334,28 +431,29 @@ func (s *CheckService) tcpConnect(ctx context.Context, monitor *models.Monitor, 
 // succeeds within the timeout. On success the resolved addresses are recorded in
 // the check's error_message field for informational purposes.
 func (s *CheckService) ExecuteDNSCheck(ctx context.Context, monitor *models.Monitor) (*models.Check, error) {
-	timeout := s.checkTimeout(monitor)
 	host := hostname(monitor.URL)
 
-	lookupCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+	return s.retryProbe(ctx, monitor, "dns", func(ctx context.Context, budget time.Duration) *models.Check {
+		lookupCtx, cancel := context.WithTimeout(ctx, budget)
+		defer cancel()
 
-	start := time.Now()
-	addrs, err := net.DefaultResolver.LookupHost(lookupCtx, host)
-	elapsed := time.Since(start)
-	if err != nil {
-		if isTimeout(err) {
-			s.logger.Printf("[dns] monitor=%s host=%s timeout", monitor.ID, host)
-			return s.timeoutCheck(monitor, int(elapsed.Milliseconds()), err), nil
+		start := time.Now()
+		addrs, err := net.DefaultResolver.LookupHost(lookupCtx, host)
+		elapsed := time.Since(start)
+		if err != nil {
+			if isTimeout(err) {
+				s.logger.Printf("[dns] monitor=%s host=%s timeout", monitor.ID, host)
+				return s.timeoutCheck(monitor, int(elapsed.Milliseconds()), err)
+			}
+			s.logger.Printf("[dns] monitor=%s host=%s error=%v", monitor.ID, host, err)
+			return s.failedCheck(monitor, elapsed, 0, err.Error())
 		}
-		s.logger.Printf("[dns] monitor=%s host=%s error=%v", monitor.ID, host, err)
-		return s.failedCheck(monitor, elapsed, 0, err.Error()), nil
-	}
 
-	check := s.successCheck(monitor, elapsed, 0)
-	check.ErrorMessage = fmt.Sprintf("resolved: %s", strings.Join(addrs, ", "))
-	s.logger.Printf("[dns] monitor=%s host=%s resolved %d address(es) in %dms", monitor.ID, host, len(addrs), elapsed.Milliseconds())
-	return check, nil
+		check := s.successCheck(monitor, elapsed, 0)
+		check.ErrorMessage = fmt.Sprintf("resolved: %s", strings.Join(addrs, ", "))
+		s.logger.Printf("[dns] monitor=%s host=%s resolved %d address(es) in %dms", monitor.ID, host, len(addrs), elapsed.Milliseconds())
+		return check
+	}), nil
 }
 
 // StoreCheck persists a check result for the given monitor, defaulting the
@@ -479,6 +577,47 @@ func (s *CheckService) CountChecks(ctx context.Context, monitorID uuid.UUID, sta
 }
 
 // checkTimeout returns the effective per-check timeout for a monitor.
+// minProbeTimeout is the least time one probe is given, however the monitor's
+// timeout divides.
+const minProbeTimeout = time.Second
+
+// probeAttempts is how many probes one check may send: the first, plus the
+// monitor's configured retries.
+func probeAttempts(m *models.Monitor) int {
+	if m.Retries < 0 {
+		return 1
+	}
+	return m.Retries + 1
+}
+
+// probeBudget divides a monitor's timeout across its attempts.
+//
+// Per-attempt rather than per-check, so retrying does not quietly multiply how
+// long a check can take: timeout_seconds keeps meaning "how long this check may
+// run". Without that, a monitor set to 10s with 3 retries would hold the
+// sequential check loop for 40s on a host that is genuinely down, delaying
+// every monitor behind it.
+func probeBudget(total time.Duration, attempts int) time.Duration {
+	if attempts < 1 {
+		attempts = 1
+	}
+	per := total / time.Duration(attempts)
+	if per < minProbeTimeout {
+		per = minProbeTimeout
+	}
+	return per
+}
+
+// retryBackoff is the pause between probes.
+//
+// Short and near-constant, unlike the HTTP path's exponential seconds. The
+// failures being retried here are lost packets and momentary congestion, which
+// clear in milliseconds; waiting seconds would only make a check slower without
+// making it more likely to succeed.
+func retryBackoff(attempt int) time.Duration {
+	return time.Duration(attempt) * 300 * time.Millisecond
+}
+
 func (s *CheckService) checkTimeout(m *models.Monitor) time.Duration {
 	if m.TimeoutSeconds <= 0 {
 		return defaultCheckTimeout
