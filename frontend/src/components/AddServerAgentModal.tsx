@@ -25,7 +25,7 @@ const BLANK: AgentSettings = {
   retries: 3,
 }
 
-const TABS = ['One-Click Install', 'Docker One-Click', 'Direct Docker Run', 'Manual'] as const
+const TABS = ['One-Click Install', 'Docker One-Click', 'Direct Docker Run', 'Manual', 'Uninstall'] as const
 type Tab = (typeof TABS)[number]
 
 /** A command block with its own copy button. */
@@ -365,6 +365,63 @@ docker run -d \\
             Change <code>amd64</code> to <code>arm64</code> on ARM hardware.
           </p>
           <Command value={directDocker} />
+        </div>
+      )}
+
+      {tab === 'Uninstall' && (
+        <div className="space-y-4">
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-300">
+            <p className="font-medium">Before you remove it</p>
+            <ul className="mt-1 list-inside list-disc space-y-0.5">
+              <li>This host stops reporting immediately; its metrics stay until you delete it here.</li>
+              <li>Removing the agent does not remove it from Sentinel — it will show as offline.</li>
+              <li>
+                Keep the agent id <span className="font-mono">{agent.agent_id}</span> if you might
+                reconnect this host later.
+              </li>
+            </ul>
+          </div>
+
+          <Command
+            label="Installed with the systemd installer"
+            value={`# Stop it and prevent it starting at boot
+sudo systemctl stop sentinel-agent
+sudo systemctl disable sentinel-agent
+
+# Remove the service, binary, configuration and log
+sudo rm -f /etc/systemd/system/sentinel-agent.service
+sudo rm -f /usr/local/bin/sentinel-agent
+sudo rm -rf /etc/sentinel
+sudo rm -f /var/log/sentinel-agent.log
+
+sudo systemctl daemon-reload
+sudo systemctl reset-failed sentinel-agent 2>/dev/null || true`}
+          />
+
+          <Command
+            label="Installed with the Docker installer"
+            value={`# Stop and remove the container
+docker rm -f sentinel-agent
+
+# Remove the image built during installation (optional)
+docker rmi sentinel-agent:local`}
+          />
+
+          <Command
+            label="Verify nothing is left"
+            value={`systemctl status sentinel-agent   # expect: could not be found
+pgrep -a sentinel-agent           # expect: no output
+docker ps -a --filter name=sentinel-agent   # expect: no rows`}
+          />
+
+          <div className="rounded-lg border border-white/10 bg-slate-800/40 p-4">
+            <h4 className="mb-2 text-sm font-medium text-white">Then in Sentinel</h4>
+            <p className="text-xs text-slate-400">
+              Delete this server under Server Monitoring to remove it and its metric history.
+              Leaving it registered is also fine — it simply shows as offline. Nothing is removed
+              automatically.
+            </p>
+          </div>
         </div>
       )}
 

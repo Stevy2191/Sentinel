@@ -122,6 +122,77 @@ func safePrefix(s string, n int) string {
 	return s[:n]
 }
 
+// ReconnectResult says what reconnecting did.
+type ReconnectResult struct {
+	Agent *models.Agent `json:"agent"`
+	// Recreated is true when the agent had been deleted and its registration
+	// was restored, false when an existing agent's token was replaced.
+	Recreated bool `json:"recreated"`
+}
+
+// Reconnect issues a fresh token for an agent id, whether or not the agent
+// still exists.
+//
+// Two situations, one action. An agent that was deleted by mistake is still
+// running on its host and still knows its own id, so its registration is
+// recreated under that id and it can reconnect by being given the new token —
+// no reinstall. An agent that still exists simply has its token replaced,
+// which is what to do when a token has leaked or a host has the wrong one.
+//
+// The id is the only thing the host cannot be talked out of, so it is what
+// this is keyed on. The token is always new: reusing the old one would mean
+// storing it somewhere retrievable after deletion, and a credential that
+// survives deletion is worse than one that has to be re-copied.
+func (s *AgentService) Reconnect(ctx context.Context, agentID string, name string) (*ReconnectResult, error) {
+	if err := models.ValidateAgentID(agentID); err != nil {
+		return nil, err
+	}
+	token, err := models.NewServerToken()
+	if err != nil {
+		return nil, err
+	}
+
+	existing, err := s.Get(ctx, agentID)
+	if err != nil && !errors.Is(err, ErrAgentNotFound) {
+		return nil, err
+	}
+
+	now := time.Now()
+	if existing != nil {
+		if err := s.db.WithContext(ctx).Model(&models.Agent{}).
+			Where("id = ?", existing.ID).
+			Updates(map[string]interface{}{"server_token": token, "updated_at": now}).Error; err != nil {
+			return nil, fmt.Errorf("rotating token for %s: %w", agentID, err)
+		}
+		existing.ServerToken = token
+		s.logger.Printf("[agent] token rotated for %s", agentID)
+		return &ReconnectResult{Agent: existing, Recreated: false}, nil
+	}
+
+	if strings.TrimSpace(name) == "" {
+		name = agentID
+	}
+	agent := &models.Agent{
+		ID:            uuid.New(),
+		Name:          strings.TrimSpace(name),
+		AgentID:       agentID,
+		ServerToken:   token,
+		OSType:        "linux",
+		CheckInterval: models.DefaultAgentInterval,
+		RetryAttempts: models.DefaultAgentRetries,
+		// Pending rather than active: nothing has reported under this
+		// registration yet, and it stays pending until the host does.
+		Status:    models.AgentPending,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := s.db.WithContext(ctx).Create(agent).Error; err != nil {
+		return nil, fmt.Errorf("re-registering agent %s: %w", agentID, err)
+	}
+	s.logger.Printf("[agent] re-registered %s after deletion", agentID)
+	return &ReconnectResult{Agent: agent, Recreated: true}, nil
+}
+
 // Update changes the settings an operator owns. Credentials are not among
 // them: rotating a token would silently break the installed agent.
 func (s *AgentService) Update(ctx context.Context, agentID string, name string, osType string, interval, retries int, ipOverride *string) (*models.Agent, error) {

@@ -281,6 +281,47 @@ func UpdateAgentHandler(agents *services.AgentService) gin.HandlerFunc {
 	}
 }
 
+type reconnectRequest struct {
+	// Name is used only when the agent had been deleted and is being
+	// re-registered. Ignored for an agent that still exists, whose name is
+	// already set.
+	Name string `json:"name"`
+}
+
+// ReconnectAgentHandler handles POST /api/v1/agents/:agent_id/reconnect.
+//
+// Issues a new token for an agent id. If the agent was deleted, its
+// registration is recreated under the same id, so a host still running the
+// agent can be reconnected by updating one environment variable instead of
+// being reinstalled.
+func ReconnectAgentHandler(agents *services.AgentService, settings *services.SettingsService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req reconnectRequest
+		// A body is optional: without one the id becomes the name.
+		_ = c.ShouldBindJSON(&req)
+
+		result, err := agents.Reconnect(c.Request.Context(), c.Param("agent_id"), req.Name)
+		if err != nil {
+			if errors.Is(err, services.ErrAgentNotFound) {
+				respondAgentError(c, err)
+				return
+			}
+			// A malformed id is the caller's mistake, not a server fault.
+			respondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		urls := resolveSentinelURLs(c, settings)
+		respondSuccess(c, http.StatusOK, gin.H{
+			"agent":        result.Agent,
+			"recreated":    result.Recreated,
+			"external_url": urls.External,
+			"internal_url": urls.Internal,
+			"sentinel_url": urls.External,
+		})
+	}
+}
+
 // DeleteAgentHandler handles DELETE /api/v1/agents/:agent_id.
 func DeleteAgentHandler(agents *services.AgentService) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -585,6 +626,9 @@ func RegisterAgentRoutes(rg *gin.RouterGroup, agents *services.AgentService, set
 	admin.GET("/:agent_id", GetAgentHandler(agents, settings))
 	admin.PATCH("/:agent_id", UpdateAgentHandler(agents))
 	admin.DELETE("/:agent_id", DeleteAgentHandler(agents))
+	// Issues a new token, recreating the registration if it was deleted. Its
+	// whole purpose is to hand out a credential, so it is administrative.
+	admin.POST("/:agent_id/reconnect", ReconnectAgentHandler(agents, settings))
 	// Reachability check for the configured URLs, so an operator finds out
 	// here rather than from an agent that silently never reports.
 	admin.POST("/urls/test", TestSentinelURLsHandler(settings))
