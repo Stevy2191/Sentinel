@@ -33,6 +33,10 @@ nano .env
 Key settings to configure:
 
 - `DB_PASSWORD` — set a strong database password
+- `JWT_SECRET` — a random secret of at least 32 characters (`openssl rand
+  -base64 48`) that signs login sessions. If left unset, Sentinel generates a
+  new one on every restart, which logs everyone out each time the container
+  restarts — set it explicitly for anything beyond a quick local test.
 - `FRONTEND_PORT` — host port for the web UI (default `3000`; change if it's in use)
 - `BACKEND_PORT` — host port for the API (default `3001`)
 - `TIMEZONE` — your timezone (e.g. `America/Chicago`)
@@ -71,11 +75,19 @@ Sentinel will:
 
 Open your browser and go to: **http://localhost:3000**
 
-> **No login required.** Sentinel does not currently include built-in
-> authentication — the UI opens directly. **Do not expose it directly to the
-> public internet.** Run it on a private network, or place it behind a reverse
-> proxy / VPN that provides authentication. (The public status pages under
-> `/public/status/...` are the only pages meant to be shared.)
+You'll land on the sign-in screen. Since no account exists yet, click through
+to **register** and create the first account — it always succeeds regardless
+of the `REGISTRATION_ENABLED` setting, and becomes the instance's first admin.
+After that, self-registration is closed by default (`REGISTRATION_ENABLED=false`):
+new users are added by an admin invitation (**Settings -> Users**) unless an
+admin explicitly re-opens self-registration under **Settings -> Security**.
+
+> Sentinel requires sign-in for the admin UI, but has no additional
+> network-level access control of its own. **Do not expose it directly to the
+> public internet** without a reverse proxy / VPN in front of it, since a
+> compromised or weak admin password is then your only line of defense. (The
+> public status pages under `/public/status/...` are the only pages meant to
+> be shared with the outside world.)
 
 ## Your First Monitor (2 minutes)
 
@@ -163,6 +175,23 @@ Public URL: `http://localhost:3000/public/status/{page-slug}`
 
 Unpublished pages return "not available", so drafts stay private.
 
+## Monitoring a Server (Optional)
+
+Beyond HTTP/TCP/ping/DNS/webhook checks, Sentinel can install a small agent on
+a host to report its own system metrics (CPU, memory, disk, Docker containers):
+
+1. Go to **Server Monitoring** → **Add Server Agent**
+2. Copy the generated install command and run it on the target host
+3. The agent registers itself and starts reporting; its page shows live
+   system stats alongside any monitors you point at it
+
+## SSL Certificate & Domain Monitoring (Optional)
+
+Under **SSL & Domains**, add a hostname to track its certificate's expiry and
+validity, or a domain to track its registration/expiry via RDAP — useful for
+catching a lapsed certificate or an about-to-expire domain before it takes a
+service down.
+
 ## Updating Sentinel
 
 To update once new images are published:
@@ -196,5 +225,7 @@ code with `git pull`.
 - **Report** — historical uptime and response-time analysis
 - **Status Page** — a public-facing dashboard of selected monitors
 - **Notification** — an alert sent when a monitor changes state (email, Slack, …)
+- **Server Agent** — a small binary installed on a host that reports its
+  system metrics (CPU, memory, disk, Docker containers) back to Sentinel
 
 Happy monitoring! 🎉

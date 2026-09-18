@@ -11,10 +11,15 @@ consumption minimal thanks to a compiled **Go** backend.
 
 ## Key Features
 
-- 📊 **Advanced historical reporting** with custom date ranges
+- 📊 **Advanced historical reporting** with custom date ranges, saved report definitions, scheduled delivery, and PDF/CSV export
 - ✅ **Uptime percentage tracking** and SLA compliance monitoring
 - 🔔 **Multi-channel notifications** — Email, ntfy, Slack, Discord, Telegram, and custom webhooks
 - 🌐 **Public shareable status pages** for your users and stakeholders
+- 🖥️ **Server agents** — install a lightweight agent on a host to report CPU, memory, disk, and Docker container status
+- 🔒 **SSL certificate monitoring** and domain registration/expiry tracking
+- 🔎 **Network discovery** to find and add monitors from your local network
+- 👥 **User accounts, roles, and invitations**, with optional TOTP two-factor authentication and an audit log of admin actions
+- 💾 **One-click database backup and restore**
 - 🔌 **RESTful API** for integrations and automation
 - 🪶 **Lightweight Go backend** with minimal RAM usage
 - 🐳 **Docker-first deployment**
@@ -39,14 +44,17 @@ Get Sentinel running in three steps:
 ```bash
 # 1. Clone the repository
 git clone https://github.com/Stevy2191/Sentinel.git
-cd sentinel
+cd Sentinel
 
 # 2. Run the installer
 ./install.sh
 ```
 
-Then **open [http://localhost](http://localhost)** in your browser and complete
-the setup wizard.
+Then **open [http://localhost:3000](http://localhost:3000)** (or whatever
+`FRONTEND_PORT` you chose) in your browser and create the first admin account.
+Sentinel requires sign-in — the first account created bootstraps the admin;
+after that, self-registration stays closed until an admin opens it under
+**Settings -> Security**.
 
 ---
 
@@ -54,23 +62,26 @@ the setup wizard.
 
 For detailed installation instructions — including manual setup, environment
 configuration, and production deployment — see
-**[docs/INSTALLATION.md](docs/INSTALLATION.md)**.
+**[GETTING_STARTED.md](GETTING_STARTED.md)**.
 
 ---
 
-## API Documentation
+## API
 
-Sentinel exposes a RESTful API for managing monitors, retrieving reports, and
-integrating with your existing tooling. See **[docs/API.md](docs/API.md)** for
-the full reference.
+Sentinel exposes a RESTful API (base URL `/api/v1`) for managing monitors,
+retrieving reports, and integrating with your existing tooling. Requests
+require a Bearer JWT obtained from `/api/v1/auth/login` (or a scoped API
+token). There is no published API reference yet; see `backend/internal/api/`
+for the route handlers.
 
 ---
 
 ## Notifications
 
 Sentinel supports Email, ntfy, Slack, Discord, Telegram, and custom webhooks.
-For configuration details for each channel, see
-**[docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md)**.
+Channels are configured per-instance under **Settings -> Notifications**; see
+**[GETTING_STARTED.md](GETTING_STARTED.md#setting-up-notifications-optional)**
+for configuration details for each channel.
 
 ---
 
@@ -166,15 +177,17 @@ every push to `main` and on `v*` tags. Pull requests build but do not push.
 
 ## Contributing
 
-Contributions are welcome! Please read **[CONTRIBUTING.md](CONTRIBUTING.md)**
-before opening an issue or pull request.
+Contributions are welcome! Open an issue to discuss a change before starting
+significant work, and open pull requests against `main`.
 
 ---
 
 ## License
 
-Sentinel is licensed under the **MIT License**. See the [LICENSE](LICENSE) file
-for details.
+Sentinel is licensed under the **GNU Affero General Public License v3.0
+(AGPL-3.0)**. See the [LICENSE](LICENSE) file for details. Notably, the AGPL
+requires that if you run a modified version of Sentinel as a network service,
+you make the modified source available to its users.
 
 ---
 

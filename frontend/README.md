@@ -13,6 +13,7 @@ React + TypeScript + Tailwind CSS admin UI and public status pages for
 - **Recharts** — charts
 - **lucide-react** — icons
 - **date-fns** — date formatting
+- **qrcode.react** — QR code for TOTP two-factor authentication setup
 
 ## Getting Started
 
@@ -33,11 +34,12 @@ npm run build
 npm run preview
 ```
 
-The dev server proxies `/api` and `/public` to the backend at
-`http://localhost:3001` (see `vite.config.ts`), so the browser makes
-same-origin requests and no CORS configuration is required. **Run the backend on
-port 3001** (e.g. `PORT=3001 ./bin/sentinel`) to match, or change the proxy
-target.
+The dev server proxies `/api` to the backend at `http://localhost:3001` (see
+`vite.config.ts`), so the browser makes same-origin requests and no CORS
+configuration is required. `/public/status/:slug` is not proxied — it's a SPA
+route served by Vite itself, which then fetches its data through the proxied
+`/api`. **Run the backend on port 3001** (e.g. `PORT=3001 ./bin/sentinel`) to
+match, or change the proxy target.
 
 ## Environment Variables
 
@@ -45,8 +47,9 @@ Vite exposes only `VITE_*` and `REACT_APP_*` prefixed keys via `import.meta.env`
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `REACT_APP_API_URL` | `/api/v1` (proxy) | API base URL |
-| `REACT_APP_WS_URL` | `ws://localhost:3001` | WebSocket URL (future) |
+| `VITE_API_URL` | `/api/v1` (proxy) | API base URL (checked first) |
+| `REACT_APP_API_URL` | `/api/v1` (proxy) | API base URL (fallback if `VITE_API_URL` is unset) |
+| `REACT_APP_WS_URL` | `ws://localhost:3001` | WebSocket URL (declared, not yet used) |
 
 ## Project Structure
 
@@ -55,19 +58,19 @@ frontend/
 ├── index.html              # Vite entry HTML
 ├── vite.config.ts          # Vite config (aliases, dev proxy)
 ├── tailwind.config.js      # Sentinel design system
-├── public/                 # Static assets (favicon)
+├── public/                 # Static assets (favicon, PWA manifest, service worker)
 └── src/
     ├── index.tsx           # App entry point
     ├── App.tsx             # Router + providers
     ├── index.css           # Tailwind + global styles
     ├── styles/             # theme.css (CSS variables, dark mode)
-    ├── components/         # Reusable components (Layout, …)
-    ├── pages/              # Route pages (Dashboard, Monitors, …)
-    ├── context/            # ThemeContext (light/dark/auto)
+    ├── components/         # Reusable components (Layout, modals, …)
+    ├── pages/              # Route pages (Overview, Monitors, Reports, …)
+    ├── context/            # Auth, Theme (light/dark/auto), and app config providers
     ├── services/           # api.ts (Axios instance + interceptors)
     ├── hooks/              # useMonitors and friends
     ├── types/              # Shared TypeScript types
-    └── utils/              # Formatting helpers
+    └── utils/              # Formatting, validation, and CSV export helpers
 ```
 
 ## Path Aliases
