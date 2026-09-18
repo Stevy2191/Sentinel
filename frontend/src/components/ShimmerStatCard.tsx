@@ -10,6 +10,7 @@ interface ShimmerStatCardProps {
   onMouseLeave: () => void
   showShimmer: boolean
   shimmerStyle: React.CSSProperties
+  onClick?: () => void
 }
 
 // Whole literal class strings per colour. Tailwind only generates CSS for class
@@ -64,12 +65,20 @@ export const ShimmerStatCard: React.FC<ShimmerStatCardProps> = ({
   onMouseLeave,
   showShimmer,
   shimmerStyle,
+  onClick,
 }) => {
   const c = colorMap[colorType]
+  const Container = onClick ? 'button' : 'div'
 
   return (
-    <div
-      className={`group relative cursor-default overflow-hidden rounded-lg border ${c.border} ${c.hoverBorder} bg-gradient-to-br ${c.bg} to-slate-800/40 p-6 backdrop-blur-sm transition-all`}
+    <Container
+      type={onClick ? 'button' : undefined}
+      onClick={onClick}
+      className={`group relative w-full overflow-hidden rounded-lg border ${c.border} ${c.hoverBorder} bg-gradient-to-br ${c.bg} to-slate-800/40 p-6 text-left backdrop-blur-sm transition-all ${
+        onClick
+          ? 'cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40'
+          : 'cursor-default'
+      }`}
       onMouseMove={onMouseMove}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
@@ -95,7 +104,7 @@ export const ShimmerStatCard: React.FC<ShimmerStatCardProps> = ({
           {subtitle && <div className={`text-xs font-medium ${c.subtle}`}>{subtitle}</div>}
         </div>
       </div>
-    </div>
+    </Container>
   )
 }
 

@@ -1,6 +1,6 @@
 import { useAuthContext } from '@/context/AuthContext'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   RefreshCw,
   Plus,
@@ -385,6 +385,7 @@ export default function UptimeMonitoring() {
   const { currentUser } = useAuthContext()
   const isAdmin = currentUser?.is_admin ?? false
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { monitors, loading, error, refetch } = useMonitors()
   const agentSummary = useAgentSummary()
   const { groups, refetch: refetchGroups } = useMonitorGroups()
@@ -421,10 +422,27 @@ export default function UptimeMonitoring() {
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebounced(search, 300)
   const [selectedTags, setSelectedTags] = useState<string[]>([])
-  const [typeFilter, setTypeFilter] = useState<string>('all')
+  const [typeFilter, setTypeFilter] = useState<string>(() => searchParams.get('type') ?? 'all')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [groupFilter, setGroupFilter] = useState<string>('all') // 'all' | 'ungrouped' | groupId
   const [sort, setSort] = useState<SortKey>('down-first')
+
+  // Lets a link such as the Overview page's per-type cards land here with the
+  // filter pre-applied. Consumed once and stripped from the URL so it doesn't
+  // fight a filter change made afterwards.
+  useEffect(() => {
+    const requestedType = searchParams.get('type')
+    if (!requestedType) return
+    setTypeFilter(requestedType)
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('type')
+        return next
+      },
+      { replace: true }
+    )
+  }, [searchParams, setSearchParams])
 
   useEffect(() => {
     const t = window.setInterval(() => {

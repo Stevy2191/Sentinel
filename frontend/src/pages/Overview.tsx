@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useMonitors } from '@/hooks/useMonitors'
 import { useAgentSummary } from '@/hooks/useAgents'
 import { useSummaryReport } from '@/hooks/useReports'
@@ -17,6 +18,7 @@ const REFRESH_MS = 30_000
  * nothing else, so it stays legible on a wall display.
  */
 export default function Overview() {
+  const navigate = useNavigate()
   const { monitors, refetch } = useMonitors()
   const agentSummary = useAgentSummary()
   const [refreshedAt, setRefreshedAt] = useState(() => Date.now())
@@ -206,6 +208,7 @@ export default function Overview() {
               value={agentSummary.value}
               subtitle={agentSummary.subtitle}
               colorType="agents"
+              onClick={() => navigate('/servers')}
               onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'agents')}
               onMouseEnter={() => shimmer.handleCardMouseEnter('agents')}
               onMouseLeave={() => shimmer.handleCardMouseLeave('agents')}
@@ -226,6 +229,7 @@ export default function Overview() {
                   count={t.count}
                   online={t.online}
                   colorType={t.key}
+                  onClick={() => navigate(`/uptime?type=${t.key}`)}
                   onMouseMove={(e) => shimmer.handleCardMouseMove(e, t.key)}
                   onMouseEnter={() => shimmer.handleCardMouseEnter(t.key)}
                   onMouseLeave={() => shimmer.handleCardMouseLeave(t.key)}
