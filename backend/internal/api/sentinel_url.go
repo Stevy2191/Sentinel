@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -61,6 +62,14 @@ func resolveSentinelURLs(c *gin.Context, settings *services.SettingsService) Sen
 	return SentinelURLs{External: external, Internal: internal}
 }
 
+// safeHostPattern is what a Host header may contain to be used.
+//
+// A host is letters, digits, dots and hyphens, optionally a port, or a
+// bracketed IPv6 literal. Nothing else — and in particular no quote, space,
+// semicolon, backtick or dollar sign, which are the characters that turn an
+// interpolated value into a command when it lands in a shell script.
+var safeHostPattern = regexp.MustCompile(`^(?:\[[0-9a-fA-F:.]+\]|[a-zA-Z0-9.-]+)(?::[0-9]{1,5})?$`)
+
 // requestBaseURL reconstructs the address the client used to reach us.
 //
 // The forwarding headers come first because behind a proxy the request's own
@@ -80,8 +89,21 @@ func requestBaseURL(c *gin.Context) string {
 	if host == "" {
 		host = c.Request.Host
 	}
-	if host == "" {
+	// Both of those are supplied by the client and neither is validated by the
+	// HTTP server, so the value is checked before it is used. This address is
+	// interpolated into the agent install scripts, which are downloaded and run
+	// with sudo: a host containing a quote and a semicolon would close the
+	// assignment and append commands to a script somebody then executes as
+	// root. An address that fails the check is discarded rather than repaired,
+	// since a host header that is not a host is an attack or a broken proxy,
+	// and neither should decide what the script says.
+	if !safeHostPattern.MatchString(host) {
 		return ""
+	}
+	// Only http and https can appear in the result; the header is otherwise
+	// as controllable as the host.
+	if scheme != "http" && scheme != "https" {
+		scheme = "http"
 	}
 	return scheme + "://" + host
 }

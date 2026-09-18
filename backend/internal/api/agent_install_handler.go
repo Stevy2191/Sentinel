@@ -80,6 +80,16 @@ func ServeInstallScriptHandler(settings *services.SettingsService) gin.HandlerFu
 		// downloaded from. Behind a proxy those differ.
 		url := resolveSentinelURLs(c, settings).Internal
 
+		// Checked again here even though the sources are validated, because
+		// what is being written is a shell script that will be run with sudo.
+		// A value that cannot be vouched for produces an error an operator can
+		// act on rather than a script that might carry something else.
+		if err := validateSentinelURL(url); err != nil || url == "" {
+			respondError(c, http.StatusServiceUnavailable,
+				"this server cannot determine its own address; set the external and internal URLs under Settings -> System, then download the script again")
+			return
+		}
+
 		c.Header("Content-Type", "text/x-shellscript; charset=utf-8")
 		if err := tmpl.Execute(c.Writer, map[string]string{"SentinelURL": url}); err != nil {
 			// The status is already written by this point, so there is nothing
