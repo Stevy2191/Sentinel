@@ -16,7 +16,6 @@ import {
   Radar,
 } from 'lucide-react'
 import { useMonitors } from '@/hooks/useMonitors'
-import { useAgentSummary } from '@/hooks/useAgents'
 import {
   useMonitorGroups,
   useCreateMonitorGroup,
@@ -387,7 +386,6 @@ export default function UptimeMonitoring() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { monitors, loading, error, refetch } = useMonitors()
-  const agentSummary = useAgentSummary()
   const { groups, refetch: refetchGroups } = useMonitorGroups()
   const { usernameFor } = useUsers()
   const { toasts, push } = useToasts()
@@ -485,7 +483,7 @@ export default function UptimeMonitoring() {
 
   // One shimmer position per card, so the highlight follows the cursor on the
   // hovered card only.
-  const shimmer = useCardShimmer(['monitoring', 'responseTime', 'incidents', 'agents'])
+  const shimmer = useCardShimmer(['monitoring', 'responseTime', 'incidents'])
 
   const allTags = useMemo(() => {
     const s = new Set<string>()
@@ -590,7 +588,7 @@ export default function UptimeMonitoring() {
 
       {/* Four readings across the monitors this page manages. Each carries its
           own cursor highlight, as on the Overview. */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <ShimmerStatCard
           title="Currently Monitoring"
           value={counts.active}
@@ -623,17 +621,6 @@ export default function UptimeMonitoring() {
           onMouseLeave={() => shimmer.handleCardMouseLeave('incidents')}
           showShimmer={shimmer.isShown('incidents')}
           shimmerStyle={shimmer.getShimmerStyle('incidents')}
-        />
-        <ShimmerStatCard
-          title="Monitoring Agents"
-          value={agentSummary.value}
-          subtitle={agentSummary.subtitle}
-          colorType="agents"
-          onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'agents')}
-          onMouseEnter={() => shimmer.handleCardMouseEnter('agents')}
-          onMouseLeave={() => shimmer.handleCardMouseLeave('agents')}
-          showShimmer={shimmer.isShown('agents')}
-          shimmerStyle={shimmer.getShimmerStyle('agents')}
         />
       </div>
 
