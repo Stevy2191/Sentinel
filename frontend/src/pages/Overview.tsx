@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMonitors } from '@/hooks/useMonitors'
-import { useAgentSummary } from '@/hooks/useAgents'
+import { useAgentSummary, useFleetMetrics } from '@/hooks/useAgents'
 import { useSSLSummary } from '@/hooks/useSSLCertificates'
 import { useSummaryReport } from '@/hooks/useReports'
 import { useCardShimmer } from '@/hooks/useCardShimmer'
@@ -18,11 +18,46 @@ const REFRESH_MS = 30_000
  * Uptime Monitoring. This page answers "is anything wrong" at a glance and
  * nothing else, so it stays legible on a wall display.
  */
+/**
+ * One resource reading inside the status card.
+ *
+ * Colour comes from the number rather than being fixed, so the row stays quiet
+ * until something has actually filled up, and the bar carries the reading at a
+ * glance without the figure having to be read.
+ */
+function ResourceMeter({
+  label,
+  percent,
+  detail,
+}: {
+  label: string
+  percent: number
+  detail: string
+}) {
+  const v = Math.max(0, Math.min(100, percent))
+  const bar = v >= 90 ? 'bg-red-500' : v >= 75 ? 'bg-amber-500' : 'bg-emerald-500'
+  const text = v >= 90 ? 'text-red-400' : v >= 75 ? 'text-amber-400' : 'text-white'
+
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs uppercase tracking-wider text-slate-400">{label}</span>
+        <span className={`text-sm font-medium tabular-nums ${text}`}>{v.toFixed(1)}%</span>
+      </div>
+      <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+        <div className={`h-full rounded-full ${bar}`} style={{ width: `${v}%` }} />
+      </div>
+      <div className="mt-1 text-xs text-slate-500">{detail}</div>
+    </div>
+  )
+}
+
 export default function Overview() {
   const navigate = useNavigate()
   const { monitors, refetch } = useMonitors()
   const agentSummary = useAgentSummary()
   const sslSummary = useSSLSummary()
+  const { metrics: fleet } = useFleetMetrics()
   const [refreshedAt, setRefreshedAt] = useState(() => Date.now())
   const [period, setPeriod] = useState<ReportPeriod>('30d')
 
@@ -123,8 +158,12 @@ export default function Overview() {
         </p>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="space-y-4 lg:col-span-2">
+      {/* One column rather than a two-thirds split. The type cards were in a
+          narrow right-hand column, so an install watching only one or two
+          kinds of monitor left a lone card beside a tall one. Stacked, every
+          row spans the width and the breakdown reads as a row of its own. */}
+      <div className="space-y-6">
+        <div className="space-y-4">
           <div
             className={`group relative overflow-hidden rounded-xl border bg-gradient-to-br ${mainCard.bg} via-slate-800/40 to-cyan-600/20 p-8 backdrop-blur-sm ${mainCard.border}`}
             onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'operational')}
@@ -181,6 +220,52 @@ export default function Overview() {
                 </select>
               </div>
             </div>
+
+            {/* Server resources, from the agents rather than from the
+                monitors. Inside this card because it answers the same
+                question it does — whether everything is healthy right now —
+                and a row of its own would imply a separate subject. Hidden
+                entirely when no agent is reporting: three bars at zero would
+                read as a fleet at rest rather than as no fleet. */}
+            {fleet && fleet.agents_reporting > 0 && (
+              <div className="relative z-10 mt-8 border-t border-white/10 pt-6">
+                <div className="mb-4 flex items-baseline justify-between gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+                    Server resources
+                  </span>
+                  <button
+                    onClick={() => navigate('/servers')}
+                    className="text-xs text-slate-500 transition hover:text-slate-300"
+                  >
+                    across {fleet.agents_reporting} server
+                    {fleet.agents_reporting === 1 ? '' : 's'} &rarr;
+                  </button>
+                </div>
+                <div className="grid gap-5 sm:grid-cols-3">
+                  <ResourceMeter
+                    label="CPU"
+                    percent={fleet.cpu_percent}
+                    detail={
+                      fleet.agents_reporting === 1 ? 'current load' : 'average across servers'
+                    }
+                  />
+                  <ResourceMeter
+                    label="Memory"
+                    percent={fleet.memory_percent}
+                    detail={`${(fleet.memory_used_mb / 1024).toFixed(1)} of ${(
+                      fleet.memory_total_mb / 1024
+                    ).toFixed(1)} GB`}
+                  />
+                  <ResourceMeter
+                    label="Disk"
+                    percent={fleet.disk_percent}
+                    detail={`${fleet.disk_used_gb.toFixed(0)} of ${fleet.disk_total_gb.toFixed(
+                      0,
+                    )} GB`}
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -233,8 +318,8 @@ export default function Overview() {
           </div>
         </div>
 
-        <div className="lg:col-span-1">
-          <div className="grid grid-cols-2 gap-3">
+        <div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
             {byType
               .filter((t) => t.count > 0)
               .map((t) => (
@@ -253,7 +338,7 @@ export default function Overview() {
                 />
               ))}
             {byType.every((t) => t.count === 0) && (
-              <div className="col-span-2 rounded-lg border border-white/10 bg-slate-800/40 p-4 text-sm text-slate-400 backdrop-blur-sm">
+              <div className="col-span-full rounded-lg border border-white/10 bg-slate-800/40 p-4 text-sm text-slate-400 backdrop-blur-sm">
                 No monitors configured yet.
               </div>
             )}

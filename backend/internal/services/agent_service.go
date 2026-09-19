@@ -379,6 +379,81 @@ func (s *AgentService) LatestContainers(ctx context.Context, agent *models.Agent
 	return containers, nil
 }
 
+// FleetMetrics is the current resource usage across reporting agents.
+type FleetMetrics struct {
+	// Reporting is how many agents contributed. Zero means nothing recent
+	// enough to average, which is different from zero usage.
+	Reporting     int     `json:"agents_reporting"`
+	CPUPercent    float64 `json:"cpu_percent"`
+	MemoryPercent float64 `json:"memory_percent"`
+	DiskPercent   float64 `json:"disk_percent"`
+	MemoryUsedMB  int64   `json:"memory_used_mb"`
+	MemoryTotalMB int64   `json:"memory_total_mb"`
+	DiskUsedGB    float64 `json:"disk_used_gb"`
+	DiskTotalGB   float64 `json:"disk_total_gb"`
+}
+
+// fleetMetricsWindow bounds how old a sample may be and still count.
+//
+// Without it an agent that stopped reporting last week would keep contributing
+// whatever it last said, so the dashboard would show a fleet average made
+// partly of history. The window is generous relative to the default one-minute
+// interval so a slow or briefly interrupted agent still counts.
+const fleetMetricsWindow = 15 * time.Minute
+
+// FleetMetrics averages the most recent sample from each reporting agent.
+//
+// Percentages are averaged and absolute figures summed, which is what each one
+// means across several machines: "the fleet is 40% busy" against "the fleet is
+// using 12 of 64 GB". Averaging a total or summing a percentage would produce
+// a number with no meaning.
+//
+// One query rather than one per agent: DISTINCT ON takes each agent's newest
+// row, and the aggregate runs over that.
+func (s *AgentService) FleetMetrics(ctx context.Context) (*FleetMetrics, error) {
+	var row struct {
+		Reporting     int
+		CPUPercent    float64
+		MemoryPercent float64
+		DiskPercent   float64
+		MemoryUsedMB  int64
+		MemoryTotalMB int64
+		DiskUsedGB    float64
+		DiskTotalGB   float64
+	}
+
+	err := s.db.WithContext(ctx).Raw(`
+		SELECT
+		    COUNT(*)                                    AS reporting,
+		    COALESCE(AVG(cpu_percent), 0)               AS cpu_percent,
+		    COALESCE(AVG(memory_percent), 0)            AS memory_percent,
+		    COALESCE(AVG(disk_percent), 0)              AS disk_percent,
+		    COALESCE(SUM(memory_used_mb), 0)            AS memory_used_mb,
+		    COALESCE(SUM(memory_total_mb), 0)           AS memory_total_mb,
+		    COALESCE(SUM(disk_used_gb), 0)              AS disk_used_gb,
+		    COALESCE(SUM(disk_total_gb), 0)             AS disk_total_gb
+		  FROM (
+		    SELECT DISTINCT ON (agent_id) *
+		      FROM agent_metrics
+		     WHERE timestamp > ?
+		     ORDER BY agent_id, timestamp DESC
+		  ) latest`, time.Now().Add(-fleetMetricsWindow)).Scan(&row).Error
+	if err != nil {
+		return nil, fmt.Errorf("summarising agent metrics: %w", err)
+	}
+
+	return &FleetMetrics{
+		Reporting:     row.Reporting,
+		CPUPercent:    row.CPUPercent,
+		MemoryPercent: row.MemoryPercent,
+		DiskPercent:   row.DiskPercent,
+		MemoryUsedMB:  row.MemoryUsedMB,
+		MemoryTotalMB: row.MemoryTotalMB,
+		DiskUsedGB:    row.DiskUsedGB,
+		DiskTotalGB:   row.DiskTotalGB,
+	}, nil
+}
+
 // MarkStaleOffline flips agents that have stopped reporting to offline.
 //
 // Persisted rather than only derived on read so the transition is a fact the
