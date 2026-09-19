@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -48,8 +49,17 @@ func scheduleSnapshot(s *models.ReportSchedule) map[string]any {
 
 // scheduleRequest is the create/update body.
 type scheduleRequest struct {
-	ScheduleType     string   `json:"schedule_type" binding:"required,oneof=daily weekly monthly custom"`
-	CronExpression   *string  `json:"cron_expression"`
+	ScheduleType   string  `json:"schedule_type" binding:"required,oneof=daily weekly monthly quarterly custom"`
+	CronExpression *string `json:"cron_expression"`
+	// SendHour and SendMinute are the local time of day, read in the report
+	// timezone. Omitted means 08:00, which is what every cadence used before
+	// the time was configurable.
+	SendHour   *int `json:"send_hour" binding:"omitempty,min=0,max=23"`
+	SendMinute *int `json:"send_minute" binding:"omitempty,min=0,max=59"`
+	// DayOfWeek (0 = Sunday) applies to the weekly cadence, DayOfMonth to the
+	// monthly and quarterly ones.
+	DayOfWeek        *int     `json:"day_of_week" binding:"omitempty,min=0,max=6"`
+	DayOfMonth       *int     `json:"day_of_month" binding:"omitempty,min=1,max=28"`
 	EmailRecipients  []string `json:"email_recipients" binding:"required,min=1"`
 	SendAsAttachment *bool    `json:"send_as_attachment"`
 	IncludeInEmail   *struct {
@@ -61,25 +71,38 @@ type scheduleRequest struct {
 
 // scheduleResponse is the API shape of a schedule.
 type scheduleResponse struct {
-	ID               uuid.UUID              `json:"id"`
-	ReportID         uuid.UUID              `json:"report_id"`
-	ScheduleType     string                 `json:"schedule_type"`
-	CronExpression   *string                `json:"cron_expression"`
-	EmailRecipients  []string               `json:"email_recipients"`
-	SendAsAttachment bool                   `json:"send_as_attachment"`
-	IncludeInEmail   models.EmailInclusions `json:"include_in_email"`
-	LastRunAt        *time.Time             `json:"last_run_at"`
-	NextRunAt        *time.Time             `json:"next_run_at"`
-	IsActive         bool                   `json:"is_active"`
-	CreatedAt        time.Time              `json:"created_at"`
-	UpdatedAt        time.Time              `json:"updated_at"`
+	ID             uuid.UUID `json:"id"`
+	ReportID       uuid.UUID `json:"report_id"`
+	ScheduleType   string    `json:"schedule_type"`
+	CronExpression *string   `json:"cron_expression"`
+	SendHour       int       `json:"send_hour"`
+	SendMinute     int       `json:"send_minute"`
+	DayOfWeek      *int      `json:"day_of_week"`
+	DayOfMonth     *int      `json:"day_of_month"`
+	// CronExpressionResolved is what the runner actually evaluates, so the UI
+	// can show when a schedule fires without reimplementing the mapping.
+	CronExpressionResolved string                 `json:"cron_expression_resolved"`
+	EmailRecipients        []string               `json:"email_recipients"`
+	SendAsAttachment       bool                   `json:"send_as_attachment"`
+	IncludeInEmail         models.EmailInclusions `json:"include_in_email"`
+	LastRunAt              *time.Time             `json:"last_run_at"`
+	NextRunAt              *time.Time             `json:"next_run_at"`
+	IsActive               bool                   `json:"is_active"`
+	CreatedAt              time.Time              `json:"created_at"`
+	UpdatedAt              time.Time              `json:"updated_at"`
 }
 
 func toScheduleResponse(s models.ReportSchedule) scheduleResponse {
+	// Best effort: a schedule whose cadence cannot be mapped is still worth
+	// listing, just without the resolved expression.
+	resolved, _ := services.CronExpressionFor(&s)
 	return scheduleResponse{
 		ID: s.ID, ReportID: s.ReportID, ScheduleType: s.ScheduleType,
 		CronExpression: s.CronExpression, EmailRecipients: s.EmailRecipients,
-		SendAsAttachment: s.SendAsAttachment, IncludeInEmail: s.IncludeInEmail,
+		SendHour: s.SendHour, SendMinute: s.SendMinute,
+		DayOfWeek: s.DayOfWeek, DayOfMonth: s.DayOfMonth,
+		CronExpressionResolved: resolved,
+		SendAsAttachment:       s.SendAsAttachment, IncludeInEmail: s.IncludeInEmail,
 		LastRunAt: s.LastRunAt, NextRunAt: s.NextRunAt, IsActive: s.IsActive,
 		CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt,
 	}
@@ -132,6 +155,21 @@ func applyRequest(schedule *models.ReportSchedule, req scheduleRequest) error {
 	schedule.ScheduleType = req.ScheduleType
 	schedule.CronExpression = req.CronExpression
 
+	// 08:00 when omitted, matching what every cadence did before the send time
+	// could be chosen, so an existing client that does not send it is unchanged.
+	schedule.SendHour = 8
+	if req.SendHour != nil {
+		schedule.SendHour = *req.SendHour
+	}
+	schedule.SendMinute = 0
+	if req.SendMinute != nil {
+		schedule.SendMinute = *req.SendMinute
+	}
+	// Nil is meaningful: it means "the default day for this cadence", so it is
+	// carried through rather than resolved here.
+	schedule.DayOfWeek = req.DayOfWeek
+	schedule.DayOfMonth = req.DayOfMonth
+
 	recipients := make(models.StringSlice, 0, len(req.EmailRecipients))
 	for _, r := range req.EmailRecipients {
 		if trimmed := strings.TrimSpace(r); trimmed != "" {
@@ -161,7 +199,7 @@ func applyRequest(schedule *models.ReportSchedule, req scheduleRequest) error {
 	}
 	// Reject a bad cron expression here rather than logging it at registration
 	// and leaving a schedule that silently never runs.
-	expr, err := services.CronExpressionFor(schedule.ScheduleType, schedule.CronExpression)
+	expr, err := services.CronExpressionFor(schedule)
 	if err != nil {
 		return err
 	}
@@ -328,6 +366,15 @@ func (h *ReportScheduleHandler) RunScheduleNow(c *gin.Context) {
 	}
 
 	if err := h.scheduler.RunSchedule(c.Request.Context(), schedule.ID); err != nil {
+		// Nothing to send through is a configuration mistake, not a server
+		// fault. Reported as one it told the operator only that something went
+		// wrong, when the fix is a named setting.
+		if errors.Is(err, services.ErrReportEmailNotConfigured) {
+			respondError(c, http.StatusPreconditionFailed,
+				"no email delivery is configured, so the report was generated but not sent. "+
+					"Set up the email channel under Notifications, then run this schedule again.")
+			return
+		}
 		respondInternal(c, "running schedule", err)
 		return
 	}

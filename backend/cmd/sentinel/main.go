@@ -129,7 +129,7 @@ func run() error {
 	// Scheduled delivery sends through the same SMTP configuration as the email
 	// notification channel, so it inherits its connection-security settings.
 	reportMailer := services.NewReportMailer(db, resolveBaseURL)
-	reportScheduler := services.NewReportSchedulerService(db, reportGenerator, reportMailer)
+	reportScheduler := services.NewReportSchedulerService(db, reportGenerator, reportMailer, settingsService)
 	// Wired after construction: deleting a report must also stop its cron jobs.
 	reportBuilder.SetScheduler(reportScheduler)
 
@@ -292,7 +292,7 @@ func run() error {
 	api.RegisterMonitorSharingRoutes(v1, monitorService, authService)
 	api.RegisterStatusPageRoutes(v1, statusPageService, incidentService)
 	api.RegisterNotificationRoutes(v1, notificationManager, monitorService)
-	api.RegisterSettingsRoutes(v1, settingsService, models.DefaultMonitorCheckInterval, authService)
+	api.RegisterSettingsRoutes(v1, settingsService, models.DefaultMonitorCheckInterval, authService, reportScheduler)
 	api.RegisterSSLCertificateRoutes(v1, sslChecker, authService)
 	api.RegisterAgentRoutes(v1, agentService, settingsService, authService)
 	api.RegisterBackupRoutes(v1, backupService, auditService, authService)

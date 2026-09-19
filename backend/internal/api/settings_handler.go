@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -55,7 +56,15 @@ type updateSystemRequest struct {
 }
 
 // UpdateSystemSettingsHandler handles PATCH /api/v1/settings/system (admin).
-func UpdateSystemSettingsHandler(settingsService *services.SettingsService) gin.HandlerFunc {
+// SchedulerReloader is the part of the report scheduler this handler needs:
+// re-reading schedules after the timezone changes. An interface rather than the
+// concrete service so settings does not depend on the scheduler package graph,
+// and so nil means "no scheduler running", which is the case in tests.
+type SchedulerReloader interface {
+	Reload(ctx context.Context) error
+}
+
+func UpdateSystemSettingsHandler(settingsService *services.SettingsService, scheduler SchedulerReloader) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req updateSystemRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -125,6 +134,16 @@ func UpdateSystemSettingsHandler(settingsService *services.SettingsService) gin.
 				strings.TrimSpace(*req.ReportTimezone)); err != nil {
 				respondInternal(c, "UpdateSystemSettingsHandler", err)
 				return
+			}
+			// Schedule times are read in this zone, so the runner has to be
+			// rebuilt. Left alone, a schedule set to 08:00 would keep firing at
+			// 08:00 in the old zone until the next restart.
+			if scheduler != nil {
+				if err := scheduler.Reload(c.Request.Context()); err != nil {
+					// The setting is saved and reports will render correctly;
+					// only the delivery times are stale, which a restart fixes.
+					log.Printf("[settings] report timezone saved but schedules could not be reloaded: %v", err)
+				}
 			}
 		}
 
@@ -202,12 +221,12 @@ func UpdateRegistrationHandler(settingsService *services.SettingsService) gin.Ha
 
 // RegisterSettingsRoutes mounts admin-only settings endpoints on the given group
 // (already protected by AuthMiddleware); RequireAdmin further restricts them.
-func RegisterSettingsRoutes(rg *gin.RouterGroup, settingsService *services.SettingsService, defaultInterval int, users adminChecker) {
+func RegisterSettingsRoutes(rg *gin.RouterGroup, settingsService *services.SettingsService, defaultInterval int, users adminChecker, scheduler SchedulerReloader) {
 	settings := rg.Group("/settings")
 	settings.Use(RequireAdmin(users))
 	settings.GET("", GetSettingsHandler(settingsService, defaultInterval))
 	settings.PATCH("/registration", UpdateRegistrationHandler(settingsService))
-	settings.PATCH("/system", UpdateSystemSettingsHandler(settingsService))
+	settings.PATCH("/system", UpdateSystemSettingsHandler(settingsService, scheduler))
 	settings.GET("/incident-retention-days", GetIncidentRetentionHandler(settingsService))
 	settings.PATCH("/incident-retention-days", UpdateIncidentRetentionHandler(settingsService))
 }

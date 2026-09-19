@@ -17,16 +17,25 @@ const (
 	ScheduleTypeDaily   = "daily"
 	ScheduleTypeWeekly  = "weekly"
 	ScheduleTypeMonthly = "monthly"
-	ScheduleTypeCustom  = "custom"
+	// ScheduleTypeQuarterly delivers on the first day of each quarter, which is
+	// when a report covering the quarter that just ended becomes worth sending.
+	ScheduleTypeQuarterly = "quarterly"
+	ScheduleTypeCustom    = "custom"
 )
 
 // ValidScheduleTypes lists the accepted schedule_type values.
 var ValidScheduleTypes = map[string]bool{
-	ScheduleTypeDaily:   true,
-	ScheduleTypeWeekly:  true,
-	ScheduleTypeMonthly: true,
-	ScheduleTypeCustom:  true,
+	ScheduleTypeDaily:     true,
+	ScheduleTypeWeekly:    true,
+	ScheduleTypeMonthly:   true,
+	ScheduleTypeQuarterly: true,
+	ScheduleTypeCustom:    true,
 }
+
+// MaxScheduleDayOfMonth is capped below 29 on purpose: a schedule set to the
+// 31st would not fire in February at all, and a report that silently skips a
+// month is worse than one that arrives on the 28th.
+const MaxScheduleDayOfMonth = 28
 
 // maxScheduleRecipients caps the recipient list. A schedule sends mail on a
 // timer without further review, so an unbounded list is a standing amplifier.
@@ -65,6 +74,15 @@ type ReportSchedule struct {
 	ScheduleType string    `json:"schedule_type" gorm:"column:schedule_type;not null"`
 	// CronExpression applies only to the "custom" cadence.
 	CronExpression *string `json:"cron_expression" gorm:"column:cron_expression"`
+	// SendHour and SendMinute are the local time of day the report is sent,
+	// read in the instance's report timezone rather than the server process's.
+	SendHour   int `json:"send_hour" gorm:"column:send_hour;default:8"`
+	SendMinute int `json:"send_minute" gorm:"column:send_minute;default:0"`
+	// DayOfWeek (0 = Sunday) applies to the weekly cadence, DayOfMonth to the
+	// monthly and quarterly ones. Nil keeps the original behaviour: Monday, and
+	// the 1st.
+	DayOfWeek  *int `json:"day_of_week" gorm:"column:day_of_week"`
+	DayOfMonth *int `json:"day_of_month" gorm:"column:day_of_month"`
 	// EmailRecipients is a non-empty list of validated addresses.
 	EmailRecipients  StringSlice     `json:"email_recipients" gorm:"column:email_recipients;type:jsonb;not null"`
 	SendAsAttachment bool            `json:"send_as_attachment" gorm:"column:send_as_attachment"`
@@ -92,7 +110,20 @@ func (rs *ReportSchedule) Validate() error {
 		return errors.New("report_id is required")
 	}
 	if !ValidScheduleTypes[rs.ScheduleType] {
-		return errors.New("schedule_type must be one of: daily, weekly, monthly, custom")
+		return errors.New("schedule_type must be one of: daily, weekly, monthly, quarterly, custom")
+	}
+	if rs.SendHour < 0 || rs.SendHour > 23 {
+		return fmt.Errorf("send_hour must be between 0 and 23, got %d", rs.SendHour)
+	}
+	if rs.SendMinute < 0 || rs.SendMinute > 59 {
+		return fmt.Errorf("send_minute must be between 0 and 59, got %d", rs.SendMinute)
+	}
+	if rs.DayOfWeek != nil && (*rs.DayOfWeek < 0 || *rs.DayOfWeek > 6) {
+		return fmt.Errorf("day_of_week must be between 0 and 6, got %d", *rs.DayOfWeek)
+	}
+	if rs.DayOfMonth != nil && (*rs.DayOfMonth < 1 || *rs.DayOfMonth > MaxScheduleDayOfMonth) {
+		return fmt.Errorf("day_of_month must be between 1 and %d, got %d",
+			MaxScheduleDayOfMonth, *rs.DayOfMonth)
 	}
 	// A custom cadence with no expression would silently fall back to a daily
 	// run, delivering mail the operator never asked for.

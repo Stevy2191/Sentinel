@@ -11,12 +11,17 @@ interface EditScheduleModalProps {
   onUpdated: () => void
 }
 
+// The times are chosen now, so the labels name the cadence rather than baking
+// 08:00 into it.
 const SCHEDULE_OPTIONS: { value: ScheduleType; label: string }[] = [
-  { value: 'daily', label: 'Daily at 08:00' },
-  { value: 'weekly', label: 'Weekly, Monday 08:00' },
-  { value: 'monthly', label: 'Monthly, 1st at 08:00' },
+  { value: 'daily', label: 'Every day' },
+  { value: 'weekly', label: 'Every week' },
+  { value: 'monthly', label: 'Every month' },
+  { value: 'quarterly', label: 'Every quarter' },
   { value: 'custom', label: 'Custom (cron)' },
 ]
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
 /**
  * EditScheduleModal edits an existing delivery schedule.
@@ -41,6 +46,12 @@ export default function EditScheduleModal({
     scheduleType: schedule.schedule_type,
     // Carried through so a custom cadence keeps its expression on save.
     cronExpression: schedule.cron_expression ?? '',
+    // Existing schedules predate configurable times, so they read as 08:00 —
+    // which is the hour they have always fired at.
+    sendHour: schedule.send_hour ?? 8,
+    sendMinute: schedule.send_minute ?? 0,
+    dayOfWeek: schedule.day_of_week ?? 1,
+    dayOfMonth: schedule.day_of_month ?? 1,
     recipients: schedule.email_recipients.join(', '),
     sendAsAttachment: schedule.send_as_attachment,
     includeLink: schedule.include_in_email?.include_link ?? false,
@@ -82,6 +93,13 @@ export default function EditScheduleModal({
         schedule_type: form.scheduleType,
         cron_expression:
           form.scheduleType === 'custom' ? form.cronExpression.trim() : undefined,
+        send_hour: form.sendHour,
+        send_minute: form.sendMinute,
+        day_of_week: form.scheduleType === 'weekly' ? form.dayOfWeek : undefined,
+        day_of_month:
+          form.scheduleType === 'monthly' || form.scheduleType === 'quarterly'
+            ? form.dayOfMonth
+            : undefined,
         email_recipients: recipientList,
         send_as_attachment: form.sendAsAttachment,
         include_in_email: {
@@ -154,6 +172,58 @@ export default function EditScheduleModal({
               ))}
             </select>
           </div>
+
+          {form.scheduleType === 'weekly' && (
+            <div>
+              <label className="mb-1 block text-sm font-medium">Day</label>
+              <select
+                className="rd-select w-full"
+                value={form.dayOfWeek}
+                onChange={(e) => setForm((f) => ({ ...f, dayOfWeek: Number(e.target.value) }))}
+              >
+                {WEEKDAYS.map((d, i) => (
+                  <option key={d} value={i}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {(form.scheduleType === 'monthly' || form.scheduleType === 'quarterly') && (
+            <div>
+              <label className="mb-1 block text-sm font-medium">Day of month</label>
+              <select
+                className="rd-select w-full"
+                value={form.dayOfMonth}
+                onChange={(e) => setForm((f) => ({ ...f, dayOfMonth: Number(e.target.value) }))}
+              >
+                {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {form.scheduleType !== 'custom' && (
+            <div>
+              <label className="mb-1 block text-sm font-medium">Time</label>
+              <input
+                type="time"
+                className="rd-input w-full"
+                value={`${String(form.sendHour).padStart(2, '0')}:${String(form.sendMinute).padStart(2, '0')}`}
+                onChange={(e) => {
+                  const [h, m] = e.target.value.split(':').map(Number)
+                  setForm((f) => ({ ...f, sendHour: h || 0, sendMinute: m || 0 }))
+                }}
+              />
+              <p className="mt-1 text-xs" style={{ color: 'var(--vs-text-dim)' }}>
+                In the instance timezone, set under Settings &rarr; System.
+              </p>
+            </div>
+          )}
 
           {form.scheduleType === 'custom' && (
             <div>

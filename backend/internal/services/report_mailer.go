@@ -32,6 +32,13 @@ import (
 const maxAttachmentBytes = 20 << 20 // 20 MiB
 
 // ReportMailer sends generated reports to a schedule's recipients.
+// ErrReportEmailNotConfigured means there is no email channel to send through.
+//
+// Distinguished from a delivery failure because it is a configuration mistake,
+// not an outage: the caller can say what to fix rather than reporting an
+// internal error, which is what a scheduled report told operators before.
+var ErrReportEmailNotConfigured = errors.New("email delivery is not configured")
+
 type ReportMailer struct {
 	db      *gorm.DB
 	baseURL BaseURLFunc
@@ -103,7 +110,7 @@ func (m *ReportMailer) resolveSender(ctx context.Context) (*notifications.EmailP
 
 	plugin, envErr := notifications.NewEmailPlugin()
 	if envErr != nil {
-		return nil, fmt.Errorf("email is not configured: %w", envErr)
+		return nil, fmt.Errorf("%w: %v", ErrReportEmailNotConfigured, envErr)
 	}
 	return plugin, nil
 }

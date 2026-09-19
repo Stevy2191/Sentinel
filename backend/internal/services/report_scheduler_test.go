@@ -17,26 +17,53 @@ func mustUUID() uuid.UUID { return uuid.New() }
 
 func TestCronExpressionFor(t *testing.T) {
 	custom := "*/15 * * * *"
+	ptr := func(v int) *int { return &v }
+
 	cases := []struct {
-		name         string
-		scheduleType string
-		custom       *string
-		want         string
-		wantErr      bool
+		name     string
+		schedule *models.ReportSchedule
+		want     string
+		wantErr  bool
 	}{
-		{"daily", models.ScheduleTypeDaily, nil, "0 8 * * *", false},
-		{"weekly", models.ScheduleTypeWeekly, nil, "0 8 * * MON", false},
-		{"monthly", models.ScheduleTypeMonthly, nil, "0 8 1 * *", false},
-		{"custom with expression", models.ScheduleTypeCustom, &custom, custom, false},
+		// The defaults match what every cadence did before the send time was
+		// configurable, so an existing schedule keeps firing when it always did.
+		{"daily default", &models.ReportSchedule{
+			ScheduleType: models.ScheduleTypeDaily, SendHour: 8}, "0 8 * * *", false},
+		{"weekly default is Monday", &models.ReportSchedule{
+			ScheduleType: models.ScheduleTypeWeekly, SendHour: 8}, "0 8 * * 1", false},
+		{"monthly default is the 1st", &models.ReportSchedule{
+			ScheduleType: models.ScheduleTypeMonthly, SendHour: 8}, "0 8 1 * *", false},
+
+		{"chosen time", &models.ReportSchedule{
+			ScheduleType: models.ScheduleTypeDaily, SendHour: 17, SendMinute: 30},
+			"30 17 * * *", false},
+		{"chosen weekday", &models.ReportSchedule{
+			ScheduleType: models.ScheduleTypeWeekly, SendHour: 6, DayOfWeek: ptr(5)},
+			"0 6 * * 5", false},
+		{"chosen day of month", &models.ReportSchedule{
+			ScheduleType: models.ScheduleTypeMonthly, SendHour: 9, DayOfMonth: ptr(15)},
+			"0 9 15 * *", false},
+
+		// A quarter's report is delivered when the quarter turns.
+		{"quarterly", &models.ReportSchedule{
+			ScheduleType: models.ScheduleTypeQuarterly, SendHour: 8}, "0 8 1 1,4,7,10 *", false},
+		{"quarterly on a chosen day", &models.ReportSchedule{
+			ScheduleType: models.ScheduleTypeQuarterly, SendHour: 7, DayOfMonth: ptr(3)},
+			"0 7 3 1,4,7,10 *", false},
+
+		{"custom with expression", &models.ReportSchedule{
+			ScheduleType: models.ScheduleTypeCustom, CronExpression: &custom}, custom, false},
 		// The original design fell back to daily here, delivering mail on a
 		// cadence nobody chose.
-		{"custom without expression is an error", models.ScheduleTypeCustom, nil, "", true},
-		{"unknown type is an error", "hourly", nil, "", true},
+		{"custom without expression is an error", &models.ReportSchedule{
+			ScheduleType: models.ScheduleTypeCustom}, "", true},
+		{"unknown type is an error", &models.ReportSchedule{ScheduleType: "hourly"}, "", true},
+		{"nil schedule is an error", nil, "", true},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := CronExpressionFor(c.scheduleType, c.custom)
+			got, err := CronExpressionFor(c.schedule)
 			if c.wantErr {
 				if err == nil {
 					t.Fatal("expected an error")
@@ -49,6 +76,10 @@ func TestCronExpressionFor(t *testing.T) {
 			if got != c.want {
 				t.Errorf("got %q, want %q", got, c.want)
 			}
+			// An expression the runner cannot parse registers and never fires.
+			if err := ValidateCronExpression(got); err != nil {
+				t.Errorf("expression %q does not parse: %v", got, err)
+			}
 		})
 	}
 }
@@ -56,9 +87,10 @@ func TestCronExpressionFor(t *testing.T) {
 // Every built-in cadence must parse, or a schedule would register and never run.
 func TestBuiltInCadencesParse(t *testing.T) {
 	for _, st := range []string{
-		models.ScheduleTypeDaily, models.ScheduleTypeWeekly, models.ScheduleTypeMonthly,
+		models.ScheduleTypeDaily, models.ScheduleTypeWeekly,
+		models.ScheduleTypeMonthly, models.ScheduleTypeQuarterly,
 	} {
-		expr, err := CronExpressionFor(st, nil)
+		expr, err := CronExpressionFor(&models.ReportSchedule{ScheduleType: st, SendHour: 8})
 		if err != nil {
 			t.Fatalf("%s: %v", st, err)
 		}

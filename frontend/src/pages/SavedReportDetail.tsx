@@ -25,6 +25,36 @@ import {
   useSavedReports,
   useShareLinks,
 } from '@/hooks/useReportBuilder'
+import type { ReportSchedule } from '@/types/reports'
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+/**
+ * Says when a schedule actually fires, rather than only how often.
+ *
+ * "Monthly" alone leaves the two questions someone checking a schedule has —
+ * which day, what time — answerable only by opening the edit form.
+ */
+function describeCadence(s: ReportSchedule): string {
+  if (s.schedule_type === 'custom') return 'Custom'
+
+  const hh = String(s.send_hour ?? 8).padStart(2, '0')
+  const mm = String(s.send_minute ?? 0).padStart(2, '0')
+  const at = `${hh}:${mm}`
+
+  switch (s.schedule_type) {
+    case 'daily':
+      return `Daily at ${at}`
+    case 'weekly':
+      return `Weekly on ${WEEKDAYS[s.day_of_week ?? 1]} at ${at}`
+    case 'monthly':
+      return `Monthly on day ${s.day_of_month ?? 1} at ${at}`
+    case 'quarterly':
+      return `Quarterly on day ${s.day_of_month ?? 1} at ${at}`
+    default:
+      return s.schedule_type
+  }
+}
 
 /**
  * SavedReportDetail shows one report's generation history and its delivery
@@ -405,7 +435,7 @@ export default function SavedReportDetail() {
             >
               <div className="min-w-0">
                 <p className="text-sm font-medium capitalize">
-                  {s.schedule_type}
+                  {describeCadence(s)}
                   {s.cron_expression && (
                     <span className="ml-2 font-mono text-xs" style={{ color: 'var(--vs-text-dim)' }}>
                       {s.cron_expression}

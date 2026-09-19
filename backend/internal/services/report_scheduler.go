@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,23 +35,53 @@ type ReportSchedulerService struct {
 	generator *ReportGenerator
 	mailer    *ReportMailer
 	logger    *log.Logger
+	// settings supplies the report timezone. Schedule times are read in it, so
+	// "08:00" is 08:00 where the reader is; without it the cron runs in the
+	// server process's zone, which in a container is UTC — an operator in
+	// Chicago asking for a morning report got it at 03:00.
+	settings *SettingsService
+	// mu guards a reload, which swaps the cron runner for one in a new zone.
+	mu sync.Mutex
 }
 
 // NewReportSchedulerService returns a scheduler bound to its dependencies.
-func NewReportSchedulerService(db *gorm.DB, generator *ReportGenerator, mailer *ReportMailer) *ReportSchedulerService {
-	c := cron.New(cron.WithParser(cronParser))
-	return &ReportSchedulerService{
+func NewReportSchedulerService(db *gorm.DB, generator *ReportGenerator, mailer *ReportMailer, settings *SettingsService) *ReportSchedulerService {
+	s := &ReportSchedulerService{
 		db:        db,
-		cron:      c,
-		jobs:      NewCronJobManager(c, cronParser),
 		generator: generator,
 		mailer:    mailer,
 		logger:    log.Default(),
+		settings:  settings,
 	}
+	s.newRunner(time.UTC)
+	return s
+}
+
+// newRunner replaces the cron runner with one evaluating in loc.
+func (s *ReportSchedulerService) newRunner(loc *time.Location) {
+	c := cron.New(cron.WithParser(cronParser), cron.WithLocation(loc))
+	s.cron = c
+	s.jobs = NewCronJobManager(c, cronParser)
+}
+
+// schedulerLocation is the zone schedule times are read in, or UTC.
+func (s *ReportSchedulerService) schedulerLocation(ctx context.Context) *time.Location {
+	if s.settings == nil {
+		return time.UTC
+	}
+	return s.settings.ReportLocation(ctx)
 }
 
 // Start loads every active schedule and begins running them.
 func (s *ReportSchedulerService) Start(ctx context.Context) error {
+	s.mu.Lock()
+	loc := s.schedulerLocation(ctx)
+	// Built here rather than in the constructor: the timezone is a stored
+	// setting, so it is not known until the database is reachable.
+	s.newRunner(loc)
+	s.mu.Unlock()
+	s.logger.Printf("[report-scheduler] schedule times are read in %s", loc)
+
 	// cron entry ids are local to a cron runner and restart at 1, so any value
 	// left by a previous process now points at a different schedule's job.
 	// Clear them all before registering, so a non-null cron_entry_id always
@@ -81,6 +112,24 @@ func (s *ReportSchedulerService) Start(ctx context.Context) error {
 	return nil
 }
 
+// Reload rebuilds the runner in the current report timezone and re-registers
+// every active schedule.
+//
+// Called when an administrator changes the timezone. Without it a schedule set
+// to 08:00 would keep firing at 08:00 in the old zone until the next restart,
+// which is the kind of drift nobody notices until a report arrives at the wrong
+// hour for a month.
+func (s *ReportSchedulerService) Reload(ctx context.Context) error {
+	s.mu.Lock()
+	if s.cron != nil {
+		// Waits for an in-flight run: killing a half-sent report would leave
+		// recipients with nothing and no record of why.
+		<-s.cron.Stop().Done()
+	}
+	s.mu.Unlock()
+	return s.Start(ctx)
+}
+
 // Stop halts the cron runner and waits for any in-flight run to finish.
 func (s *ReportSchedulerService) Stop() {
 	ctx := s.cron.Stop()
@@ -95,7 +144,7 @@ func (s *ReportSchedulerService) Register(schedule *models.ReportSchedule) error
 	if err := schedule.Validate(); err != nil {
 		return err
 	}
-	expr, err := CronExpressionFor(schedule.ScheduleType, schedule.CronExpression)
+	expr, err := CronExpressionFor(schedule)
 	if err != nil {
 		return err
 	}
@@ -242,7 +291,7 @@ func (s *ReportSchedulerService) recordRun(ctx context.Context, schedule *models
 	now := time.Now()
 	updates := map[string]interface{}{"last_run_at": now, "updated_at": now}
 
-	if expr, err := CronExpressionFor(schedule.ScheduleType, schedule.CronExpression); err == nil {
+	if expr, err := CronExpressionFor(schedule); err == nil {
 		if next, nerr := s.jobs.GetNextRunTime(expr); nerr == nil {
 			updates["next_run_at"] = next
 		}
@@ -261,22 +310,50 @@ func (s *ReportSchedulerService) recordRun(ctx context.Context, schedule *models
 // CronExpressionFor maps a cadence to a cron expression. A custom cadence
 // requires its own expression: falling back to a daily default, as the original
 // design did, would deliver mail on a cadence nobody chose.
-func CronExpressionFor(scheduleType string, custom *string) (string, error) {
-	switch scheduleType {
+//
+// The expression is evaluated in the report timezone (see NewReportSchedulerService),
+// so 08:00 means 08:00 where the reader is rather than in the container.
+func CronExpressionFor(schedule *models.ReportSchedule) (string, error) {
+	if schedule == nil {
+		return "", errors.New("schedule is nil")
+	}
+	hour, minute := schedule.SendHour, schedule.SendMinute
+
+	switch schedule.ScheduleType {
 	case models.ScheduleTypeDaily:
-		return "0 8 * * *", nil // 08:00 daily
+		return fmt.Sprintf("%d %d * * *", minute, hour), nil
+
 	case models.ScheduleTypeWeekly:
-		return "0 8 * * MON", nil // 08:00 Mondays
+		dow := 1 // Monday, the original default
+		if schedule.DayOfWeek != nil {
+			dow = *schedule.DayOfWeek
+		}
+		return fmt.Sprintf("%d %d * * %d", minute, hour, dow), nil
+
 	case models.ScheduleTypeMonthly:
-		return "0 8 1 * *", nil // 08:00 on the 1st
+		return fmt.Sprintf("%d %d %d * *", minute, hour, scheduleDayOfMonth(schedule)), nil
+
+	case models.ScheduleTypeQuarterly:
+		// The months a quarter begins in. A report covering "last quarter"
+		// delivered on 1 January describes October to December.
+		return fmt.Sprintf("%d %d %d 1,4,7,10 *", minute, hour, scheduleDayOfMonth(schedule)), nil
+
 	case models.ScheduleTypeCustom:
-		if custom == nil || *custom == "" {
+		if schedule.CronExpression == nil || *schedule.CronExpression == "" {
 			return "", errors.New("a custom schedule requires a cron expression")
 		}
-		return *custom, nil
+		return *schedule.CronExpression, nil
+
 	default:
-		return "", fmt.Errorf("unknown schedule type %q", scheduleType)
+		return "", fmt.Errorf("unknown schedule type %q", schedule.ScheduleType)
 	}
+}
+
+func scheduleDayOfMonth(schedule *models.ReportSchedule) int {
+	if schedule.DayOfMonth != nil {
+		return *schedule.DayOfMonth
+	}
+	return 1
 }
 
 // ValidateCronExpression reports whether expr is one the scheduler can run.

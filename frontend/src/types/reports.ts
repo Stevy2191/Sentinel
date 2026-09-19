@@ -3,7 +3,7 @@
 // internal/models/report.go and report_schedule.go.
 
 export type ReportScopeType = 'monitors' | 'tags' | 'groups' | 'types'
-export type ScheduleType = 'daily' | 'weekly' | 'monthly' | 'custom'
+export type ScheduleType = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'custom'
 
 export interface ReportTemplate {
   id: string
@@ -63,6 +63,12 @@ export interface SavedReport {
 export interface ReportSchedule {
   id: string
   report_id: string
+  send_hour?: number
+  send_minute?: number
+  day_of_week?: number | null
+  day_of_month?: number | null
+  /** What the runner evaluates, so the UI need not reimplement the mapping. */
+  cron_expression_resolved?: string
   schedule_type: ScheduleType
   cron_expression?: string | null
   email_recipients: string[]
@@ -101,6 +107,13 @@ export interface CreateReportPayload {
 export interface CreateSchedulePayload {
   schedule_type: ScheduleType
   cron_expression?: string
+  /** Local time of day, read in the instance's report timezone. */
+  send_hour?: number
+  send_minute?: number
+  /** Weekly only, 0 = Sunday. */
+  day_of_week?: number
+  /** Monthly and quarterly only, 1-28. */
+  day_of_month?: number
   email_recipients: string[]
   send_as_attachment: boolean
   /**

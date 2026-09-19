@@ -9,12 +9,22 @@ interface ScheduleManagerProps {
   onError?: (message: string) => void
 }
 
+// The times are chosen now, so the labels say the cadence rather than baking
+// 08:00 into the name of it.
 const SCHEDULE_OPTIONS: { value: ScheduleType; label: string }[] = [
-  { value: 'daily', label: 'Daily at 08:00' },
-  { value: 'weekly', label: 'Weekly, Monday 08:00' },
-  { value: 'monthly', label: 'Monthly, 1st at 08:00' },
+  { value: 'daily', label: 'Every day' },
+  { value: 'weekly', label: 'Every week' },
+  { value: 'monthly', label: 'Every month' },
+  { value: 'quarterly', label: 'Every quarter' },
   { value: 'custom', label: 'Custom (cron)' },
 ]
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+// Capped below 29 deliberately: a schedule set to the 31st would not fire in
+// February, and a report that silently skips a month is worse than one that
+// arrives on the 28th.
+const MAX_DAY_OF_MONTH = 28
 
 /**
  * ScheduleManager is the create form for a report's delivery schedule. It owns
@@ -30,6 +40,10 @@ export default function ScheduleManager({
   const [form, setForm] = useState({
     scheduleType: 'weekly' as ScheduleType,
     cronExpression: '',
+    sendHour: 8,
+    sendMinute: 0,
+    dayOfWeek: 1,
+    dayOfMonth: 1,
     recipients: '',
     sendAsAttachment: true,
     includeLink: false,
@@ -60,6 +74,15 @@ export default function ScheduleManager({
         schedule_type: form.scheduleType,
         cron_expression:
           form.scheduleType === 'custom' ? form.cronExpression.trim() : undefined,
+        send_hour: form.sendHour,
+        send_minute: form.sendMinute,
+        // Only sent where the cadence has a choice to make, so the server keeps
+        // its own default for the rest rather than storing a meaningless day.
+        day_of_week: form.scheduleType === 'weekly' ? form.dayOfWeek : undefined,
+        day_of_month:
+          form.scheduleType === 'monthly' || form.scheduleType === 'quarterly'
+            ? form.dayOfMonth
+            : undefined,
         email_recipients: recipientList,
         send_as_attachment: form.sendAsAttachment,
         include_in_email: {
@@ -70,6 +93,10 @@ export default function ScheduleManager({
       setForm({
         scheduleType: 'weekly',
         cronExpression: '',
+        sendHour: 8,
+        sendMinute: 0,
+        dayOfWeek: 1,
+        dayOfMonth: 1,
         recipients: '',
         sendAsAttachment: true,
         includeLink: false,
@@ -107,6 +134,64 @@ export default function ScheduleManager({
             ))}
           </select>
         </div>
+
+        {/* The day and time only appear where the cadence has a choice to
+            make, so the form never asks which weekday a monthly report goes
+            out on. */}
+        {form.scheduleType === 'weekly' && (
+          <div>
+            <label className="mb-1 block text-sm font-medium">Day</label>
+            <select
+              className="rd-select w-full"
+              value={form.dayOfWeek}
+              onChange={(e) => setForm((f) => ({ ...f, dayOfWeek: Number(e.target.value) }))}
+            >
+              {WEEKDAYS.map((d, i) => (
+                <option key={d} value={i}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {(form.scheduleType === 'monthly' || form.scheduleType === 'quarterly') && (
+          <div>
+            <label className="mb-1 block text-sm font-medium">Day of month</label>
+            <select
+              className="rd-select w-full"
+              value={form.dayOfMonth}
+              onChange={(e) => setForm((f) => ({ ...f, dayOfMonth: Number(e.target.value) }))}
+            >
+              {Array.from({ length: MAX_DAY_OF_MONTH }, (_, i) => i + 1).map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs" style={{ color: 'var(--vs-text-dim)' }}>
+              Up to the 28th, so the report still goes out in February.
+            </p>
+          </div>
+        )}
+
+        {form.scheduleType !== 'custom' && (
+          <div>
+            <label className="mb-1 block text-sm font-medium">Time</label>
+            <input
+              type="time"
+              className="rd-input w-full"
+              value={`${String(form.sendHour).padStart(2, '0')}:${String(form.sendMinute).padStart(2, '0')}`}
+              onChange={(e) => {
+                const [h, m] = e.target.value.split(':').map(Number)
+                setForm((f) => ({ ...f, sendHour: h || 0, sendMinute: m || 0 }))
+              }}
+            />
+            <p className="mt-1 text-xs" style={{ color: 'var(--vs-text-dim)' }}>
+              In the instance timezone, set under Settings &rarr; System.
+            </p>
+          </div>
+        )}
 
         {form.scheduleType === 'custom' && (
           <div>

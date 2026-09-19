@@ -99,11 +99,20 @@ func (cm *CronJobManager) Count() int {
 }
 
 // GetNextRunTime reports when cronExpr would next fire.
+//
+// Computed from a time in the runner's own location. Asking a spec for its next
+// occurrence after time.Now() answers in the process's zone, which is UTC in a
+// container: a schedule set to 09:30 Chicago then reported a next run of 09:30
+// UTC — five hours before it would actually fire.
 func (cm *CronJobManager) GetNextRunTime(cronExpr string) (*time.Time, error) {
 	spec, err := cm.parser.Parse(cronExpr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid cron expression %q: %w", cronExpr, err)
 	}
-	next := spec.Next(time.Now())
+	loc := time.UTC
+	if cm.cron != nil {
+		loc = cm.cron.Location()
+	}
+	next := spec.Next(time.Now().In(loc))
 	return &next, nil
 }
