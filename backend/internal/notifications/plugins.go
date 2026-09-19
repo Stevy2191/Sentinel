@@ -32,7 +32,11 @@ const maxHistoryLimit = 1000
 // NotificationMessage is the channel-agnostic payload describing a status change
 // that plugins render and deliver.
 type NotificationMessage struct {
-	MonitorID        uuid.UUID     `json:"monitor_id"`
+	MonitorID uuid.UUID `json:"monitor_id"`
+	// AgentID is set instead of MonitorID when the alert is about a server
+	// agent. The name and URL fields carry the server's name and address, so
+	// every plugin renders it without needing to know the difference.
+	AgentID          *uuid.UUID    `json:"agent_id,omitempty"`
 	MonitorName      string        `json:"monitor_name"`
 	MonitorURL       string        `json:"monitor_url"`
 	Status           string        `json:"status"`
@@ -191,12 +195,18 @@ func (m *NotificationManager) StoreNotificationRecord(ctx context.Context, messa
 	channelID := inst.ID
 	record := &models.Notification{
 		ID:         uuid.New(),
-		MonitorID:  message.MonitorID,
 		IncidentID: message.IncidentID,
 		Channel:    inst.Type,
 		ChannelID:  &channelID,
 		Status:     status,
 		CreatedAt:  time.Now().UTC(),
+	}
+	// Exactly one subject, matching the table's check constraint.
+	if message.AgentID != nil {
+		record.AgentID = message.AgentID
+	} else {
+		monitorID := message.MonitorID
+		record.MonitorID = &monitorID
 	}
 	if sendErr != nil {
 		record.ErrorMessage = sendErr.Error()

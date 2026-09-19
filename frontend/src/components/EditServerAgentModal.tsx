@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { X, Loader2 } from 'lucide-react'
 import AgentSettingsFields, {
+  notifyChannelsPayload,
   validateAgentSettings,
   type AgentSettings,
 } from '@/components/AgentSettingsFields'
@@ -23,6 +24,11 @@ function settingsOf(agent: Agent): AgentSettings {
     ipOverride: agent.ip_address_override ?? '',
     interval: agent.check_interval,
     retries: agent.retry_attempts,
+    // null means every enabled channel, an empty list means none — the same
+    // convention the API stores, kept rather than flattened so reopening the
+    // form shows what is actually configured.
+    notifyEnabled: agent.notify_channels === null || (agent.notify_channels ?? []).length > 0,
+    notifyChannels: agent.notify_channels ?? [],
   }
 }
 
@@ -86,6 +92,7 @@ export default function EditServerAgentModal({ agent, isOpen, onClose, onSaved, 
         // Sent even when empty: that is how an override is cleared and the
         // address goes back to whatever the agent detects.
         ip_address_override: values.ipOverride.trim(),
+        notify_channels: notifyChannelsPayload(values),
       })
       push(`${values.name.trim()} updated`, 'success')
       onSaved()

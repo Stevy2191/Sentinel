@@ -83,6 +83,9 @@ type createAgentRequest struct {
 	// IPAddressOverride pins the address this host is recorded under. Empty
 	// means use whatever the agent detects.
 	IPAddressOverride *string `json:"ip_address_override"`
+	// NotifyChannels selects where this agent alerts. Omitted means every
+	// enabled channel; an explicit empty list means nowhere.
+	NotifyChannels *[]string `json:"notify_channels"`
 }
 
 // validateAgentSettings applies the shared bounds for create and update.
@@ -168,6 +171,11 @@ func CreateAgentHandler(agents *services.AgentService, settings *services.Settin
 			RetryAttempts:     retries,
 			IPAddressOverride: override,
 		}
+		// nil is left as nil on purpose: it means "every enabled channel",
+		// which is the right default for a server that has gone silent.
+		if req.NotifyChannels != nil {
+			agent.NotifyChannels = models.StringSlice(*req.NotifyChannels)
+		}
 		if err := agents.Register(c.Request.Context(), agent); err != nil {
 			respondInternal(c, "CreateAgentHandler", err)
 			return
@@ -228,6 +236,9 @@ type updateAgentRequest struct {
 	CheckInterval     *int    `json:"check_interval"`
 	RetryAttempts     *int    `json:"retry_attempts"`
 	IPAddressOverride *string `json:"ip_address_override"`
+	// NotifyChannels omitted leaves the current selection alone; an explicit
+	// empty list turns alerts off for this agent.
+	NotifyChannels *[]string `json:"notify_channels"`
 }
 
 // UpdateAgentHandler handles PATCH /api/v1/agents/:agent_id.
@@ -271,7 +282,19 @@ func UpdateAgentHandler(agents *services.AgentService) gin.HandlerFunc {
 			override = parsed
 		}
 
-		updated, err := agents.Update(c.Request.Context(), current.AgentID, name, osType, interval, retries, override)
+		settings := services.AgentSettings{
+			Name:          name,
+			OSType:        osType,
+			CheckInterval: interval,
+			RetryAttempts: retries,
+			IPOverride:    override,
+		}
+		if req.NotifyChannels != nil {
+			channels := models.StringSlice(*req.NotifyChannels)
+			settings.NotifyChannels = &channels
+		}
+
+		updated, err := agents.Update(c.Request.Context(), current.AgentID, settings)
 		if err != nil {
 			respondAgentError(c, err)
 			return

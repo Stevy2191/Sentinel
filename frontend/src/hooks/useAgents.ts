@@ -13,6 +13,8 @@ export interface Agent {
   os_type: AgentOS
   check_interval: number
   retry_attempts: number
+  /** Channels this server alerts on. null means every enabled channel. */
+  notify_channels?: string[] | null
   status: AgentStatus
   last_heartbeat: string | null
   /** The address to display: the override when set, else what was detected. */
@@ -82,6 +84,8 @@ export interface CreateAgentInput {
   retry_attempts: number
   /** Empty or omitted lets the agent detect its own address. */
   ip_address_override?: string
+  /** null means every enabled channel; an empty array means alert nowhere. */
+  notify_channels?: string[] | null
 }
 
 /**

@@ -1,4 +1,5 @@
 import type { RefObject } from 'react'
+import NotificationsSection from './NotificationsSection'
 import type { AgentOS } from '@/hooks/useAgents'
 
 /** The settings an operator owns. Credentials are not among them. */
@@ -8,6 +9,22 @@ export interface AgentSettings {
   ipOverride: string
   interval: number
   retries: number
+  /** Whether this server alerts at all. */
+  notifyEnabled: boolean
+  /** Which channels it alerts on. Empty with notifyEnabled means every one. */
+  notifyChannels: string[]
+}
+
+/**
+ * Turns the two notification fields into what the API expects.
+ *
+ * null means "every enabled channel" and an empty array means "nowhere" — the
+ * same convention monitors use, so a server that has gone silent alerts by
+ * default rather than quietly telling no one.
+ */
+export function notifyChannelsPayload(settings: AgentSettings): string[] | null {
+  if (!settings.notifyEnabled) return []
+  return settings.notifyChannels.length > 0 ? settings.notifyChannels : null
 }
 
 export interface AgentSettingsErrors {
@@ -203,6 +220,23 @@ export default function AgentSettingsFields({
             </p>
           </div>
         </div>
+      </section>
+
+      {/* The same control the monitor and domain dialogs use, rather than a
+          second one written for servers: a server going silent is the same kind
+          of event as a monitor going down, and two controls would drift. */}
+      <section>
+        <h4 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-300">
+          Notifications
+        </h4>
+        <NotificationsSection
+          enabled={values.notifyEnabled}
+          onEnabledChange={(v) => set('notifyEnabled', v)}
+          selected={values.notifyChannels}
+          onSelectedChange={(ids) => set('notifyChannels', ids)}
+          silentNote="this server stops reporting or comes back"
+          showHeading={false}
+        />
       </section>
     </>
   )

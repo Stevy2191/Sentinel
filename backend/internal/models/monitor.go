@@ -437,8 +437,11 @@ func (i *Incident) Status() string {
 // Notification is a record of an alert dispatched over a channel, optionally
 // tied to the incident that triggered it.
 type Notification struct {
-	ID         uuid.UUID  `json:"id" gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
-	MonitorID  uuid.UUID  `json:"monitor_id" gorm:"column:monitor_id;type:uuid;not null"`
+	ID uuid.UUID `json:"id" gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
+	// Exactly one of MonitorID and AgentID is set: a delivery is about a
+	// monitor or about a server agent, never both.
+	MonitorID  *uuid.UUID `json:"monitor_id" gorm:"column:monitor_id;type:uuid"`
+	AgentID    *uuid.UUID `json:"agent_id" gorm:"column:agent_id;type:uuid"`
 	IncidentID *uuid.UUID `json:"incident_id" gorm:"column:incident_id;type:uuid"`
 	Channel    string     `json:"channel" gorm:"column:channel;not null"`
 	// ChannelID names which configured channel sent this, since several may

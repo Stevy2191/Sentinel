@@ -291,7 +291,7 @@ func run() error {
 	api.RegisterMonitorGroupRoutes(v1, monitorService, incidentService)
 	api.RegisterMonitorSharingRoutes(v1, monitorService, authService)
 	api.RegisterStatusPageRoutes(v1, statusPageService, incidentService)
-	api.RegisterNotificationRoutes(v1, notificationManager, monitorService)
+	api.RegisterNotificationRoutes(v1, notificationManager, monitorService, db)
 	api.RegisterSettingsRoutes(v1, settingsService, models.DefaultMonitorCheckInterval, authService, reportScheduler)
 	api.RegisterSSLCertificateRoutes(v1, sslChecker, authService)
 	api.RegisterAgentRoutes(v1, agentService, settingsService, authService)
@@ -326,6 +326,11 @@ func run() error {
 	go incidentRetention.StartPurgeLoop(loopCtx)
 	// Agents report in rather than being polled, so a separate sweep notices
 	// when one stops reporting.
+	// A server going silent is the thing someone wants to be told about, and
+	// until now the sweep only wrote it to the database.
+	agentService.SetStatusChangeHook(func(ctx context.Context, change services.AgentStatusChange) {
+		notifyAgentStatusChange(ctx, notificationManager, change)
+	})
 	go agentService.StartOfflineSweep(loopCtx)
 	go hostSampler.Start(loopCtx)
 
@@ -768,7 +773,66 @@ func runMonitoringCycle(
 	log.Printf("%d monitors checked, %d failed", len(monitors), failures)
 }
 
-// handleStatusChange opens/closes incidents and sends notifications when a
+// notifyAgentStatusChange alerts on a server agent going silent or returning.
+//
+// The message reuses the monitor shape deliberately: every plugin already
+// renders a name, a target and a status, and an agent has all three. Splitting
+// the message type would mean touching six plugins to say the same sentence
+// about a different subject.
+func notifyAgentStatusChange(
+	ctx context.Context,
+	notificationManager *notifications.NotificationManager,
+	change services.AgentStatusChange,
+) {
+	agent := change.Agent
+	if !agent.NotifiesAnyChannel() {
+		log.Printf("[agent] %s changed to %s but has notifications disabled", agent.Name, change.To)
+		return
+	}
+
+	// Whatever identifies the host to a reader. The email plugin refuses a
+	// message with no target, and "which box was this" is the first thing
+	// anyone asks.
+	target := agent.AgentID
+	if ip := agent.EffectiveIP(); ip != nil && *ip != "" {
+		target = *ip
+	}
+	if agent.Hostname != nil && *agent.Hostname != "" {
+		target = *agent.Hostname
+	}
+
+	status := "down"
+	message := fmt.Sprintf("%s has stopped reporting. Last contact %s.",
+		agent.Name, lastContact(agent))
+	if change.To == models.AgentActive {
+		status = "recovered"
+		message = fmt.Sprintf("%s is reporting again.", agent.Name)
+	}
+
+	agentID := agent.ID
+	if err := notificationManager.SendNotification(ctx, &notifications.NotificationMessage{
+		AgentID:        &agentID,
+		MonitorName:    agent.Name,
+		MonitorURL:     target,
+		Status:         status,
+		Message:        message,
+		PreviousStatus: change.From,
+		Timestamp:      time.Now(),
+		Channels:       agent.NotifyChannels,
+	}); err != nil {
+		log.Printf("[agent] sending %s notification for %s: %v", status, agent.Name, err)
+	}
+}
+
+// lastContact describes when an agent was last heard from, for the alert text.
+func lastContact(agent models.Agent) string {
+	if agent.LastHeartbeat == nil {
+		return "never"
+	}
+	return agent.LastHeartbeat.UTC().Format(time.RFC3339)
+}
+
+// handleStatusChange opens/closes incidents and sends notifications when a// handleStatusChange opens/closes incidents and sends notifications when a
 // monitor transitions between online and offline.
 func handleStatusChange(
 	ctx context.Context,

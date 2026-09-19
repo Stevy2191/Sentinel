@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"github.com/Stevy2191/Sentinel/backend/internal/models"
 	"github.com/Stevy2191/Sentinel/backend/internal/notifications"
 	"github.com/Stevy2191/Sentinel/backend/internal/services"
 )
@@ -58,6 +59,7 @@ func GetNotificationChannelsHandler(manager *notifications.NotificationManager) 
 func GetNotificationHistoryHandler(
 	manager *notifications.NotificationManager,
 	monitorService *services.MonitorService,
+	db *gorm.DB,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
@@ -105,11 +107,18 @@ func GetNotificationHistoryHandler(
 			return
 		}
 
-		// Enrich with monitor names via a single lookup.
+		// Enrich with names via a single lookup each.
 		names := map[uuid.UUID]string{}
 		if monitors, err := monitorService.ListMonitors(ctx, nil); err == nil {
 			for _, m := range monitors {
 				names[m.ID] = m.Name
+			}
+		}
+		agentNames := map[uuid.UUID]string{}
+		var agentRows []models.Agent
+		if err := db.WithContext(ctx).Select("id", "name").Find(&agentRows).Error; err == nil {
+			for _, a := range agentRows {
+				agentNames[a.ID] = a.Name
 			}
 		}
 
@@ -123,10 +132,20 @@ func GetNotificationHistoryHandler(
 			if r.SentAt != nil {
 				sentAt = r.SentAt.UTC().Format(time.RFC3339)
 			}
+			// A record belongs to a monitor or to a server agent. The name
+			// lookup only covers monitors, so an agent alert falls back to
+			// its id rather than showing an empty name.
+			subject := ""
+			if r.MonitorID != nil {
+				subject = names[*r.MonitorID]
+			} else if r.AgentID != nil {
+				subject = agentNames[*r.AgentID]
+			}
 			items = append(items, gin.H{
 				"id":            r.ID,
 				"monitor_id":    r.MonitorID,
-				"monitor_name":  names[r.MonitorID],
+				"agent_id":      r.AgentID,
+				"monitor_name":  subject,
 				"channel":       r.Channel,
 				"status":        r.Status,
 				"error_message": errMsg,
@@ -212,10 +231,11 @@ func RegisterNotificationRoutes(
 	rg *gin.RouterGroup,
 	manager *notifications.NotificationManager,
 	monitorService *services.MonitorService,
+	db *gorm.DB,
 ) {
 	group := rg.Group("/notifications")
 	group.GET("/channels", GetNotificationChannelsHandler(manager))
-	group.GET("/history", GetNotificationHistoryHandler(manager, monitorService))
+	group.GET("/history", GetNotificationHistoryHandler(manager, monitorService, db))
 	group.POST("/test/:channel", SendTestNotificationHandler(manager))
 	group.POST("/retry/:notification_id", RetryFailedNotificationHandler(manager))
 }

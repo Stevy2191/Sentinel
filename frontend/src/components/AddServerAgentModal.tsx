@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { X, Copy, Check, Loader2, ServerCog } from 'lucide-react'
 import { useAgentActions, type CreatedAgent } from '@/hooks/useAgents'
 import AgentSettingsFields, {
+  notifyChannelsPayload,
   validateAgentSettings,
   type AgentSettings,
 } from '@/components/AgentSettingsFields'
@@ -23,6 +24,11 @@ const BLANK: AgentSettings = {
   ipOverride: '',
   interval: 60,
   retries: 3,
+  // On by default with no channels chosen, which the API reads as "every
+  // enabled channel". A server going quiet is the thing someone adding one
+  // wants to hear about; defaulting to silence would look broken.
+  notifyEnabled: true,
+  notifyChannels: [],
 }
 
 const TABS = ['One-Click Install', 'Docker One-Click', 'Direct Docker Run', 'Manual', 'Uninstall'] as const
@@ -137,6 +143,7 @@ export default function AddServerAgentModal({ isOpen, onClose, onCreated, push, 
         check_interval: values.interval,
         retry_attempts: values.retries,
         ip_address_override: values.ipOverride.trim(),
+        notify_channels: notifyChannelsPayload(values),
       })
       setCreated(result)
       onCreated()

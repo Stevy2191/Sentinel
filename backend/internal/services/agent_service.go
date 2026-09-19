@@ -22,6 +22,9 @@ var ErrAgentNotFound = errors.New("agent not found")
 type AgentService struct {
 	db     *gorm.DB
 	logger *log.Logger
+	// onStatusChange is called when an agent goes silent or starts reporting
+	// again. Optional: nil simply means nothing is listening.
+	onStatusChange func(context.Context, AgentStatusChange)
 }
 
 func NewAgentService(db *gorm.DB) *AgentService {
@@ -195,19 +198,42 @@ func (s *AgentService) Reconnect(ctx context.Context, agentID string, name strin
 
 // Update changes the settings an operator owns. Credentials are not among
 // them: rotating a token would silently break the installed agent.
-func (s *AgentService) Update(ctx context.Context, agentID string, name string, osType string, interval, retries int, ipOverride *string) (*models.Agent, error) {
+// AgentSettings is the editable configuration of an agent.
+//
+// A struct rather than a growing parameter list: this call already carried six
+// positional arguments, and a seventh of the same type as its neighbour is the
+// kind of signature that gets mis-called without the compiler noticing.
+type AgentSettings struct {
+	Name          string
+	OSType        string
+	CheckInterval int
+	RetryAttempts int
+	// IPOverride nil clears any pinned address.
+	IPOverride *string
+	// NotifyChannels is applied only when non-nil. Nil means "leave as is",
+	// which is different from an empty slice meaning "alert nowhere".
+	NotifyChannels *models.StringSlice
+}
+
+func (s *AgentService) Update(ctx context.Context, agentID string, settings AgentSettings) (*models.Agent, error) {
 	agent, err := s.Get(ctx, agentID)
 	if err != nil {
 		return nil, err
 	}
 	updates := map[string]interface{}{
-		"name":           name,
-		"os_type":        osType,
-		"check_interval": interval,
-		"retry_attempts": retries,
+		"name":           settings.Name,
+		"os_type":        settings.OSType,
+		"check_interval": settings.CheckInterval,
+		"retry_attempts": settings.RetryAttempts,
 		// nil clears it, which is how an operator goes back to detection.
-		"ip_address_override": ipOverride,
+		"ip_address_override": settings.IPOverride,
 		"updated_at":          time.Now(),
+	}
+	// Applied only when supplied, so an update that says nothing about
+	// notifications leaves the current selection alone rather than silently
+	// resetting it to "every channel".
+	if settings.NotifyChannels != nil {
+		updates["notify_channels"] = *settings.NotifyChannels
 	}
 	if err := s.db.WithContext(ctx).Model(&models.Agent{}).
 		Where("id = ?", agent.ID).Updates(updates).Error; err != nil {
@@ -249,6 +275,9 @@ type AgentSystemInfo struct {
 // Heartbeat records that an agent is alive and refreshes what it reports about
 // itself.
 func (s *AgentService) Heartbeat(ctx context.Context, agent *models.Agent, info AgentSystemInfo) error {
+	// Captured before the update: an agent that was offline and has just
+	// reported is a recovery worth announcing.
+	wasOffline := agent.Status == models.AgentOffline
 	now := time.Now()
 	updates := map[string]interface{}{
 		"last_heartbeat": now,
@@ -286,6 +315,11 @@ func (s *AgentService) Heartbeat(ctx context.Context, agent *models.Agent, info 
 		Where("id = ?", agent.ID).Updates(updates).Error; err != nil {
 		return fmt.Errorf("recording heartbeat for %s: %w", agent.AgentID, err)
 	}
+	if wasOffline {
+		s.notifyStatusChange(ctx, AgentStatusChange{
+			Agent: *agent, From: models.AgentOffline, To: models.AgentActive,
+		})
+	}
 	return nil
 }
 
@@ -294,6 +328,10 @@ func (s *AgentService) Heartbeat(ctx context.Context, agent *models.Agent, info 
 // Metrics arriving is itself proof the agent is alive, so a run of successful
 // submissions keeps an agent active even if a heartbeat is lost.
 func (s *AgentService) RecordMetrics(ctx context.Context, agent *models.Agent, metric *models.AgentMetric, containers []models.AgentContainer) error {
+	// Metrics arriving counts as a heartbeat, so this is also where a silent
+	// agent can come back — the recovery has to be announced from here too, or
+	// an agent that only submits metrics would recover without a word.
+	wasOffline := agent.Status == models.AgentOffline
 	if metric.Timestamp.IsZero() {
 		metric.Timestamp = time.Now()
 	}
@@ -326,6 +364,11 @@ func (s *AgentService) RecordMetrics(ctx context.Context, agent *models.Agent, m
 	})
 	if err != nil {
 		return err
+	}
+	if wasOffline {
+		s.notifyStatusChange(ctx, AgentStatusChange{
+			Agent: *agent, From: models.AgentOffline, To: models.AgentActive,
+		})
 	}
 	return nil
 }
@@ -379,6 +422,30 @@ func (s *AgentService) LatestContainers(ctx context.Context, agent *models.Agent
 	return containers, nil
 }
 
+// AgentStatusChange describes an agent crossing between reporting and silent.
+type AgentStatusChange struct {
+	Agent models.Agent
+	From  string
+	To    string
+}
+
+// SetStatusChangeHook registers a callback invoked when an agent goes silent or
+// starts reporting again.
+//
+// A hook rather than a notification manager dependency: this service's job is
+// agent state, and wiring delivery into it would pull the whole notification
+// graph in behind it. main decides what a transition means.
+func (s *AgentService) SetStatusChangeHook(fn func(context.Context, AgentStatusChange)) {
+	s.onStatusChange = fn
+}
+
+func (s *AgentService) notifyStatusChange(ctx context.Context, change AgentStatusChange) {
+	if s.onStatusChange == nil {
+		return
+	}
+	s.onStatusChange(ctx, change)
+}
+
 // MarkStaleOffline flips agents that have stopped reporting to offline.
 //
 // Persisted rather than only derived on read so the transition is a fact the
@@ -386,9 +453,29 @@ func (s *AgentService) LatestContainers(ctx context.Context, agent *models.Agent
 // something recomputed by whoever happens to load the page.
 func (s *AgentService) MarkStaleOffline(ctx context.Context) (int64, error) {
 	cutoff := time.Now().Add(-models.AgentOfflineAfter)
-	res := s.db.WithContext(ctx).Model(&models.Agent{}).
+
+	// Read the rows that are about to flip before flipping them. The caller
+	// needs to know which agents went silent, not only how many, and an UPDATE
+	// cannot say who it touched portably.
+	var stale []models.Agent
+	if err := s.db.WithContext(ctx).
 		Where("status = ? AND last_heartbeat IS NOT NULL AND last_heartbeat < ?",
 			models.AgentActive, cutoff).
+		Find(&stale).Error; err != nil {
+		return 0, fmt.Errorf("finding stale agents: %w", err)
+	}
+	if len(stale) == 0 {
+		return 0, nil
+	}
+
+	ids := make([]uuid.UUID, 0, len(stale))
+	for _, a := range stale {
+		ids = append(ids, a.ID)
+	}
+	res := s.db.WithContext(ctx).Model(&models.Agent{}).
+		// Still constrained on status, so an agent that reported in between the
+		// read and this write is not dragged offline behind its own heartbeat.
+		Where("id IN ? AND status = ?", ids, models.AgentActive).
 		Updates(map[string]interface{}{"status": models.AgentOffline, "updated_at": time.Now()})
 	if res.Error != nil {
 		return 0, fmt.Errorf("marking stale agents offline: %w", res.Error)
@@ -396,6 +483,12 @@ func (s *AgentService) MarkStaleOffline(ctx context.Context) (int64, error) {
 	if res.RowsAffected > 0 {
 		s.logger.Printf("[agent] %d agent(s) marked offline after %s without contact",
 			res.RowsAffected, models.AgentOfflineAfter)
+	}
+
+	for i := range stale {
+		s.notifyStatusChange(ctx, AgentStatusChange{
+			Agent: stale[i], From: models.AgentActive, To: models.AgentOffline,
+		})
 	}
 	return res.RowsAffected, nil
 }

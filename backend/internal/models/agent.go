@@ -76,9 +76,17 @@ type Agent struct {
 	// IPAddressOverride is an address an operator pinned. When set it is what
 	// gets displayed, whatever the host detected.
 	IPAddressOverride *string `json:"ip_address_override" gorm:"column:ip_address_override"`
-	Hostname          *string `json:"hostname" gorm:"column:hostname"`
-	OSVersion         *string `json:"os_version" gorm:"column:os_version"`
-	AgentVersion      *string `json:"agent_version" gorm:"column:agent_version"`
+	// NotifyChannels selects which notification channels this agent alerts on
+	// when it stops reporting or comes back. Mirrors the monitor field: nil
+	// means every enabled channel, an empty slice means none.
+	//
+	// The default is nil rather than empty because an agent that goes silent is
+	// exactly the thing someone wants to hear about, and a default of "tell
+	// nobody" would make the feature look broken to whoever added the agent.
+	NotifyChannels StringSlice `json:"notify_channels" gorm:"column:notify_channels;type:jsonb"`
+	Hostname       *string     `json:"hostname" gorm:"column:hostname"`
+	OSVersion      *string     `json:"os_version" gorm:"column:os_version"`
+	AgentVersion   *string     `json:"agent_version" gorm:"column:agent_version"`
 
 	// ---- What the host reports about itself ----------------------------
 	// Refreshed on each heartbeat rather than stored per sample: these change
@@ -236,3 +244,10 @@ type AgentContainer struct {
 }
 
 func (AgentContainer) TableName() string { return "agent_containers" }
+
+// NotifiesAnyChannel reports whether this agent alerts anywhere. A nil
+// NotifyChannels means "every enabled channel"; an explicitly empty one means
+// the agent has been opted out of notifications.
+func (a *Agent) NotifiesAnyChannel() bool {
+	return a.NotifyChannels == nil || len(a.NotifyChannels) > 0
+}
