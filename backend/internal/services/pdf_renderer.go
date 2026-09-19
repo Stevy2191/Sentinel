@@ -191,11 +191,15 @@ func drawPDFHeader(pdf *fpdf.Fpdf, data *ReportData) {
 	pdf.Ln(2)
 	pdf.SetFont("Helvetica", "", 9)
 	setColor(pdf, pdfMuted, false)
+	// Every timestamp in the document is written in the report's configured
+	// zone. Without this they rendered in the server process's zone, which in a
+	// container is UTC by default — a timezone nobody chose.
+	loc := data.ReportLocation()
 	pdf.MultiCell(pdfContentW, 5, fmt.Sprintf(
 		"Report period: %s to %s\nGenerated: %s",
-		data.TimeRangeStart.Format("January 02, 2006"),
-		data.TimeRangeEnd.Format("January 02, 2006"),
-		time.Now().Format("January 02, 2006 at 15:04 MST"),
+		data.TimeRangeStart.In(loc).Format("January 02, 2006"),
+		data.TimeRangeEnd.In(loc).Format("January 02, 2006"),
+		time.Now().In(loc).Format("January 02, 2006 at 15:04 MST"),
 	), "", "L", false)
 
 	pdf.Ln(2)
@@ -349,7 +353,7 @@ func drawPDFIncidentSection(pdf *fpdf.Fpdf, data *ReportData) {
 
 			pdf.SetFont("Helvetica", "B", 9)
 			setColor(pdf, pdfInk, false)
-			pdf.CellFormat(pdfContentW-44, 6, inc.StartTime.Format("Jan 02, 2006 15:04"), "", 0, "L", false, 0, "")
+			pdf.CellFormat(pdfContentW-44, 6, inc.StartTime.In(data.ReportLocation()).Format("Jan 02, 2006 15:04"), "", 0, "L", false, 0, "")
 			pdf.SetFont("Helvetica", "", 9)
 			setColor(pdf, pdfMuted, false)
 			pdf.CellFormat(40, 6, fmt.Sprintf("%s  %s", formatMinutes(inc.Duration), inc.Status), "", 1, "R", false, 0, "")

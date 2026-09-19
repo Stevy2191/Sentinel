@@ -122,10 +122,10 @@ func run() error {
 	}
 	reportBuilder := api.NewReportBuilder(db, reportAggregator, pdfRenderer, nil)
 	// PDF rendering runs on a worker pool rather than in the request handler.
-	reportJobs := services.NewReportJobQueue(db, services.NewReportGenerator(db, reportAggregator, pdfRenderer), cfg.ReportWorkers)
+	reportJobs := services.NewReportJobQueue(db, services.NewReportGenerator(db, reportAggregator, pdfRenderer, settingsService), cfg.ReportWorkers)
 	reportBuilder.SetJobQueue(reportJobs)
 	reportBuilder.SetAudit(auditService)
-	reportGenerator := services.NewReportGenerator(db, reportAggregator, pdfRenderer)
+	reportGenerator := services.NewReportGenerator(db, reportAggregator, pdfRenderer, settingsService)
 	// Scheduled delivery sends through the same SMTP configuration as the email
 	// notification channel, so it inherits its connection-security settings.
 	reportMailer := services.NewReportMailer(db, resolveBaseURL)
@@ -153,6 +153,21 @@ func run() error {
 	if _, err := settingsService.SeedInt(settingsCtx, models.SettingDefaultCheckInterval,
 		models.DefaultMonitorCheckInterval); err != nil {
 		return fmt.Errorf("seeding default check interval: %w", err)
+	}
+	// Seeded from TZ when the deployment set one, so an operator who already
+	// configured the container's zone does not have to state it twice. Anything
+	// unloadable falls back to UTC rather than failing startup over a display
+	// preference.
+	reportTZ := models.DefaultReportTimezone
+	if env := strings.TrimSpace(os.Getenv("TZ")); env != "" {
+		if _, err := models.ParseReportTimezone(env); err == nil {
+			reportTZ = env
+		} else {
+			log.Printf("[sentinel] ignoring TZ=%q for reports: %v", env, err)
+		}
+	}
+	if _, err := settingsService.SeedString(settingsCtx, models.SettingReportTimezone, reportTZ); err != nil {
+		return fmt.Errorf("seeding report timezone: %w", err)
 	}
 	if _, err := settingsService.SeedInt(settingsCtx, models.SettingCheckRetentionDays,
 		models.DefaultCheckRetentionDays); err != nil {

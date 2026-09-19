@@ -17,7 +17,6 @@ import {
   DEFAULTS,
   applyStoredPreferences,
   resetAllPreferences,
-  defaultTimezone,
   getString,
   getBool,
   setString,
@@ -73,6 +72,8 @@ interface SystemSettings {
   sentinel_external_url: string
   /** Where agents report metrics. Empty means use the external URL. */
   sentinel_internal_url: string
+  /** IANA zone that reports are rendered in and the UI displays times in. */
+  report_timezone: string
 }
 
 function Toggle({
@@ -154,7 +155,7 @@ function apiMessage(err: unknown, fallback: string): string {
 export default function Settings() {
   const { toasts, push } = useToasts()
   const { currentUser } = useAuthContext()
-  const { appName, refresh: refreshAppConfig } = useAppConfig()
+  const { appName, reportTimezone, refresh: refreshAppConfig } = useAppConfig()
   const isAdmin = currentUser?.is_admin ?? false
 
   // System and notification-channel settings are instance-wide and their APIs
@@ -215,6 +216,7 @@ export default function Settings() {
           check_retention_days: r.data.data.check_retention_days,
           sentinel_external_url: r.data.data.sentinel_external_url ?? '',
           sentinel_internal_url: r.data.data.sentinel_internal_url ?? '',
+          report_timezone: r.data.data.report_timezone || 'UTC',
         })
         setSystemError(null)
       })
@@ -236,6 +238,7 @@ export default function Settings() {
         check_retention_days: system.check_retention_days,
         sentinel_external_url: system.sentinel_external_url.trim(),
         sentinel_internal_url: system.sentinel_internal_url.trim(),
+        report_timezone: system.report_timezone,
       })
       // Re-read the public config so the sidebar, sign-in screen and browser tab
       // pick up a renamed instance without a reload.
@@ -262,7 +265,6 @@ export default function Settings() {
   const [timeFormat, setTimeFormat] = useState<TimeFormat>(
     () => getString(PREF.timeFormat, DEFAULTS.timeFormat) as TimeFormat
   )
-  const [timezone, setTimezone] = useState(() => getString(PREF.timezone, defaultTimezone()))
   const [dateFormat, setDateFormat] = useState<DateFormatPref>(
     () => getString(PREF.dateFormat, DEFAULTS.dateFormat) as DateFormatPref
   )
@@ -301,7 +303,6 @@ export default function Settings() {
     setBool(PREF.soundAlerts, soundAlerts)
     setBool(PREF.desktopNotifications, desktopNotifications)
     setString(PREF.timeFormat, timeFormat)
-    setString(PREF.timezone, timezone)
     setString(PREF.dateFormat, dateFormat)
     setString(PREF.reportRange, reportRange)
     applyStoredPreferences()
@@ -314,7 +315,6 @@ export default function Settings() {
     setSoundAlerts(DEFAULTS.soundAlerts)
     setDesktopNotifications(DEFAULTS.desktopNotifications)
     setTimeFormat(DEFAULTS.timeFormat)
-    setTimezone(defaultTimezone())
     setDateFormat(DEFAULTS.dateFormat)
     setReportRange(DEFAULTS.reportRange)
     applyStoredPreferences()
@@ -546,6 +546,24 @@ export default function Settings() {
                 )}
               </SettingsCard>
 
+              {/* Instance-wide rather than per-user: a rendered report is a file
+                  that gets emailed, downloaded and shared, so the times inside it
+                  must mean the same thing to everyone who opens it rather than
+                  depending on who pressed Generate. */}
+              <SettingsCard
+                title="Timezone"
+                description="The zone reports are written in, and that times are displayed in across Sentinel."
+              >
+                <TimezoneSelector
+                  value={system.report_timezone}
+                  onChange={(tz) => setSystem({ ...system, report_timezone: tz })}
+                />
+                <p className="text-xs text-slate-500">
+                  Applies to generated PDFs, scheduled report emails and every timestamp on
+                  screen. Takes effect on the next report — nothing needs restarting.
+                </p>
+              </SettingsCard>
+              
               <SettingsCard
                 title="Data Retention"
                 description="Old history is deleted automatically. The purge runs nightly at 2 AM."
@@ -683,14 +701,20 @@ export default function Settings() {
             </div>
           </SettingsCard>
 
-          <SettingsCard title="Timezone" description="Used for displaying report timestamps.">
-            <TimezoneSelector
-              value={timezone}
-              onChange={(tz) => {
-                setTimezone(tz)
-                setString(PREF.timezone, tz)
-              }}
-            />
+          {/* The zone is instance-wide, not per-browser: a report is a file that
+              gets emailed and shared, so its timestamps have to mean the same
+              thing to everyone who opens it. Shown here because this is where
+              people look for it, but changed under System. */}
+          <SettingsCard
+            title="Timezone"
+            description="Times across Sentinel, and in generated reports, are shown in this zone."
+          >
+            <p className="text-sm text-white">{reportTimezone ?? 'UTC'}</p>
+            <p className="text-xs text-slate-500">
+              {isAdmin
+                ? 'Set for the whole instance under Settings → System.'
+                : 'Set for the whole instance by an administrator.'}
+            </p>
           </SettingsCard>
 
           <SettingsCard title="Date Format">

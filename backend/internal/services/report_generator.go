@@ -20,11 +20,24 @@ type ReportGenerator struct {
 	db          *gorm.DB
 	aggregator  *ReportAggregatorService
 	pdfRenderer *PDFRendererService
+	// settings resolves the report timezone at render time, so changing it in
+	// Settings affects the next report rather than requiring a restart. Nil is
+	// tolerated and means UTC, which keeps the zero value usable in tests.
+	settings *SettingsService
 }
 
 // NewReportGenerator returns a generator bound to its dependencies.
-func NewReportGenerator(db *gorm.DB, aggregator *ReportAggregatorService, pdfRenderer *PDFRendererService) *ReportGenerator {
-	return &ReportGenerator{db: db, aggregator: aggregator, pdfRenderer: pdfRenderer}
+func NewReportGenerator(db *gorm.DB, aggregator *ReportAggregatorService, pdfRenderer *PDFRendererService, settings *SettingsService) *ReportGenerator {
+	return &ReportGenerator{db: db, aggregator: aggregator, pdfRenderer: pdfRenderer, settings: settings}
+}
+
+// reportLocation is the configured zone, or UTC when no settings service is
+// bound. Never the process zone: see models.DefaultReportTimezone.
+func (rg *ReportGenerator) reportLocation(ctx context.Context) *time.Location {
+	if rg.settings == nil {
+		return time.UTC
+	}
+	return rg.settings.ReportLocation(ctx)
 }
 
 // GeneratedReport is the outcome of one generation.
@@ -46,6 +59,10 @@ func (rg *ReportGenerator) GenerateAndSaveReport(ctx context.Context, report *mo
 	if err != nil {
 		return nil, fmt.Errorf("aggregating report data: %w", err)
 	}
+
+	// Stamped before rendering so both the PDF and anything else built from
+	// this data describe the same clock.
+	data.Location = rg.reportLocation(ctx)
 
 	filename, err := rg.pdfRenderer.RenderReportToPDF(data, template.Sections, "report_"+report.ID.String()[:8])
 	if err != nil {

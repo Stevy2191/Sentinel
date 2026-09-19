@@ -218,6 +218,24 @@ func (s *SettingsService) IncidentRetentionDays(ctx context.Context) int {
 
 // RegistrationEnabled reports whether new-user self-registration is currently
 // allowed. Defaults to false (closed) when unset.
+// ReportTimezone returns the configured IANA zone name for rendered reports.
+func (s *SettingsService) ReportTimezone(ctx context.Context) string {
+	return s.GetString(ctx, models.SettingReportTimezone, models.DefaultReportTimezone)
+}
+
+// ReportLocation resolves the report timezone to a location.
+//
+// Falls back to UTC rather than to the process zone when the stored value can
+// no longer be loaded — a zone removed from the tzdata package should degrade
+// to something stable and stated, not to whatever the container happens to be.
+func (s *SettingsService) ReportLocation(ctx context.Context) *time.Location {
+	loc, err := models.ParseReportTimezone(s.ReportTimezone(ctx))
+	if err != nil {
+		return time.UTC
+	}
+	return loc
+}
+
 func (s *SettingsService) RegistrationEnabled(ctx context.Context) bool {
 	return s.GetBool(ctx, models.SettingRegistrationEnabled, false)
 }

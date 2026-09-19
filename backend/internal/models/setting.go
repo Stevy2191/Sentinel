@@ -1,6 +1,11 @@
 package models
 
-import "time"
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+)
 
 // Setting is a single persisted key/value application setting. Values are stored
 // as text; typed accessors on the settings service handle parsing.
@@ -45,6 +50,13 @@ const (
 	// SettingCheckRetentionDays bounds how long individual check results are
 	// kept. Without it the checks table grows without limit.
 	SettingCheckRetentionDays = "check_retention_days"
+
+	// SettingReportTimezone is the IANA zone rendered reports are written in.
+	//
+	// Global rather than per-user because a report is a file: it gets emailed,
+	// downloaded and shared, and the timestamps inside it must mean the same
+	// thing to everyone who opens it, not depend on who pressed Generate.
+	SettingReportTimezone = "report_timezone"
 )
 
 // Bounds and defaults for the system settings above.
@@ -79,3 +91,28 @@ const (
 	MinIncidentRetentionDays     = 7
 	MaxIncidentRetentionDays     = 365
 )
+
+// DefaultReportTimezone is used until an administrator sets one. UTC rather
+// than the host's zone: the server process runs in whatever the container was
+// given, which is not a deliberate choice by anyone.
+const DefaultReportTimezone = "UTC"
+
+// ParseReportTimezone validates an IANA zone name and returns its location.
+//
+// Rejects the empty string and "Local" explicitly. "Local" would resolve to the
+// server process's zone, which is exactly the accidental behaviour this setting
+// exists to replace.
+func ParseReportTimezone(name string) (*time.Location, error) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return nil, errors.New("timezone is required, e.g. UTC or America/Chicago")
+	}
+	if strings.EqualFold(trimmed, "Local") {
+		return nil, errors.New(`"Local" is not a timezone; name the zone explicitly, e.g. America/Chicago`)
+	}
+	loc, err := time.LoadLocation(trimmed)
+	if err != nil {
+		return nil, fmt.Errorf("unknown timezone %q: use an IANA name such as UTC or America/Chicago", trimmed)
+	}
+	return loc, nil
+}

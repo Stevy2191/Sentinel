@@ -65,6 +65,22 @@ type ReportData struct {
 	// compliance artifact, so a dropped monitor is surfaced rather than silently
 	// omitted from the results.
 	Warnings []string `json:"warnings,omitempty"`
+	// Location is the timezone every timestamp in the rendered report is
+	// written in. Carried on the data rather than read by each renderer so a
+	// PDF and its HTML equivalent cannot disagree about what time it was.
+	// Renderers must use ReportLocation(), which falls back to UTC when unset.
+	Location *time.Location `json:"-"`
+}
+
+// ReportLocation is the zone a report renders in, defaulting to UTC.
+//
+// Never falls back to time.Local: that is the server process's zone, which is
+// whatever the container was started with and not a choice anyone made.
+func (d *ReportData) ReportLocation() *time.Location {
+	if d == nil || d.Location == nil {
+		return time.UTC
+	}
+	return d.Location
 }
 
 // AggregateReportData assembles everything a report needs. Monitors that fail to

@@ -1,4 +1,3 @@
-import { format } from 'date-fns'
 
 /** "99.87%" */
 export function formatUptimePercent(percent: number): string {
@@ -55,16 +54,71 @@ export function formatStatus(status: string): string {
   }
 }
 
-/** "Jan 15, 2024" */
-export function formatDate(date: Date | string): string {
-  const d = typeof date === 'string' ? new Date(date) : date
-  return format(d, 'MMM d, yyyy')
+/**
+ * The zone every timestamp in the UI is displayed in — the instance's report
+ * timezone, so the screen and a rendered report describe the same clock.
+ *
+ * Module state set once by AppConfigContext rather than a parameter on each
+ * call: these formatters are used from well over a hundred places, and threading
+ * a zone through all of them would be a lot of churn for a value that is global
+ * by definition. Undefined means "not loaded yet" and falls back to the
+ * browser's zone, which is what the whole UI did before.
+ */
+let displayTimeZone: string | undefined
+
+/** Sets the display zone. Called by AppConfigContext when config loads. */
+export function setDisplayTimezone(tz: string | undefined): void {
+  if (!tz) {
+    displayTimeZone = undefined
+    return
+  }
+  // Verified before being adopted: an unknown zone makes Intl throw on every
+  // subsequent call, which would take out every timestamp in the app.
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz })
+    displayTimeZone = tz
+  } catch {
+    displayTimeZone = undefined
+  }
 }
 
-/** "Jan 15, 2024 10:30 AM" */
-export function formatDatetime(date: Date | string): string {
+/** The zone currently used for display, or the browser's when none is set. */
+export function getDisplayTimezone(): string {
+  return displayTimeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone
+}
+
+function formatIn(date: Date | string, options: Intl.DateTimeFormatOptions): string {
   const d = typeof date === 'string' ? new Date(date) : date
-  return format(d, 'MMM d, yyyy h:mm a')
+  if (Number.isNaN(d.getTime())) return '—'
+  return new Intl.DateTimeFormat('en-US', { ...options, timeZone: displayTimeZone }).format(d)
+}
+
+/** "Jan 15, 2024" */
+export function formatDate(date: Date | string): string {
+  return formatIn(date, { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+/** "Jan 15, 2024, 10:30 AM" */
+export function formatDatetime(date: Date | string): string {
+  return formatIn(date, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+/** "Jan 15, 2024, 10:30 AM CST" — used where the zone itself matters. */
+export function formatDatetimeWithZone(date: Date | string): string {
+  return formatIn(date, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  })
 }
 
 /** Format a duration given in seconds, e.g. 5445 -> "1h 30m 45s". */

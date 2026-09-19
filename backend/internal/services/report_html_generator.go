@@ -116,9 +116,9 @@ func (g *HTMLReportGenerator) header(data *ReportData) string {
 		esc(title),
 		esc(title),
 		description,
-		esc(data.TimeRangeStart.Format("January 02, 2006")),
-		esc(data.TimeRangeEnd.Format("January 02, 2006")),
-		esc(time.Now().Format("January 02, 2006 at 15:04 MST")),
+		esc(data.TimeRangeStart.In(data.ReportLocation()).Format("January 02, 2006")),
+		esc(data.TimeRangeEnd.In(data.ReportLocation()).Format("January 02, 2006")),
+		esc(time.Now().In(data.ReportLocation()).Format("January 02, 2006 at 15:04 MST")),
 	)
 }
 
@@ -212,7 +212,7 @@ func (g *HTMLReportGenerator) incidentSection(data *ReportData) string {
     <span class="incident-title">Incident on %s</span>
     <span class="incident-duration">%s downtime &middot; %s</span>
   </div>
-`, esc(inc.StartTime.Format("Jan 02, 2006 15:04")), esc(formatMinutes(inc.Duration)), esc(inc.Status))
+`, esc(inc.StartTime.In(data.ReportLocation()).Format("Jan 02, 2006 15:04")), esc(formatMinutes(inc.Duration)), esc(inc.Status))
 
 			if inc.RootCause != "" {
 				fmt.Fprintf(&b, "  <div class=\"incident-detail\"><strong>Root cause:</strong> %s</div>\n", esc(inc.RootCause))

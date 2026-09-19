@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import { setDisplayTimezone } from '@/utils/formatters'
 
 export const DEFAULT_APP_NAME = 'Sentinel'
 /** Mirrors models.DefaultMonitorCheckInterval on the backend. */
@@ -13,6 +14,9 @@ interface AppConfig {
   setupRequired: boolean
   /** The interval, in seconds, a newly created monitor starts with. */
   defaultCheckInterval: number
+  /** The IANA zone reports are rendered in, and that the UI displays times in.
+   *  Undefined until the config loads, when the browser's zone is used. */
+  reportTimezone: string | undefined
   /** False until the first read completes. Callers that would otherwise flash
    *  a wrong answer — "registration disabled" before we know — wait on this. */
   loaded: boolean
@@ -24,6 +28,7 @@ const AppConfigContext = createContext<AppConfig>({
   appName: DEFAULT_APP_NAME,
   registrationEnabled: false,
   setupRequired: false,
+  reportTimezone: undefined,
   defaultCheckInterval: DEFAULT_CHECK_INTERVAL,
   loaded: false,
   refresh: async () => {},
@@ -46,6 +51,7 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
   const [registrationEnabled, setRegistrationEnabled] = useState(false)
   const [setupRequired, setSetupRequired] = useState(false)
   const [defaultCheckInterval, setDefaultCheckInterval] = useState(DEFAULT_CHECK_INTERVAL)
+  const [reportTimezone, setReportTimezone] = useState<string | undefined>(undefined)
   const [loaded, setLoaded] = useState(false)
 
   const refresh = useCallback(async () => {
@@ -63,6 +69,11 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
           ? data.default_check_interval
           : DEFAULT_CHECK_INTERVAL
       )
+      // Applied to the formatters immediately, so every timestamp on screen
+      // is in the same zone the server writes into reports.
+      const tz = typeof data.report_timezone === 'string' ? data.report_timezone : undefined
+      setReportTimezone(tz)
+      setDisplayTimezone(tz)
     } catch {
       // A failed probe leaves the defaults in place: the app still renders,
       // just under its stock name with sign-up closed.
@@ -85,7 +96,7 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
   }, [appName])
 
   return (
-    <AppConfigContext.Provider value={{ appName, registrationEnabled, setupRequired, defaultCheckInterval, loaded, refresh }}>
+    <AppConfigContext.Provider value={{ appName, registrationEnabled, setupRequired, defaultCheckInterval, reportTimezone, loaded, refresh }}>
       {children}
     </AppConfigContext.Provider>
   )

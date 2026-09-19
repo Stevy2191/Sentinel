@@ -66,6 +66,18 @@ type ReportEmail struct {
 	ShareLink string
 	// Summary lines are rendered in the body when the schedule asks for them.
 	Summary []string
+	// Location is the report timezone. The body states a generation time and
+	// the attached PDF states the same one, so they have to agree; nil means
+	// UTC rather than the server process's zone.
+	Location *time.Location
+}
+
+// location resolves the email's zone, defaulting to UTC.
+func (e ReportEmail) location() *time.Location {
+	if e.Location == nil {
+		return time.UTC
+	}
+	return e.Location
 }
 
 // resolveSender builds an email sender from the stored notification config for
@@ -159,7 +171,7 @@ func (m *ReportMailer) buildMIME(from string, email ReportEmail) (string, error)
 	fmt.Fprintf(&b, "From: %s\r\n", from)
 	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(email.To, ", "))
 	fmt.Fprintf(&b, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", subject))
-	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().Format(time.RFC1123Z))
+	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().In(email.location()).Format(time.RFC1123Z))
 	b.WriteString("MIME-Version: 1.0\r\n")
 
 	var attachment []byte
@@ -261,7 +273,7 @@ func (m *ReportMailer) textBody(email ReportEmail) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n\n", email.ReportName)
 	fmt.Fprintf(&b, "Your scheduled report was generated on %s.\n",
-		time.Now().Format("January 02, 2006 at 15:04 MST"))
+		time.Now().In(email.location()).Format("January 02, 2006 at 15:04 MST"))
 	if email.AttachmentPath != "" {
 		b.WriteString("The PDF is attached to this message.\n")
 	}
@@ -316,7 +328,7 @@ func (m *ReportMailer) htmlBody(email ReportEmail) string {
 </div>
 </body></html>`,
 		esc(email.ReportName),
-		esc(time.Now().Format("January 02, 2006 at 15:04 MST")),
+		esc(time.Now().In(email.location()).Format("January 02, 2006 at 15:04 MST")),
 		attachLine,
 		extras.String(),
 	)

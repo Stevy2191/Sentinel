@@ -32,6 +32,7 @@ func GetSettingsHandler(settingsService *services.SettingsService, defaultInterv
 			"check_retention_days":   settingsService.CheckRetentionDays(ctx),
 			"sentinel_external_url":  settingsService.GetString(ctx, models.SettingSentinelExternalURL, ""),
 			"sentinel_internal_url":  settingsService.GetString(ctx, models.SettingSentinelInternalURL, ""),
+			"report_timezone":        settingsService.ReportTimezone(ctx),
 		})
 	}
 }
@@ -49,6 +50,8 @@ type updateSystemRequest struct {
 	// SentinelInternalURL is where agents report back. Empty means derive.
 	SentinelExternalURL *string `json:"sentinel_external_url"`
 	SentinelInternalURL *string `json:"sentinel_internal_url"`
+	// ReportTimezone is the IANA zone rendered reports are written in.
+	ReportTimezone *string `json:"report_timezone"`
 }
 
 // UpdateSystemSettingsHandler handles PATCH /api/v1/settings/system (admin).
@@ -105,6 +108,21 @@ func UpdateSystemSettingsHandler(settingsService *services.SettingsService) gin.
 				return
 			}
 			if err := settingsService.SetInt(ctx, models.SettingDefaultCheckInterval, n); err != nil {
+				respondInternal(c, "UpdateSystemSettingsHandler", err)
+				return
+			}
+		}
+
+		if req.ReportTimezone != nil {
+			// Validated by loading it: an unknown name would otherwise be
+			// stored happily and silently fall back to UTC at render time,
+			// leaving the setting showing one zone and the report in another.
+			if _, err := models.ParseReportTimezone(*req.ReportTimezone); err != nil {
+				respondError(c, http.StatusBadRequest, err.Error())
+				return
+			}
+			if err := settingsService.SetString(ctx, models.SettingReportTimezone,
+				strings.TrimSpace(*req.ReportTimezone)); err != nil {
 				respondInternal(c, "UpdateSystemSettingsHandler", err)
 				return
 			}

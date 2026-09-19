@@ -191,6 +191,9 @@ func (s *ReportSchedulerService) RunSchedule(ctx context.Context, scheduleID uui
 	email := ReportEmail{
 		To:         schedule.EmailRecipients,
 		ReportName: report.Name,
+		// Taken from the data that was just rendered, so the time in the email
+		// body and the time inside the attached PDF are the same time.
+		Location: generated.Data.ReportLocation(),
 	}
 	if schedule.SendAsAttachment {
 		email.AttachmentPath = generated.Path

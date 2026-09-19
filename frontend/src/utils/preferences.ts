@@ -11,7 +11,6 @@ export const PREF = {
   soundAlerts: 'sentinel:soundAlerts',
   desktopNotifications: 'sentinel:desktopNotifications',
   timeFormat: 'sentinel:timeFormat',
-  timezone: 'sentinel:timezone',
   dateFormat: 'sentinel:dateFormat',
   reportRange: 'sentinel:reportRange',
   logo: 'sentinel:logo',
@@ -46,14 +45,6 @@ export function setBool(key: string, value: boolean): void {
   localStorage.setItem(key, String(value))
 }
 
-/** Default timezone: the browser's resolved zone. */
-export function defaultTimezone(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
-  } catch {
-    return 'UTC'
-  }
-}
 
 /** Apply the visual preferences that affect the whole document. Call at startup
  *  and whenever these prefs change.

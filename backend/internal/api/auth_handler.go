@@ -162,6 +162,10 @@ func AuthStatusHandler(authService *services.AuthService, settingsService *servi
 			"setup_required":         !hasUsers,
 			"app_name":               settingsService.AppName(ctx),
 			"default_check_interval": settingsService.DefaultCheckInterval(ctx, models.DefaultMonitorCheckInterval),
+			// Readable by everyone, changeable only by an admin via /settings:
+			// the UI formats timestamps with it so the screen and a rendered
+			// report agree, and it is a display convention, not a secret.
+			"report_timezone": settingsService.ReportTimezone(ctx),
 		})
 	}
 }
