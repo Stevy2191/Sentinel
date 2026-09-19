@@ -98,7 +98,12 @@ function Chart({
       <h3 className="mb-3 text-sm font-medium text-white">{title}</h3>
       <div className="h-48">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -12 }}>
+          {/* No negative left margin. It was there to reclaim whitespace, but a
+              negative margin shifts the Y axis off the canvas rather than
+              shrinking it, so every tick lost 12px from its left edge — enough
+              to cut the leading digit off "100%" on the percentage charts. The
+              axis widths below already reserve only what the labels need. */}
+          <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
             <defs>
               {series.map((s) => (
                 <linearGradient key={s.key} id={`fill-${s.key}`} x1="0" y1="0" x2="0" y2="1">
