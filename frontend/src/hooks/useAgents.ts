@@ -232,50 +232,6 @@ export function useAgentSummary(): { value: string; subtitle: string } {
   }, [agents, loading])
 }
 
-/** Current resource usage across every reporting agent. */
-export interface FleetMetrics {
-  /** How many agents contributed. Zero means nothing recent, not zero usage. */
-  agents_reporting: number
-  cpu_percent: number
-  memory_percent: number
-  disk_percent: number
-  memory_used_mb: number
-  memory_total_mb: number
-  disk_used_gb: number
-  disk_total_gb: number
-}
-
-/**
- * Fleet-wide CPU, memory and disk, polled for the Overview.
- *
- * One request whatever the fleet size: the server takes each agent's newest
- * sample and aggregates, rather than the page fetching per agent.
- */
-export function useFleetMetrics(pollMs = 30000) {
-  const [metrics, setMetrics] = useState<FleetMetrics | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    let active = true
-    const load = () =>
-      api
-        .get<{ data: FleetMetrics }>('/agent-metrics/summary')
-        .then((res) => active && setMetrics(res.data.data))
-        .catch(() => active && setMetrics(null))
-        .finally(() => active && setLoading(false))
-
-    void load()
-    if (pollMs <= 0) return () => { active = false }
-    const t = window.setInterval(() => void load(), pollMs)
-    return () => {
-      active = false
-      window.clearInterval(t)
-    }
-  }, [pollMs])
-
-  return { metrics, loading }
-}
-
 export function useAgentActions() {
   const [busy, setBusy] = useState(false)
 

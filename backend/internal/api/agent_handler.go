@@ -572,18 +572,6 @@ func GetAgentMetricsHandler(agents *services.AgentService) gin.HandlerFunc {
 	}
 }
 
-// FleetMetricsHandler handles GET /api/v1/agent-metrics/summary.
-func FleetMetricsHandler(agents *services.AgentService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		metrics, err := agents.FleetMetrics(c.Request.Context())
-		if err != nil {
-			respondInternal(c, "FleetMetricsHandler", err)
-			return
-		}
-		respondSuccess(c, http.StatusOK, metrics)
-	}
-}
-
 // GetAgentStatusHandler handles GET /api/v1/agents/:agent_id/status.
 func GetAgentStatusHandler(agents *services.AgentService) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -630,10 +618,6 @@ func RegisterAgentRoutes(rg *gin.RouterGroup, agents *services.AgentService, set
 	g.GET("", ListAgentsHandler(agents))
 	g.GET("/:agent_id/metrics", GetAgentMetricsHandler(agents))
 	g.GET("/:agent_id/status", GetAgentStatusHandler(agents))
-
-	// Outside the /agents group: a static segment there would collide with the
-	// ":agent_id" wildcard, which gin refuses to register.
-	rg.GET("/agent-metrics/summary", FleetMetricsHandler(agents))
 
 	admin := rg.Group("/agents", RequireAdmin(users))
 	admin.POST("", CreateAgentHandler(agents, settings))

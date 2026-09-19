@@ -26,6 +26,7 @@ import (
 
 	"github.com/Stevy2191/Sentinel/backend/internal/api"
 	"github.com/Stevy2191/Sentinel/backend/internal/database"
+	"github.com/Stevy2191/Sentinel/backend/internal/hoststats"
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
 	"github.com/Stevy2191/Sentinel/backend/internal/notifications"
 	"github.com/Stevy2191/Sentinel/backend/internal/services"
@@ -194,6 +195,10 @@ func run() error {
 	sslChecker := services.NewSSLCheckerService(db, notificationManager)
 	incidentRetention := services.NewIncidentRetentionService(db, settingsService)
 	agentService := services.NewAgentService(db)
+	// The Sentinel host's own resources. The disk path matters in a container:
+	// the container's root is an overlay, so it has to measure something that
+	// reaches the host's filesystem.
+	hostSampler := hoststats.NewSampler(getenv("HOST_DISK_PATH", "/"))
 	// pg_dump and psql read the same settings the pool does, so a backup goes
 	// to the database the application is actually using rather than to
 	// whatever a second set of variables happens to point at.
@@ -276,6 +281,7 @@ func run() error {
 	api.RegisterSSLCertificateRoutes(v1, sslChecker, authService)
 	api.RegisterAgentRoutes(v1, agentService, settingsService, authService)
 	api.RegisterBackupRoutes(v1, backupService, auditService, authService)
+	api.RegisterSystemRoutes(v1, hostSampler)
 	// Per-user theme (not admin-gated): only AuthMiddleware applies.
 	// Self password change (any authenticated user).
 	v1.POST("/auth/change-password", api.ChangeOwnPasswordHandler(authService))
@@ -306,6 +312,7 @@ func run() error {
 	// Agents report in rather than being polled, so a separate sweep notices
 	// when one stops reporting.
 	go agentService.StartOfflineSweep(loopCtx)
+	go hostSampler.Start(loopCtx)
 
 	// 9. HTTP server.
 	server := &http.Server{

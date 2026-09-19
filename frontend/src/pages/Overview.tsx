@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMonitors } from '@/hooks/useMonitors'
-import { useAgentSummary, useFleetMetrics } from '@/hooks/useAgents'
+import { useAgentSummary } from '@/hooks/useAgents'
+import { useSystemResources } from '@/hooks/useSystemResources'
 import { useSSLSummary } from '@/hooks/useSSLCertificates'
 import { useSummaryReport } from '@/hooks/useReports'
 import { useCardShimmer } from '@/hooks/useCardShimmer'
@@ -57,7 +58,7 @@ export default function Overview() {
   const { monitors, refetch } = useMonitors()
   const agentSummary = useAgentSummary()
   const sslSummary = useSSLSummary()
-  const { metrics: fleet } = useFleetMetrics()
+  const { resources: host } = useSystemResources()
   const [refreshedAt, setRefreshedAt] = useState(() => Date.now())
   const [period, setPeriod] = useState<ReportPeriod>('30d')
 
@@ -221,45 +222,39 @@ export default function Overview() {
               </div>
             </div>
 
-            {/* Server resources, from the agents rather than from the
-                monitors. Inside this card because it answers the same
-                question it does — whether everything is healthy right now —
-                and a row of its own would imply a separate subject. Hidden
-                entirely when no agent is reporting: three bars at zero would
-                read as a fleet at rest rather than as no fleet. */}
-            {fleet && fleet.agents_reporting > 0 && (
+            {/* This server's own resources — the machine Sentinel runs on,
+                not the hosts it watches. Inside this card because it answers
+                the same question it does, whether everything is healthy right
+                now, and a row of its own would imply a separate subject.
+                Needs no agent: the server reads its own /proc. */}
+            {host && (
               <div className="relative z-10 mt-8 border-t border-white/10 pt-6">
                 <div className="mb-4 flex items-baseline justify-between gap-2">
                   <span className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-                    Server resources
+                    This server
                   </span>
-                  <button
-                    onClick={() => navigate('/servers')}
-                    className="text-xs text-slate-500 transition hover:text-slate-300"
-                  >
-                    across {fleet.agents_reporting} server
-                    {fleet.agents_reporting === 1 ? '' : 's'} &rarr;
-                  </button>
+                  <span className="text-xs text-slate-500">where Sentinel is running</span>
                 </div>
                 <div className="grid gap-5 sm:grid-cols-3">
                   <ResourceMeter
                     label="CPU"
-                    percent={fleet.cpu_percent}
-                    detail={
-                      fleet.agents_reporting === 1 ? 'current load' : 'average across servers'
-                    }
+                    percent={host.cpu_percent ?? 0}
+                    // Utilisation needs two samples, so the first few seconds
+                    // after a restart have nothing to report yet. Saying so
+                    // beats drawing an empty bar as though the box were idle.
+                    detail={host.cpu_percent === null ? 'sampling…' : 'current load'}
                   />
                   <ResourceMeter
                     label="Memory"
-                    percent={fleet.memory_percent}
-                    detail={`${(fleet.memory_used_mb / 1024).toFixed(1)} of ${(
-                      fleet.memory_total_mb / 1024
+                    percent={host.memory_percent}
+                    detail={`${(host.memory_used_mb / 1024).toFixed(1)} of ${(
+                      host.memory_total_mb / 1024
                     ).toFixed(1)} GB`}
                   />
                   <ResourceMeter
                     label="Disk"
-                    percent={fleet.disk_percent}
-                    detail={`${fleet.disk_used_gb.toFixed(0)} of ${fleet.disk_total_gb.toFixed(
+                    percent={host.disk_percent}
+                    detail={`${host.disk_used_gb.toFixed(0)} of ${host.disk_total_gb.toFixed(
                       0,
                     )} GB`}
                   />

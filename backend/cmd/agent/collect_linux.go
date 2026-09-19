@@ -6,8 +6,9 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
+
+	"github.com/Stevy2191/Sentinel/backend/internal/hoststats"
 )
 
 // Metrics is one collection cycle, matching the API's request body.
@@ -44,21 +45,11 @@ type Container struct {
 	MemoryUsedMB  int64   `json:"memory_used_mb"`
 }
 
-// procRoot is where the host's /proc is mounted. In a container the host's is
-// bind-mounted elsewhere, so it is configurable rather than assumed.
-var procRoot = envOr("HOST_PROC", "/proc")
-
-// cpuSample is a point-in-time reading of the kernel's cumulative CPU counters.
-type cpuSample struct {
-	idle  uint64
-	total uint64
-}
-
 // Collector gathers host metrics. It holds the previous CPU sample because
 // utilisation is a rate: /proc/stat reports cumulative jiffies since boot, and
 // a single reading gives the average since boot rather than the load now.
 type Collector struct {
-	prevCPU  *cpuSample
+	prevCPU  *hoststats.CPUSample
 	diskPath string
 }
 
@@ -78,10 +69,10 @@ func (c *Collector) Collect() Metrics {
 	if pct, err := c.cpuPercent(); err == nil {
 		m.CPUPercent = &pct
 	}
-	if used, total, pct, err := memory(); err == nil {
+	if used, total, pct, err := hoststats.Memory(); err == nil {
 		m.MemoryUsedMB, m.MemoryTotalMB, m.MemoryPercent = &used, &total, &pct
 	}
-	if used, total, pct, err := disk(c.diskPath); err == nil {
+	if used, total, pct, err := hoststats.Disk(c.diskPath); err == nil {
 		m.DiskUsedGB, m.DiskTotalGB, m.DiskPercent = &used, &total, &pct
 	}
 	if up, err := uptimeSeconds(); err == nil {
@@ -100,7 +91,7 @@ func (c *Collector) Collect() Metrics {
 // nothing to compare against and reports nothing rather than a number derived
 // from uptime, which would be wrong in a way nobody would notice.
 func (c *Collector) cpuPercent() (float64, error) {
-	sample, err := readCPUSample()
+	sample, err := hoststats.ReadCPUSample()
 	if err != nil {
 		return 0, err
 	}
@@ -110,129 +101,23 @@ func (c *Collector) cpuPercent() (float64, error) {
 		return 0, fmt.Errorf("no previous sample yet")
 	}
 
-	totalDelta := float64(sample.total - prev.total)
-	idleDelta := float64(sample.idle - prev.idle)
+	totalDelta := float64(sample.Total - prev.Total)
+	idleDelta := float64(sample.Idle - prev.Idle)
 	if totalDelta <= 0 {
 		return 0, fmt.Errorf("no elapsed CPU time")
 	}
 	pct := (totalDelta - idleDelta) / totalDelta * 100
-	return clampPercent(pct), nil
-}
-
-func readCPUSample() (cpuSample, error) {
-	f, err := os.Open(procRoot + "/stat")
-	if err != nil {
-		return cpuSample{}, err
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) < 5 || fields[0] != "cpu" {
-			continue
-		}
-		var total, idle uint64
-		for i, raw := range fields[1:] {
-			v, err := strconv.ParseUint(raw, 10, 64)
-			if err != nil {
-				continue
-			}
-			total += v
-			// Fields 4 and 5 are idle and iowait: time the CPU was not doing
-			// work. iowait counts as idle because the CPU was available.
-			if i == 3 || i == 4 {
-				idle += v
-			}
-		}
-		return cpuSample{idle: idle, total: total}, nil
-	}
-	return cpuSample{}, fmt.Errorf("no cpu line in %s/stat", procRoot)
-}
-
-// memory returns used and total in MB and the percentage in use.
-//
-// Used is total minus MemAvailable, not minus MemFree. The kernel keeps cache
-// and buffers that it will release under pressure; counting those as used
-// reports a machine as nearly full when it is fine, which is the number most
-// naive readings get wrong.
-func memory() (usedMB, totalMB int64, percent float64, err error) {
-	f, err := os.Open(procRoot + "/meminfo")
-	if err != nil {
-		return 0, 0, 0, err
-	}
-	defer f.Close()
-
-	var totalKB, availableKB, freeKB uint64
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) < 2 {
-			continue
-		}
-		v, err := strconv.ParseUint(fields[1], 10, 64)
-		if err != nil {
-			continue
-		}
-		switch fields[0] {
-		case "MemTotal:":
-			totalKB = v
-		case "MemAvailable:":
-			availableKB = v
-		case "MemFree:":
-			freeKB = v
-		}
-	}
-	if totalKB == 0 {
-		return 0, 0, 0, fmt.Errorf("could not read MemTotal")
-	}
-	// Very old kernels have no MemAvailable; MemFree is the fallback.
-	if availableKB == 0 {
-		availableKB = freeKB
-	}
-
-	totalMB = int64(totalKB / 1024)
-	usedMB = int64((totalKB - availableKB) / 1024)
-	percent = clampPercent(float64(totalKB-availableKB) / float64(totalKB) * 100)
-	return usedMB, totalMB, percent, nil
-}
-
-// disk reports usage of the filesystem holding path.
-//
-// Capacity uses the blocks available to an unprivileged user, not the raw
-// total. Filesystems reserve a slice for root, and counting it as free
-// promises space an application cannot actually use.
-func disk(path string) (usedGB, totalGB, percent float64, err error) {
-	var st syscall.Statfs_t
-	if err := syscall.Statfs(path, &st); err != nil {
-		return 0, 0, 0, err
-	}
-	blockSize := uint64(st.Bsize)
-	total := st.Blocks * blockSize
-	free := st.Bavail * blockSize
-	if total == 0 {
-		return 0, 0, 0, fmt.Errorf("filesystem reports no capacity")
-	}
-	usable := st.Blocks - (st.Bfree - st.Bavail)
-	used := (usable - st.Bavail) * blockSize
-
-	const gb = 1024 * 1024 * 1024
-	usedGB = float64(used) / gb
-	totalGB = float64(usable*blockSize) / gb
-	percent = clampPercent(float64(used) / float64(usable*blockSize) * 100)
-	_ = free
-	_ = total
-	return usedGB, totalGB, percent, nil
+	return hoststats.ClampPercent(pct), nil
 }
 
 func uptimeSeconds() (int64, error) {
-	raw, err := os.ReadFile(procRoot + "/uptime")
+	raw, err := os.ReadFile(hoststats.ProcRoot + "/uptime")
 	if err != nil {
 		return 0, err
 	}
 	fields := strings.Fields(string(raw))
 	if len(fields) == 0 {
-		return 0, fmt.Errorf("empty %s/uptime", procRoot)
+		return 0, fmt.Errorf("empty %s/uptime", hoststats.ProcRoot)
 	}
 	secs, err := strconv.ParseFloat(fields[0], 64)
 	if err != nil {
@@ -242,13 +127,13 @@ func uptimeSeconds() (int64, error) {
 }
 
 func loadAverage() (l1, l5, l15 float64, err error) {
-	raw, err := os.ReadFile(procRoot + "/loadavg")
+	raw, err := os.ReadFile(hoststats.ProcRoot + "/loadavg")
 	if err != nil {
 		return 0, 0, 0, err
 	}
 	fields := strings.Fields(string(raw))
 	if len(fields) < 3 {
-		return 0, 0, 0, fmt.Errorf("unexpected %s/loadavg format", procRoot)
+		return 0, 0, 0, fmt.Errorf("unexpected %s/loadavg format", hoststats.ProcRoot)
 	}
 	if l1, err = strconv.ParseFloat(fields[0], 64); err != nil {
 		return 0, 0, 0, err
@@ -268,7 +153,7 @@ func loadAverage() (l1, l5, l15 float64, err error) {
 // interfaces because container and bridge traffic would be counted twice —
 // once on the container's side and once on the host bridge.
 func network() (in, out int64, err error) {
-	f, err := os.Open(procRoot + "/net/dev")
+	f, err := os.Open(hoststats.ProcRoot + "/net/dev")
 	if err != nil {
 		return 0, 0, err
 	}
@@ -336,16 +221,6 @@ func osVersion() string {
 		}
 	}
 	return ""
-}
-
-func clampPercent(v float64) float64 {
-	if v < 0 {
-		return 0
-	}
-	if v > 100 {
-		return 100
-	}
-	return v
 }
 
 func envOr(key, fallback string) string {

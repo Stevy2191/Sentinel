@@ -96,6 +96,15 @@ services:
       REPORT_WORKERS: ${REPORT_WORKERS:-2}
       # Where database backups are written. Must match the volume below.
       BACKUP_DIR: ${BACKUP_DIR:-/var/lib/sentinel/backups}
+      # Which filesystem the Overview reports as this server's disk.
+      #
+      # Not "/": inside the container that is the image's own overlay, which
+      # measures the container rather than the machine. /app/migrations is
+      # bind-mounted from the host below, so measuring it reports the host
+      # filesystem. CPU and memory need no equivalent — /proc/stat and
+      # /proc/meminfo already report the host's figures from inside a
+      # container.
+      HOST_DISK_PATH: ${HOST_DISK_PATH:-/app/migrations}
     ports:
       - "${BACKEND_PORT:-3001}:3001"
     volumes:

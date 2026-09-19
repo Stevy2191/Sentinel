@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/Stevy2191/Sentinel/backend/internal/hoststats"
 )
 
 // SystemInfo is what a host reports about itself.
@@ -40,7 +42,7 @@ func collectSystemInfo(dockerAvailable bool) SystemInfo {
 		DockerAvailable: dockerAvailable,
 	}
 	info.CPUModel, info.CPUCores = cpuInfo()
-	if _, total, _, err := memory(); err == nil {
+	if _, total, _, err := hoststats.Memory(); err == nil {
 		info.MemoryTotalMB = total
 	}
 	return info
@@ -51,8 +53,8 @@ func collectSystemInfo(dockerAvailable bool) SystemInfo {
 // From /proc/sys/kernel rather than uname, so it works in a container with the
 // host's /proc mounted — where uname would report the container's view.
 func kernelVersion() string {
-	name := readTrimmed(procRoot + "/sys/kernel/ostype")
-	release := readTrimmed(procRoot + "/sys/kernel/osrelease")
+	name := readTrimmed(hoststats.ProcRoot + "/sys/kernel/ostype")
+	release := readTrimmed(hoststats.ProcRoot + "/sys/kernel/osrelease")
 	switch {
 	case name != "" && release != "":
 		return name + " " + release
@@ -69,7 +71,7 @@ func kernelVersion() string {
 // runtime.NumCPU, which reports what this process may use — a container under
 // a CPU limit would otherwise report the limit as the machine's size.
 func cpuInfo() (model string, cores int) {
-	f, err := os.Open(procRoot + "/cpuinfo")
+	f, err := os.Open(hoststats.ProcRoot + "/cpuinfo")
 	if err != nil {
 		return "", runtime.NumCPU()
 	}
