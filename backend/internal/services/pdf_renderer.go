@@ -179,13 +179,13 @@ func uptimeColor(pct float64) [3]int {
 func drawPDFHeader(pdf *fpdf.Fpdf, data *ReportData) {
 	pdf.SetFont("Helvetica", "B", 22)
 	setColor(pdf, pdfInk, false)
-	pdf.MultiCell(pdfContentW, 9, reportTitle(data), "", "L", false)
+	pdf.MultiCell(pdfContentW, 9, pdfText(reportTitle(data)), "", "L", false)
 
 	if data.CustomDescription != nil && *data.CustomDescription != "" {
 		pdf.Ln(1)
 		pdf.SetFont("Helvetica", "", 10)
 		setColor(pdf, pdfMuted, false)
-		pdf.MultiCell(pdfContentW, 5, *data.CustomDescription, "", "L", false)
+		pdf.MultiCell(pdfContentW, 5, pdfText(*data.CustomDescription), "", "L", false)
 	}
 
 	pdf.Ln(2)
@@ -195,12 +195,12 @@ func drawPDFHeader(pdf *fpdf.Fpdf, data *ReportData) {
 	// zone. Without this they rendered in the server process's zone, which in a
 	// container is UTC by default — a timezone nobody chose.
 	loc := data.ReportLocation()
-	pdf.MultiCell(pdfContentW, 5, fmt.Sprintf(
+	pdf.MultiCell(pdfContentW, 5, pdfText(fmt.Sprintf(
 		"Report period: %s to %s\nGenerated: %s",
 		data.TimeRangeStart.In(loc).Format("January 02, 2006"),
 		data.TimeRangeEnd.In(loc).Format("January 02, 2006"),
 		time.Now().In(loc).Format("January 02, 2006 at 15:04 MST"),
-	), "", "L", false)
+	)), "", "L", false)
 
 	pdf.Ln(2)
 	setColor(pdf, pdfRule, true)
@@ -216,7 +216,7 @@ func drawSectionHeading(pdf *fpdf.Fpdf, title string) {
 	pdf.SetX(pdfMarginLeft + 4)
 	pdf.SetFont("Helvetica", "B", 14)
 	setColor(pdf, pdfInk, false)
-	pdf.CellFormat(pdfContentW-4, 7, title, "", 1, "L", false, 0, "")
+	pdf.CellFormat(pdfContentW-4, 7, pdfText(title), "", 1, "L", false, 0, "")
 	pdf.Ln(2)
 }
 
@@ -260,12 +260,12 @@ func drawPDFSummary(pdf *fpdf.Fpdf, data *ReportData) {
 		pdf.SetXY(x+4, y+3.5)
 		pdf.SetFont("Helvetica", "", 7)
 		setColor(pdf, pdfMuted, false)
-		pdf.CellFormat(w-6, 4, strings.ToUpper(t.label), "", 0, "L", false, 0, "")
+		pdf.CellFormat(w-6, 4, pdfText(strings.ToUpper(t.label)), "", 0, "L", false, 0, "")
 
 		pdf.SetXY(x+4, y+9.5)
 		pdf.SetFont("Helvetica", "B", 15)
 		setColor(pdf, t.color, false)
-		pdf.CellFormat(w-6, 8, t.value, "", 0, "L", false, 0, "")
+		pdf.CellFormat(w-6, 8, pdfText(t.value), "", 0, "L", false, 0, "")
 	}
 	pdf.SetY(y + 24)
 }
@@ -293,14 +293,14 @@ func drawPDFSLASection(pdf *fpdf.Fpdf, data *ReportData) {
 	setColor(pdf, pdfPanel, true)
 	setColor(pdf, pdfInk, false)
 	for i, h := range headers {
-		pdf.CellFormat(widths[i], 8, h, "", 0, "L", true, 0, "")
+		pdf.CellFormat(widths[i], 8, pdfText(h), "", 0, "L", true, 0, "")
 	}
 	pdf.Ln(-1)
 
 	pdf.SetFont("Helvetica", "", 9)
 	for _, m := range withTargets {
 		setColor(pdf, pdfInk, false)
-		pdf.CellFormat(widths[0], 7, truncate(m.MonitorName, 46), "B", 0, "L", false, 0, "")
+		pdf.CellFormat(widths[0], 7, pdfText(truncate(m.MonitorName, 46)), "B", 0, "L", false, 0, "")
 		setColor(pdf, uptimeColor(m.Uptime), false)
 		pdf.CellFormat(widths[1], 7, fmt.Sprintf("%.2f%%", m.Uptime), "B", 0, "L", false, 0, "")
 		setColor(pdf, pdfInk, false)
@@ -311,7 +311,7 @@ func drawPDFSLASection(pdf *fpdf.Fpdf, data *ReportData) {
 			status, color = "Met", pdfSuccess
 		}
 		setColor(pdf, color, false)
-		pdf.CellFormat(widths[3], 7, status, "B", 1, "L", false, 0, "")
+		pdf.CellFormat(widths[3], 7, pdfText(status), "B", 1, "L", false, 0, "")
 	}
 	pdf.Ln(2)
 }
@@ -343,7 +343,7 @@ func drawPDFIncidentSection(pdf *fpdf.Fpdf, data *ReportData) {
 		pdf.SetFont("Helvetica", "B", 11)
 		setColor(pdf, pdfInk, false)
 		pdf.CellFormat(pdfContentW, 6,
-			fmt.Sprintf("%s (%d)", truncate(m.MonitorName, 60), len(m.Incidents)), "", 1, "L", false, 0, "")
+			pdfText(fmt.Sprintf("%s (%d)", truncate(m.MonitorName, 60), len(m.Incidents))), "", 1, "L", false, 0, "")
 
 		for _, inc := range m.Incidents {
 			y := pdf.GetY()
@@ -353,10 +353,10 @@ func drawPDFIncidentSection(pdf *fpdf.Fpdf, data *ReportData) {
 
 			pdf.SetFont("Helvetica", "B", 9)
 			setColor(pdf, pdfInk, false)
-			pdf.CellFormat(pdfContentW-44, 6, inc.StartTime.In(data.ReportLocation()).Format("Jan 02, 2006 15:04"), "", 0, "L", false, 0, "")
+			pdf.CellFormat(pdfContentW-44, 6, pdfText(inc.StartTime.In(data.ReportLocation()).Format("Jan 02, 2006 15:04")), "", 0, "L", false, 0, "")
 			pdf.SetFont("Helvetica", "", 9)
 			setColor(pdf, pdfMuted, false)
-			pdf.CellFormat(40, 6, fmt.Sprintf("%s  %s", formatMinutes(inc.Duration), inc.Status), "", 1, "R", false, 0, "")
+			pdf.CellFormat(40, 6, pdfText(fmt.Sprintf("%s  %s", formatMinutes(inc.Duration), inc.Status)), "", 1, "R", false, 0, "")
 
 			for _, detail := range [][2]string{
 				{"Root cause", inc.RootCause},
@@ -368,7 +368,7 @@ func drawPDFIncidentSection(pdf *fpdf.Fpdf, data *ReportData) {
 				pdf.SetX(pdfMarginLeft + 4)
 				pdf.SetFont("Helvetica", "", 8)
 				setColor(pdf, pdfMuted, false)
-				pdf.MultiCell(pdfContentW-4, 4, detail[0]+": "+detail[1], "", "L", false)
+				pdf.MultiCell(pdfContentW-4, 4, pdfText(detail[0]+": "+detail[1]), "", "L", false)
 			}
 			pdf.Ln(1.5)
 		}
@@ -382,7 +382,7 @@ func drawPDFCustomSection(pdf *fpdf.Fpdf, data *ReportData) {
 	drawSectionHeading(pdf, "Notes")
 	pdf.SetFont("Helvetica", "", 10)
 	setColor(pdf, pdfInk, false)
-	pdf.MultiCell(pdfContentW, 5, *data.CustomDescription, "", "L", false)
+	pdf.MultiCell(pdfContentW, 5, pdfText(*data.CustomDescription), "", "L", false)
 }
 
 // drawPDFWarnings surfaces monitors the aggregator could not include. A report
@@ -396,7 +396,7 @@ func drawPDFWarnings(pdf *fpdf.Fpdf, data *ReportData) {
 	pdf.SetFont("Helvetica", "", 9)
 	setColor(pdf, pdfWarning, false)
 	for _, w := range data.Warnings {
-		pdf.MultiCell(pdfContentW, 4.5, "- "+w, "", "L", false)
+		pdf.MultiCell(pdfContentW, 4.5, pdfText("- "+w), "", "L", false)
 	}
 }
 
