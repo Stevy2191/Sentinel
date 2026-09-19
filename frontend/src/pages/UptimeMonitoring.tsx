@@ -414,7 +414,6 @@ export default function UptimeMonitoring() {
 
   const [createOpen, setCreateOpen] = useState(false)
   const [refreshedAt, setRefreshedAt] = useState(() => Date.now())
-  const [expandedId, setExpandedId] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [modal, setModal] = useState<{ mode: 'create' | 'edit'; group?: MonitorGroup } | null>(null)
   const [search, setSearch] = useState('')
@@ -559,7 +558,6 @@ export default function UptimeMonitoring() {
     return map
   }, [filtered])
 
-  const toggleCard = useCallback((id: string) => setExpandedId((cur) => (cur === id ? null : id)), [])
   const toggleGroup = (id: string) => setCollapsed((c) => ({ ...c, [id]: !c[id] }))
   const toggleTag = (t: string) =>
     setSelectedTags((cur) => (cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]))
@@ -742,9 +740,6 @@ export default function UptimeMonitoring() {
                   <MonitorTable
                     monitors={members}
                     uptimeById={uptimeById}
-                    groups={groups}
-                    expandedId={expandedId}
-                    onToggle={toggleCard}
                     usernameFor={usernameFor}
                     onChanged={() => void refetchAll()}
                     push={push}
@@ -768,9 +763,6 @@ export default function UptimeMonitoring() {
                 <MonitorTable
                   monitors={ungrouped}
                   uptimeById={uptimeById}
-                  groups={groups}
-                  expandedId={expandedId}
-                  onToggle={toggleCard}
                   usernameFor={usernameFor}
                   onChanged={() => void refetchAll()}
                   push={push}
@@ -781,9 +773,6 @@ export default function UptimeMonitoring() {
               <MonitorTable
                 monitors={ungrouped}
                 uptimeById={uptimeById}
-                groups={groups}
-                expandedId={expandedId}
-                onToggle={toggleCard}
                 usernameFor={usernameFor}
                 onChanged={() => void refetchAll()}
                 push={push}

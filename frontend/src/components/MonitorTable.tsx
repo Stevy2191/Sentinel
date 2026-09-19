@@ -1,9 +1,11 @@
 import { useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useMonitorUptime, type RecentCheck } from '@/hooks/useMonitorUptime'
-import DetailPanel, { uptimeColor } from '@/components/DetailPanel'
+import { uptimeColor } from '@/components/UptimeSparkline'
+import MonitorRowActions from '@/components/MonitorRowActions'
 import { formatLastResponseTime } from '@/utils/formatters'
 import { monitorAccess, badgeToneClass } from '@/utils/monitorAccess'
-import type { Monitor, MonitorGroup } from '@/types'
+import type { Monitor } from '@/types'
 
 // The reference draws twenty bars in the uptime column.
 const BARS = 20
@@ -112,10 +114,7 @@ function UptimeBars({ checks, loading }: { checks: RecentCheck[]; loading: boole
 interface RowProps {
   monitor: Monitor
   uptime24h: number | null
-  expanded: boolean
-  groups: MonitorGroup[]
   ownerUsername?: string
-  onToggle: (id: string) => void
   onChanged: () => void
   push: (msg: string, type?: 'success' | 'error' | 'info') => void
   /** Changes on each dashboard refresh, re-fetching this row's checks. */
@@ -125,16 +124,13 @@ interface RowProps {
 function MonitorRow({
   monitor,
   uptime24h,
-  expanded,
-  groups,
   ownerUsername,
-  onToggle,
   onChanged,
   push,
   refreshKey,
 }: RowProps) {
-  // One fetch per row powers both the bar strip and the uptime percentage,
-  // and feeds the detail panel when the row is opened.
+  const navigate = useNavigate()
+  // One fetch per row powers both the bar strip and the uptime percentage.
   const { data: uptime, loading } = useMonitorUptime(monitor.id, '24h', true, refreshKey)
 
   const access = monitorAccess(monitor)
@@ -158,7 +154,7 @@ function MonitorRow({
     <>
       <tr
         className="cursor-pointer transition hover:bg-white/5"
-        onClick={() => onToggle(monitor.id)}
+        onClick={() => navigate(`/monitors/${monitor.id}`)}
       >
         <td className="px-4 py-3">
           <div className="flex items-center gap-2">
@@ -213,40 +209,18 @@ function MonitorRow({
 
         <td className="px-4 py-3 text-xs text-slate-500">{checked}</td>
 
-        <td className="px-4 py-3 text-slate-400">
-          <button
-            className="rounded px-1 leading-none transition hover:text-slate-200"
-            aria-label={expanded ? `Collapse ${monitor.name}` : `Expand ${monitor.name}`}
-            aria-expanded={expanded}
-            onClick={(e) => {
-              e.stopPropagation()
-              onToggle(monitor.id)
-            }}
-          >
-            ⋯
-          </button>
+        {/* Stops propagation so using the menu does not also navigate away
+            from the list it was opened in. */}
+        <td className="px-4 py-3 text-slate-400" onClick={(e) => e.stopPropagation()}>
+          <MonitorRowActions
+            monitor={monitor}
+            access={access}
+            onChanged={onChanged}
+            push={push}
+          />
         </td>
       </tr>
 
-      {expanded && (
-        <tr>
-          {/* Full-width drawer under the row, carrying the same detail panel
-              the card layout used, so opening a row keeps every action
-              (edit, pause, group, delete) that was there before. */}
-          <td colSpan={7} className="bg-slate-900/40 p-0">
-            <DetailPanel
-              monitor={monitor}
-              uptime={uptime}
-              uptimeLoading={loading}
-              groups={groups}
-              access={access}
-              ownerUsername={ownerUsername}
-              onChanged={onChanged}
-              push={push}
-            />
-          </td>
-        </tr>
-      )}
     </>
   )
 }
@@ -254,9 +228,6 @@ function MonitorRow({
 interface Props {
   monitors: Monitor[]
   uptimeById: Map<string, number>
-  groups: MonitorGroup[]
-  expandedId: string | null
-  onToggle: (id: string) => void
   usernameFor: (id: string | null | undefined) => string | undefined
   onChanged: () => void
   push: (msg: string, type?: 'success' | 'error' | 'info') => void
@@ -272,9 +243,6 @@ interface Props {
 export default function MonitorTable({
   monitors,
   uptimeById,
-  groups,
-  expandedId,
-  onToggle,
   usernameFor,
   onChanged,
   push,
@@ -301,10 +269,7 @@ export default function MonitorTable({
                 key={m.id}
                 monitor={m}
                 uptime24h={uptimeById.get(m.id) ?? null}
-                expanded={expandedId === m.id}
-                groups={groups}
                 ownerUsername={usernameFor(m.owner_id)}
-                onToggle={onToggle}
                 onChanged={onChanged}
                 push={push}
                 refreshKey={refreshKey}

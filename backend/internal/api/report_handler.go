@@ -264,6 +264,34 @@ func buildRecentChecks(newestFirst []models.Check) ([]gin.H, *float64) {
 	return out, &v
 }
 
+// responseSeries describes the response-time chart for one range: how far back
+// it reaches, how wide each bucket is, and how a bucket is labelled. The hourly
+// health series is always 24 hours regardless of range — it is a 24-hour bar by
+// definition, and the three uptime figures already cover the wider windows.
+type responseSeries struct {
+	window time.Duration
+	bucket time.Duration
+	label  func(time.Time) string
+}
+
+// responseSeriesFor maps the "range" query parameter to a series. Bucket sizes
+// are chosen to keep the point count readable: a week of hourly points is 168
+// of them, which draws as noise rather than a trend.
+func responseSeriesFor(raw string) (responseSeries, bool) {
+	switch raw {
+	case "24h":
+		return responseSeries{24 * time.Hour, time.Hour,
+			func(t time.Time) string { return t.Format("15:00") }}, true
+	case "7d":
+		return responseSeries{7 * 24 * time.Hour, 6 * time.Hour,
+			func(t time.Time) string { return t.Format("Jan 2 15:00") }}, true
+	case "30d":
+		return responseSeries{30 * 24 * time.Hour, 24 * time.Hour,
+			func(t time.Time) string { return t.Format("Jan 2") }}, true
+	}
+	return responseSeries{}, false
+}
+
 // GetUptimeHistoryHandler handles GET /api/v1/monitors/:id/uptime-history. It
 // returns 24h/7d/30d uptime (incident-based, consistent with the other reports),
 // a 24-bucket hourly uptime series for sparklines, a 24-hour hourly response
@@ -300,9 +328,8 @@ func GetUptimeHistoryHandler(
 			return
 		}
 		currentlyOffline := monitor.CurrentStatus == "offline"
-		switch c.DefaultQuery("range", "24h") {
-		case "24h", "7d", "30d":
-		default:
+		series, ok := responseSeriesFor(c.DefaultQuery("range", "24h"))
+		if !ok {
 			respondError(c, http.StatusBadRequest, "range must be 24h, 7d, or 30d")
 			return
 		}
@@ -331,14 +358,21 @@ func GetUptimeHistoryHandler(
 			return round2(100 - down)
 		}
 
-		// Bucket the last 24h of checks by hour (UTC).
-		checks, err := checkService.GetChecksInRange(ctx, id, now.Add(-24*time.Hour), now, 0, 0)
+		// One read covers both series: the hourly health buckets always describe
+		// the last 24 hours, while the response-time chart reaches back as far as
+		// the requested range. Fetching the wider of the two and bucketing it
+		// twice avoids a second query for the common 24h case.
+		histStart := now.Add(-24 * time.Hour)
+		if start := now.Add(-series.window); start.Before(histStart) {
+			histStart = start
+		}
+		checks, err := checkService.GetChecksInRange(ctx, id, histStart, now, 0, 0)
 		if err != nil {
 			respondInternal(c, "GetUptimeHistoryHandler", err)
 			return
 		}
 		type bucket struct {
-			total, failed, sumResp, respN int
+			total, failed int
 			// First/last failing check in the hour: the fallback source for a
 			// downtime span when no incident was recorded (e.g. failures during a
 			// maintenance window, where incidents are suppressed).
@@ -357,10 +391,7 @@ func GetUptimeHistoryHandler(
 				buckets[k] = b
 			}
 			b.total++
-			if ch.Status == "success" {
-				b.sumResp += ch.ResponseTimeMs
-				b.respN++
-			} else {
+			if ch.Status != "success" {
 				b.failed++
 				ts := ch.Timestamp.UTC()
 				if b.firstFail.IsZero() || ts.Before(b.firstFail) {
@@ -392,14 +423,12 @@ func GetUptimeHistoryHandler(
 		maintIntervals := maintenanceIntervals(maintenanceWindows)
 
 		hourly := make([]gin.H, 0, 24)
-		responseData := make([]gin.H, 0, 24)
 		curHour := truncHour(now)
 		for i := 23; i >= 0; i-- {
 			k := curHour.Add(time.Duration(-i) * time.Hour)
 			b := buckets[k]
 			status := "nodata"
 			uptime := 0.0
-			avg := 0
 			if b != nil && b.total > 0 {
 				uptime = round2(float64(b.total-b.failed) / float64(b.total) * 100)
 				switch {
@@ -409,9 +438,6 @@ func GetUptimeHistoryHandler(
 					status = "down"
 				default:
 					status = "partial"
-				}
-				if b.respN > 0 {
-					avg = b.sumResp / b.respN
 				}
 			}
 
@@ -443,7 +469,38 @@ func GetUptimeHistoryHandler(
 				"observed": !k.Add(time.Hour).Before(monitor.CreatedAt.UTC()),
 			}
 			hourly = append(hourly, entry)
-			responseData = append(responseData, gin.H{"time": fmt.Sprintf("%02d:00", k.Hour()), "responseTime": avg})
+		}
+
+		// The response-time series, over the requested range. Buckets are aligned
+		// to the bucket size rather than to "now", so a point covers the same
+		// clock span on every request and the line does not shift under a refresh.
+		type respBucket struct{ sum, n int }
+		respBuckets := make(map[time.Time]*respBucket)
+		for _, ch := range checks {
+			// Only successful checks carry a meaningful duration: a timeout's
+			// elapsed time measures the timeout setting, not the service.
+			if ch.Status != "success" {
+				continue
+			}
+			k := ch.Timestamp.UTC().Truncate(series.bucket)
+			b := respBuckets[k]
+			if b == nil {
+				b = &respBucket{}
+				respBuckets[k] = b
+			}
+			b.sum += ch.ResponseTimeMs
+			b.n++
+		}
+		points := int(series.window / series.bucket)
+		responseData := make([]gin.H, 0, points)
+		curBucket := now.UTC().Truncate(series.bucket)
+		for i := points - 1; i >= 0; i-- {
+			k := curBucket.Add(time.Duration(-i) * series.bucket)
+			avg := 0
+			if b := respBuckets[k]; b != nil && b.n > 0 {
+				avg = b.sum / b.n
+			}
+			responseData = append(responseData, gin.H{"time": series.label(k), "responseTime": avg})
 		}
 
 		// The per-check strip. GetRecentChecks returns newest-first; the strip is
