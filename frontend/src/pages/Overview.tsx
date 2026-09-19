@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMonitors } from '@/hooks/useMonitors'
 import { useAgentSummary } from '@/hooks/useAgents'
+import { useSSLSummary } from '@/hooks/useSSLCertificates'
 import { useSummaryReport } from '@/hooks/useReports'
 import { useCardShimmer } from '@/hooks/useCardShimmer'
 import ShimmerStatCard from '@/components/ShimmerStatCard'
@@ -21,6 +22,7 @@ export default function Overview() {
   const navigate = useNavigate()
   const { monitors, refetch } = useMonitors()
   const agentSummary = useAgentSummary()
+  const sslSummary = useSSLSummary()
   const [refreshedAt, setRefreshedAt] = useState(() => Date.now())
   const [period, setPeriod] = useState<ReportPeriod>('30d')
 
@@ -57,6 +59,7 @@ export default function Overview() {
     'http',
     'ping',
     'tcp',
+    'ssl',
   ])
 
   // "Paused" is a configuration state, so a disabled monitor counts as paused
@@ -180,7 +183,7 @@ export default function Overview() {
             </div>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <ShimmerStatCard
               title="Avg Response Time"
               value={overview.avgResponse > 0 ? `${overview.avgResponse}ms` : '—'}
@@ -202,6 +205,18 @@ export default function Overview() {
               onMouseLeave={() => shimmer.handleCardMouseLeave('incidents')}
               showShimmer={shimmer.isShown('incidents')}
               shimmerStyle={shimmer.getShimmerStyle('incidents')}
+            />
+            <ShimmerStatCard
+              title="SSL & Domains"
+              value={sslSummary.value}
+              subtitle={sslSummary.subtitle}
+              colorType="ssl"
+              onClick={() => navigate('/ssl')}
+              onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'ssl')}
+              onMouseEnter={() => shimmer.handleCardMouseEnter('ssl')}
+              onMouseLeave={() => shimmer.handleCardMouseLeave('ssl')}
+              showShimmer={shimmer.isShown('ssl')}
+              shimmerStyle={shimmer.getShimmerStyle('ssl')}
             />
             <ShimmerStatCard
               title="Monitoring Agents"

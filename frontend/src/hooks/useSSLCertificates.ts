@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import api, { type ApiError } from '@/services/api'
 
 export type SSLStatus = 'unknown' | 'valid' | 'expiring_soon' | 'expired'
@@ -90,6 +90,46 @@ export function useSSLCertificates() {
   }, [refetch])
 
   return { certificates, loading, error, refetch }
+}
+
+/**
+ * The SSL & Domains figure for a dashboard card.
+ *
+ * Counts both clocks, because a domain can hold a perfectly good certificate
+ * and still lapse at the registrar weeks later — reporting only the
+ * certificate would call that healthy right up to the day the domain stops
+ * resolving.
+ */
+export function useSSLSummary(): { value: string; subtitle: string } {
+  const { certificates, loading } = useSSLCertificates()
+
+  return useMemo(() => {
+    if (loading) return { value: '—', subtitle: 'loading' }
+    if (certificates.length === 0) {
+      // A bare zero reads as "nothing is wrong" when in fact nothing is being
+      // watched, so the card says which it is.
+      return { value: 'None yet', subtitle: 'add a domain to watch' }
+    }
+
+    const expired = certificates.filter(
+      (c) => c.status === 'expired' || c.domain_status === 'expired',
+    ).length
+    const expiring = certificates.filter(
+      (c) => c.status === 'expiring_soon' || c.domain_status === 'expiring_soon',
+    ).length
+    const unreadable = certificates.filter((c) => c.status === 'unknown').length
+
+    // Leads with whatever needs attention, in the order it would bite:
+    // something already expired, then something about to, then something that
+    // could not be read at all.
+    let subtitle = `of ${certificates.length} watched`
+    if (expired > 0) subtitle = `${expired} expired`
+    else if (expiring > 0) subtitle = `${expiring} expiring soon`
+    else if (unreadable > 0) subtitle = `${unreadable} could not be checked`
+
+    const healthy = certificates.length - expired - expiring
+    return { value: `${healthy} valid`, subtitle }
+  }, [certificates, loading])
 }
 
 /**
