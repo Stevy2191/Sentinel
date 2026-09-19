@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Search, X, ArrowUpDown, Eye, Loader2 } from 'lucide-react'
-import IncidentDetailModal from '@/components/IncidentDetailModal'
 import { useMonitors } from '@/hooks/useMonitors'
 import {
   useIncidents,
@@ -34,10 +34,10 @@ function useDebounced<T>(value: T, ms: number): T {
 }
 
 export default function Incidents() {
+  const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebounced(search, 300)
   const [filters, setFilters] = useState<IncidentFilters>(DEFAULT_FILTERS)
-  const [openId, setOpenId] = useState<string | null>(null)
 
   // Any change to what is being asked for returns to the first page: staying on
   // page 4 of a filter that now has one page shows an empty table.
@@ -201,7 +201,7 @@ export default function Incidents() {
                     <tr
                       key={inc.id}
                       className={`cursor-pointer transition hover:bg-white/5 ${i % 2 ? 'bg-white/[0.02]' : ''}`}
-                      onClick={() => setOpenId(inc.id)}
+                      onClick={() => navigate(`/incidents/${inc.id}`, { state: { from: '/incidents' } })}
                     >
                       <td className="px-4 py-3">
                         <div className="font-medium text-slate-200">{inc.monitor_name}</div>
@@ -237,7 +237,7 @@ export default function Incidents() {
                           <button
                             className="rounded p-1.5 text-slate-400 transition hover:bg-white/10 hover:text-white"
                             aria-label={`View details for ${inc.monitor_name}`}
-                            onClick={() => setOpenId(inc.id)}
+                            onClick={() => navigate(`/incidents/${inc.id}`, { state: { from: '/incidents' } })}
                           >
                             <Eye className="h-4 w-4" />
                           </button>
@@ -276,12 +276,6 @@ export default function Incidents() {
           </div>
         </div>
       )}
-
-      <IncidentDetailModal
-        incidentId={openId}
-        onClose={() => setOpenId(null)}
-        onSaved={() => void refetch()}
-      />
     </div>
   )
 }

@@ -17,6 +17,7 @@ import Auth from '@/pages/Auth'
 const Overview = lazy(() => import('@/pages/Overview'))
 const UptimeMonitoring = lazy(() => import('@/pages/UptimeMonitoring'))
 const Incidents = lazy(() => import('@/pages/Incidents'))
+const IncidentDetail = lazy(() => import('@/pages/IncidentDetail'))
 const Monitors = lazy(() => import('@/pages/Monitors'))
 const MonitorDetail = lazy(() => import('@/pages/MonitorDetail'))
 const MonitorWizard = lazy(() => import('@/pages/MonitorWizard'))
@@ -75,6 +76,7 @@ export default function App() {
               <Route path="/dashboard" element={<Navigate to="/" replace />} />
               <Route path="/uptime" element={<UptimeMonitoring />} />
               <Route path="/incidents" element={<Incidents />} />
+                <Route path="/incidents/:id" element={<IncidentDetail />} />
               <Route path="/monitors" element={<Monitors />} />
               <Route path="/ssl" element={<SSL />} />
               <Route path="/servers" element={<ServerMonitoring />} />

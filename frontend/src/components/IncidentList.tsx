@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { ChevronRight } from 'lucide-react'
-import IncidentDetailModal from '@/components/IncidentDetailModal'
 import api, { type ApiError } from '@/services/api'
 import type { ApiResponse, Incident } from '@/types'
 import { formatDatetime, formatDuration } from '@/utils/formatters'
@@ -17,10 +17,7 @@ export default function IncidentList({ monitorId }: { monitorId: string }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<ApiError | null>(null)
   const [page, setPage] = useState(1)
-  const [openId, setOpenId] = useState<string | null>(null)
-  // Bumped after an edit so the list re-reads: a new comment or a changed root
-  // cause should not leave the row behind it stale.
-  const [refreshKey, setRefreshKey] = useState(0)
+  const navigate = useNavigate()
 
   useEffect(() => {
     let active = true
@@ -33,7 +30,7 @@ export default function IncidentList({ monitorId }: { monitorId: string }) {
     return () => {
       active = false
     }
-  }, [monitorId, refreshKey])
+  }, [monitorId])
 
   if (loading) return <div className="text-sm text-slate-500">Loading incidents…</div>
   if (error) return <div className="text-sm text-error-600">{error.message}</div>
@@ -50,7 +47,11 @@ export default function IncidentList({ monitorId }: { monitorId: string }) {
           <button
             key={inc.id}
             type="button"
-            onClick={() => setOpenId(inc.id)}
+            onClick={() =>
+              navigate(`/incidents/${inc.id}`, {
+                state: { from: `/monitors/${monitorId}` },
+              })
+            }
             aria-label={`Open the incident from ${formatDatetime(inc.start_time)}`}
             className="flex w-full items-center justify-between gap-4 py-2 text-left text-sm transition hover:bg-white/5"
           >
@@ -92,13 +93,6 @@ export default function IncidentList({ monitorId }: { monitorId: string }) {
         </div>
       )}
 
-      {openId && (
-        <IncidentDetailModal
-          incidentId={openId}
-          onClose={() => setOpenId(null)}
-          onSaved={() => setRefreshKey((k) => k + 1)}
-        />
-      )}
     </div>
   )
 }
