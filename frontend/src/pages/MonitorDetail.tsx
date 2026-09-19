@@ -617,6 +617,14 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
               <DetailRow label="Interval">{monitor.interval_seconds}s</DetailRow>
               <DetailRow label="Timeout">{monitor.timeout_seconds}s</DetailRow>
               <DetailRow label="Retries">{monitor.retries}</DetailRow>
+              {/* Spelled out because the number alone reads as a duplicate of
+                  Retries, which it is not. */}
+              <DetailRow label="Failures before incident">
+                {monitor.failure_threshold ?? 2}
+                <span className="ml-1 text-xs font-normal text-slate-500">
+                  consecutive
+                </span>
+              </DetailRow>
             </div>
 
             {/* Group assignment lives here now that a row opens this page

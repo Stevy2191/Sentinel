@@ -720,21 +720,31 @@ func runMonitoringCycle(
 			log.Printf("monitoring cycle: store check for %s: %v", monitor.ID, err)
 		}
 
-		newStatus := models.StatusOnline
-		if check.Status != "success" {
-			newStatus = models.StatusOffline
+		// A failed check is not yet an outage: EvaluateCheck holds the previous
+		// status until the monitor's threshold of consecutive failures is met,
+		// so one dropped packet no longer opens an incident that closes again
+		// on the next cycle.
+		decision := monitor.EvaluateCheck(check.Status, check.Timestamp)
+		if check.Status != models.CheckStatusSuccess {
 			failures++
+			if !decision.Confirmed && decision.Status != models.StatusOffline {
+				log.Printf("monitor %s failed check %d of %d before incident",
+					monitor.ID, decision.ConsecutiveFailures, monitor.FailureThresholdOrDefault())
+			}
 		}
+		newStatus := decision.Status
 
-		handleStatusChange(ctx, incidentService, notificationManager, &monitor, check, newStatus)
+		handleStatusChange(ctx, incidentService, notificationManager, &monitor, check, newStatus, decision.StreakStartedAt)
 
 		// Persist the latest status snapshot on the monitor row.
 		if err := db.WithContext(ctx).Model(&models.Monitor{}).
 			Where("id = ?", monitor.ID).
 			Updates(map[string]interface{}{
-				"current_status":        newStatus,
-				"last_check_at":         time.Now(),
-				"last_response_time_ms": check.ResponseTimeMs,
+				"current_status":            newStatus,
+				"last_check_at":             time.Now(),
+				"last_response_time_ms":     check.ResponseTimeMs,
+				"consecutive_failures":      decision.ConsecutiveFailures,
+				"failure_streak_started_at": decision.StreakStartedAt,
 			}).Error; err != nil {
 			log.Printf("monitoring cycle: update monitor %s: %v", monitor.ID, err)
 		}
@@ -752,6 +762,7 @@ func handleStatusChange(
 	monitor *models.Monitor,
 	check *models.Check,
 	newStatus string,
+	failureStreakStartedAt *time.Time,
 ) {
 	previous := monitor.CurrentStatus
 	if newStatus == previous {
@@ -786,8 +797,15 @@ func handleStatusChange(
 		// Newly offline: open an incident and alert. The failing check's own
 		// status and message are carried across so the incident says what
 		// happened rather than only that something did.
+		// Dated from the first failure of the streak, not from the check that
+		// confirmed it: the service stopped answering then, and a threshold of
+		// 2 would otherwise under-report every outage by one interval.
+		startedAt := time.Now()
+		if failureStreakStartedAt != nil && !failureStreakStartedAt.IsZero() {
+			startedAt = *failureStreakStartedAt
+		}
 		if incident, err := incidentService.CreateIncidentFromCheck(
-			ctx, monitor.ID, time.Now(),
+			ctx, monitor.ID, startedAt,
 			models.IncidentTypeForCheck(check.Status), check.ErrorMessage,
 		); err != nil {
 			log.Printf("opening incident for %s: %v", monitor.ID, err)

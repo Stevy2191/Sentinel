@@ -14,6 +14,7 @@ export interface MonitorFormValues {
   interval_seconds: number
   timeout_seconds: number
   retries: number
+  failure_threshold: number
   tags: string
   /** null = all channels, [] = none, [...] = only those. */
   notify_channels: string[] | null
@@ -29,6 +30,7 @@ export const emptyMonitorForm: MonitorFormValues = {
   interval_seconds: 60,
   timeout_seconds: 10,
   retries: 3,
+  failure_threshold: 2,
   tags: '',
   notify_channels: null,
 }
@@ -45,6 +47,7 @@ export function monitorToForm(m: Monitor): MonitorFormValues {
     interval_seconds: m.interval_seconds,
     timeout_seconds: m.timeout_seconds,
     retries: m.retries,
+    failure_threshold: m.failure_threshold ?? 2,
     tags: (m.tags ?? []).join(', '),
     notify_channels: m.notify_channels ?? null,
   }
@@ -81,6 +84,12 @@ export function validateMonitorForm(v: MonitorFormValues): Errors {
     e.timeout_seconds = 'Timeout must be less than the interval'
   if (!Number.isInteger(v.retries) || v.retries < 0 || v.retries > 10)
     e.retries = 'Retries must be 0–10'
+  if (
+    !Number.isInteger(v.failure_threshold) ||
+    v.failure_threshold < 1 ||
+    v.failure_threshold > 10
+  )
+    e.failure_threshold = 'Failure threshold must be 1–10'
   if (v.type === 'http' && v.headers.trim()) {
     try {
       const parsed = JSON.parse(v.headers)
@@ -101,6 +110,7 @@ export function monitorFormToInput(v: MonitorFormValues): MonitorInput {
     interval_seconds: v.interval_seconds,
     timeout_seconds: v.timeout_seconds,
     retries: v.retries,
+    failure_threshold: v.failure_threshold,
     enabled: true,
   }
   if (v.type === 'http') {
@@ -285,12 +295,34 @@ export default function MonitorForm({
             onChange={(e) => set('timeout_seconds', Number(e.target.value))}
           />
         </Field>
-        <Field label="Retries" required help="0–10" error={errors.retries}>
+        <Field
+          label="Retries"
+          required
+          help="0–10 · extra attempts within a single check"
+          error={errors.retries}
+        >
           <input
             type="number"
             className={inputCls}
             value={values.retries}
             onChange={(e) => set('retries', Number(e.target.value))}
+          />
+        </Field>
+        {/* Named apart from Retries deliberately: the two are easy to confuse,
+            and this help text is the only place the difference is stated. */}
+        <Field
+          label="Failures before incident"
+          required
+          help="1–10 · consecutive failed checks before this counts as an outage"
+          error={errors.failure_threshold}
+        >
+          <input
+            type="number"
+            min={1}
+            max={10}
+            className={inputCls}
+            value={values.failure_threshold}
+            onChange={(e) => set('failure_threshold', Number(e.target.value))}
           />
         </Field>
       </div>

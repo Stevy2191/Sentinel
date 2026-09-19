@@ -43,6 +43,13 @@ const (
 	StatusUnknown = "unknown"
 )
 
+// Check result statuses, as written to checks.status.
+const (
+	CheckStatusSuccess = "success"
+	CheckStatusFailed  = "failed"
+	CheckStatusTimeout = "timeout"
+)
+
 // Validation bounds for a monitor's schedule. The interval bounds alias the
 // exported ones in setting.go, so the value an admin may pick as the instance
 // default is by construction a value a monitor may actually hold.
@@ -130,6 +137,21 @@ type Monitor struct {
 	IntervalSeconds int       `json:"interval_seconds" gorm:"column:interval_seconds;default:60"`
 	TimeoutSeconds  int       `json:"timeout_seconds" gorm:"column:timeout_seconds;default:10"`
 	Retries         int       `json:"retries" gorm:"column:retries;default:0"`
+	// FailureThreshold is how many consecutive failed checks it takes to call a
+	// monitor down and open an incident.
+	//
+	// Distinct from Retries, which are attempts inside one check: retries decide
+	// whether a single check fails, this decides how many failed checks make an
+	// outage. Without it one dropped packet opened and closed an incident, which
+	// is noise rather than history.
+	FailureThreshold int `json:"failure_threshold" gorm:"column:failure_threshold;default:2"`
+	// ConsecutiveFailures is the current run of failed checks, and
+	// FailureStreakStartedAt is when that run began. Both are maintained by the
+	// monitoring cycle; the start time is what an incident is dated from, so
+	// downtime is measured from the first failure rather than the one that
+	// happened to confirm it.
+	ConsecutiveFailures    int        `json:"consecutive_failures" gorm:"column:consecutive_failures;default:0"`
+	FailureStreakStartedAt *time.Time `json:"failure_streak_started_at" gorm:"column:failure_streak_started_at"`
 	// SSLVerify controls TLS certificate verification on HTTPS checks, and is
 	// only consulted for type=http.
 	//
@@ -264,8 +286,94 @@ func (m *Monitor) Validate() error {
 	if m.TimeoutSeconds >= m.IntervalSeconds {
 		return fmt.Errorf("timeout_seconds (%d) must be less than interval_seconds (%d)", m.TimeoutSeconds, m.IntervalSeconds)
 	}
+	// Zero is accepted as "not supplied" and resolved by FailureThresholdOrDefault,
+	// matching how the other optional numeric fields behave on a partial update.
+	if m.FailureThreshold != 0 &&
+		(m.FailureThreshold < MinFailureThreshold || m.FailureThreshold > MaxFailureThreshold) {
+		return fmt.Errorf("failure_threshold must be between %d and %d, got %d",
+			MinFailureThreshold, MaxFailureThreshold, m.FailureThreshold)
+	}
 
 	return nil
+}
+
+// Failure threshold bounds. The ceiling exists because a threshold larger than
+// this delays detection past the point of being a monitor.
+const (
+	MinFailureThreshold     = 1
+	MaxFailureThreshold     = 10
+	DefaultFailureThreshold = 2
+)
+
+// FailureThresholdOrDefault resolves an unset threshold. Rows written before
+// the column existed, and partial updates that omit it, both read as zero.
+func (m *Monitor) FailureThresholdOrDefault() int {
+	if m.FailureThreshold < MinFailureThreshold {
+		return DefaultFailureThreshold
+	}
+	if m.FailureThreshold > MaxFailureThreshold {
+		return MaxFailureThreshold
+	}
+	return m.FailureThreshold
+}
+
+// StatusDecision is what one check result means for a monitor's incident state.
+type StatusDecision struct {
+	Status              string
+	ConsecutiveFailures int
+	StreakStartedAt     *time.Time
+	// Confirmed is true on the check that just met the threshold — the moment
+	// an incident should open, as opposed to every later failure in the same
+	// outage.
+	Confirmed bool
+}
+
+// EvaluateCheck decides a monitor's status from one check result.
+//
+// A failed check is not yet an outage: the monitor goes offline only when
+// FailureThreshold consecutive checks have failed, so a single dropped packet
+// or momentary error no longer opens an incident that closes again on the next
+// cycle. Recovery is not thresholded — one success means the service answered,
+// and there is nothing to confirm.
+func (m *Monitor) EvaluateCheck(checkStatus string, at time.Time) StatusDecision {
+	if checkStatus == CheckStatusSuccess {
+		return StatusDecision{Status: StatusOnline}
+	}
+
+	consecutive := m.ConsecutiveFailures + 1
+	streak := m.FailureStreakStartedAt
+	if streak == nil {
+		when := at
+		if when.IsZero() {
+			when = time.Now()
+		}
+		streak = &when
+	}
+
+	threshold := m.FailureThresholdOrDefault()
+	if consecutive >= threshold {
+		return StatusDecision{
+			Status:              StatusOffline,
+			ConsecutiveFailures: consecutive,
+			StreakStartedAt:     streak,
+			// Only the check that crosses the line confirms; later failures in
+			// the same outage must not re-open an incident.
+			Confirmed: m.CurrentStatus != StatusOffline,
+		}
+	}
+
+	// Below the threshold the previous status stands. Claiming "online" while
+	// checks are failing would be a lie, so a monitor with nothing established
+	// yet stays unknown rather than being called up.
+	held := m.CurrentStatus
+	if held == "" {
+		held = StatusUnknown
+	}
+	return StatusDecision{
+		Status:              held,
+		ConsecutiveFailures: consecutive,
+		StreakStartedAt:     streak,
+	}
 }
 
 // IsValid reports whether the monitor passes Validate.

@@ -47,6 +47,8 @@ export interface Monitor {
   interval_seconds: number
   timeout_seconds: number
   retries: number
+  /** Consecutive failed checks required before an incident opens. */
+  failure_threshold: number
   current_status: MonitorStatus
   last_check_at: string | null
   last_response_time_ms: number
@@ -90,6 +92,7 @@ export interface MonitorInput {
   interval_seconds: number
   timeout_seconds: number
   retries?: number
+  failure_threshold?: number
   enabled?: boolean
   tags?: string[]
   notify_channels?: string[] | null

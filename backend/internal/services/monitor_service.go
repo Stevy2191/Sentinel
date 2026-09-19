@@ -165,6 +165,9 @@ func applyMonitorUpdates(target, updates *models.Monitor) {
 	if updates.Retries != 0 {
 		target.Retries = updates.Retries
 	}
+	if updates.FailureThreshold != 0 {
+		target.FailureThreshold = updates.FailureThreshold
+	}
 	if updates.Tags != nil {
 		target.Tags = updates.Tags
 	}
