@@ -27,12 +27,15 @@ func NewReportAggregatorService(db *gorm.DB) *ReportAggregatorService {
 
 // ReportMetrics is one monitor's contribution to a report.
 type ReportMetrics struct {
-	MonitorID       uuid.UUID `json:"monitor_id"`
-	MonitorName     string    `json:"monitor_name"`
-	Uptime          float64   `json:"uptime"` // percentage over the range
-	DowntimeMinutes int       `json:"downtime_minutes"`
-	IncidentCount   int       `json:"incident_count"`
-	SLATarget       *float64  `json:"sla_target"`
+	MonitorID   uuid.UUID `json:"monitor_id"`
+	MonitorName string    `json:"monitor_name"`
+	Uptime      float64   `json:"uptime"` // percentage over the range
+	// DowntimeMinutes is fractional on purpose. Truncating to whole minutes
+	// made every outage shorter than 60s count as zero, so a report could show
+	// incidents alongside 100% uptime.
+	DowntimeMinutes float64  `json:"downtime_minutes"`
+	IncidentCount   int      `json:"incident_count"`
+	SLATarget       *float64 `json:"sla_target"`
 	// SLAMet is meaningful only when SLATarget is non-nil; a monitor with no
 	// target is not "failing", it is simply not under an SLA.
 	SLAMet    bool              `json:"sla_met"`
@@ -46,11 +49,11 @@ type IncidentSummary struct {
 	EndTime   *time.Time `json:"end_time"`
 	// Duration is the incident's overlap with the report window, in minutes -
 	// not its total length, which may extend beyond the window on either side.
-	Duration        int    `json:"duration_minutes"`
-	Severity        string `json:"severity"`
-	Status          string `json:"status"` // "ongoing" or "resolved"
-	RootCause       string `json:"root_cause"`
-	ResolutionNotes string `json:"resolution_notes"`
+	Duration        float64 `json:"duration_minutes"`
+	Severity        string  `json:"severity"`
+	Status          string  `json:"status"` // "ongoing" or "resolved"
+	RootCause       string  `json:"root_cause"`
+	ResolutionNotes string  `json:"resolution_notes"`
 }
 
 // ReportData is the fully aggregated payload handed to a renderer.
@@ -260,9 +263,9 @@ func (s *ReportAggregatorService) calculateMonitorMetrics(
 //
 // Kept free of the database so the window arithmetic can be tested directly;
 // it is the part of reporting most likely to be quietly wrong.
-func summarizeIncidents(incidents []models.Incident, startTime, endTime time.Time) ([]IncidentSummary, int) {
+func summarizeIncidents(incidents []models.Incident, startTime, endTime time.Time) ([]IncidentSummary, float64) {
 	summaries := make([]IncidentSummary, 0, len(incidents))
-	total := 0
+	total := 0.0
 
 	for i := range incidents {
 		incident := incidents[i]
@@ -278,7 +281,9 @@ func summarizeIncidents(incidents []models.Incident, startTime, endTime time.Tim
 			endT = *incident.EndTime
 		}
 
-		durationMinutes := int(endT.Sub(startT).Minutes())
+		// Kept fractional rather than truncated to whole minutes: a 40-second
+		// outage is not zero downtime, and four of them are not zero either.
+		durationMinutes := endT.Sub(startT).Minutes()
 		if durationMinutes < 0 {
 			durationMinutes = 0
 		}
@@ -302,8 +307,8 @@ func summarizeIncidents(incidents []models.Incident, startTime, endTime time.Tim
 // uptimePercent is the share of the window not spent in downtime. Overlapping
 // incidents can sum past the window length, so the result floors at zero rather
 // than going negative.
-func uptimePercent(startTime, endTime time.Time, downtimeMinutes int) float64 {
-	totalMinutes := int(endTime.Sub(startTime).Minutes())
+func uptimePercent(startTime, endTime time.Time, downtimeMinutes float64) float64 {
+	totalMinutes := endTime.Sub(startTime).Minutes()
 	if totalMinutes <= 0 {
 		return 0
 	}
@@ -311,5 +316,5 @@ func uptimePercent(startTime, endTime time.Time, downtimeMinutes int) float64 {
 	if up < 0 {
 		up = 0
 	}
-	return float64(up) / float64(totalMinutes) * 100
+	return up / totalMinutes * 100
 }

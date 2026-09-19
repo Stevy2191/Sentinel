@@ -75,8 +75,8 @@ func TestSummarizeIncidentsClampsToWindow(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			summaries, total := summarizeIncidents(c.incidents, windowStart, windowEnd)
-			if total != c.wantDowntime {
-				t.Errorf("downtime = %d minutes, want %d", total, c.wantDowntime)
+			if total != float64(c.wantDowntime) {
+				t.Errorf("downtime = %v minutes, want %d", total, c.wantDowntime)
 			}
 			if len(summaries) != len(c.incidents) {
 				t.Errorf("got %d summaries, want %d", len(summaries), len(c.incidents))
@@ -118,7 +118,7 @@ func TestUptimePercent(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := uptimePercent(windowStart, windowEnd, c.downtime)
+			got := uptimePercent(windowStart, windowEnd, float64(c.downtime))
 			if got != c.want {
 				t.Errorf("uptimePercent(%d) = %v, want %v", c.downtime, got, c.want)
 			}

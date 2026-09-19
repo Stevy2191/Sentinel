@@ -149,10 +149,16 @@ func TestPDFFilenameIsSanitized(t *testing.T) {
 }
 
 func TestFormatMinutes(t *testing.T) {
-	cases := map[int]string{0: "0m", 45: "45m", 60: "1h", 90: "1h 30m", 125: "2h 5m"}
+	cases := map[float64]string{
+		0: "0s", 45: "45m", 60: "1h", 90: "1h 30m", 125: "2h 5m",
+		// Sub-minute outages read as seconds rather than "0m": a 30s check
+		// interval produces them routinely, and "0m" made them look like
+		// nothing happened.
+		0.5: "30s", 0.75: "45s", 0.0166: "1s",
+	}
 	for in, want := range cases {
 		if got := formatMinutes(in); got != want {
-			t.Errorf("formatMinutes(%d) = %q, want %q", in, got, want)
+			t.Errorf("formatMinutes(%v) = %q, want %q", in, got, want)
 		}
 	}
 }

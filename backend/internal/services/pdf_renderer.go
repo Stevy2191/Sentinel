@@ -11,6 +11,7 @@ package services
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -242,7 +243,7 @@ func drawPDFSummary(pdf *fpdf.Fpdf, data *ReportData) {
 		color [3]int
 	}{
 		{"Services monitored", fmt.Sprintf("%d", total), pdfInk},
-		{"Average uptime", fmt.Sprintf("%.2f%%", avgUptime), uptimeColor(avgUptime)},
+		{"Average uptime", formatUptimePercent(avgUptime), uptimeColor(avgUptime)},
 		{"Total incidents", fmt.Sprintf("%d", incidents), pdfInk},
 		{"Healthy services", fmt.Sprintf("%d", healthy), pdfSuccess},
 	}
@@ -302,7 +303,7 @@ func drawPDFSLASection(pdf *fpdf.Fpdf, data *ReportData) {
 		setColor(pdf, pdfInk, false)
 		pdf.CellFormat(widths[0], 7, pdfText(truncate(m.MonitorName, 46)), "B", 0, "L", false, 0, "")
 		setColor(pdf, uptimeColor(m.Uptime), false)
-		pdf.CellFormat(widths[1], 7, fmt.Sprintf("%.2f%%", m.Uptime), "B", 0, "L", false, 0, "")
+		pdf.CellFormat(widths[1], 7, formatUptimePercent(m.Uptime), "B", 0, "L", false, 0, "")
 		setColor(pdf, pdfInk, false)
 		pdf.CellFormat(widths[2], 7, fmt.Sprintf("%.2f%%", *m.SLATarget), "B", 0, "L", false, 0, "")
 
@@ -427,15 +428,45 @@ func sectionsOrDefault(sections []string) []string {
 }
 
 // formatMinutes renders a downtime duration compactly (e.g. "2h 15m").
-func formatMinutes(minutes int) string {
-	if minutes < 60 {
-		return fmt.Sprintf("%dm", minutes)
+//
+// Sub-minute outages are shown in seconds rather than as "0m". A monitor on a
+// 30-second interval produces exactly those, and rendering four of them as "0m"
+// next to a 100% uptime figure is how a real outage came to look like nothing
+// happened.
+func formatMinutes(minutes float64) string {
+	if minutes <= 0 {
+		return "0s"
 	}
-	h, m := minutes/60, minutes%60
+	seconds := int(math.Round(minutes * 60))
+	if seconds < 60 {
+		return fmt.Sprintf("%ds", seconds)
+	}
+	total := int(math.Round(minutes))
+	if total < 60 {
+		return fmt.Sprintf("%dm", total)
+	}
+	h, m := total/60, total%60
 	if m == 0 {
 		return fmt.Sprintf("%dh", h)
 	}
 	return fmt.Sprintf("%dh %dm", h, m)
+}
+
+// formatUptimePercent renders an uptime figure without ever rounding a real
+// outage away.
+//
+// "%.2f" turns 99.9954% into "100.00%", which read as a contradiction beside a
+// list of incidents. Anything short of a perfect record is rounded down, so
+// 100% means no recorded downtime at all and nothing else does.
+func formatUptimePercent(pct float64) string {
+	if pct >= 100 {
+		return "100.00%"
+	}
+	floored := math.Floor(pct*100) / 100
+	if floored >= 100 {
+		floored = 99.99
+	}
+	return fmt.Sprintf("%.2f%%", floored)
 }
 
 // truncate shortens s to max runes, marking that it was cut.

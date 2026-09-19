@@ -147,11 +147,11 @@ func (g *HTMLReportGenerator) summarySection(data *ReportData) string {
 	return fmt.Sprintf(`<h2>Summary</h2>
 <div class="metric-grid">
   <div class="metric-card"><div class="metric-label">Services monitored</div><div class="metric-value">%d</div></div>
-  <div class="metric-card"><div class="metric-label">Average uptime</div><div class="metric-value %s">%.2f%%</div></div>
+  <div class="metric-card"><div class="metric-label">Average uptime</div><div class="metric-value %s">%s</div></div>
   <div class="metric-card"><div class="metric-label">Total incidents</div><div class="metric-value">%d</div></div>
   <div class="metric-card"><div class="metric-label">Healthy services</div><div class="metric-value success">%d</div></div>
 </div>
-`, total, uptimeClass, avgUptime, incidents, healthy)
+`, total, uptimeClass, formatUptimePercent(avgUptime), incidents, healthy)
 }
 
 func (g *HTMLReportGenerator) slaSection(data *ReportData) string {
@@ -170,8 +170,8 @@ func (g *HTMLReportGenerator) slaSection(data *ReportData) string {
 			status, statusClass = "Met", "met"
 		}
 		fmt.Fprintf(&body,
-			"<tr><td>%s</td><td>%.2f%%</td><td>%.2f%%</td><td><span class=\"sla-badge %s\">%s</span></td></tr>\n",
-			esc(m.MonitorName), m.Uptime, *m.SLATarget, statusClass, status)
+			"<tr><td>%s</td><td>%s</td><td>%.2f%%</td><td><span class=\"sla-badge %s\">%s</span></td></tr>\n",
+			esc(m.MonitorName), formatUptimePercent(m.Uptime), *m.SLATarget, statusClass, status)
 	}
 
 	if rows == 0 {
