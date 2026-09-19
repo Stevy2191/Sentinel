@@ -79,6 +79,26 @@ function formatBytesPerSecond(v: number): string {
   return `${Math.round(v)} B/s`
 }
 
+/**
+ * The same rate, as short as it can honestly be written.
+ *
+ * Axis ticks get this rather than the full form. A tick is a scale marker, not
+ * a reading — "24.0 kB/s" spends four characters on a decimal that is always
+ * zero, because the tick values recharts picks are round. Those characters
+ * matter: the tick text wraps when it outgrows the axis width, and a label
+ * broken across two lines is harder to read than the digit it was protecting.
+ * The tooltip still shows the precise value.
+ */
+function formatRateTick(v: number): string {
+  const unit = v >= 1e9 ? 'GB/s' : v >= 1e6 ? 'MB/s' : v >= 1e3 ? 'kB/s' : 'B/s'
+  const scale = v >= 1e9 ? 1e9 : v >= 1e6 ? 1e6 : v >= 1e3 ? 1e3 : 1
+  const n = v / scale
+  // A decimal only where it says something: 1.5 kB/s is worth distinguishing
+  // from 2, 24.0 is not.
+  const text = Number.isInteger(n) || n >= 10 ? Math.round(n).toString() : n.toFixed(1)
+  return `${text} ${unit}`
+}
+
 const AXIS = { stroke: '#64748b', fontSize: 11 }
 
 function Chart({
@@ -119,8 +139,8 @@ function Chart({
               tickLine={false}
               axisLine={false}
               domain={percent ? [0, 100] : [0, 'auto']}
-              tickFormatter={(v: number) => (percent ? `${v}%` : formatBytesPerSecond(v))}
-              width={percent ? 40 : 68}
+              tickFormatter={(v: number) => (percent ? `${v}%` : formatRateTick(v))}
+              width={percent ? 44 : 64}
             />
             <Tooltip
               contentStyle={{
