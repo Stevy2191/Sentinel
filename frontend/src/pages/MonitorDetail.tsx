@@ -12,6 +12,7 @@ import {
   Share2,
   Activity,
   AlertTriangle,
+  FileText,
 } from 'lucide-react'
 import {
   useMonitor,
@@ -37,6 +38,7 @@ import {
 import MonitorForm, { monitorToForm } from '@/components/MonitorForm'
 import TestResult from '@/components/TestResult'
 import ShareModal from '@/components/ShareModal'
+import GenerateReportModal from '@/components/GenerateReportModal'
 import IncidentList from '@/components/IncidentList'
 import { useToasts, Toaster } from '@/components/Toast'
 import {
@@ -174,6 +176,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
   const [testCheck, setTestCheck] = useState<Check | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
   const [maintModal, setMaintModal] = useState(false)
   const [maintStart, setMaintStart] = useState('')
   const [maintEnd, setMaintEnd] = useState('')
@@ -348,6 +351,9 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
           </nav>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <button className="btn-secondary !py-1.5" onClick={() => setReportOpen(true)}>
+            <FileText className="h-4 w-4" /> Generate Report
+          </button>
           {(access.isOwner || access.permission === 'admin') && (
             <button className="btn-secondary !py-1.5" onClick={() => setShareOpen(true)}>
               <Share2 className="h-4 w-4" /> Share
@@ -758,6 +764,12 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
       {shareOpen && id && (
         <ShareModal monitorId={id} onClose={() => setShareOpen(false)} push={push} />
       )}
+
+      <GenerateReportModal
+        monitor={monitor}
+        isOpen={reportOpen}
+        onClose={() => setReportOpen(false)}
+      />
     </div>
   )
 }
