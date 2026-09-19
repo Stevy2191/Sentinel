@@ -80,8 +80,18 @@ func (s *PDFRendererService) RenderReportToPDF(data *ReportData, sections []stri
 		case models.SectionIncidentSummary:
 			drawPDFIncidentSection(pdf, data)
 		case models.SectionCharts:
-			// Charts are not rendered yet; the summary tiles stand in for them.
+			// "charts" predates the richer sections and has always drawn the
+			// summary tiles. Kept as-is so existing templates render what they
+			// always did; new templates use the sections below instead.
 			drawPDFSummary(pdf, data)
+		case models.SectionExecutiveSummary:
+			drawPDFExecutiveSummary(pdf, data)
+		case models.SectionTimeline:
+			drawPDFTimeline(pdf, data)
+		case models.SectionAvailability:
+			drawPDFAvailability(pdf, data)
+		case models.SectionPerformance:
+			drawPDFPerformance(pdf, data)
 		case models.SectionCustom:
 			drawPDFCustomSection(pdf, data)
 		}

@@ -46,6 +46,14 @@ func (g *HTMLReportGenerator) GenerateHTMLReport(data *ReportData, template *mod
 			b.WriteString(g.incidentSection(data))
 		case models.SectionCharts:
 			b.WriteString(g.summarySection(data))
+		case models.SectionExecutiveSummary:
+			b.WriteString(g.executiveSummarySection(data))
+		case models.SectionTimeline:
+			b.WriteString(g.timelineSection(data))
+		case models.SectionAvailability:
+			b.WriteString(g.availabilitySection(data))
+		case models.SectionPerformance:
+			b.WriteString(g.performanceSection(data))
 		case models.SectionCustom:
 			b.WriteString(g.customSection(data))
 		}

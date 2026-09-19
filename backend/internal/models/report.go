@@ -36,14 +36,30 @@ const (
 	SectionIncidentSummary = "incident_summary"
 	SectionCharts          = "charts"
 	SectionCustom          = "custom"
+
+	// SectionExecutiveSummary is the headline figures against the previous
+	// equivalent period — whether things got better or worse.
+	SectionExecutiveSummary = "executive_summary"
+	// SectionTimeline is every incident in the scope ordered by time rather
+	// than grouped by monitor.
+	SectionTimeline = "timeline"
+	// SectionAvailability breaks the window into days or weeks, so a bad day is
+	// visible instead of averaged away.
+	SectionAvailability = "availability_breakdown"
+	// SectionPerformance is response-time behaviour per monitor.
+	SectionPerformance = "performance"
 )
 
 // ValidReportSections lists the accepted section names.
 var ValidReportSections = map[string]bool{
-	SectionSLACompliance:   true,
-	SectionIncidentSummary: true,
-	SectionCharts:          true,
-	SectionCustom:          true,
+	SectionSLACompliance:    true,
+	SectionIncidentSummary:  true,
+	SectionCharts:           true,
+	SectionCustom:           true,
+	SectionExecutiveSummary: true,
+	SectionTimeline:         true,
+	SectionAvailability:     true,
+	SectionPerformance:      true,
 }
 
 // Report access types.

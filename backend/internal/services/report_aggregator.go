@@ -82,6 +82,16 @@ type ReportData struct {
 	// compliance artifact, so a dropped monitor is surfaced rather than silently
 	// omitted from the results.
 	Warnings []string `json:"warnings,omitempty"`
+	// Timeline is every incident in the scope, ordered by time rather than
+	// grouped by monitor, so a bad afternoon reads as one story.
+	Timeline []TimelineEvent `json:"timeline,omitempty"`
+	// Previous compares this period against the one before it. Nil when there
+	// is nothing to compare against.
+	Previous *PeriodComparison `json:"previous,omitempty"`
+	// Availability breaks the window into days, or weeks when it is long.
+	Availability []DayAvailability `json:"availability,omitempty"`
+	// Performance is response-time behaviour per monitor.
+	Performance []PerformanceStat `json:"performance,omitempty"`
 	// Location is the timezone every timestamp in the rendered report is
 	// written in. Carried on the data rather than read by each renderer so a
 	// PDF and its HTML equivalent cannot disagree about what time it was.
@@ -169,7 +179,83 @@ func (s *ReportAggregatorService) AggregateReportData(ctx context.Context, repor
 		data.Metrics = append(data.Metrics, metrics)
 	}
 
+	data.Timeline = buildTimeline(data.Metrics)
+	data.Availability = availabilityBuckets(data.Metrics, startTime, endTime, loc)
+
+	// Response times and the previous period are extra queries, so a failure in
+	// either degrades the report rather than failing it: the sections that did
+	// aggregate are still worth delivering.
+	if perf, err := s.performanceStats(ctx, monitors, startTime, endTime); err != nil {
+		data.Warnings = append(data.Warnings, fmt.Sprintf("response times unavailable: %v", err))
+	} else {
+		data.Performance = perf
+	}
+
+	prevStart, prevEnd := report.PreviousPeriod(time.Now(), loc)
+	if prev, err := s.periodSummary(ctx, monitors, prevStart, prevEnd); err != nil {
+		data.Warnings = append(data.Warnings, fmt.Sprintf("previous period unavailable: %v", err))
+	} else {
+		current := summarize(data.Metrics)
+		prev.Label = report.PreviousPeriodLabel(time.Now(), loc)
+		prev.UptimeDelta = round2(current.uptime - prev.Uptime)
+		prev.IncidentDelta = current.incidents - prev.IncidentCount
+		prev.DowntimeDelta = round2(current.downtime - prev.DowntimeMinutes)
+		data.Previous = prev
+	}
+
 	return data, nil
+}
+
+// aggregateTotals are the headline figures for one window.
+type aggregateTotals struct {
+	uptime    float64
+	incidents int
+	downtime  float64
+}
+
+// summarize averages per-monitor metrics into the figures the summary shows.
+func summarize(metrics []ReportMetrics) aggregateTotals {
+	if len(metrics) == 0 {
+		return aggregateTotals{uptime: 0}
+	}
+	var t aggregateTotals
+	for _, m := range metrics {
+		t.uptime += m.Uptime
+		t.incidents += m.IncidentCount
+		t.downtime += m.DowntimeMinutes
+	}
+	t.uptime = round2(t.uptime / float64(len(metrics)))
+	t.downtime = round2(t.downtime)
+	return t
+}
+
+// periodSummary computes just the headline figures for a window, without the
+// per-incident detail a full aggregation carries. The comparison needs three
+// numbers, not a second copy of the whole report.
+func (s *ReportAggregatorService) periodSummary(
+	ctx context.Context,
+	monitors []models.Monitor,
+	start, end time.Time,
+) (*PeriodComparison, error) {
+	summary := &PeriodComparison{Start: start, End: end}
+	if len(monitors) == 0 || !end.After(start) {
+		return summary, nil
+	}
+
+	var totals aggregateTotals
+	for i := range monitors {
+		metrics, err := s.calculateMonitorMetrics(ctx, monitors[i], start, end)
+		if err != nil {
+			return nil, err
+		}
+		totals.uptime += metrics.Uptime
+		totals.incidents += metrics.IncidentCount
+		totals.downtime += metrics.DowntimeMinutes
+	}
+	summary.Uptime = round2(totals.uptime / float64(len(monitors)))
+	summary.IncidentCount = totals.incidents
+	summary.DowntimeMinutes = round2(totals.downtime)
+	return summary, nil
 }
 
 // getMonitorIDsForScope resolves a report's scope to the monitor IDs it covers.
