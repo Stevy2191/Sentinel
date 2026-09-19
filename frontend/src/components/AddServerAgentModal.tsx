@@ -233,6 +233,25 @@ export default function AddServerAgentModal({ isOpen, onClose, onCreated, push, 
   )
 }
 
+/** True for addresses that only ever mean the machine reading them. */
+function isLoopback(url: string): boolean {
+  if (!url) return false
+  let host: string
+  try {
+    host = new URL(url).hostname.replace(/^\[|\]$/g, '')
+  } catch {
+    return false
+  }
+  return (
+    host === 'localhost' ||
+    host === 'localhost.localdomain' ||
+    host === '0.0.0.0' ||
+    host === '::1' ||
+    host.startsWith('127.') ||
+    host.startsWith('::ffff:127.')
+  )
+}
+
 function InstallStep({
   created,
   tab,
@@ -248,6 +267,11 @@ function InstallStep({
   const downloadURL = created.external_url || created.sentinel_url || ''
   const reportURL = created.internal_url || downloadURL
   const proxied = reportURL !== downloadURL
+  // A loopback address means "this machine" wherever it is read, so an agent
+  // on another host would report to itself. It comes from Sentinel falling
+  // back to the address the browser used when no URL is configured, and is
+  // easy to miss until the host never appears.
+  const unreachable = isLoopback(reportURL) || isLoopback(downloadURL)
 
   const env = [
     `SERVER_TOKEN="${agent.server_token ?? ''}"`,
@@ -310,6 +334,23 @@ docker run -d \\
           </p>
         </div>
       </div>
+
+      {/* Placed above the commands rather than beside them: copying one of
+          these is the mistake, so it has to be read first. */}
+      {unreachable && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-200">
+          <p className="font-medium">
+            These commands only work on this machine.
+          </p>
+          <p className="mt-1 text-amber-200/80">
+            Sentinel has no address configured, so it used the one your browser is open at (
+            <span className="font-mono">{reportURL || downloadURL}</span>). On any other server that
+            address means that server itself, so the agent would never connect. Set the external and
+            internal URLs under <span className="font-medium">Settings → System</span> to an address
+            your other machines can reach, then add the server again.
+          </p>
+        </div>
+      )}
 
       {/* Only shown when the two differ, since that is the case worth
           explaining: the commands look inconsistent otherwise. */}

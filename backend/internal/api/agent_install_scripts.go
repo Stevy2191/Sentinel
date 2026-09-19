@@ -22,6 +22,8 @@ OS_TYPE="${OS_TYPE:-linux}"
 CHECK_INTERVAL="${CHECK_INTERVAL:-60}"
 RETRY_ATTEMPTS="${RETRY_ATTEMPTS:-3}"
 DISK_PATH="${DISK_PATH:-/}"
+# Short, so a wrong address fails in seconds rather than at the OS TCP timeout.
+CONNECT_TIMEOUT="${CONNECT_TIMEOUT:-10}"
 
 BIN_PATH=/usr/local/bin/sentinel-agent
 CONF_DIR=/etc/sentinel
@@ -50,13 +52,50 @@ echo "    server:   $SENTINEL_URL"
 echo "    agent:    $AGENT_ID"
 echo "    interval: ${CHECK_INTERVAL}s"
 
+
+# --- can this machine actually reach Sentinel? -------------------------------
+# Checked before anything is installed. Every later step depends on it, and a
+# wrong address otherwise shows up as a download that hangs for minutes with
+# nothing said about why.
+# The host is picked apart rather than matched against the whole URL, because
+# a bracket in a case pattern is a character class: "*//[::1]*" also matches
+# the "1" in //10.255.255.1, rejecting perfectly good addresses.
+url_host="${SENTINEL_URL#*://}"   # scheme
+url_host="${url_host%%/*}"        # path
+url_host="${url_host##*@}"        # userinfo
+case "$url_host" in
+  \[*\]*) url_host="${url_host#\[}"; url_host="${url_host%%\]*}" ;;  # [::1]:3000
+  *)       url_host="${url_host%%:*}" ;;                            # host:3000
+esac
+
+case "$url_host" in
+  localhost|localhost.localdomain|127.*|0.0.0.0|::1|::ffff:127.*)
+    echo "error: SENTINEL_URL is $SENTINEL_URL" >&2
+    echo "       That address means *this* machine, not the Sentinel server, so the agent" >&2
+    echo "       would try to report to itself and never connect." >&2
+    echo "       It comes from the address Sentinel was open at in your browser. Set the" >&2
+    echo "       external and internal URLs under Settings -> System to an address other" >&2
+    echo "       machines can reach, then copy the install command again." >&2
+    exit 1 ;;
+esac
+
+info "checking that $SENTINEL_URL is reachable"
+if ! curl -fsS --connect-timeout "$CONNECT_TIMEOUT" --max-time 20 -o /dev/null "$SENTINEL_URL/health"; then
+  echo "error: cannot reach Sentinel at $SENTINEL_URL from this machine." >&2
+  echo "       Check from here with:  curl -v $SENTINEL_URL/health" >&2
+  echo "       Common causes: the URL names an address only the Sentinel server can resolve," >&2
+  echo "       a firewall between the two, or Sentinel not listening on that port." >&2
+  exit 1
+fi
+
 # --- download ---------------------------------------------------------------
 # To a temporary file first, so a failed download cannot leave a half-written
 # binary where a working one used to be.
 TMP_BIN="$(mktemp)"
 trap 'rm -f "$TMP_BIN"' EXIT
 info "downloading the agent for linux/$ARCH"
-curl -fSL --retry 3 --retry-delay 2 -o "$TMP_BIN" "$SENTINEL_URL/agent/download/linux/$ARCH" \
+curl -fSL --retry 2 --retry-delay 2 --connect-timeout "$CONNECT_TIMEOUT" --max-time 300 \
+  -o "$TMP_BIN" "$SENTINEL_URL/agent/download/linux/$ARCH" \
   || die "could not download the agent from $SENTINEL_URL"
 [ -s "$TMP_BIN" ] || die "the downloaded agent is empty"
 
@@ -131,11 +170,25 @@ if systemctl is-active --quiet sentinel-agent; then
   echo "    status: systemctl status sentinel-agent"
   echo "    logs:   tail -f $LOG_PATH"
   echo
+  # Confirms it connected, rather than only that the process is alive. An
+  # agent that cannot reach Sentinel keeps running and retrying, so "active"
+  # on its own would report success for an install that never works.
   if grep -qi "rejected by server" "$LOG_PATH" 2>/dev/null; then
-    echo "warning: the server rejected the agent's credentials. Check AGENT_ID and SERVER_TOKEN." >&2
+    echo "error: the server rejected the agent's credentials. Check AGENT_ID and SERVER_TOKEN." >&2
     exit 1
   fi
-  echo "The host should appear in Sentinel under Server Monitoring within a minute."
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    grep -qi "registered with server" "$LOG_PATH" 2>/dev/null && break
+    sleep 2
+  done
+  if grep -qi "registered with server" "$LOG_PATH" 2>/dev/null; then
+    echo "The agent has connected. The host appears under Server Monitoring now."
+  else
+    echo "warning: the agent is running but has not reached Sentinel yet." >&2
+    echo "         Recent output:" >&2
+    tail -n 10 "$LOG_PATH" >&2
+    exit 1
+  fi
 else
   echo "error: the agent did not stay running. Recent output:" >&2
   journalctl -u sentinel-agent -n 20 --no-pager >&2 || tail -n 20 "$LOG_PATH" >&2
@@ -160,6 +213,7 @@ CHECK_INTERVAL="${CHECK_INTERVAL:-60}"
 RETRY_ATTEMPTS="${RETRY_ATTEMPTS:-3}"
 CONTAINER_NAME="${CONTAINER_NAME:-sentinel-agent}"
 IMAGE="${AGENT_IMAGE:-alpine:latest}"
+CONNECT_TIMEOUT="${CONNECT_TIMEOUT:-10}"
 
 die() { echo "error: $*" >&2; exit 1; }
 info() { echo "==> $*"; }
@@ -175,10 +229,47 @@ case "$(uname -m)" in
   *) die "unsupported architecture: $(uname -m)" ;;
 esac
 
+
+# --- can this machine actually reach Sentinel? -------------------------------
+# Checked before anything is installed. Every later step depends on it, and a
+# wrong address otherwise shows up as a download that hangs for minutes with
+# nothing said about why.
+# The host is picked apart rather than matched against the whole URL, because
+# a bracket in a case pattern is a character class: "*//[::1]*" also matches
+# the "1" in //10.255.255.1, rejecting perfectly good addresses.
+url_host="${SENTINEL_URL#*://}"   # scheme
+url_host="${url_host%%/*}"        # path
+url_host="${url_host##*@}"        # userinfo
+case "$url_host" in
+  \[*\]*) url_host="${url_host#\[}"; url_host="${url_host%%\]*}" ;;  # [::1]:3000
+  *)       url_host="${url_host%%:*}" ;;                            # host:3000
+esac
+
+case "$url_host" in
+  localhost|localhost.localdomain|127.*|0.0.0.0|::1|::ffff:127.*)
+    echo "error: SENTINEL_URL is $SENTINEL_URL" >&2
+    echo "       That address means *this* machine, not the Sentinel server, so the agent" >&2
+    echo "       would try to report to itself and never connect." >&2
+    echo "       It comes from the address Sentinel was open at in your browser. Set the" >&2
+    echo "       external and internal URLs under Settings -> System to an address other" >&2
+    echo "       machines can reach, then copy the install command again." >&2
+    exit 1 ;;
+esac
+
+info "checking that $SENTINEL_URL is reachable"
+if ! curl -fsS --connect-timeout "$CONNECT_TIMEOUT" --max-time 20 -o /dev/null "$SENTINEL_URL/health"; then
+  echo "error: cannot reach Sentinel at $SENTINEL_URL from this machine." >&2
+  echo "       Check from here with:  curl -v $SENTINEL_URL/health" >&2
+  echo "       Common causes: the URL names an address only the Sentinel server can resolve," >&2
+  echo "       a firewall between the two, or Sentinel not listening on that port." >&2
+  exit 1
+fi
+
 info "preparing the agent for linux/$ARCH"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
-curl -fSL --retry 3 --retry-delay 2 -o "$WORK/sentinel-agent" "$SENTINEL_URL/agent/download/linux/$ARCH" \
+curl -fSL --retry 2 --retry-delay 2 --connect-timeout "$CONNECT_TIMEOUT" --max-time 300 \
+  -o "$WORK/sentinel-agent" "$SENTINEL_URL/agent/download/linux/$ARCH" \
   || die "could not download the agent from $SENTINEL_URL"
 chmod +x "$WORK/sentinel-agent"
 
@@ -233,10 +324,21 @@ if [ "$(docker inspect -f '{{"{{"}}.State.Running{{"}}"}}' "$CONTAINER_NAME" 2>/
   echo "    stop:    docker stop $CONTAINER_NAME"
   echo
   if docker logs "$CONTAINER_NAME" 2>&1 | grep -qi "rejected by server"; then
-    echo "warning: the server rejected the agent's credentials. Check AGENT_ID and SERVER_TOKEN." >&2
+    echo "error: the server rejected the agent's credentials. Check AGENT_ID and SERVER_TOKEN." >&2
     exit 1
   fi
-  echo "The host should appear in Sentinel under Server Monitoring within a minute."
+  # As above: confirm it connected rather than only that it started.
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    docker logs "$CONTAINER_NAME" 2>&1 | grep -qi "registered with server" && break
+    sleep 2
+  done
+  if docker logs "$CONTAINER_NAME" 2>&1 | grep -qi "registered with server"; then
+    echo "The agent has connected. The host appears under Server Monitoring now."
+  else
+    echo "warning: the container is running but has not reached Sentinel yet." >&2
+    docker logs "$CONTAINER_NAME" 2>&1 | tail -n 10 >&2
+    exit 1
+  fi
 else
   echo "error: the container did not stay running:" >&2
   docker logs "$CONTAINER_NAME" 2>&1 | tail -n 20 >&2
