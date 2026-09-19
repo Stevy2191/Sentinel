@@ -774,9 +774,9 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
       )}
 
       <GenerateReportModal
-        monitor={monitor}
         isOpen={reportOpen}
         onClose={() => setReportOpen(false)}
+        fixedScope={{ scope_type: 'monitors', ids: [monitor.id], label: monitor.name }}
       />
     </div>
   )

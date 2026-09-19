@@ -50,6 +50,10 @@ export interface SavedReport {
   template_name: string
   scope_type: ReportScopeType
   time_range_days: number
+  /** The window in words — "August 2026", "Q2 2026", "Last 7 days". */
+  period_label?: string
+  period_kind?: ReportPeriodKind
+  period_unit?: string
   created_at: string
   updated_at: string
   last_generated?: string | null
@@ -83,7 +87,13 @@ export interface CreateReportPayload {
   template_id: string
   scope_type: ReportScopeType
   scope_data: ReportScopeData
-  time_range_days: number
+  /** Required only for a rolling period, which is the default on the server. */
+  time_range_days?: number
+  period_kind?: ReportPeriodKind
+  period_unit?: 'week' | 'month' | 'quarter' | 'year'
+  period_offset?: number
+  period_start?: string
+  period_end?: string
   custom_title?: string
   custom_description?: string
 }
@@ -144,4 +154,20 @@ export interface ShareLink {
   expires_at?: string | null
   expired: boolean
   created_at: string
+}
+
+/** How a report's window is worked out. */
+export type ReportPeriodKind = 'rolling' | 'calendar' | 'custom'
+
+export interface ReportPeriod {
+  period_kind: ReportPeriodKind
+  /** Rolling only. */
+  time_range_days?: number
+  /** Calendar only. */
+  period_unit?: 'week' | 'month' | 'quarter' | 'year'
+  /** Calendar only: 0 is the period in progress, 1 the one before it. */
+  period_offset?: number
+  /** Custom only, RFC3339. */
+  period_start?: string
+  period_end?: string
 }

@@ -4,6 +4,7 @@ import { BarChart3, Download, FileText, Loader2, Plus, Share2, Trash2 } from 'lu
 import { formatDistanceToNow } from 'date-fns'
 import { useToasts, Toaster } from '@/components/Toast'
 import ReportBuilderWizard from '@/components/ReportBuilderWizard'
+import GenerateReportModal from '@/components/GenerateReportModal'
 import {
   downloadReportPDF,
   formatFileSize,
@@ -25,6 +26,7 @@ export default function SavedReports({ mode = 'list' }: SavedReportsProps) {
   const navigate = useNavigate()
   const { toasts, push } = useToasts()
   const { reports, loading, error, listReports, deleteReport, shareReport } = useSavedReports()
+  const [generateOpen, setGenerateOpen] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [confirmId, setConfirmId] = useState<string | null>(null)
 
@@ -231,6 +233,16 @@ export default function SavedReports({ mode = 'list' }: SavedReportsProps) {
           </div>
         ))}
       </div>
+
+      <GenerateReportModal
+        isOpen={generateOpen}
+        onClose={() => {
+          setGenerateOpen(false)
+          // Re-read so a report generated in the dialog appears in the list
+          // behind it rather than only after a reload.
+          void listReports()
+        }}
+      />
 
       <Toaster toasts={toasts} />
     </div>

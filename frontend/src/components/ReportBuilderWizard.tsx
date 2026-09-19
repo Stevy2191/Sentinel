@@ -9,7 +9,8 @@ import {
   useSavedReports,
   waitForReportJob,
 } from '@/hooks/useReportBuilder'
-import type { ReportScopeType } from '@/types/reports'
+import PeriodSelector, { DEFAULT_PERIOD, describePeriod } from '@/components/PeriodSelector'
+import type { ReportPeriod, ReportScopeType } from '@/types/reports'
 
 type WizardStep = 1 | 2 | 3 | 4
 
@@ -23,13 +24,6 @@ const STEPS = [
 // The check types a report may be scoped to, in the order the app shows them.
 // Webhook is absent: it receives rather than checks, so it has no incidents.
 const REPORTABLE_TYPES = ['http', 'dns', 'ping', 'tcp']
-
-const RANGE_PRESETS = [
-  { value: 1, label: '24 hours' },
-  { value: 7, label: '7 days' },
-  { value: 30, label: '30 days' },
-  { value: 90, label: '90 days' },
-]
 
 interface ReportBuilderWizardProps {
   onError?: (message: string) => void
@@ -56,7 +50,7 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
   const [name, setName] = useState('')
   const [scopeType, setScopeType] = useState<ReportScopeType>('monitors')
   const [selection, setSelection] = useState<string[]>([])
-  const [timeRangeDays, setTimeRangeDays] = useState(7)
+  const [period, setPeriod] = useState<ReportPeriod>(DEFAULT_PERIOD)
   const [templateId, setTemplateId] = useState('')
   const [customTitle, setCustomTitle] = useState('')
   const [customDescription, setCustomDescription] = useState('')
@@ -117,12 +111,16 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
         return `Select at least one ${scopeType === 'types' ? 'monitor type' : scopeType.slice(0, -1)}`
       }
     }
-    if (step === 2 && (timeRangeDays < 1 || timeRangeDays > 365)) {
-      return 'The period must be between 1 and 365 days'
+    if (
+      step === 2 &&
+      period.period_kind === 'custom' &&
+      (!period.period_start || !period.period_end)
+    ) {
+      return 'Choose both a start and an end date'
     }
     if (step === 3 && !templateId) return 'Choose a template'
     return null
-  }, [step, name, selection, scopeType, timeRangeDays, templateId])
+  }, [step, name, selection, scopeType, period, templateId])
 
   const generate = async () => {
     setGenerating(true)
@@ -141,7 +139,7 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
         template_id: templateId,
         scope_type: scopeType,
         scope_data: scopeData,
-        time_range_days: timeRangeDays,
+        ...period,
         custom_title: customTitle.trim() || undefined,
         custom_description: customDescription.trim() || undefined,
       })
@@ -273,36 +271,10 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
       {step === 2 && (
         <div className="rd-card space-y-5 p-5">
           <span className="vs-eyebrow block">Reporting period</span>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {RANGE_PRESETS.map((p) => (
-              <button
-                key={p.value}
-                type="button"
-                onClick={() => setTimeRangeDays(p.value)}
-                className="rounded-md px-3 py-3 text-sm font-medium"
-                style={{
-                  border: `1px solid ${timeRangeDays === p.value ? 'var(--vs-ecg)' : 'var(--vs-line)'}`,
-                  color: timeRangeDays === p.value ? 'var(--vs-ecg)' : 'var(--vs-text)',
-                }}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium">Or a custom number of days</label>
-            <input
-              type="number"
-              min={1}
-              max={365}
-              className="rd-input w-full"
-              value={timeRangeDays}
-              onChange={(e) => setTimeRangeDays(Number(e.target.value))}
-            />
-            <p className="mt-1 text-xs" style={{ color: 'var(--vs-text-dim)' }}>
-              1 to 365 days.
-            </p>
-          </div>
+          {/* The same selector the quick dialog uses: the two paths must not
+              offer different periods, or a report built one way cannot be
+              reproduced the other. */}
+          <PeriodSelector value={period} onChange={setPeriod} />
         </div>
       )}
 
@@ -368,8 +340,7 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
               <strong style={{ color: 'var(--vs-text)' }}>{name || 'Untitled'}</strong>
             </p>
             <p className="mt-1">
-              {selection.length} {scopeType} · {timeRangeDays} day
-              {timeRangeDays === 1 ? '' : 's'} ·{' '}
+              {selection.length} {scopeType} · {describePeriod(period)} ·{' '}
               {templates.find((t) => t.id === templateId)?.name ?? 'no template'}
             </p>
           </div>
