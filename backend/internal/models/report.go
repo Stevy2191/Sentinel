@@ -151,18 +151,27 @@ func (rt *ReportTemplate) Validate() error {
 
 // Report is a saved report definition. Generating it produces a ReportGeneration.
 type Report struct {
-	ID                uuid.UUID   `json:"id" gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
-	UserID            uuid.UUID   `json:"user_id" gorm:"column:user_id;type:uuid;not null"`
-	Name              string      `json:"name" gorm:"column:name;not null"`
-	TemplateID        uuid.UUID   `json:"template_id" gorm:"column:template_id;type:uuid;not null"`
-	ScopeType         string      `json:"scope_type" gorm:"column:scope_type;not null"`
-	ScopeData         ReportScope `json:"scope_data" gorm:"column:scope_data;type:jsonb;not null"`
-	TimeRangeDays     int         `json:"time_range_days" gorm:"column:time_range_days;not null"`
-	CustomTitle       *string     `json:"custom_title" gorm:"column:custom_title"`
-	CustomDescription *string     `json:"custom_description" gorm:"column:custom_description"`
-	CreatedAt         time.Time   `json:"created_at" gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt         time.Time   `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
-	CreatedBy         uuid.UUID   `json:"created_by" gorm:"column:created_by;type:uuid;not null"`
+	ID            uuid.UUID   `json:"id" gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
+	UserID        uuid.UUID   `json:"user_id" gorm:"column:user_id;type:uuid;not null"`
+	Name          string      `json:"name" gorm:"column:name;not null"`
+	TemplateID    uuid.UUID   `json:"template_id" gorm:"column:template_id;type:uuid;not null"`
+	ScopeType     string      `json:"scope_type" gorm:"column:scope_type;not null"`
+	ScopeData     ReportScope `json:"scope_data" gorm:"column:scope_data;type:jsonb;not null"`
+	TimeRangeDays int         `json:"time_range_days" gorm:"column:time_range_days;not null"`
+	// How the window is worked out: rolling (TimeRangeDays back from now),
+	// calendar (a whole month/quarter/week), or custom (explicit bounds).
+	// Empty means rolling, which is what every row written before periods
+	// existed is.
+	PeriodKind        string     `json:"period_kind" gorm:"column:period_kind;default:rolling"`
+	PeriodUnit        string     `json:"period_unit" gorm:"column:period_unit"`
+	PeriodOffset      int        `json:"period_offset" gorm:"column:period_offset;default:0"`
+	PeriodStart       *time.Time `json:"period_start" gorm:"column:period_start"`
+	PeriodEnd         *time.Time `json:"period_end" gorm:"column:period_end"`
+	CustomTitle       *string    `json:"custom_title" gorm:"column:custom_title"`
+	CustomDescription *string    `json:"custom_description" gorm:"column:custom_description"`
+	CreatedAt         time.Time  `json:"created_at" gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt         time.Time  `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
+	CreatedBy         uuid.UUID  `json:"created_by" gorm:"column:created_by;type:uuid;not null"`
 }
 
 // TableName tells GORM which table backs the Report model.
@@ -181,8 +190,8 @@ func (r *Report) Validate() error {
 	if !ValidScopeTypes[r.ScopeType] {
 		return errors.New("scope_type must be one of: monitors, tags, groups")
 	}
-	if r.TimeRangeDays <= 0 {
-		return errors.New("time_range_days must be greater than zero")
+	if err := r.ValidatePeriod(); err != nil {
+		return err
 	}
 	return r.ScopeData.Validate(r.ScopeType)
 }

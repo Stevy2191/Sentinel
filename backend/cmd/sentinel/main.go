@@ -114,13 +114,13 @@ func run() error {
 	notifications.SetBaseURLResolver(resolveBaseURL)
 	invitationService := services.NewInvitationService(db, authService, resolveBaseURL)
 	discoveryService := services.NewDiscoveryService()
-	reportAggregator := services.NewReportAggregatorService(db)
+	reportAggregator := services.NewReportAggregatorService(db, settingsService)
 	auditService := services.NewAuditService(db)
 	pdfRenderer, err := services.NewPDFRendererService(cfg.ReportsDir)
 	if err != nil {
 		return fmt.Errorf("initializing report renderer: %w", err)
 	}
-	reportBuilder := api.NewReportBuilder(db, reportAggregator, pdfRenderer, nil)
+	reportBuilder := api.NewReportBuilder(db, reportAggregator, pdfRenderer, nil, settingsService)
 	// PDF rendering runs on a worker pool rather than in the request handler.
 	reportJobs := services.NewReportJobQueue(db, services.NewReportGenerator(db, reportAggregator, pdfRenderer, settingsService), cfg.ReportWorkers)
 	reportBuilder.SetJobQueue(reportJobs)

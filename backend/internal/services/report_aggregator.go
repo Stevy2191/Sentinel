@@ -18,11 +18,25 @@ import (
 // the report's own scope definition.
 type ReportAggregatorService struct {
 	db *gorm.DB
+	// settings supplies the report timezone, which calendar periods are
+	// resolved in: "September" has to mean September where the reader is, and a
+	// boundary taken in the wrong zone moves every figure by a few hours at
+	// each end. Nil is tolerated and means UTC, keeping the service usable in
+	// tests.
+	settings *SettingsService
 }
 
 // NewReportAggregatorService returns a service bound to db.
-func NewReportAggregatorService(db *gorm.DB) *ReportAggregatorService {
-	return &ReportAggregatorService{db: db}
+func NewReportAggregatorService(db *gorm.DB, settings *SettingsService) *ReportAggregatorService {
+	return &ReportAggregatorService{db: db, settings: settings}
+}
+
+// reportLocation is the configured report zone, or UTC.
+func (s *ReportAggregatorService) reportLocation(ctx context.Context) *time.Location {
+	if s.settings == nil {
+		return time.UTC
+	}
+	return s.settings.ReportLocation(ctx)
 }
 
 // ReportMetrics is one monitor's contribution to a report.
@@ -92,8 +106,8 @@ func (s *ReportAggregatorService) AggregateReportData(ctx context.Context, repor
 	if report == nil {
 		return nil, fmt.Errorf("report is nil")
 	}
-	if report.TimeRangeDays <= 0 {
-		return nil, fmt.Errorf("report time_range_days must be greater than zero, got %d", report.TimeRangeDays)
+	if err := report.ValidatePeriod(); err != nil {
+		return nil, fmt.Errorf("report period: %w", err)
 	}
 
 	// A report's scope can name monitors, groups, or tags the requester does
@@ -111,8 +125,8 @@ func (s *ReportAggregatorService) AggregateReportData(ctx context.Context, repor
 		return nil, err
 	}
 
-	endTime := time.Now()
-	startTime := endTime.AddDate(0, 0, -report.TimeRangeDays)
+	loc := s.reportLocation(ctx)
+	startTime, endTime := report.ResolvePeriod(time.Now(), loc)
 
 	data := &ReportData{
 		ReportName:        report.Name,

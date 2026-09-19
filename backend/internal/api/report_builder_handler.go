@@ -40,6 +40,9 @@ type ReportBuilder struct {
 	jobs *services.ReportJobQueue
 	// audit records who changed what.
 	audit *services.AuditService
+	// settings supplies the report timezone, which period labels are resolved
+	// in so the list agrees with the rendered report.
+	settings *services.SettingsService
 }
 
 // NewReportBuilder returns a handler set bound to its dependencies.
@@ -48,6 +51,7 @@ func NewReportBuilder(
 	aggregator *services.ReportAggregatorService,
 	pdfRenderer *services.PDFRendererService,
 	scheduler *services.ReportSchedulerService,
+	settings *services.SettingsService,
 ) *ReportBuilder {
 	return &ReportBuilder{
 		db:            db,
@@ -55,7 +59,16 @@ func NewReportBuilder(
 		pdfRenderer:   pdfRenderer,
 		htmlGenerator: services.NewHTMLReportGenerator(),
 		scheduler:     scheduler,
+		settings:      settings,
 	}
+}
+
+// reportLocation is the zone period labels are resolved in, or UTC.
+func (h *ReportBuilder) reportLocation(ctx context.Context) *time.Location {
+	if h.settings == nil {
+		return time.UTC
+	}
+	return h.settings.ReportLocation(ctx)
 }
 
 // SetScheduler wires the report scheduler in after construction, breaking the
@@ -84,22 +97,37 @@ func actorFrom(c *gin.Context) services.Actor {
 
 // GenerateReportRequest creates a report definition and renders it immediately.
 type GenerateReportRequest struct {
-	Name              string             `json:"name" binding:"required"`
-	TemplateID        uuid.UUID          `json:"template_id" binding:"required"`
-	ScopeType         string             `json:"scope_type" binding:"required,oneof=monitors tags groups types"`
-	ScopeData         models.ReportScope `json:"scope_data" binding:"required"`
-	TimeRangeDays     int                `json:"time_range_days" binding:"required,min=1,max=365"`
-	CustomTitle       *string            `json:"custom_title"`
-	CustomDescription *string            `json:"custom_description"`
+	Name       string             `json:"name" binding:"required"`
+	TemplateID uuid.UUID          `json:"template_id" binding:"required"`
+	ScopeType  string             `json:"scope_type" binding:"required,oneof=monitors tags groups types"`
+	ScopeData  models.ReportScope `json:"scope_data" binding:"required"`
+	// TimeRangeDays is required only for a rolling period, which is the default
+	// and what every caller sent before calendar periods existed.
+	TimeRangeDays int `json:"time_range_days" binding:"omitempty,min=1,max=365"`
+	// PeriodKind selects how the window is worked out: rolling, calendar or
+	// custom. Empty means rolling.
+	PeriodKind        string     `json:"period_kind" binding:"omitempty,oneof=rolling calendar custom"`
+	PeriodUnit        string     `json:"period_unit" binding:"omitempty,oneof=week month quarter year"`
+	PeriodOffset      int        `json:"period_offset" binding:"omitempty,min=0,max=24"`
+	PeriodStart       *time.Time `json:"period_start"`
+	PeriodEnd         *time.Time `json:"period_end"`
+	CustomTitle       *string    `json:"custom_title"`
+	CustomDescription *string    `json:"custom_description"`
 }
 
 // ReportResponse is a report definition plus its generation history.
 type ReportResponse struct {
-	ID            uuid.UUID                  `json:"id"`
-	Name          string                     `json:"name"`
-	TemplateName  string                     `json:"template_name"`
-	ScopeType     string                     `json:"scope_type"`
-	TimeRangeDays int                        `json:"time_range_days"`
+	ID            uuid.UUID `json:"id"`
+	Name          string    `json:"name"`
+	TemplateName  string    `json:"template_name"`
+	ScopeType     string    `json:"scope_type"`
+	TimeRangeDays int       `json:"time_range_days"`
+	// PeriodLabel names the window in words — "August 2026", "Q2 2026",
+	// "Last 7 days" — so the list does not have to reconstruct it from the
+	// period fields to show what a report actually covers.
+	PeriodLabel   string                     `json:"period_label"`
+	PeriodKind    string                     `json:"period_kind"`
+	PeriodUnit    string                     `json:"period_unit"`
 	CreatedAt     time.Time                  `json:"created_at"`
 	UpdatedAt     time.Time                  `json:"updated_at"`
 	LastGenerated *time.Time                 `json:"last_generated"`
@@ -182,6 +210,11 @@ func (h *ReportBuilder) GenerateReport(c *gin.Context) {
 		ScopeType:         req.ScopeType,
 		ScopeData:         req.ScopeData,
 		TimeRangeDays:     req.TimeRangeDays,
+		PeriodKind:        periodKindOrDefault(req.PeriodKind),
+		PeriodUnit:        req.PeriodUnit,
+		PeriodOffset:      req.PeriodOffset,
+		PeriodStart:       req.PeriodStart,
+		PeriodEnd:         req.PeriodEnd,
 		CustomTitle:       req.CustomTitle,
 		CustomDescription: req.CustomDescription,
 		CreatedBy:         userID,
@@ -242,6 +275,15 @@ func (h *ReportBuilder) GenerateReport(c *gin.Context) {
 		"status":  job.Status,
 		"job_url": jobURL(job.ID),
 	})
+}
+
+// periodKindOrDefault treats an omitted kind as rolling, which is what every
+// request sent before calendar periods existed.
+func periodKindOrDefault(kind string) string {
+	if kind == "" {
+		return models.PeriodRolling
+	}
+	return kind
 }
 
 // ListReports handles GET /api/v1/reports. Admins see every report; everyone
@@ -577,6 +619,11 @@ func (h *ReportBuilder) buildReportResponse(ctx context.Context, report *models.
 		TemplateName:  template.Name,
 		ScopeType:     report.ScopeType,
 		TimeRangeDays: report.TimeRangeDays,
+		// Resolved in the report timezone, so a calendar label in the list
+		// matches the one printed inside the rendered report.
+		PeriodLabel:   report.PeriodLabel(time.Now(), h.reportLocation(ctx)),
+		PeriodKind:    periodKindOrDefault(report.PeriodKind),
+		PeriodUnit:    report.PeriodUnit,
 		CreatedAt:     report.CreatedAt,
 		UpdatedAt:     report.UpdatedAt,
 		LastGenerated: lastGenerated,
