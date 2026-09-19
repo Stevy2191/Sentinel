@@ -103,10 +103,80 @@ export function useIncidents(filters: IncidentFilters) {
   return { incidents, total, loading, error, refetch }
 }
 
+/** One entry in an incident's thread. */
+export interface IncidentComment {
+  id: string
+  incident_id: string
+  user_id: string | null
+  author_name: string
+  body: string
+  created_at: string
+  updated_at: string
+}
+
+/** One alert sent for an incident. */
+export interface IncidentNotification {
+  id: string
+  channel: string
+  status: string
+  error_message?: string | null
+  sent_at?: string | null
+  created_at: string
+}
+
 export interface IncidentDetail {
   incident: Incident
   checks: Check[]
   total_checks: number
+  /** Who was alerted, and whether it worked. */
+  notifications?: IncidentNotification[] | null
+  comments?: IncidentComment[] | null
+}
+
+/** Adds, edits and removes entries in an incident's thread. */
+export function useIncidentComments(incidentId: string | null) {
+  const [busy, setBusy] = useState(false)
+
+  const add = useCallback(
+    async (body: string) => {
+      if (!incidentId) return
+      setBusy(true)
+      try {
+        await api.post(`/incidents/${incidentId}/comments`, { body })
+      } finally {
+        setBusy(false)
+      }
+    },
+    [incidentId],
+  )
+
+  const update = useCallback(
+    async (commentId: string, body: string) => {
+      if (!incidentId) return
+      setBusy(true)
+      try {
+        await api.patch(`/incidents/${incidentId}/comments/${commentId}`, { body })
+      } finally {
+        setBusy(false)
+      }
+    },
+    [incidentId],
+  )
+
+  const remove = useCallback(
+    async (commentId: string) => {
+      if (!incidentId) return
+      setBusy(true)
+      try {
+        await api.delete(`/incidents/${incidentId}/comments/${commentId}`)
+      } finally {
+        setBusy(false)
+      }
+    },
+    [incidentId],
+  )
+
+  return { add, update, remove, busy }
 }
 
 /** One incident with the checks recorded while it was open. */

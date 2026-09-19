@@ -427,3 +427,82 @@ func (s *IncidentService) ChecksDuringIncident(ctx context.Context, inc *models.
 	}
 	return checks, nil
 }
+
+// ListComments returns an incident's thread, oldest first — the order it was
+// written in, which is how an investigation reads.
+func (s *IncidentService) ListComments(ctx context.Context, incidentID uuid.UUID) ([]models.IncidentComment, error) {
+	var comments []models.IncidentComment
+	if err := s.db.WithContext(ctx).
+		Where("incident_id = ?", incidentID).
+		Order("created_at ASC").
+		Find(&comments).Error; err != nil {
+		return nil, fmt.Errorf("listing incident comments: %w", err)
+	}
+	return comments, nil
+}
+
+// AddComment appends to an incident's thread.
+func (s *IncidentService) AddComment(ctx context.Context, comment *models.IncidentComment) error {
+	comment.Body = strings.TrimSpace(comment.Body)
+	if err := comment.Validate(); err != nil {
+		return err
+	}
+	if err := s.db.WithContext(ctx).Create(comment).Error; err != nil {
+		return fmt.Errorf("adding incident comment: %w", err)
+	}
+	return nil
+}
+
+// GetComment loads one comment.
+func (s *IncidentService) GetComment(ctx context.Context, id uuid.UUID) (*models.IncidentComment, error) {
+	var comment models.IncidentComment
+	if err := s.db.WithContext(ctx).First(&comment, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	return &comment, nil
+}
+
+// UpdateComment rewrites a comment's body.
+func (s *IncidentService) UpdateComment(ctx context.Context, id uuid.UUID, body string) (*models.IncidentComment, error) {
+	comment, err := s.GetComment(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	comment.Body = strings.TrimSpace(body)
+	if err := comment.Validate(); err != nil {
+		return nil, err
+	}
+	if err := s.db.WithContext(ctx).Model(comment).
+		Updates(map[string]any{"body": comment.Body, "updated_at": time.Now()}).Error; err != nil {
+		return nil, fmt.Errorf("updating incident comment: %w", err)
+	}
+	return comment, nil
+}
+
+// DeleteComment removes one comment.
+func (s *IncidentService) DeleteComment(ctx context.Context, id uuid.UUID) error {
+	result := s.db.WithContext(ctx).Delete(&models.IncidentComment{}, "id = ?", id)
+	if result.Error != nil {
+		return fmt.Errorf("deleting incident comment: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+// NotificationsForIncident lists the alerts sent for an incident.
+//
+// Part of what an incident record has to answer is "was anyone actually told",
+// which the incident row itself cannot say. A delivery that failed is as worth
+// seeing as one that worked.
+func (s *IncidentService) NotificationsForIncident(ctx context.Context, incidentID uuid.UUID) ([]models.Notification, error) {
+	var sent []models.Notification
+	if err := s.db.WithContext(ctx).
+		Where("incident_id = ?", incidentID).
+		Order("created_at ASC").
+		Find(&sent).Error; err != nil {
+		return nil, fmt.Errorf("listing incident notifications: %w", err)
+	}
+	return sent, nil
+}

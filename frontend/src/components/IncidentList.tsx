@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { ChevronRight } from 'lucide-react'
+import IncidentDetailModal from '@/components/IncidentDetailModal'
 import api, { type ApiError } from '@/services/api'
 import type { ApiResponse, Incident } from '@/types'
 import { formatDatetime, formatDuration } from '@/utils/formatters'
@@ -15,6 +17,10 @@ export default function IncidentList({ monitorId }: { monitorId: string }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<ApiError | null>(null)
   const [page, setPage] = useState(1)
+  const [openId, setOpenId] = useState<string | null>(null)
+  // Bumped after an edit so the list re-reads: a new comment or a changed root
+  // cause should not leave the row behind it stale.
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     let active = true
@@ -27,7 +33,7 @@ export default function IncidentList({ monitorId }: { monitorId: string }) {
     return () => {
       active = false
     }
-  }, [monitorId])
+  }, [monitorId, refreshKey])
 
   if (loading) return <div className="text-sm text-slate-500">Loading incidents…</div>
   if (error) return <div className="text-sm text-error-600">{error.message}</div>
@@ -41,7 +47,13 @@ export default function IncidentList({ monitorId }: { monitorId: string }) {
     <div className="space-y-3">
       <div className="divide-y divide-white/5">
         {pageItems.map((inc) => (
-          <div key={inc.id} className="flex items-center justify-between gap-4 py-2 text-sm">
+          <button
+            key={inc.id}
+            type="button"
+            onClick={() => setOpenId(inc.id)}
+            aria-label={`Open the incident from ${formatDatetime(inc.start_time)}`}
+            className="flex w-full items-center justify-between gap-4 py-2 text-left text-sm transition hover:bg-white/5"
+          >
             <div className="min-w-0">
               <div className="font-medium">{formatDatetime(inc.start_time)}</div>
               <div className="text-xs text-slate-500">
@@ -55,8 +67,9 @@ export default function IncidentList({ monitorId }: { monitorId: string }) {
                   {inc.severity}
                 </span>
               )}
+              <ChevronRight className="h-4 w-4 text-slate-600" aria-hidden />
             </div>
-          </div>
+          </button>
         ))}
       </div>
       {totalPages > 1 && (
@@ -77,6 +90,14 @@ export default function IncidentList({ monitorId }: { monitorId: string }) {
             </button>
           </div>
         </div>
+      )}
+
+      {openId && (
+        <IncidentDetailModal
+          incidentId={openId}
+          onClose={() => setOpenId(null)}
+          onSaved={() => setRefreshKey((k) => k + 1)}
+        />
       )}
     </div>
   )

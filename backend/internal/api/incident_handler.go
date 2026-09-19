@@ -234,10 +234,26 @@ func GetIncidentHandler(incidentService *services.IncidentService) gin.HandlerFu
 			checks = nil
 		}
 
+		// Both are supporting detail: an incident is still worth returning
+		// without them rather than failing the whole request.
+		sent, err := incidentService.NotificationsForIncident(c.Request.Context(), id)
+		if err != nil {
+			sent = nil
+		}
+		comments, err := incidentService.ListComments(c.Request.Context(), id)
+		if err != nil {
+			comments = nil
+		}
+		if comments == nil {
+			comments = []models.IncidentComment{}
+		}
+
 		respondSuccess(c, http.StatusOK, gin.H{
-			"incident":     toIncidentView(*row, time.Now()),
-			"checks":       checks,
-			"total_checks": len(checks),
+			"incident":      toIncidentView(*row, time.Now()),
+			"checks":        checks,
+			"total_checks":  len(checks),
+			"notifications": sent,
+			"comments":      comments,
 		})
 	}
 }
@@ -303,4 +319,8 @@ func RegisterIncidentRoutes(rg *gin.RouterGroup, incidentService *services.Incid
 	rg.GET("/incidents", ListIncidentsHandler(incidentService))
 	rg.GET("/incidents/:id", GetIncidentHandler(incidentService))
 	rg.PATCH("/incidents/:id", UpdateIncidentHandler(incidentService, monitorService, db))
+	rg.GET("/incidents/:id/comments", ListIncidentCommentsHandler(incidentService, monitorService))
+	rg.POST("/incidents/:id/comments", AddIncidentCommentHandler(incidentService, monitorService))
+	rg.PATCH("/incidents/:id/comments/:comment_id", UpdateIncidentCommentHandler(incidentService, monitorService))
+	rg.DELETE("/incidents/:id/comments/:comment_id", DeleteIncidentCommentHandler(incidentService, monitorService))
 }

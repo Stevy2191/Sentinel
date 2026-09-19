@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { X, Loader2, ExternalLink, Check } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import IncidentThread from '@/components/IncidentThread'
 import {
   useIncidentDetail,
   useUpdateIncident,
@@ -205,6 +206,51 @@ export default function IncidentDetailModal({ incidentId, onClose, onSaved }: Pr
                 </div>
               )}
 
+              {/* Who was actually told. An incident record that cannot answer
+                  "did anyone get paged" is missing the thing people check
+                  first after an outage nobody noticed. */}
+              <div>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-300">
+                  Alerts sent
+                </h3>
+                {!detail.notifications || detail.notifications.length === 0 ? (
+                  <p className="text-sm text-slate-500">
+                    No alerts were sent for this incident.
+                  </p>
+                ) : (
+                  <ul className="space-y-1 text-sm">
+                    {detail.notifications.map((n) => (
+                      <li
+                        key={n.id}
+                        className="flex flex-wrap items-center gap-2 rounded-lg border border-white/10 bg-slate-800/40 px-3 py-2"
+                      >
+                        <span
+                          className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                            n.status === 'sent' ? 'bg-emerald-500' : 'bg-red-500'
+                          }`}
+                        />
+                        <span className="font-medium capitalize text-slate-200">{n.channel}</span>
+                        <span className="text-xs text-slate-500">
+                          {new Date(n.sent_at ?? n.created_at).toLocaleString()}
+                        </span>
+                        <span className="text-xs text-slate-400">{n.status}</span>
+                        {n.error_message && (
+                          <span className="w-full break-words text-xs text-red-400">
+                            {n.error_message}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <IncidentThread
+                incidentId={inc.id}
+                comments={detail.comments ?? []}
+                onChanged={reload}
+              />
+
               <div>
                 <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-300">
                   Check timeline
@@ -238,7 +284,11 @@ export default function IncidentDetailModal({ incidentId, onClose, onSaved }: Pr
                             {new Date(c.timestamp).toLocaleTimeString()}
                           </span>
                           <span className="truncate">
-                            {c.error_message || `${c.status} · ${c.response_time_ms}ms`}
+                            {/* A check with no recorded duration says so
+                                rather than claiming "0ms", which reads as an
+                                instant response instead of a missing one. */}
+                            {c.error_message ||
+                              `${c.status}${c.response_time_ms ? ` · ${c.response_time_ms}ms` : ''}`}
                           </span>
                         </li>
                       ))}
