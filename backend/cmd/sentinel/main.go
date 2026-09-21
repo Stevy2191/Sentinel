@@ -166,16 +166,23 @@ func run() error {
 		models.DefaultMonitorCheckInterval); err != nil {
 		return fmt.Errorf("seeding default check interval: %w", err)
 	}
-	// Seeded from TZ when the deployment set one, so an operator who already
-	// configured the container's zone does not have to state it twice. Anything
+	// Seeded from TIMEZONE - the variable docker-compose.yml actually sets on
+	// this container - when the deployment configured one, so an operator who
+	// already set it there does not have to state it twice. TZ is also
+	// accepted, as the conventional Unix name for anyone who set that instead
+	// (e.g. running the image directly, outside this compose file). Anything
 	// unloadable falls back to UTC rather than failing startup over a display
 	// preference.
 	reportTZ := models.DefaultReportTimezone
-	if env := strings.TrimSpace(os.Getenv("TZ")); env != "" {
+	env := strings.TrimSpace(os.Getenv("TIMEZONE"))
+	if env == "" {
+		env = strings.TrimSpace(os.Getenv("TZ"))
+	}
+	if env != "" {
 		if _, err := models.ParseReportTimezone(env); err == nil {
 			reportTZ = env
 		} else {
-			log.Printf("[sentinel] ignoring TZ=%q for reports: %v", env, err)
+			log.Printf("[sentinel] ignoring TIMEZONE/TZ=%q for reports: %v", env, err)
 		}
 	}
 	if _, err := settingsService.SeedString(settingsCtx, models.SettingReportTimezone, reportTZ); err != nil {
