@@ -37,7 +37,13 @@ type fakeSMTPOpts struct {
 	implicitTLS       bool
 	advertiseSTARTTLS bool
 	advertiseAUTH     bool
-	tlsConfig         *tls.Config
+	// authMechanisms overrides which mechanisms EHLO advertises and AUTH
+	// accepts, e.g. "LOGIN" to reproduce a Microsoft 365 style server that
+	// does not offer PLAIN. Defaults to "PLAIN LOGIN" when advertiseAUTH is
+	// true and this is left empty, matching every pre-existing test's
+	// assumption that either mechanism is acceptable.
+	authMechanisms string
+	tlsConfig      *tls.Config
 }
 
 type fakeSMTP struct {
@@ -152,7 +158,11 @@ func (f *fakeSMTP) handle(conn net.Conn, opts fakeSMTPOpts) {
 				caps = append(caps, "STARTTLS")
 			}
 			if opts.advertiseAUTH {
-				caps = append(caps, "AUTH PLAIN LOGIN")
+				mechs := opts.authMechanisms
+				if mechs == "" {
+					mechs = "PLAIN LOGIN"
+				}
+				caps = append(caps, "AUTH "+mechs)
 			}
 			write(ehloResponse(caps))
 
@@ -174,6 +184,32 @@ func (f *fakeSMTP) handle(conn net.Conn, opts fakeSMTPOpts) {
 			}
 
 		case strings.HasPrefix(up, "AUTH"):
+			fields := strings.Fields(line)
+			mech := ""
+			if len(fields) >= 2 {
+				mech = strings.ToUpper(fields[1])
+			}
+			mechs := opts.authMechanisms
+			if mechs == "" {
+				mechs = "PLAIN LOGIN"
+			}
+			if !mechanismAdvertised(mechs, mech) {
+				// The real behaviour this reproduces: Microsoft 365 and
+				// similar servers reject a mechanism they did not advertise
+				// with exactly this response, not a generic auth failure.
+				write("504 5.7.4 Unrecognized authentication type\r\n")
+				continue
+			}
+			if mech == "LOGIN" {
+				write("334 VXNlcm5hbWU6\r\n") // base64 "Username:"
+				if _, err := rw.ReadString('\n'); err != nil {
+					return
+				}
+				write("334 UGFzc3dvcmQ6\r\n") // base64 "Password:"
+				if _, err := rw.ReadString('\n'); err != nil {
+					return
+				}
+			}
 			write("235 2.7.0 Authentication successful\r\n")
 
 		case strings.HasPrefix(up, "MAIL FROM"), strings.HasPrefix(up, "RCPT TO"):
@@ -191,6 +227,17 @@ func (f *fakeSMTP) handle(conn net.Conn, opts fakeSMTPOpts) {
 			write("250 2.0.0 OK\r\n")
 		}
 	}
+}
+
+// mechanismAdvertised reports whether mech appears in the space-separated
+// advertised list, case-insensitively.
+func mechanismAdvertised(advertised, mech string) bool {
+	for _, m := range strings.Fields(advertised) {
+		if strings.EqualFold(m, mech) {
+			return true
+		}
+	}
+	return false
 }
 
 // ehloResponse formats a multiline 250 reply; the final line uses a space.
@@ -333,6 +380,66 @@ func TestDeliverErrorsWhenAuthUnadvertised(t *testing.T) {
 	}
 	if f.sawCommand("MAIL FROM") {
 		t.Errorf("delivery continued without authentication, transcript: %s", f.transcript())
+	}
+}
+
+// The bug this change fixes: net/smtp.PlainAuth sends AUTH PLAIN
+// unconditionally, with no regard for what the server actually advertised.
+// A server that offers only LOGIN — Microsoft 365 / Exchange Online commonly
+// does — rejected that with "504 5.7.4 Unrecognized authentication type",
+// which looked identical to a bad password. Proven against the wire: the fake
+// server here enforces the advertised mechanism the same way a real one does.
+func TestDeliverLoginOnlyServerAuthenticates(t *testing.T) {
+	tlsCfg := selfSignedCert(t)
+	f := startFakeSMTP(t, fakeSMTPOpts{
+		advertiseSTARTTLS: true, advertiseAUTH: true, authMechanisms: "LOGIN", tlsConfig: tlsCfg,
+	})
+	p := testPlugin(f, models.SMTPSecuritySTARTTLS, "user@fake.test", "secret", true)
+
+	if err := p.deliver(context.Background(), testMIME(), p.to); err != nil {
+		t.Fatalf("deliver against a LOGIN-only server: %v (transcript: %s)", err, f.transcript())
+	}
+	if !f.sawCommand("AUTH LOGIN") {
+		t.Errorf("expected AUTH LOGIN, transcript: %s", f.transcript())
+	}
+	if f.sawCommand("AUTH PLAIN") {
+		t.Errorf("sent AUTH PLAIN to a server that only advertised LOGIN, transcript: %s", f.transcript())
+	}
+}
+
+// selectAuth is the mechanism-negotiation logic in isolation: it should
+// prefer PLAIN when offered (every already-working provider advertises it),
+// fall back to LOGIN when that is all a server offers, and fail clearly
+// rather than guess when neither is advertised.
+func TestSelectAuth(t *testing.T) {
+	cases := []struct {
+		name       string
+		advertised string
+		wantType   string
+		wantErr    bool
+	}{
+		{name: "prefers PLAIN when both offered", advertised: "PLAIN LOGIN", wantType: "*smtp.plainAuth"},
+		{name: "falls back to LOGIN when PLAIN absent", advertised: "LOGIN", wantType: "*notifications.loginAuth"},
+		{name: "CRAM-MD5 when nothing else offered", advertised: "CRAM-MD5", wantType: "*smtp.cramMD5Auth"},
+		{name: "case-insensitive", advertised: "login", wantType: "*notifications.loginAuth"},
+		{name: "errors when nothing recognized is offered", advertised: "XOAUTH2", wantErr: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			auth, err := selectAuth(c.advertised, "user@fake.test", "secret", "fake.test")
+			if c.wantErr {
+				if err == nil {
+					t.Fatalf("expected an error for advertised=%q", c.advertised)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := fmt.Sprintf("%T", auth); got != c.wantType {
+				t.Errorf("got %s, want %s", got, c.wantType)
+			}
+		})
 	}
 }
 

@@ -165,6 +165,61 @@ func allowCleartextAuth(security, host string) bool {
 	return isLoopbackHost(host)
 }
 
+// loginAuth implements the AUTH LOGIN mechanism, which net/smtp does not
+// provide — only PLAIN and CRAM-MD5. Microsoft 365 / Exchange Online
+// commonly advertises LOGIN without PLAIN, and rejects a client that sends
+// AUTH PLAIN anyway with "504 5.7.4 Unrecognized authentication type" — a
+// protocol mismatch that looks identical to a bad password until the actual
+// EHLO response is inspected.
+type loginAuth struct {
+	username, password string
+}
+
+func (a *loginAuth) Start(_ *smtp.ServerInfo) (string, []byte, error) {
+	return "LOGIN", nil, nil
+}
+
+func (a *loginAuth) Next(fromServer []byte, more bool) ([]byte, error) {
+	if !more {
+		return nil, nil
+	}
+	switch strings.ToLower(strings.TrimSpace(string(fromServer))) {
+	case "username:":
+		return []byte(a.username), nil
+	case "password:":
+		return []byte(a.password), nil
+	default:
+		return nil, fmt.Errorf("unexpected LOGIN authentication prompt: %q", fromServer)
+	}
+}
+
+// selectAuth picks an AUTH mechanism the server actually advertises, rather
+// than assuming PLAIN: smtp.PlainAuth sends AUTH PLAIN unconditionally, with
+// no check against what the server's EHLO response listed, which is exactly
+// what produces a "504 5.7.4 Unrecognized authentication type" against a
+// server (Microsoft 365 among others) that only advertises LOGIN.
+func selectAuth(mechanisms, user, password, host string) (smtp.Auth, error) {
+	fields := strings.Fields(strings.ToUpper(mechanisms))
+	has := func(name string) bool {
+		for _, f := range fields {
+			if f == name {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case has("PLAIN"):
+		return smtp.PlainAuth("", user, password, host), nil
+	case has("LOGIN"):
+		return &loginAuth{username: user, password: password}, nil
+	case has("CRAM-MD5"):
+		return smtp.CRAMMD5Auth(user, password), nil
+	default:
+		return nil, fmt.Errorf("server does not advertise a supported AUTH mechanism (offers: %s)", mechanisms)
+	}
+}
+
 // parseRecipients splits a comma-separated recipient list, trimming blanks.
 func parseRecipients(raw string) []string {
 	var out []string
@@ -370,11 +425,15 @@ func (p *EmailPlugin) deliver(ctx context.Context, mime string, to []string) err
 		}
 		// Credentials configured against a server with no AUTH is a configuration
 		// error; sending anyway just produces a confusing rejection later.
-		if ok, _ := client.Extension("AUTH"); !ok {
+		ok, mechanisms := client.Extension("AUTH")
+		if !ok {
 			return nonRetriable{errors.New(
 				"SMTP credentials are configured but the server does not advertise AUTH")}
 		}
-		auth := smtp.PlainAuth("", p.user, p.password, p.host)
+		auth, err := selectAuth(mechanisms, p.user, p.password, p.host)
+		if err != nil {
+			return nonRetriable{err}
+		}
 		if err := client.Auth(auth); err != nil {
 			return nonRetriable{fmt.Errorf("invalid SMTP credentials: %w", err)}
 		}

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net/smtp"
 	"os"
 	"strings"
 	"time"
@@ -16,6 +15,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
+	"github.com/Stevy2191/Sentinel/backend/internal/notifications"
 )
 
 const invitationTTL = 7 * 24 * time.Hour
@@ -165,20 +165,21 @@ func (s *InvitationService) CancelInvitation(ctx context.Context, id uuid.UUID) 
 
 // SendInvitationEmail emails the invitation link. Returns ErrEmailNotConfigured
 // when SMTP is not set up.
+//
+// Sent through notifications.EmailPlugin (the same path the Settings ->
+// Notifications "Test" button and every alert email use) rather than a
+// second, independent net/smtp.SendMail call: that second copy hardcoded
+// AUTH PLAIN with no regard for what the server actually advertises, which
+// is what a server such as Microsoft 365 - commonly LOGIN-only - rejects
+// with "504 5.7.4 Unrecognized authentication type". One SMTP
+// implementation means that class of bug gets fixed once, not per copy.
 func (s *InvitationService) SendInvitationEmail(inv *models.Invitation, inviterName string) error {
-	host := strings.TrimSpace(os.Getenv("SMTP_HOST"))
-	if host == "" {
+	if strings.TrimSpace(os.Getenv("SMTP_HOST")) == "" {
 		return ErrEmailNotConfigured
 	}
-	port := strings.TrimSpace(os.Getenv("SMTP_PORT"))
-	if port == "" {
-		port = "587"
-	}
-	user := strings.TrimSpace(os.Getenv("SMTP_USER"))
-	pass := os.Getenv("SMTP_PASSWORD")
-	from := strings.TrimSpace(os.Getenv("SMTP_FROM"))
-	if from == "" {
-		from = user
+	plugin, err := notifications.NewEmailPlugin()
+	if err != nil {
+		return fmt.Errorf("email is not configured correctly: %w", err)
 	}
 	base := ""
 	if s.baseURL != nil {
@@ -201,17 +202,13 @@ func (s *InvitationService) SendInvitationEmail(inv *models.Invitation, inviterN
 			"This link expires on %s.\r\n\r\nBest regards,\r\nSentinel",
 		inviterName, link, inv.ExpiresAt.Format("Mon, 02 Jan 2006"),
 	)
-	msg := []byte(fmt.Sprintf(
+	msg := fmt.Sprintf(
 		"From: %s\r\nTo: %s\r\nSubject: You're invited to Sentinel\r\n"+
 			"MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s",
-		from, inv.Email, body,
-	))
+		plugin.From(), inv.Email, body,
+	)
 
-	var auth smtp.Auth
-	if user != "" {
-		auth = smtp.PlainAuth("", user, pass, host)
-	}
-	if err := smtp.SendMail(host+":"+port, auth, from, []string{inv.Email}, msg); err != nil {
+	if err := plugin.SendRaw(context.Background(), []string{inv.Email}, msg); err != nil {
 		return fmt.Errorf("sending invitation email: %w", err)
 	}
 	s.logger.Printf("[invite] invitation email sent to %s", inv.Email)
