@@ -23,9 +23,21 @@ func SystemResourcesHandler(sampler *hoststats.Sampler) gin.HandlerFunc {
 	}
 }
 
-// RegisterSystemRoutes mounts the host resource route. Readable by any
-// signed-in user: it is the same dashboard data the rest of the page shows,
-// and says nothing an operator of this instance should not see.
-func RegisterSystemRoutes(rg *gin.RouterGroup, sampler *hoststats.Sampler) {
+// VersionHandler handles GET /api/v1/system/version.
+//
+// Read from the running binary rather than a config value, so the About page
+// shows what is actually deployed instead of whatever a stale build-time
+// constant happens to say elsewhere.
+func VersionHandler(version string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		respondSuccess(c, http.StatusOK, gin.H{"version": version})
+	}
+}
+
+// RegisterSystemRoutes mounts the host resource and version routes. Readable
+// by any signed-in user: neither says anything an operator of this instance
+// should not see.
+func RegisterSystemRoutes(rg *gin.RouterGroup, sampler *hoststats.Sampler, version string) {
 	rg.GET("/system/resources", SystemResourcesHandler(sampler))
+	rg.GET("/system/version", VersionHandler(version))
 }

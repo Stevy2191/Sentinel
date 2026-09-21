@@ -12,6 +12,7 @@ import NotificationSettings from '@/pages/NotificationSettings'
 import { useAuthContext } from '@/context/AuthContext'
 import { useAppConfig, DEFAULT_APP_NAME } from '@/context/AppConfigContext'
 import { useIncidentRetention } from '@/hooks/useIncidents'
+import { useSystemVersion } from '@/hooks/useSystemVersion'
 import {
   PREF,
   DEFAULTS,
@@ -30,6 +31,9 @@ import {
 type Tab = 'system' | 'preferences' | 'notifications' | 'about'
 
 const GITHUB_URL = 'https://github.com/Stevy2191/Sentinel'
+
+/** True for a version CI actually tagged, e.g. "0.1.0" — false for "dev" or a branch name. */
+const isReleasedVersion = (v: string) => /^\d+\.\d+\.\d+/.test(v)
 
 // Mirrors the bounds the backend enforces (models.Min/MaxCheckIntervalSeconds),
 // which are themselves the monitor validator's bounds — so a value accepted
@@ -157,6 +161,7 @@ export default function Settings() {
   const { currentUser } = useAuthContext()
   const { appName, reportTimezone, refresh: refreshAppConfig } = useAppConfig()
   const isAdmin = currentUser?.is_admin ?? false
+  const version = useSystemVersion()
 
   // System and notification-channel settings are instance-wide and their APIs
   // are gated by RequireAdmin, so a non-admin is not shown tabs they cannot use.
@@ -774,11 +779,35 @@ export default function Settings() {
               </div>
               <div className="flex justify-between">
                 <dt className="text-slate-500">Version</dt>
-                <dd className="font-medium">Sentinel v1.0</dd>
+                <dd className="font-medium">
+                  {version === null ? (
+                    '…'
+                  ) : isReleasedVersion(version) ? (
+                    <a
+                      className="hover:underline"
+                      href={`${GITHUB_URL}/releases/tag/v${version}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Sentinel v{version}
+                    </a>
+                  ) : (
+                    `Sentinel (development build)`
+                  )}
+                </dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-slate-500">License</dt>
-                <dd className="font-medium">MIT</dd>
+                <dd className="font-medium">
+                  <a
+                    className="hover:underline"
+                    href={`${GITHUB_URL}/blob/main/LICENSE`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    AGPL-3.0
+                  </a>
+                </dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-slate-500">Frontend</dt>

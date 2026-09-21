@@ -34,6 +34,11 @@ import (
 
 const shutdownTimeout = 30 * time.Second
 
+// version is stamped at build time with -ldflags "-X main.version=...",
+// mirroring the agent's own versioning (cmd/agent/main.go). Left at "dev" for
+// a local build, so the About page can tell a real release from one.
+var version = "dev"
+
 // config holds runtime configuration read from the environment.
 type config struct {
 	Port                string
@@ -296,7 +301,7 @@ func run() error {
 	api.RegisterSSLCertificateRoutes(v1, sslChecker, authService)
 	api.RegisterAgentRoutes(v1, agentService, settingsService, authService)
 	api.RegisterBackupRoutes(v1, backupService, auditService, authService)
-	api.RegisterSystemRoutes(v1, hostSampler)
+	api.RegisterSystemRoutes(v1, hostSampler, version)
 	// Per-user theme (not admin-gated): only AuthMiddleware applies.
 	// Self password change (any authenticated user).
 	v1.POST("/auth/change-password", api.ChangeOwnPasswordHandler(authService))

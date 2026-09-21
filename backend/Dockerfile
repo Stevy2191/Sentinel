@@ -18,6 +18,17 @@ ARG GOPROXY=https://goproxy.cn,https://proxy.golang.org,direct
 ARG GOSUMDB=sum.golang.org
 ENV GOPROXY=${GOPROXY}     GOSUMDB=${GOSUMDB}     GOFLAGS=-mod=mod
 
+# Stamped into the binaries below. "dev" for a local `docker compose build`;
+# CI passes the real released version (docker-build.yml derives both from the
+# same git tag that becomes the image's own Docker tag, so a binary's
+# self-reported version always matches the image it shipped in).
+#
+# AGENT_VERSION previously had no matching ARG declaration, so the
+# `${AGENT_VERSION:-1.0.0}` below was dead: the shell variable was never set,
+# and the fallback silently won every time regardless of what was passed in.
+ARG SENTINEL_VERSION=dev
+ARG AGENT_VERSION=1.0.0
+
 WORKDIR /app
 COPY go.mod go.sum ./
 # Cache mounts keep the module and build caches across image builds, so a code
@@ -27,7 +38,7 @@ RUN --mount=type=cache,target=/go/pkg/mod     go mod download
 COPY . .
 # Static binary (pure-Go pgx driver) so it runs on a minimal alpine image.
 # -trimpath drops absolute build paths; -s -w strips the symbol table.
-RUN --mount=type=cache,target=/go/pkg/mod     --mount=type=cache,target=/root/.cache/go-build     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o sentinel ./cmd/sentinel
+RUN --mount=type=cache,target=/go/pkg/mod     --mount=type=cache,target=/root/.cache/go-build     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${SENTINEL_VERSION}" -o sentinel ./cmd/sentinel
 
 # The monitoring agent, cross-built for the architectures a host is likely to
 # be. Built here so the server can hand the binary to an installer rather than
