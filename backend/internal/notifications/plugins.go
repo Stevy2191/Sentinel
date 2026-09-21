@@ -129,6 +129,38 @@ func NewNotificationManager(db *gorm.DB) *NotificationManager {
 	}
 }
 
+// locationResolver, when set, supplies the instance's configured timezone for
+// rendering notification timestamps. Mirrors SetBaseURLResolver in email.go:
+// this package cannot import internal/services (services imports this one),
+// so the settings-backed lookup is injected by main rather than called
+// directly.
+var (
+	locationMu       sync.RWMutex
+	locationResolver func() *time.Location
+)
+
+// SetLocationResolver installs the function used to resolve the instance's
+// configured timezone. Passing nil restores UTC. Safe to call at any time.
+func SetLocationResolver(f func() *time.Location) {
+	locationMu.Lock()
+	defer locationMu.Unlock()
+	locationResolver = f
+}
+
+// resolveLocation returns the configured timezone, or UTC when none is set -
+// the same fallback models.SettingsService.ReportLocation uses.
+func resolveLocation() *time.Location {
+	locationMu.RLock()
+	resolve := locationResolver
+	locationMu.RUnlock()
+	if resolve != nil {
+		if loc := resolve(); loc != nil {
+			return loc
+		}
+	}
+	return time.UTC
+}
+
 // SendNotification fans the message out to every enabled channel the message is
 // addressed to, recording each delivery attempt. It returns an error only if
 // every attempted channel fails; success from at least one (or having none to
@@ -143,6 +175,7 @@ func (m *NotificationManager) SendNotification(ctx context.Context, message *Not
 	if message.Channels != nil && len(message.Channels) == 0 {
 		return nil
 	}
+	message.Timestamp = message.Timestamp.In(resolveLocation())
 
 	m.logger.Printf("[notify] sending %s notification for %q", message.Status, message.MonitorName)
 
@@ -414,12 +447,14 @@ func (m *NotificationManager) TestConfig(ctx context.Context, cfg models.Notific
 	if err != nil {
 		return err
 	}
+	msg := testMessage()
+	msg.Timestamp = msg.Timestamp.In(resolveLocation())
 	if recipient != "" {
 		if emailPlugin, ok := plugin.(*EmailPlugin); ok {
-			return emailPlugin.SendTest(ctx, recipient, testMessage())
+			return emailPlugin.SendTest(ctx, recipient, msg)
 		}
 	}
-	return plugin.Send(ctx, testMessage())
+	return plugin.Send(ctx, msg)
 }
 
 // SendToChannel delivers a message through a single named channel (used by the
@@ -431,6 +466,7 @@ func (m *NotificationManager) SendToChannel(ctx context.Context, id uuid.UUID, m
 	if !ok {
 		return fmt.Errorf("notification channel %s is not loaded", id)
 	}
+	message.Timestamp = message.Timestamp.In(resolveLocation())
 	if err := inst.Plugin.Send(ctx, message); err != nil {
 		return fmt.Errorf("sending via %s: %w", inst.Label(), err)
 	}

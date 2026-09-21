@@ -117,6 +117,13 @@ func run() error {
 	// The notifications package cannot import services (services imports it),
 	// so the lookup is injected rather than called directly.
 	notifications.SetBaseURLResolver(resolveBaseURL)
+	// Same reasoning: a notification's rendered timestamp should read in the
+	// instance's configured timezone (Settings -> System -> Timezone), not
+	// whatever zone the container happens to run in, and resolved live so
+	// changing it takes effect on the next alert rather than needing a restart.
+	notifications.SetLocationResolver(func() *time.Location {
+		return settingsService.ReportLocation(context.Background())
+	})
 	invitationService := services.NewInvitationService(db, authService, resolveBaseURL)
 	discoveryService := services.NewDiscoveryService()
 	reportAggregator := services.NewReportAggregatorService(db, settingsService)
