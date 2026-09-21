@@ -21,16 +21,19 @@ import (
 // NewEmailPluginFromConfig builds an EmailPlugin from explicit SMTP settings.
 // security is one of models.SMTPSecurity* ("" resolves to STARTTLS); skipTLSVerify
 // disables certificate verification for self-signed internal mail servers.
-func NewEmailPluginFromConfig(host string, port int, user, password, from, security string, skipTLSVerify bool) *EmailPlugin {
+// to is the channel's configured recipient list; empty falls back to the
+// from/user address (matches the env plugin's self-send fallback, and keeps
+// a channel saved before a destination was required working unchanged).
+func NewEmailPluginFromConfig(host string, port int, user, password, from, security string, skipTLSVerify bool, to []string) *EmailPlugin {
 	if port <= 0 {
 		port = defaultSMTPPort
 	}
 	if from == "" {
 		from = user
 	}
-	// With no explicit recipient list the config carries, send to the from/user
-	// address (matches the env plugin's self-send fallback).
-	to := []string{from}
+	if len(to) == 0 {
+		to = []string{from}
+	}
 	return &EmailPlugin{
 		host:          host,
 		port:          port,
@@ -135,6 +138,7 @@ func BuildPluginFromConfig(cfg models.NotificationConfig) (NotificationPlugin, e
 			deref(cfg.SMTPHost), port, deref(cfg.SMTPUser),
 			deref(cfg.SMTPPassword), deref(cfg.SMTPFrom),
 			models.ResolveSMTPSecurity(cfg.SMTPSecurity), cfg.SMTPSkipTLSVerify,
+			parseRecipients(deref(cfg.SMTPTo)),
 		), nil
 	case "slack":
 		return NewSlackPluginFromConfig(deref(cfg.WebhookURL))

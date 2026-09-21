@@ -213,10 +213,8 @@ func SetChannelEnabledHandler(service *services.NotificationConfigService) gin.H
 // error - only a malformed one is.
 type testChannelRequest struct {
 	// Recipient overrides where a test message is sent. Only meaningful for
-	// email: a channel has no stored "to" address at all (see
-	// models.NotificationConfig.DestinationKey), so without this a test
-	// otherwise silently mails the configured account itself, which is not
-	// always an inbox anyone actually checks.
+	// email, to verify delivery to an inbox other than the channel's
+	// configured destination without having to change (and save) it first.
 	Recipient string `json:"recipient"`
 }
 

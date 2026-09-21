@@ -34,6 +34,7 @@ func emailConfig(security *string) *NotificationConfig {
 		SMTPPort:     &port,
 		SMTPUser:     strptr("user@example.com"),
 		SMTPFrom:     strptr("sentinel@example.com"),
+		SMTPTo:       strptr("ops@example.com"),
 		SMTPSecurity: security,
 	}
 }
@@ -123,4 +124,63 @@ func TestDestinationKeyNtfy(t *testing.T) {
 	if base.DestinationKey() == other.DestinationKey() {
 		t.Error("different topics are different destinations")
 	}
+}
+
+func TestValidateEmailRequiresDestination(t *testing.T) {
+	t.Run("rejects a missing destination", func(t *testing.T) {
+		cfg := emailConfig(nil)
+		cfg.SMTPTo = nil
+		if err := cfg.Validate(); err == nil {
+			t.Error("expected an error when smtp_to is unset")
+		}
+	})
+
+	t.Run("rejects a blank destination", func(t *testing.T) {
+		cfg := emailConfig(nil)
+		cfg.SMTPTo = strptr("   ")
+		if err := cfg.Validate(); err == nil {
+			t.Error("expected an error when smtp_to is blank")
+		}
+	})
+
+	t.Run("rejects a malformed address", func(t *testing.T) {
+		cfg := emailConfig(nil)
+		cfg.SMTPTo = strptr("not-an-email")
+		if err := cfg.Validate(); err == nil {
+			t.Error("expected an error for a malformed destination address")
+		}
+	})
+
+	t.Run("accepts several comma-separated addresses", func(t *testing.T) {
+		cfg := emailConfig(nil)
+		cfg.SMTPTo = strptr("ops@example.com, manager@example.com")
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("expected multiple addresses to be valid: %v", err)
+		}
+	})
+}
+
+// The motivating scenario: two channels sharing one SMTP account but
+// alerting different people must not be flagged as duplicates of each other.
+func TestDestinationKeyDistinguishesEmailRecipients(t *testing.T) {
+	itTeam := emailConfig(nil)
+	itTeam.SMTPTo = strptr("it@example.com")
+
+	managers := emailConfig(nil)
+	managers.SMTPTo = strptr("managers@example.com")
+
+	if itTeam.DestinationKey() == managers.DestinationKey() {
+		t.Error("channels with different recipients must not share a destination key")
+	}
+
+	t.Run("order and case do not change the destination", func(t *testing.T) {
+		a := emailConfig(nil)
+		a.SMTPTo = strptr("ops@example.com, Manager@Example.com")
+		b := emailConfig(nil)
+		b.SMTPTo = strptr("manager@example.com,ops@example.com")
+		if a.DestinationKey() != b.DestinationKey() {
+			t.Errorf("expected the same key regardless of order/case, got %q and %q",
+				a.DestinationKey(), b.DestinationKey())
+		}
+	})
 }

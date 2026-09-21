@@ -29,6 +29,8 @@ export interface NotificationConfig {
   smtp_user?: string | null
   smtp_password?: string | null
   smtp_from?: string | null
+  /** Who this channel alerts, comma-separated. Required for a new channel. */
+  smtp_to?: string | null
   /** Connection security. Null means starttls (the backend default). */
   smtp_security?: SMTPSecurity | null
   /** Skip TLS certificate verification for self-signed internal mail servers. */

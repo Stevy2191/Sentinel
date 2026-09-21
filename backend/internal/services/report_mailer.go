@@ -98,10 +98,14 @@ func (m *ReportMailer) resolveSender(ctx context.Context) (*notifications.EmailP
 		if cfg.SMTPPort != nil {
 			port = *cfg.SMTPPort
 		}
+		// The recipient list is irrelevant here: every send through this
+		// plugin goes via SendRaw with the schedule's own recipients (see
+		// ReportEmail.To below), which bypasses whatever "to" the plugin was
+		// built with entirely.
 		return notifications.NewEmailPluginFromConfig(
 			deref(cfg.SMTPHost), port, deref(cfg.SMTPUser), deref(cfg.SMTPPassword),
 			deref(cfg.SMTPFrom), models.ResolveSMTPSecurity(cfg.SMTPSecurity),
-			cfg.SMTPSkipTLSVerify,
+			cfg.SMTPSkipTLSVerify, nil,
 		), nil
 	}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {

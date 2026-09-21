@@ -493,13 +493,9 @@ func (p *EmailPlugin) SendRaw(ctx context.Context, to []string, mime string) err
 func (p *EmailPlugin) From() string { return p.from }
 
 // SendTest builds and delivers a synthetic message to an explicit recipient,
-// overriding the channel's configured "to" rather than using it.
-//
-// A notification config carries no recipient for email at all - unlike
-// Slack's webhook or Telegram's chat id, the destination is implicit (it
-// mails the configured account itself, see NewEmailPluginFromConfig) - so
-// without this a connection test always lands wherever that account's inbox
-// is, whether or not that is somewhere the person testing it can check.
+// overriding the channel's configured "to" rather than using it - lets a
+// connection test verify delivery to an inbox other than the channel's
+// configured destination, without having to change (and save) it first.
 func (p *EmailPlugin) SendTest(ctx context.Context, to string, message *NotificationMessage) error {
 	if message == nil {
 		return errors.New("message is nil")

@@ -19,6 +19,15 @@ import {
 // ---------- validation helpers ----------
 const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+/** True when every comma-separated entry is a valid email address. */
+function isValidEmailList(raw: string): boolean {
+  const parts = raw
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean)
+  return parts.length > 0 && parts.every((p) => emailRe.test(p))
+}
+
 // The port conventionally paired with each security mode. Choosing a mode
 // retargets the port only when the current value is one of these, so a custom
 // port (2525, say) is never clobbered.
@@ -66,6 +75,7 @@ interface FormState {
   smtp_user: string
   smtp_password: string
   smtp_from: string
+  smtp_to: string
   smtp_security: SMTPSecurity
   smtp_skip_tls_verify: boolean
   webhook_url: string
@@ -85,6 +95,7 @@ const emptyForm: FormState = {
   smtp_user: '',
   smtp_password: '',
   smtp_from: '',
+  smtp_to: '',
   smtp_security: 'starttls',
   smtp_skip_tls_verify: false,
   webhook_url: '',
@@ -106,6 +117,7 @@ function formFromConfig(cfg: NotificationConfig | null): FormState {
     smtp_user: cfg.smtp_user ?? '',
     smtp_password: cfg.smtp_password ?? '',
     smtp_from: cfg.smtp_from ?? '',
+    smtp_to: cfg.smtp_to ?? '',
     // Null means starttls, matching the backend's ResolveSMTPSecurity.
     smtp_security: cfg.smtp_security ?? 'starttls',
     smtp_skip_tls_verify: cfg.smtp_skip_tls_verify ?? false,
@@ -137,6 +149,8 @@ function validate(channel: ChannelName, f: FormState): Record<string, string> {
       if (!f.smtp_password) e.smtp_password = 'Password is required'
       if (!f.smtp_from.trim()) e.smtp_from = 'From address is required'
       else if (!emailRe.test(f.smtp_from.trim())) e.smtp_from = 'Must be a valid email address'
+      if (!f.smtp_to.trim()) e.smtp_to = 'A destination email address is required'
+      else if (!isValidEmailList(f.smtp_to)) e.smtp_to = 'Must be a valid email address, or several separated by commas'
       break
     }
     case 'slack':
@@ -171,6 +185,7 @@ function buildPayload(channel: ChannelName, f: FormState): Partial<NotificationC
       p.smtp_user = f.smtp_user.trim()
       p.smtp_password = f.smtp_password
       p.smtp_from = f.smtp_from.trim()
+      p.smtp_to = f.smtp_to.trim()
       p.smtp_security = f.smtp_security
       p.smtp_skip_tls_verify = f.smtp_security === 'none' ? false : f.smtp_skip_tls_verify
       break
@@ -530,6 +545,21 @@ function ConfigModal({
                     (STARTTLS) · implicit TLS servers normally use port 465
                   </Helper>
                 </div>
+                <div>
+                  <Label required>Destination Address</Label>
+                  <input
+                    className={inputCls}
+                    value={form.smtp_to}
+                    onChange={(e) => set('smtp_to', e.target.value)}
+                    onBlur={() => markTouched('smtp_to')}
+                    placeholder="ops@example.com, manager@example.com"
+                  />
+                  <FieldError msg={errFor('smtp_to')} />
+                  <Helper>
+                    Who this channel alerts. Several channels can share one SMTP account and send
+                    to different people — separate multiple addresses with commas.
+                  </Helper>
+                </div>
               </>
             )}
 
@@ -675,8 +705,9 @@ function ConfigModal({
               <span className="text-sm">Enabled (send alerts through this channel)</span>
             </label>
 
-            {/* Email has no stored recipient at all (see DestinationKey) -
-                without this, Test just mails the configured account itself. */}
+            {/* Overrides the Destination Address above for one test click only -
+                useful for checking delivery to an inbox other than the ones
+                this channel actually alerts. */}
             {channel === 'email' && (
               <div>
                 <Label>Send test to</Label>
@@ -688,7 +719,7 @@ function ConfigModal({
                   placeholder="you@example.com (optional)"
                 />
                 <FieldError msg={testRecipientError} />
-                <Helper>Leave blank to send the test to {form.smtp_from.trim() || form.smtp_user.trim() || 'the account itself'}.</Helper>
+                <Helper>Leave blank to send the test to {form.smtp_to.trim() || 'the destination address above'}.</Helper>
               </div>
             )}
 

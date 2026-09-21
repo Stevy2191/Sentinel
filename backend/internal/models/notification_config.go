@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/mail"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -72,6 +74,10 @@ type NotificationConfig struct {
 	SMTPUser     *string `json:"smtp_user" gorm:"column:smtp_user"`
 	SMTPPassword *string `json:"smtp_password,omitempty" gorm:"column:smtp_password"` // never returned in list responses
 	SMTPFrom     *string `json:"smtp_from" gorm:"column:smtp_from"`
+	// SMTPTo is who this channel actually alerts - comma-separated, matching
+	// the SMTP_TO environment variable's convention. Not a secret: shown in
+	// list responses same as SMTPFrom, unlike the fields HideSecrets clears.
+	SMTPTo *string `json:"smtp_to" gorm:"column:smtp_to"`
 	// SMTPSecurity is the connection security mode: none, starttls, or ssltls.
 	// Nil means starttls (see ResolveSMTPSecurity). Not a secret.
 	SMTPSecurity *string `json:"smtp_security" gorm:"column:smtp_security"`
@@ -204,6 +210,18 @@ func (nc *NotificationConfig) Validate() error {
 		if nc.SMTPFrom == nil || *nc.SMTPFrom == "" {
 			return errors.New("SMTP from address is required")
 		}
+		if nc.SMTPTo == nil || strings.TrimSpace(*nc.SMTPTo) == "" {
+			return errors.New("a destination email address is required")
+		}
+		for _, addr := range strings.Split(*nc.SMTPTo, ",") {
+			addr = strings.TrimSpace(addr)
+			if addr == "" {
+				continue
+			}
+			if _, err := mail.ParseAddress(addr); err != nil {
+				return fmt.Errorf("invalid destination email address %q", addr)
+			}
+		}
 		// Nil is allowed and means starttls; a present value must be recognized.
 		if nc.SMTPSecurity != nil && !ValidSMTPSecurity[*nc.SMTPSecurity] {
 			return errors.New("SMTP security must be one of: none, starttls, ssltls")
@@ -276,19 +294,35 @@ func derefIntOr(p *int, fallback int) int {
 	return *p
 }
 
+// normalizedRecipients collapses a comma-separated address list down to a
+// canonical form - order and case do not change who receives the message,
+// but they would make two identical lists compare unequal.
+func normalizedRecipients(raw string) string {
+	var cleaned []string
+	for _, part := range strings.Split(raw, ",") {
+		if v := strings.ToLower(strings.TrimSpace(part)); v != "" {
+			cleaned = append(cleaned, v)
+		}
+	}
+	sort.Strings(cleaned)
+	return strings.Join(cleaned, ",")
+}
+
 func (nc *NotificationConfig) DestinationKey() string {
 	norm := func(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
 
 	switch nc.Channel {
 	case "email":
-		// No recipient list exists on a channel, so a mail channel is
-		// identified by the server it sends through and the address it sends
-		// as. Two of those really are the same channel twice.
+		// The recipient list is part of the identity now that a channel has
+		// one: two channels sharing one SMTP account but alerting different
+		// people (e.g. "IT team" vs "Managers") are legitimately different
+		// channels, not duplicates of each other.
 		return strings.Join([]string{
 			norm(derefOr(nc.SMTPHost, "")),
 			fmt.Sprintf("%d", derefIntOr(nc.SMTPPort, 0)),
 			norm(derefOr(nc.SMTPUser, "")),
 			norm(derefOr(nc.SMTPFrom, "")),
+			normalizedRecipients(derefOr(nc.SMTPTo, "")),
 		}, "|")
 	case "telegram":
 		return norm(derefOr(nc.TelegramChatID, ""))
@@ -308,6 +342,13 @@ func (nc *NotificationConfig) Summary() string {
 		host := derefOr(nc.SMTPHost, "")
 		if host == "" {
 			return "not configured"
+		}
+		// The destination is the more useful thing to show once a channel has
+		// one: "to ops@example.com" tells two email channels apart at a
+		// glance, where "smtp.example.com:587" - identical for both if they
+		// share an account - does not.
+		if to := derefOr(nc.SMTPTo, ""); to != "" {
+			return "to " + to
 		}
 		if nc.SMTPPort != nil && *nc.SMTPPort > 0 {
 			return fmt.Sprintf("%s:%d", host, *nc.SMTPPort)
