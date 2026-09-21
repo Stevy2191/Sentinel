@@ -3,7 +3,9 @@ package api
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/mail"
 	"sort"
 	"strings"
 	"time"
@@ -206,6 +208,18 @@ func SetChannelEnabledHandler(service *services.NotificationConfigService) gin.H
 	}
 }
 
+// testChannelRequest is the optional body for POST .../test. Every caller
+// before this field existed sent no body at all, so an empty one is not an
+// error - only a malformed one is.
+type testChannelRequest struct {
+	// Recipient overrides where a test message is sent. Only meaningful for
+	// email: a channel has no stored "to" address at all (see
+	// models.NotificationConfig.DestinationKey), so without this a test
+	// otherwise silently mails the configured account itself, which is not
+	// always an inbox anyone actually checks.
+	Recipient string `json:"recipient"`
+}
+
 // TestNotificationConfigHandler handles POST /settings/notification-channels/:id/test
 // (admin). Sends a test message using the stored config and records the result.
 func TestNotificationConfigHandler(service *services.NotificationConfigService) gin.HandlerFunc {
@@ -214,7 +228,21 @@ func TestNotificationConfigHandler(service *services.NotificationConfigService) 
 		if !ok {
 			return
 		}
-		success, testErr, err := service.TestConnection(c.Request.Context(), id)
+
+		var req testChannelRequest
+		if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+			respondError(c, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		recipient := strings.TrimSpace(req.Recipient)
+		if recipient != "" {
+			if _, err := mail.ParseAddress(recipient); err != nil {
+				respondError(c, http.StatusBadRequest, "recipient is not a valid email address")
+				return
+			}
+		}
+
+		success, testErr, err := service.TestConnection(c.Request.Context(), id, recipient)
 		if err != nil {
 			if errors.Is(err, services.ErrConfigNotFound) {
 				respondError(c, http.StatusNotFound, "no such notification channel")

@@ -237,13 +237,16 @@ func (s *NotificationConfigService) DeleteConfig(ctx context.Context, id uuid.UU
 // TestConnection sends a test message using the channel's stored config and
 // records the outcome (last_test_at / _success / _error). It returns whether the
 // test succeeded and a human-readable error message (empty on success).
-func (s *NotificationConfigService) TestConnection(ctx context.Context, id uuid.UUID) (bool, string, error) {
+//
+// recipient overrides where the test is sent - meaningful for email only,
+// which otherwise has no stored "to" address to send a test to at all.
+func (s *NotificationConfigService) TestConnection(ctx context.Context, id uuid.UUID, recipient string) (bool, string, error) {
 	config, err := s.GetConfig(ctx, id)
 	if err != nil {
 		return false, "", err
 	}
 
-	sendErr := s.manager.TestConfig(ctx, *config)
+	sendErr := s.manager.TestConfig(ctx, *config, recipient)
 	success := sendErr == nil
 	var errMsg string
 	if sendErr != nil {

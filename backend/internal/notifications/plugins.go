@@ -404,10 +404,20 @@ func (m *NotificationManager) applyConfig(cfg models.NotificationConfig) {
 
 // TestConfig builds a plugin for the given config and sends a synthetic test
 // message through it, without registering the plugin or persisting a record.
-func (m *NotificationManager) TestConfig(ctx context.Context, cfg models.NotificationConfig) error {
+//
+// recipient, when non-empty, overrides where the test is sent. It only
+// applies to email: every other channel type has its own fixed destination
+// (a webhook URL, a chat id) baked into the config already, so there is
+// nothing for it to override there.
+func (m *NotificationManager) TestConfig(ctx context.Context, cfg models.NotificationConfig, recipient string) error {
 	plugin, err := BuildPluginFromConfig(cfg)
 	if err != nil {
 		return err
+	}
+	if recipient != "" {
+		if emailPlugin, ok := plugin.(*EmailPlugin); ok {
+			return emailPlugin.SendTest(ctx, recipient, testMessage())
+		}
 	}
 	return plugin.Send(ctx, testMessage())
 }

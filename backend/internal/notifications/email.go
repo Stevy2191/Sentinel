@@ -315,7 +315,7 @@ func (p *EmailPlugin) Send(ctx context.Context, message *NotificationMessage) er
 	subject := p.buildSubject(message)
 	htmlBody := p.buildHTMLBody(message)
 	textBody := p.buildTextBody(message)
-	mime := p.buildMIME(subject, htmlBody, textBody)
+	mime := p.buildMIME(subject, htmlBody, textBody, p.to)
 
 	start := time.Now()
 	if err := p.sendWithRetry(ctx, mime, p.to); err != nil {
@@ -492,6 +492,39 @@ func (p *EmailPlugin) SendRaw(ctx context.Context, to []string, mime string) err
 // From returns the plugin's envelope sender, for building message headers.
 func (p *EmailPlugin) From() string { return p.from }
 
+// SendTest builds and delivers a synthetic message to an explicit recipient,
+// overriding the channel's configured "to" rather than using it.
+//
+// A notification config carries no recipient for email at all - unlike
+// Slack's webhook or Telegram's chat id, the destination is implicit (it
+// mails the configured account itself, see NewEmailPluginFromConfig) - so
+// without this a connection test always lands wherever that account's inbox
+// is, whether or not that is somewhere the person testing it can check.
+func (p *EmailPlugin) SendTest(ctx context.Context, to string, message *NotificationMessage) error {
+	if message == nil {
+		return errors.New("message is nil")
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, defaultSMTPTimeout)
+		defer cancel()
+	}
+
+	recipients := []string{to}
+	subject := p.buildSubject(message)
+	htmlBody := p.buildHTMLBody(message)
+	textBody := p.buildTextBody(message)
+	mime := p.buildMIME(subject, htmlBody, textBody, recipients)
+
+	start := time.Now()
+	if err := p.sendWithRetry(ctx, mime, recipients); err != nil {
+		p.logger.Printf("[email] ❌ test to %s failed: %v", to, err)
+		return err
+	}
+	p.logger.Printf("[email] ✅ test sent to %s (%dms)", to, time.Since(start).Milliseconds())
+	return nil
+}
+
 // buildSubject constructs the subject line for the message's status.
 func (p *EmailPlugin) buildSubject(m *NotificationMessage) string {
 	switch m.Status {
@@ -657,12 +690,15 @@ func (p *EmailPlugin) buildTextBody(m *NotificationMessage) string {
 }
 
 // buildMIME assembles a multipart/alternative message with plain-text and HTML
-// parts and the required headers.
-func (p *EmailPlugin) buildMIME(subject, htmlBody, textBody string) string {
+// parts and the required headers. to is an explicit parameter rather than
+// reading p.to directly, so the To: header always matches whoever the
+// message is actually addressed to - including a one-off SendTest recipient
+// that overrides the channel's configured address.
+func (p *EmailPlugin) buildMIME(subject, htmlBody, textBody string, to []string) string {
 	boundary := "sentinel-boundary-a1b2c3d4"
 	var b strings.Builder
 	fmt.Fprintf(&b, "From: %s\r\n", p.from)
-	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(p.to, ", "))
+	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(to, ", "))
 	fmt.Fprintf(&b, "Subject: %s\r\n", subject)
 	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().Format(time.RFC1123Z))
 	fmt.Fprintf(&b, "MIME-Version: 1.0\r\n")

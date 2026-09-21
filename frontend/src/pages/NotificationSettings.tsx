@@ -292,17 +292,27 @@ function ConfigModal({
   const [touched, setTouched] = useState<Record<string, boolean>>({})
   const [submitAttempted, setSubmitAttempted] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  // Where a test email goes. Not part of FormState/buildPayload: it is a
+  // per-click value for this test, not something saved on the channel - a
+  // channel has no stored recipient at all (see DestinationKey), and without
+  // an override a test otherwise just mails the configured account itself.
+  const [testRecipient, setTestRecipient] = useState('')
 
   // Populate the form once the existing config loads.
   useEffect(() => {
     setForm(formFromConfig(config))
     setTouched({})
     setSubmitAttempted(false)
+    setTestRecipient('')
   }, [config])
 
   const errors = useMemo(() => validate(channel, form), [channel, form])
   const hasErrors = Object.keys(errors).length > 0
   const busy = saving || testing || deleting
+  const testRecipientError =
+    channel === 'email' && testRecipient.trim() !== '' && !emailRe.test(testRecipient.trim())
+      ? 'Must be a valid email address'
+      : undefined
 
   const set = (key: keyof FormState, value: string | boolean) =>
     setForm((f) => ({ ...f, [key]: value }))
@@ -348,10 +358,16 @@ function ConfigModal({
   const handleTest = async () => {
     const id = await persist()
     if (!id) return
+    const recipient = testRecipient.trim() || undefined
     try {
-      const result = await test(id)
+      const result = await test(id, recipient)
       if (result?.test_success) {
-        push(`✓ Test sent! Message delivered via ${form.name.trim() || meta.label}`, 'success')
+        push(
+          recipient
+            ? `✓ Test sent to ${recipient}`
+            : `✓ Test sent! Message delivered via ${form.name.trim() || meta.label}`,
+          'success'
+        )
       } else {
         push(`✗ Test failed: ${result?.test_error ?? 'unknown error'}`, 'error')
       }
@@ -659,6 +675,23 @@ function ConfigModal({
               <span className="text-sm">Enabled (send alerts through this channel)</span>
             </label>
 
+            {/* Email has no stored recipient at all (see DestinationKey) -
+                without this, Test just mails the configured account itself. */}
+            {channel === 'email' && (
+              <div>
+                <Label>Send test to</Label>
+                <input
+                  className={inputCls}
+                  type="email"
+                  value={testRecipient}
+                  onChange={(e) => setTestRecipient(e.target.value)}
+                  placeholder="you@example.com (optional)"
+                />
+                <FieldError msg={testRecipientError} />
+                <Helper>Leave blank to send the test to {form.smtp_from.trim() || form.smtp_user.trim() || 'the account itself'}.</Helper>
+              </div>
+            )}
+
             {/* Actions */}
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-4">
               {/* Nothing to delete until the channel has been saved once. */}
@@ -677,7 +710,11 @@ function ConfigModal({
                 <button className="btn-secondary" disabled={busy} onClick={onClose}>
                   Cancel
                 </button>
-                <button className="btn-secondary" disabled={busy || hasErrors} onClick={() => void handleTest()}>
+                <button
+                  className="btn-secondary"
+                  disabled={busy || hasErrors || !!testRecipientError}
+                  onClick={() => void handleTest()}
+                >
                   {testing ? 'Testing…' : 'Test'}
                 </button>
                 <button className="btn-primary" disabled={busy || hasErrors} onClick={() => void handleSave()}>

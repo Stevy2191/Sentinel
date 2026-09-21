@@ -221,18 +221,27 @@ export function useSaveNotificationConfig() {
   return { save, loading, error }
 }
 
-/** Send a test message through a channel's stored config. */
+/**
+ * Send a test message through a channel's stored config.
+ *
+ * recipient overrides where it's sent - only meaningful for email, which has
+ * no stored "to" address at all and otherwise just mails the configured
+ * account itself, silently, wherever that inbox happens to be.
+ */
 export function useTestNotificationConfig() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<TestResult | null>(null)
 
-  const test = useCallback(async (id: string): Promise<TestResult | null> => {
+  const test = useCallback(async (id: string, recipient?: string): Promise<TestResult | null> => {
     setLoading(true)
     setError(null)
     setResult(null)
     try {
-      const res = await api.post<{ data: TestResult }>(`${BASE}/${id}/test`)
+      const res = await api.post<{ data: TestResult }>(
+        `${BASE}/${id}/test`,
+        recipient ? { recipient } : {}
+      )
       setResult(res.data.data)
       return res.data.data
     } catch (err) {

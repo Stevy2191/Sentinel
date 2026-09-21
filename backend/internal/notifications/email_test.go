@@ -53,6 +53,7 @@ type fakeSMTP struct {
 
 	mu   sync.Mutex
 	cmds []string
+	body strings.Builder // the DATA payload of the last message received
 }
 
 // startFakeSMTP listens on an ephemeral loopback port and serves exactly one
@@ -102,6 +103,12 @@ func (f *fakeSMTP) transcript() string {
 	return strings.Join(f.cmds, " | ")
 }
 
+func (f *fakeSMTP) receivedBody() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.body.String()
+}
+
 func (f *fakeSMTP) serveOnce(opts fakeSMTPOpts) {
 	conn, err := f.ln.Accept()
 	if err != nil {
@@ -139,10 +146,16 @@ func (f *fakeSMTP) handle(conn net.Conn, opts fakeSMTPOpts) {
 		line = strings.TrimRight(line, "\r\n")
 
 		if inData {
-			// Message body: swallow until the lone "." terminator.
+			// Message body: captured until the lone "." terminator, so a
+			// test can assert on headers (e.g. To:) inside it.
 			if line == "." {
 				inData = false
 				write("250 OK queued\r\n")
+			} else {
+				f.mu.Lock()
+				f.body.WriteString(line)
+				f.body.WriteString("\n")
+				f.mu.Unlock()
 			}
 			continue
 		}
@@ -404,6 +417,34 @@ func TestDeliverLoginOnlyServerAuthenticates(t *testing.T) {
 	}
 	if f.sawCommand("AUTH PLAIN") {
 		t.Errorf("sent AUTH PLAIN to a server that only advertised LOGIN, transcript: %s", f.transcript())
+	}
+}
+
+// SendTest must reach the given recipient, not the channel's configured "to"
+// (which for email is just the account itself - see
+// NewEmailPluginFromConfig). Checked at both layers: the SMTP envelope
+// (RCPT TO) and the message's own To: header, since the two are built from
+// separate code paths and a fix that only updated one would still produce a
+// message that looks misdirected to anything inspecting the header.
+func TestEmailPluginSendTest(t *testing.T) {
+	tlsCfg := selfSignedCert(t)
+	f := startFakeSMTP(t, fakeSMTPOpts{advertiseSTARTTLS: true, advertiseAUTH: true, tlsConfig: tlsCfg})
+	p := testPlugin(f, models.SMTPSecuritySTARTTLS, "user@fake.test", "secret", true)
+	// The plugin's own configured "to" - SendTest must not use this.
+	p.to = []string{"configured-account@fake.test"}
+
+	err := p.SendTest(context.Background(), "override@example.com", testMessage())
+	if err != nil {
+		t.Fatalf("SendTest: %v (transcript: %s)", err, f.transcript())
+	}
+	if !f.sawCommand("RCPT TO:<override@example.com>") {
+		t.Errorf("expected RCPT TO the override recipient, transcript: %s", f.transcript())
+	}
+	if f.sawCommand("RCPT TO:<configured-account@fake.test>") {
+		t.Errorf("sent to the configured account instead of the override, transcript: %s", f.transcript())
+	}
+	if !strings.Contains(f.receivedBody(), "To: override@example.com") {
+		t.Errorf("expected a To: header naming the override recipient, body: %q", f.receivedBody())
 	}
 }
 
