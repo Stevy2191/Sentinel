@@ -126,6 +126,10 @@ func main() {
 		http:    &http.Client{Timeout: 30 * time.Second},
 	}
 
+	if runAsServiceIfApplicable(cfg, collector, docker, client) {
+		return
+	}
+
 	// Signals are handled so a stop is a clean exit rather than a kill: an
 	// in-flight submission finishes and the queue is not lost mid-write.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

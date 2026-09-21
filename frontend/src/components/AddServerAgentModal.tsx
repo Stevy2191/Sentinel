@@ -269,6 +269,7 @@ function InstallStep({
   setTab: (t: Tab) => void
 }) {
   const { agent } = created
+  const isWindows = agent.os_type === 'windows'
   // Downloads come from the external address, the agent reports to the
   // internal one. They are the same unless a proxy sits in front.
   const downloadURL = created.external_url || created.sentinel_url || ''
@@ -279,6 +280,11 @@ function InstallStep({
   // back to the address the browser used when no URL is configured, and is
   // easy to miss until the host never appears.
   const unreachable = isLoopback(reportURL) || isLoopback(downloadURL)
+  // Windows has no Docker install path (see AddServerAgentModal design notes:
+  // host metrics only, native service instead of systemd/Docker).
+  const visibleTabs = isWindows
+    ? TABS.filter((t) => t !== 'Docker One-Click' && t !== 'Direct Docker Run')
+    : TABS
 
   const env = [
     `SERVER_TOKEN="${agent.server_token ?? ''}"`,
@@ -327,6 +333,24 @@ docker run -d \\
   -e RETRY_ATTEMPTS="${agent.retry_attempts}" \\
   sentinel-agent:local`
 
+  const windowsEnv = [
+    `$env:SERVER_TOKEN="${agent.server_token ?? ''}"`,
+    `$env:AGENT_ID="${agent.agent_id}"`,
+    `$env:SENTINEL_URL="${reportURL}"`,
+    `$env:SERVER_NAME="${agent.name}"`,
+    `$env:OS_TYPE="${agent.os_type}"`,
+    `$env:CHECK_INTERVAL="${agent.check_interval}"`,
+    `$env:RETRY_ATTEMPTS="${agent.retry_attempts}"`,
+  ].join('\n')
+
+  const windowsInstall = `${windowsEnv}
+iwr -useb "${downloadURL}/scripts/server-agent.ps1" | iex`
+
+  const windowsManualDownload = `Invoke-WebRequest -Uri "${downloadURL}/agent/download/windows/amd64" -OutFile sentinel-agent.exe`
+
+  const windowsManualRun = `${windowsEnv}
+.\\sentinel-agent.exe`
+
   return (
     <>
       <div className="grid gap-3 rounded-lg border border-white/10 bg-slate-800/40 p-4 sm:grid-cols-2">
@@ -371,7 +395,7 @@ docker run -d \\
 
       {/* Horizontally scrollable so four tabs do not wrap on a phone. */}
       <div className="-mx-1 flex gap-1 overflow-x-auto border-b border-white/10 px-1">
-        {TABS.map((t) => (
+        {visibleTabs.map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -386,7 +410,18 @@ docker run -d \\
         ))}
       </div>
 
-      {tab === 'One-Click Install' && (
+      {tab === 'One-Click Install' && isWindows && (
+        <div className="space-y-4">
+          <p className="text-sm text-slate-400">
+            Installs the agent as a native Windows service and starts it. Run from an{' '}
+            <span className="font-medium text-slate-300">elevated PowerShell</span> (right-click
+            PowerShell, Run as Administrator).
+          </p>
+          <Command label="Run on the server" value={windowsInstall} />
+        </div>
+      )}
+
+      {tab === 'One-Click Install' && !isWindows && (
         <div className="space-y-4">
           <p className="text-sm text-slate-400">
             Installs the agent as a systemd service and starts it. Needs <code>curl</code>,{' '}
@@ -430,9 +465,28 @@ docker run -d \\
             </ul>
           </div>
 
-          <Command
-            label="Installed with the systemd installer"
-            value={`# Stop it and prevent it starting at boot
+          {isWindows ? (
+            <>
+              <Command
+                label="Stop it and remove the service"
+                value={`Stop-Service SentinelAgent -ErrorAction SilentlyContinue
+sc.exe delete SentinelAgent
+
+# Remove the binary, configuration and log
+Remove-Item -Recurse -Force "$env:ProgramFiles\\SentinelAgent" -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force "$env:ProgramData\\SentinelAgent" -ErrorAction SilentlyContinue`}
+              />
+              <Command
+                label="Verify nothing is left"
+                value={`Get-Service SentinelAgent -ErrorAction SilentlyContinue   # expect: nothing
+Get-Process sentinel-agent -ErrorAction SilentlyContinue    # expect: nothing`}
+              />
+            </>
+          ) : (
+            <>
+              <Command
+                label="Installed with the systemd installer"
+                value={`# Stop it and prevent it starting at boot
 sudo systemctl stop sentinel-agent
 sudo systemctl disable sentinel-agent
 
@@ -444,23 +498,25 @@ sudo rm -f /var/log/sentinel-agent.log
 
 sudo systemctl daemon-reload
 sudo systemctl reset-failed sentinel-agent 2>/dev/null || true`}
-          />
+              />
 
-          <Command
-            label="Installed with the Docker installer"
-            value={`# Stop and remove the container
+              <Command
+                label="Installed with the Docker installer"
+                value={`# Stop and remove the container
 docker rm -f sentinel-agent
 
 # Remove the image built during installation (optional)
 docker rmi sentinel-agent:local`}
-          />
+              />
 
-          <Command
-            label="Verify nothing is left"
-            value={`systemctl status sentinel-agent   # expect: could not be found
+              <Command
+                label="Verify nothing is left"
+                value={`systemctl status sentinel-agent   # expect: could not be found
 pgrep -a sentinel-agent           # expect: no output
 docker ps -a --filter name=sentinel-agent   # expect: no rows`}
-          />
+              />
+            </>
+          )}
 
           <div className="rounded-lg border border-white/10 bg-slate-800/40 p-4">
             <h4 className="mb-2 text-sm font-medium text-white">Then in Sentinel</h4>
@@ -473,7 +529,40 @@ docker ps -a --filter name=sentinel-agent   # expect: no rows`}
         </div>
       )}
 
-      {tab === 'Manual' && (
+      {tab === 'Manual' && isWindows && (
+        <div className="space-y-4">
+          <div>
+            <h4 className="mb-2 text-sm font-medium text-white">Prerequisites</h4>
+            <ul className="list-inside list-disc space-y-1 text-sm text-slate-400">
+              <li>Windows Server 2016+, or Windows 10/11 (64-bit)</li>
+              <li>Network access from the host to {reportURL}</li>
+              <li>
+                An elevated PowerShell only if you want it to persist as a service — for a quick
+                foreground test below, an ordinary prompt works.
+              </li>
+            </ul>
+          </div>
+          <Command label="1. Download the binary" value={windowsManualDownload} />
+          <Command label="2. Run it" value={windowsManualRun} />
+          <div className="rounded-lg border border-white/10 bg-slate-800/40 p-4">
+            <h4 className="mb-2 text-sm font-medium text-white">After installation</h4>
+            <ul className="list-inside list-disc space-y-1 text-xs text-slate-400">
+              <li>The host appears under Server Monitoring within a minute.</li>
+              <li>
+                Metrics are sent every {agent.check_interval} seconds; a heartbeat every 5
+                minutes keeps it marked active.
+              </li>
+              <li>
+                If the server is unreachable the agent queues samples and sends them when it
+                returns.
+              </li>
+              <li>This runs in the foreground only — use One-Click Install to persist it as a service.</li>
+            </ul>
+          </div>
+        </div>
+      )}
+
+      {tab === 'Manual' && !isWindows && (
         <div className="space-y-4">
           <div>
             <h4 className="mb-2 text-sm font-medium text-white">Prerequisites</h4>

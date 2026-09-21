@@ -4,46 +4,13 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/hoststats"
 )
-
-// Metrics is one collection cycle, matching the API's request body.
-type Metrics struct {
-	Timestamp time.Time `json:"timestamp"`
-
-	CPUPercent    *float64 `json:"cpu_percent,omitempty"`
-	MemoryPercent *float64 `json:"memory_percent,omitempty"`
-	MemoryUsedMB  *int64   `json:"memory_used_mb,omitempty"`
-	MemoryTotalMB *int64   `json:"memory_total_mb,omitempty"`
-	DiskPercent   *float64 `json:"disk_percent,omitempty"`
-	DiskUsedGB    *float64 `json:"disk_used_gb,omitempty"`
-	DiskTotalGB   *float64 `json:"disk_total_gb,omitempty"`
-	UptimeSeconds *int64   `json:"uptime_seconds,omitempty"`
-
-	LoadAverage1m  *float64 `json:"load_average_1m,omitempty"`
-	LoadAverage5m  *float64 `json:"load_average_5m,omitempty"`
-	LoadAverage15m *float64 `json:"load_average_15m,omitempty"`
-
-	NetworkInBytes  *int64 `json:"network_in_bytes,omitempty"`
-	NetworkOutBytes *int64 `json:"network_out_bytes,omitempty"`
-
-	Containers []Container `json:"containers"`
-}
-
-// Container is one Docker container's metrics.
-type Container struct {
-	ContainerID   string  `json:"container_id"`
-	ContainerName string  `json:"container_name"`
-	Image         string  `json:"image"`
-	Status        string  `json:"status"`
-	CPUPercent    float64 `json:"cpu_percent"`
-	MemoryPercent float64 `json:"memory_percent"`
-	MemoryUsedMB  int64   `json:"memory_used_mb"`
-}
 
 // Collector gathers host metrics. It holds the previous CPU sample because
 // utilisation is a rate: /proc/stat reports cumulative jiffies since boot, and
@@ -223,9 +190,69 @@ func osVersion() string {
 	return ""
 }
 
-func envOr(key, fallback string) string {
-	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-		return v
+// kernelVersion reads the running kernel, e.g. "Linux 6.8.0-139-generic".
+//
+// From /proc/sys/kernel rather than uname, so it works in a container with the
+// host's /proc mounted — where uname would report the container's view.
+func kernelVersion() string {
+	name := readTrimmed(hoststats.ProcRoot + "/sys/kernel/ostype")
+	release := readTrimmed(hoststats.ProcRoot + "/sys/kernel/osrelease")
+	switch {
+	case name != "" && release != "":
+		return name + " " + release
+	case release != "":
+		return release
+	default:
+		return name
 	}
-	return fallback
+}
+
+// cpuInfo returns the processor model and how many cores the host has.
+//
+// Cores are counted from the "processor" lines rather than taken from
+// runtime.NumCPU, which reports what this process may use — a container under
+// a CPU limit would otherwise report the limit as the machine's size.
+func cpuInfo() (model string, cores int) {
+	f, err := os.Open(hoststats.ProcRoot + "/cpuinfo")
+	if err != nil {
+		return "", runtime.NumCPU()
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		key, value, found := strings.Cut(scanner.Text(), ":")
+		if !found {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		switch key {
+		case "model name", "Model", "cpu model":
+			if model == "" {
+				model = value
+			}
+		case "processor":
+			cores++
+		}
+	}
+	if cores == 0 {
+		cores = runtime.NumCPU()
+	}
+	return model, cores
+}
+
+func readTrimmed(path string) string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
+}
+
+// memoryTotalMB reports the host's total memory, for the heartbeat rather
+// than a metrics cycle.
+func memoryTotalMB() (int64, error) {
+	_, total, _, err := hoststats.Memory()
+	return total, err
 }

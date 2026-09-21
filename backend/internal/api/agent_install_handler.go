@@ -58,6 +58,36 @@ func DownloadAgentBinaryHandler() gin.HandlerFunc {
 	}
 }
 
+// supportedWindowsAgentArch is separate from supportedAgentArch: the
+// Dockerfile only cross-builds Windows for amd64, so arm64 must 404 there
+// even though it is a real Linux build target.
+var supportedWindowsAgentArch = map[string]string{
+	"amd64": "amd64", "x86_64": "amd64",
+}
+
+// DownloadWindowsAgentBinaryHandler serves the Windows agent binary. Kept as
+// its own route and handler, rather than folding "linux"/"windows" into one
+// parameterized route, so the existing Linux download path — already in use
+// by every install script — is untouched.
+func DownloadWindowsAgentBinaryHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		arch, ok := supportedWindowsAgentArch[strings.ToLower(c.Param("arch"))]
+		if !ok {
+			respondError(c, http.StatusNotFound,
+				"no agent build for that architecture; amd64 is available")
+			return
+		}
+		path := filepath.Join(agentDistDir(), "sentinel-agent-windows-"+arch+".exe")
+		if _, err := os.Stat(path); err != nil {
+			respondError(c, http.StatusNotFound,
+				"the agent binary is not bundled with this server build")
+			return
+		}
+		c.Header("Content-Disposition", `attachment; filename="sentinel-agent.exe"`)
+		c.File(path)
+	}
+}
+
 // installScriptTemplates holds the two installers. They are templates rather
 // than static files so the server's own URL is baked in, which is the one
 // value an operator would otherwise have to fill in by hand and the one most
@@ -65,6 +95,7 @@ func DownloadAgentBinaryHandler() gin.HandlerFunc {
 var installScripts = map[string]*template.Template{
 	"server-agent.sh":        template.Must(template.New("bash").Parse(bashInstallScript)),
 	"server-docker-agent.sh": template.Must(template.New("docker").Parse(dockerInstallScript)),
+	"server-agent.ps1":       template.Must(template.New("powershell").Parse(windowsInstallScript)),
 }
 
 // ServeInstallScriptHandler serves an installation script.
@@ -90,7 +121,11 @@ func ServeInstallScriptHandler(settings *services.SettingsService) gin.HandlerFu
 			return
 		}
 
-		c.Header("Content-Type", "text/x-shellscript; charset=utf-8")
+		contentType := "text/x-shellscript; charset=utf-8"
+		if strings.HasSuffix(c.Param("script"), ".ps1") {
+			contentType = "text/plain; charset=utf-8"
+		}
+		c.Header("Content-Type", contentType)
 		if err := tmpl.Execute(c.Writer, map[string]string{"SentinelURL": url}); err != nil {
 			// The status is already written by this point, so there is nothing
 			// to do but record it.
@@ -103,5 +138,6 @@ func ServeInstallScriptHandler(settings *services.SettingsService) gin.HandlerFu
 // the router, outside the API group that requires a user session.
 func RegisterAgentInstallRoutes(router *gin.Engine, settings *services.SettingsService) {
 	router.GET("/agent/download/linux/:arch", DownloadAgentBinaryHandler())
+	router.GET("/agent/download/windows/:arch", DownloadWindowsAgentBinaryHandler())
 	router.GET("/scripts/:script", ServeInstallScriptHandler(settings))
 }

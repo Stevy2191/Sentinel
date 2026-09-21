@@ -345,3 +345,194 @@ else
   exit 1
 fi
 `
+
+// windowsInstallScript installs the agent as a native Windows service.
+//
+// Mirrors bashInstallScript's structure exactly: prerequisites, a
+// reachability check before anything is installed, download, install,
+// service registration, and a verification loop that tails the log for
+// "registered with server" rather than declaring success once the process is
+// merely running. Written to be run twice safely, same as the bash version:
+// an existing install is stopped, replaced and restarted, not refused.
+//
+// Written against PowerShell 5.1 syntax (what Windows Server 2016+ and
+// Windows 10/11 ship by default), which has no null-coalescing or ternary
+// operators and no backtick-free way to know it is even PowerShell 7 — so
+// none of that newer syntax is used here. Backticks themselves are avoided
+// throughout: this is a Go raw string literal, which cannot contain one.
+const windowsInstallScript = `# Sentinel monitoring agent installer.
+#
+#   $env:AGENT_ID="agent_..."; $env:SERVER_TOKEN="srv_..."
+#   iwr -useb <url>/scripts/server-agent.ps1 | iex
+#
+# Installs the agent to Program Files, registers it as a Windows service, and
+# starts it. Run from an elevated PowerShell (Run as Administrator).
+
+function Die($msg) {
+    Write-Host "error: $msg" -ForegroundColor Red
+    exit 1
+}
+function Info($msg) {
+    Write-Host "==> $msg"
+}
+
+$ServiceName = "SentinelAgent"
+$InstallDir = "$env:ProgramFiles\SentinelAgent"
+$BinPath = Join-Path $InstallDir "sentinel-agent.exe"
+$DataDir = "$env:ProgramData\SentinelAgent"
+$LogPath = Join-Path $DataDir "agent.log"
+
+# --- prerequisites -----------------------------------------------------
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    Die "run this from an elevated PowerShell (right-click PowerShell, Run as Administrator)"
+}
+
+if (-not $env:SENTINEL_URL) { $env:SENTINEL_URL = $env:POCKETBASE_URL }
+if (-not $env:SENTINEL_URL) { $env:SENTINEL_URL = "{{.SentinelURL}}" }
+$env:SENTINEL_URL = $env:SENTINEL_URL.TrimEnd('/')
+if (-not $env:AGENT_ID) { Die "AGENT_ID is not set - copy the command from Sentinel" }
+if (-not $env:SERVER_TOKEN) { Die "SERVER_TOKEN is not set - copy the command from Sentinel" }
+if (-not $env:SERVER_NAME) { $env:SERVER_NAME = $env:COMPUTERNAME }
+if (-not $env:OS_TYPE) { $env:OS_TYPE = "windows" }
+if (-not $env:CHECK_INTERVAL) { $env:CHECK_INTERVAL = "60" }
+if (-not $env:RETRY_ATTEMPTS) { $env:RETRY_ATTEMPTS = "3" }
+if (-not $env:DISK_PATH) { $env:DISK_PATH = "C:\" }
+
+if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64") {
+    Die "unsupported architecture: $env:PROCESSOR_ARCHITECTURE (only amd64 is available)"
+}
+$Arch = "amd64"
+
+Info "installing the Sentinel agent"
+Write-Host "    server:   $env:SENTINEL_URL"
+Write-Host "    agent:    $env:AGENT_ID"
+Write-Host "    interval: $($env:CHECK_INTERVAL)s"
+
+# --- can this machine actually reach Sentinel? --------------------------
+# Checked before anything is installed, same reasoning as the bash script:
+# a wrong address otherwise shows up as a download that hangs with nothing
+# said about why.
+try {
+    $parsedUrl = [Uri]$env:SENTINEL_URL
+} catch {
+    Die "SENTINEL_URL is not a valid URL: $env:SENTINEL_URL"
+}
+$loopbackHosts = @('localhost', 'localhost.localdomain', '0.0.0.0', '::1')
+if ($parsedUrl.IsLoopback -or ($loopbackHosts -contains $parsedUrl.Host) -or ($parsedUrl.Host -like '127.*')) {
+    Write-Host "error: SENTINEL_URL is $env:SENTINEL_URL" -ForegroundColor Red
+    Write-Host "       That address means *this* machine, not the Sentinel server, so the agent"
+    Write-Host "       would try to report to itself and never connect."
+    Write-Host "       It comes from the address Sentinel was open at in your browser. Set the"
+    Write-Host "       external and internal URLs under Settings -> System to an address other"
+    Write-Host "       machines can reach, then copy the install command again."
+    exit 1
+}
+
+Info "checking that $env:SENTINEL_URL is reachable"
+try {
+    Invoke-WebRequest -Uri "$env:SENTINEL_URL/health" -UseBasicParsing -TimeoutSec 20 | Out-Null
+} catch {
+    Write-Host "error: cannot reach Sentinel at $env:SENTINEL_URL from this machine." -ForegroundColor Red
+    Write-Host "       Check from here with:  Invoke-WebRequest $env:SENTINEL_URL/health"
+    Write-Host "       Common causes: the URL names an address only the Sentinel server can resolve,"
+    Write-Host "       a firewall between the two, or Sentinel not listening on that port."
+    exit 1
+}
+
+# --- download ------------------------------------------------------------
+# To a temporary file first, so a failed download cannot leave a
+# half-written binary where a working one used to be.
+$tmpBin = Join-Path $env:TEMP "sentinel-agent-download.exe"
+Info "downloading the agent for windows/$Arch"
+$downloaded = $false
+for ($attempt = 1; $attempt -le 3; $attempt++) {
+    try {
+        Invoke-WebRequest -Uri "$env:SENTINEL_URL/agent/download/windows/$Arch" -OutFile $tmpBin -UseBasicParsing -TimeoutSec 300
+        $downloaded = $true
+        break
+    } catch {
+        Start-Sleep -Seconds 2
+    }
+}
+if (-not $downloaded) { Die "could not download the agent from $env:SENTINEL_URL" }
+if ((Get-Item $tmpBin).Length -eq 0) { Die "the downloaded agent is empty" }
+
+$existingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($existingService -and $existingService.Status -eq "Running") {
+    Info "stopping the running agent"
+    Stop-Service -Name $ServiceName
+}
+
+New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
+Copy-Item -Path $tmpBin -Destination $BinPath -Force
+Remove-Item -Path $tmpBin -Force -ErrorAction SilentlyContinue
+
+# --- service ---------------------------------------------------------------
+# Environment variables come from the service's own registry key rather than
+# a config file: this is the officially-supported way a Windows service gets
+# per-service environment, and the Service Control Manager applies it to the
+# process automatically, so the agent's own os.Getenv-based configuration
+# needs no Windows-specific code at all.
+if (-not $existingService) {
+    Info "registering the Windows service"
+    $quotedBinPath = '"' + $BinPath + '"'
+    New-Service -Name $ServiceName -BinaryPathName $quotedBinPath -DisplayName "Sentinel Monitoring Agent" -Description "Reports this host's metrics to Sentinel." -StartupType Automatic | Out-Null
+}
+
+Info "writing configuration to the service environment"
+$envLines = @(
+    "SENTINEL_URL=$env:SENTINEL_URL",
+    "AGENT_ID=$env:AGENT_ID",
+    "SERVER_TOKEN=$env:SERVER_TOKEN",
+    "SERVER_NAME=$env:SERVER_NAME",
+    "OS_TYPE=$env:OS_TYPE",
+    "CHECK_INTERVAL=$env:CHECK_INTERVAL",
+    "RETRY_ATTEMPTS=$env:RETRY_ATTEMPTS",
+    "DISK_PATH=$env:DISK_PATH"
+)
+Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName" -Name "Environment" -Value $envLines -Type MultiString
+
+Info "starting the service"
+Start-Service -Name $ServiceName
+
+# --- verify ------------------------------------------------------------
+# Reporting success without checking would leave a broken token looking like
+# a working install until somebody noticed the host was missing.
+Start-Sleep -Seconds 3
+$service = Get-Service -Name $ServiceName
+if ($service.Status -eq "Running") {
+    Info "agent installed and running"
+    Write-Host ""
+    Write-Host "    status: Get-Service $ServiceName"
+    Write-Host ('    logs:   Get-Content -Path "' + $LogPath + '" -Tail 20 -Wait')
+    Write-Host ""
+
+    $registered = $false
+    $rejected = $false
+    for ($i = 1; $i -le 10; $i++) {
+        $logContent = Get-Content -Path $LogPath -ErrorAction SilentlyContinue -Raw
+        if ($logContent -match "rejected by server") { $rejected = $true; break }
+        if ($logContent -match "registered with server") { $registered = $true; break }
+        Start-Sleep -Seconds 2
+    }
+
+    if ($rejected) {
+        Write-Host "error: the server rejected the agent's credentials. Check AGENT_ID and SERVER_TOKEN." -ForegroundColor Red
+        exit 1
+    }
+    if ($registered) {
+        Write-Host "The agent has connected. The host appears under Server Monitoring now."
+    } else {
+        Write-Host "warning: the agent is running but has not reached Sentinel yet." -ForegroundColor Yellow
+        Write-Host "         Recent output:"
+        Get-Content -Path $LogPath -Tail 10 -ErrorAction SilentlyContinue
+        exit 1
+    }
+} else {
+    Write-Host "error: the agent did not stay running. Recent output:" -ForegroundColor Red
+    Get-Content -Path $LogPath -Tail 20 -ErrorAction SilentlyContinue
+    exit 1
+}
+`

@@ -32,6 +32,9 @@ RUN --mount=type=cache,target=/go/pkg/mod     --mount=type=cache,target=/root/.c
 # The monitoring agent, cross-built for the architectures a host is likely to
 # be. Built here so the server can hand the binary to an installer rather than
 # depending on a release host being reachable from the monitored machine.
+#
+# Windows is amd64 only: that covers Windows Server 2016+ and Windows 10/11,
+# which is the entire target for the Windows install path today.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     mkdir -p /app/agent-dist && \
@@ -39,7 +42,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath \
         -ldflags="-s -w -X main.version=${AGENT_VERSION:-1.0.0}" \
         -o /app/agent-dist/sentinel-agent-linux-$arch ./cmd/agent; \
-    done
+    done && \
+    CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath \
+      -ldflags="-s -w -X main.version=${AGENT_VERSION:-1.0.0}" \
+      -o /app/agent-dist/sentinel-agent-windows-amd64.exe ./cmd/agent
 
 # Runtime stage.
 FROM alpine:latest
