@@ -891,11 +891,11 @@ func notifyAgentThresholdChange(
 	label := thresholdMetricLabels[change.Metric]
 	status := "warning"
 	previous := ""
-	message := fmt.Sprintf("%s is at %.0f%%, at or above the %d%% threshold.", label, change.Value, change.Threshold)
+	message := fmt.Sprintf("%s is at %.1f%%, at or above the %d%% threshold.", label, change.Value, change.Threshold)
 	if !change.Breached {
 		status = "recovered"
 		previous = "warning"
-		message = fmt.Sprintf("%s is back under the %d%% threshold (currently %.0f%%).", label, change.Threshold, change.Value)
+		message = fmt.Sprintf("%s is back under the %d%% threshold (currently %.1f%%).", label, change.Threshold, change.Value)
 	}
 
 	agentID := agent.ID

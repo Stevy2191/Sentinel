@@ -12,7 +12,7 @@ func TestTelegramBuildTextWarning(t *testing.T) {
 	if !strings.Contains(got, "🟡") {
 		t.Errorf("expected the warning emoji in the message, got: %s", got)
 	}
-	if strings.HasPrefix(got, "*web-01* \\- 🟢") {
+	if strings.Contains(got, "🟢") {
 		t.Error("warning must not render with the green/good emoji")
 	}
 }

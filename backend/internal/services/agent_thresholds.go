@@ -94,3 +94,23 @@ func normalizeThreshold(v *int) *int {
 	}
 	return v
 }
+
+// sameThreshold reports whether two possibly-nil threshold values are equal.
+// Used to tell "the operator actually changed this metric's threshold" apart
+// from "this request happens to resend the value already stored" - the edit
+// form sends all three thresholds on every save, so a save that touches only
+// the name or interval must not re-arm an alert that is still open.
+func sameThreshold(a, b *int) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+// defaultThresholdPtr returns a fresh pointer to the default threshold
+// percent, for constructing an agent whose thresholds start at the default
+// rather than disabled.
+func defaultThresholdPtr() *int {
+	v := models.DefaultThresholdPercent
+	return &v
+}

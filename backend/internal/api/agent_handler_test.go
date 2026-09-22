@@ -35,3 +35,30 @@ func TestValidateThreshold(t *testing.T) {
 		})
 	}
 }
+
+func TestOrDefaultThreshold(t *testing.T) {
+	v := func(n int) *int { return &n }
+
+	cases := []struct {
+		name string
+		in   *int
+		want *int
+	}{
+		{"nil becomes the default", nil, v(90)},
+		{"0 stays disabled", v(0), nil},
+		{"a real value passes through unchanged", v(75), v(75)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := orDefaultThreshold(c.in)
+			switch {
+			case c.want == nil && got != nil:
+				t.Errorf("orDefaultThreshold(%v) = %v, want nil", c.in, *got)
+			case c.want != nil && got == nil:
+				t.Errorf("orDefaultThreshold(%v) = nil, want %v", c.in, *c.want)
+			case c.want != nil && got != nil && *got != *c.want:
+				t.Errorf("orDefaultThreshold(%v) = %v, want %v", c.in, *got, *c.want)
+			}
+		})
+	}
+}

@@ -186,6 +186,12 @@ func (s *AgentService) Reconnect(ctx context.Context, agentID string, name strin
 		OSType:        "linux",
 		CheckInterval: models.DefaultAgentInterval,
 		RetryAttempts: models.DefaultAgentRetries,
+		// A re-registered host starts watched, the same as a brand-new one -
+		// it should not come back silently unmonitored just because it was
+		// deleted and reconnected rather than added fresh.
+		CPUThresholdPercent:    defaultThresholdPtr(),
+		MemoryThresholdPercent: defaultThresholdPtr(),
+		DiskThresholdPercent:   defaultThresholdPtr(),
 		// Pending rather than active: nothing has reported under this
 		// registration yet, and it stays pending until the host does.
 		Status:    models.AgentPending,
@@ -250,17 +256,33 @@ func (s *AgentService) Update(ctx context.Context, agentID string, settings Agen
 	// resets its active-alert flag without notifying: nothing about the
 	// server itself changed, only what is being watched. The next incoming
 	// sample re-evaluates fresh against whatever the threshold now is.
+	//
+	// The reset only fires when the value actually changes. The edit form
+	// resends all three thresholds on every save, so an update that merely
+	// renames the server or changes its interval must not silently re-arm
+	// an alert that is still open - that would fire a duplicate breach
+	// notification the next time metrics come in, for a threshold nobody
+	// touched.
 	if settings.CPUThresholdPercent != nil {
-		updates["cpu_threshold_percent"] = normalizeThreshold(settings.CPUThresholdPercent)
-		updates["cpu_alert_active"] = false
+		next := normalizeThreshold(settings.CPUThresholdPercent)
+		updates["cpu_threshold_percent"] = next
+		if !sameThreshold(agent.CPUThresholdPercent, next) {
+			updates["cpu_alert_active"] = false
+		}
 	}
 	if settings.MemoryThresholdPercent != nil {
-		updates["memory_threshold_percent"] = normalizeThreshold(settings.MemoryThresholdPercent)
-		updates["memory_alert_active"] = false
+		next := normalizeThreshold(settings.MemoryThresholdPercent)
+		updates["memory_threshold_percent"] = next
+		if !sameThreshold(agent.MemoryThresholdPercent, next) {
+			updates["memory_alert_active"] = false
+		}
 	}
 	if settings.DiskThresholdPercent != nil {
-		updates["disk_threshold_percent"] = normalizeThreshold(settings.DiskThresholdPercent)
-		updates["disk_alert_active"] = false
+		next := normalizeThreshold(settings.DiskThresholdPercent)
+		updates["disk_threshold_percent"] = next
+		if !sameThreshold(agent.DiskThresholdPercent, next) {
+			updates["disk_alert_active"] = false
+		}
 	}
 	if err := s.db.WithContext(ctx).Model(&models.Agent{}).
 		Where("id = ?", agent.ID).Updates(updates).Error; err != nil {
