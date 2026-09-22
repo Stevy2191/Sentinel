@@ -6,6 +6,10 @@ frontend/dist/
 .env
 .env.local
 
+# Local per-host compose overrides (e.g. running a second stack on a host
+# that already has one, with renamed containers to avoid name collisions).
+docker-compose.override.yml
+
 # repair.sh runtime artifacts
 repair.log
 backup-*.sql
