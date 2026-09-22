@@ -26,12 +26,19 @@ services:
     # nginx.conf's healthcheck curls plain HTTP; this container only serves
     # HTTPS (Caddy's automatic HTTP->HTTPS redirect answers :80 with a
     # redirect, not a 200), so the check itself must switch to HTTPS too.
+    # Curling by bare IP sends no SNI matching the {$DOMAIN}-keyed site
+    # block, so Caddy can't select a cert and the handshake fails - the
+    # check must present the actual DOMAIN via --resolve instead. $$ is
+    # Compose's escape for a literal $, so $DOMAIN is read by the
+    # container's own shell (CMD-SHELL), not substituted by Compose.
+    # start_period is longer than the base file's: in letsencrypt mode
+    # nothing is servable on 443 until ACME issuance finishes.
     healthcheck:
-      test: ["CMD", "curl", "-fsk", "https://127.0.0.1/health"]
+      test: ["CMD-SHELL", "curl -fsk --resolve \"$$DOMAIN:443:127.0.0.1\" \"https://$$DOMAIN/health\""]
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 60s
     volumes:
       # Caddy's cert/state storage, so a recreated container reuses an
       # already-issued certificate instead of requesting a new one - Let's

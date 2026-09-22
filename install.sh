@@ -196,17 +196,18 @@ resolve_port() {
   ok "Port $port ($label) is now available."
 }
 
-# ask_port VARNAME LABEL DEFAULT [EXCLUDE_PORT]
-# Prompts for a port (1024-65535), optionally requiring it to differ from
-# EXCLUDE_PORT, warns on conflict, and stores the result in VARNAME.
+# ask_port VARNAME LABEL DEFAULT [EXCLUDE_PORT] [MIN]
+# Prompts for a port (MIN-65535, MIN defaults to 1024), optionally requiring
+# it to differ from EXCLUDE_PORT, warns on conflict, and stores the result
+# in VARNAME.
 ask_port() {
-  local __name="$1" label="$2" default="$3" exclude="${4:-}"
+  local __name="$1" label="$2" default="$3" exclude="${4:-}" min="${5:-1024}"
   local chosen
   while true; do
     if ! read -r -p "  Enter ${label} port (default ${default}): " INPUT; then INPUT=""; fi
     chosen="${INPUT:-$default}"
-    if ! printf '%s' "$chosen" | grep -Eq '^[0-9]+$' || [ "$chosen" -lt 1024 ] || [ "$chosen" -gt 65535 ]; then
-      err "Port must be a number between 1024 and 65535."
+    if ! printf '%s' "$chosen" | grep -Eq '^[0-9]+$' || [ "$chosen" -lt "$min" ] || [ "$chosen" -gt 65535 ]; then
+      err "Port must be a number between ${min} and 65535."
       continue
     fi
     if [ -n "$exclude" ] && [ "$chosen" = "$exclude" ]; then
@@ -268,8 +269,12 @@ prompt_for_https() {
       HTTPS_MODE="caddy"
       COMPOSE_EXTRA_FILE="docker-compose.caddy.yml"
       if ! read -r -p "  Domain name Sentinel will be reached at: " DOMAIN; then DOMAIN=""; fi
-      while [ -z "$DOMAIN" ]; do
-        err "A domain is required for Caddy mode, even for a self-signed cert."
+      while [ -z "$DOMAIN" ] || printf '%s' "$DOMAIN" | grep -Eq '[[:space:]:]'; do
+        if [ -n "$DOMAIN" ]; then
+          err "Domain must not contain a port or whitespace - just the hostname."
+        else
+          err "A domain is required for Caddy mode, even for a self-signed cert."
+        fi
         if ! read -r -p "  Domain name Sentinel will be reached at: " DOMAIN; then DOMAIN=""; fi
       done
       info "  a) Let's Encrypt - needs a real public domain and this server"
@@ -284,13 +289,28 @@ prompt_for_https() {
             err "Let's Encrypt requires a contact email."
             if ! read -r -p "  Email for Let's Encrypt renewal notices: " LETSENCRYPT_EMAIL; then LETSENCRYPT_EMAIL=""; fi
           done
+          # Let's Encrypt's HTTP-01 challenge is answered on host port 80, and
+          # Caddy's automatic HTTP->HTTPS redirect always targets 443 with no
+          # port suffix - anything else here guarantees issuance failure, so
+          # this is forced rather than asked. An operator who needs different
+          # external ports needs their own port-forwarding proxy in front,
+          # which is the "bring your own reverse proxy" mode instead.
+          FRONTEND_PORT=80
+          HTTPS_PORT=443
+          info "Let's Encrypt requires ports 80 and 443 - using those (not the port chosen earlier)."
+          if port_in_use "$FRONTEND_PORT"; then
+            warn "Port 80 is already in use - Let's Encrypt's challenge will fail until it's free."
+          fi
+          if port_in_use "$HTTPS_PORT"; then
+            warn "Port 443 is already in use - Caddy will fail to start until it's free."
+          fi
           ;;
         *)
           TLS_MODE="selfsigned"
+          info "What port should HTTPS run on?"
+          ask_port HTTPS_PORT "HTTPS" 443 "$FRONTEND_PORT" 1
           ;;
       esac
-      info "What port should HTTPS run on?"
-      ask_port HTTPS_PORT "HTTPS" 443 "$FRONTEND_PORT"
       ok "Caddy will serve ${DOMAIN} (${TLS_MODE})."
       ;;
     *)
@@ -480,6 +500,16 @@ if [ "$ADMINER_ENABLED" = "true" ]; then COMPOSE_PROFILES="adminer"; else COMPOS
 # through never leaves a half-written .env behind.
 env_quote_selftest
 
+# Only written when Caddy mode was chosen. Compose auto-includes a
+# docker-compose.override.yml if present UNLESS COMPOSE_FILE is set at all -
+# so an unconditional COMPOSE_FILE line here would silently break that
+# standard mechanism for every operator who picked modes 1 or 3, not just
+# enable this feature's override for mode 2.
+COMPOSE_FILE_LINE=""
+if [ -n "$COMPOSE_EXTRA_FILE" ]; then
+  COMPOSE_FILE_LINE="COMPOSE_FILE=$(env_quote "docker-compose.yml:$COMPOSE_EXTRA_FILE")"
+fi
+
 ENV_TMP=".env.tmp.$$"
 trap 'rm -f "$ENV_TMP"' EXIT
 
@@ -551,7 +581,7 @@ DOMAIN=$(env_quote "$DOMAIN")
 TLS_MODE=$(env_quote "$TLS_MODE")
 LETSENCRYPT_EMAIL=$(env_quote "$LETSENCRYPT_EMAIL")
 HTTPS_PORT=$(env_quote "$HTTPS_PORT")
-COMPOSE_FILE=$(env_quote "docker-compose.yml${COMPOSE_EXTRA_FILE:+:$COMPOSE_EXTRA_FILE}")
+${COMPOSE_FILE_LINE}
 ENV
 then
   err "Could not write $ENV_TMP."
@@ -599,7 +629,15 @@ case "${START_ANSWER:-y}" in
     $COMPOSE $PROFILE_FLAGS up -d --build
     echo
     ok "Sentinel is starting."
-    info "  Web UI:   ${BOLD}http://localhost:${FRONTEND_PORT}${RESET}"
+    if [ "$HTTPS_MODE" = "caddy" ]; then
+      if [ "$HTTPS_PORT" = "443" ]; then
+        info "  Web UI:   ${BOLD}https://${DOMAIN}${RESET}"
+      else
+        info "  Web UI:   ${BOLD}https://${DOMAIN}:${HTTPS_PORT}${RESET}"
+      fi
+    else
+      info "  Web UI:   ${BOLD}http://localhost:${FRONTEND_PORT}${RESET}"
+    fi
     info "  Backend:  http://localhost:${BACKEND_PORT}/api/v1"
     if [ "$ADMINER_ENABLED" = "true" ]; then
       info "  DB admin: http://localhost:${ADMINER_PORT} (Adminer)"

@@ -1,5 +1,27 @@
+# Keep this file's routes, matchers, and header values in sync with
+# frontend/nginx.conf - the two images must behave identically to an
+# operator, and nothing enforces that automatically.
+#
+# HTTP/3 needs a published UDP port this deployment doesn't provide;
+# without this, every client wastes a round trip attempting h3 anyway
+# (Caddy advertises it by default) before falling back to h2.
+{
+	servers {
+		protocols h1 h2
+	}
+}
+
 {$DOMAIN} {
 	__TLS_DIRECTIVE__
+
+	log {
+		output stdout
+	}
+
+	# Matches nginx.conf's client_max_body_size 20M.
+	request_body {
+		max_size 20MB
+	}
 
 	header {
 		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"

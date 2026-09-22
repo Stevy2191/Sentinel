@@ -155,6 +155,7 @@ Images are published to:
 
 - `ghcr.io/stevy2191/sentinel-backend:latest`
 - `ghcr.io/stevy2191/sentinel-frontend:latest`
+- `ghcr.io/stevy2191/sentinel-frontend-caddy:latest` (Caddy HTTPS mode)
 
 For private images, authenticate first: `docker login ghcr.io` (GitHub username +
 a personal access token with `read:packages`).
@@ -166,6 +167,11 @@ docker compose logs -f backend      # follow logs
 docker compose pull && docker compose up -d   # update to latest images
 docker compose down                 # stop
 docker compose down -v              # stop and DELETE the database volume
+                                     # (in Caddy mode, this also deletes
+                                     # caddy_data - a fresh Let's Encrypt
+                                     # cert will be re-requested next
+                                     # start, and LE rate-limits repeated
+                                     # issuance for the same domain)
 ```
 
 ### HTTPS

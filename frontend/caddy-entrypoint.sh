@@ -24,4 +24,4 @@ esac
 
 sed "s|__TLS_DIRECTIVE__|${TLS_DIRECTIVE}|" /etc/caddy/Caddyfile.template > /etc/caddy/Caddyfile
 
-exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile "$@"
