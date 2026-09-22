@@ -216,6 +216,14 @@ type AgentSettings struct {
 	// NotifyChannels is applied only when non-nil. Nil means "leave as is",
 	// which is different from an empty slice meaning "alert nowhere".
 	NotifyChannels *models.StringSlice
+	// Each threshold is applied only when non-nil - nil means "leave this
+	// threshold as it is". Within a non-nil pointer, 0 disables the
+	// threshold and 1-100 sets it: the same sentinel-value convention
+	// IPOverride's empty string already uses for "clear", rather than a
+	// second convention for the same idea (see normalizeThreshold).
+	CPUThresholdPercent    *int
+	MemoryThresholdPercent *int
+	DiskThresholdPercent   *int
 }
 
 func (s *AgentService) Update(ctx context.Context, agentID string, settings AgentSettings) (*models.Agent, error) {
@@ -237,6 +245,22 @@ func (s *AgentService) Update(ctx context.Context, agentID string, settings Agen
 	// resetting it to "every channel".
 	if settings.NotifyChannels != nil {
 		updates["notify_channels"] = *settings.NotifyChannels
+	}
+	// Editing a threshold - raising it, lowering it, or disabling it -
+	// resets its active-alert flag without notifying: nothing about the
+	// server itself changed, only what is being watched. The next incoming
+	// sample re-evaluates fresh against whatever the threshold now is.
+	if settings.CPUThresholdPercent != nil {
+		updates["cpu_threshold_percent"] = normalizeThreshold(settings.CPUThresholdPercent)
+		updates["cpu_alert_active"] = false
+	}
+	if settings.MemoryThresholdPercent != nil {
+		updates["memory_threshold_percent"] = normalizeThreshold(settings.MemoryThresholdPercent)
+		updates["memory_alert_active"] = false
+	}
+	if settings.DiskThresholdPercent != nil {
+		updates["disk_threshold_percent"] = normalizeThreshold(settings.DiskThresholdPercent)
+		updates["disk_alert_active"] = false
 	}
 	if err := s.db.WithContext(ctx).Model(&models.Agent{}).
 		Where("id = ?", agent.ID).Updates(updates).Error; err != nil {
