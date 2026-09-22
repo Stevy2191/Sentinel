@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { X, Loader2 } from 'lucide-react'
 import AgentSettingsFields, {
   notifyChannelsPayload,
+  thresholdPayload,
   validateAgentSettings,
   type AgentSettings,
 } from '@/components/AgentSettingsFields'
@@ -29,6 +30,14 @@ function settingsOf(agent: Agent): AgentSettings {
     // form shows what is actually configured.
     notifyEnabled: agent.notify_channels === null || (agent.notify_channels ?? []).length > 0,
     notifyChannels: agent.notify_channels ?? [],
+    // null means the metric isn't watched; falling back to 90 only matters
+    // for the number input's value while the checkbox is unchecked.
+    cpuThresholdEnabled: agent.cpu_threshold_percent !== null,
+    cpuThresholdPercent: agent.cpu_threshold_percent ?? 90,
+    memoryThresholdEnabled: agent.memory_threshold_percent !== null,
+    memoryThresholdPercent: agent.memory_threshold_percent ?? 90,
+    diskThresholdEnabled: agent.disk_threshold_percent !== null,
+    diskThresholdPercent: agent.disk_threshold_percent ?? 90,
   }
 }
 
@@ -76,7 +85,13 @@ export default function EditServerAgentModal({ agent, isOpen, onClose, onSaved, 
     values.osType !== initial.osType ||
     values.ipOverride !== initial.ipOverride ||
     values.interval !== initial.interval ||
-    values.retries !== initial.retries
+    values.retries !== initial.retries ||
+    values.cpuThresholdEnabled !== initial.cpuThresholdEnabled ||
+    values.cpuThresholdPercent !== initial.cpuThresholdPercent ||
+    values.memoryThresholdEnabled !== initial.memoryThresholdEnabled ||
+    values.memoryThresholdPercent !== initial.memoryThresholdPercent ||
+    values.diskThresholdEnabled !== initial.diskThresholdEnabled ||
+    values.diskThresholdPercent !== initial.diskThresholdPercent
 
   if (!isOpen) return null
 
@@ -93,6 +108,12 @@ export default function EditServerAgentModal({ agent, isOpen, onClose, onSaved, 
         // address goes back to whatever the agent detects.
         ip_address_override: values.ipOverride.trim(),
         notify_channels: notifyChannelsPayload(values),
+        cpu_threshold_percent: thresholdPayload(values.cpuThresholdEnabled, values.cpuThresholdPercent),
+        memory_threshold_percent: thresholdPayload(
+          values.memoryThresholdEnabled,
+          values.memoryThresholdPercent,
+        ),
+        disk_threshold_percent: thresholdPayload(values.diskThresholdEnabled, values.diskThresholdPercent),
       })
       push(`${values.name.trim()} updated`, 'success')
       onSaved()
