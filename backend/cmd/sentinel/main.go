@@ -350,6 +350,9 @@ func run() error {
 	agentService.SetStatusChangeHook(func(ctx context.Context, change services.AgentStatusChange) {
 		notifyAgentStatusChange(ctx, notificationManager, change)
 	})
+	agentService.SetThresholdChangeHook(func(ctx context.Context, change services.AgentThresholdChange) {
+		notifyAgentThresholdChange(ctx, notificationManager, change)
+	})
 	go agentService.StartOfflineSweep(loopCtx)
 	go hostSampler.Start(loopCtx)
 
@@ -849,6 +852,65 @@ func lastContact(agent models.Agent) string {
 		return "never"
 	}
 	return agent.LastHeartbeat.UTC().Format(time.RFC3339)
+}
+
+// thresholdMetricLabels names each threshold metric for an alert's message
+// text.
+var thresholdMetricLabels = map[string]string{
+	services.ThresholdMetricCPU:    "CPU usage",
+	services.ThresholdMetricMemory: "Memory usage",
+	services.ThresholdMetricDisk:   "Disk usage",
+}
+
+// notifyAgentThresholdChange alerts when a server's resource usage crosses a
+// configured threshold, in either direction.
+//
+// Status is "warning", never "down": every plugin's status handling treats
+// anything but the literal string "down" as green/good today, and reusing
+// "down" here would have every channel announce the server is offline when
+// it is actually still up and merely short on a resource.
+func notifyAgentThresholdChange(
+	ctx context.Context,
+	notificationManager *notifications.NotificationManager,
+	change services.AgentThresholdChange,
+) {
+	agent := change.Agent
+	if !agent.NotifiesAnyChannel() {
+		log.Printf("[agent] %s crossed its %s threshold but has notifications disabled", agent.Name, change.Metric)
+		return
+	}
+
+	target := agent.AgentID
+	if ip := agent.EffectiveIP(); ip != nil && *ip != "" {
+		target = *ip
+	}
+	if agent.Hostname != nil && *agent.Hostname != "" {
+		target = *agent.Hostname
+	}
+
+	label := thresholdMetricLabels[change.Metric]
+	status := "warning"
+	previous := ""
+	message := fmt.Sprintf("%s is at %.0f%%, at or above the %d%% threshold.", label, change.Value, change.Threshold)
+	if !change.Breached {
+		status = "recovered"
+		previous = "warning"
+		message = fmt.Sprintf("%s is back under the %d%% threshold (currently %.0f%%).", label, change.Threshold, change.Value)
+	}
+
+	agentID := agent.ID
+	if err := notificationManager.SendNotification(ctx, &notifications.NotificationMessage{
+		AgentID:        &agentID,
+		MonitorName:    agent.Name,
+		MonitorURL:     target,
+		Status:         status,
+		Message:        message,
+		PreviousStatus: previous,
+		Timestamp:      time.Now(),
+		Channels:       agent.NotifyChannels,
+	}); err != nil {
+		log.Printf("[agent] sending %s threshold notification for %s: %v", change.Metric, agent.Name, err)
+	}
 }
 
 // handleStatusChange opens/closes incidents and sends notifications when a// handleStatusChange opens/closes incidents and sends notifications when a
