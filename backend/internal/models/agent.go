@@ -41,6 +41,11 @@ const (
 
 	// MaxAgentNameLength keeps a name to something a table column can show.
 	MaxAgentNameLength = 100
+
+	// DefaultThresholdPercent is what a newly created server's CPU/memory/disk
+	// alert thresholds default to. A server added to Sentinel should be
+	// watched from the start, not silently unmonitored until someone remembers.
+	DefaultThresholdPercent = 90
 )
 
 // AgentOfflineAfter is how long without a heartbeat marks an agent offline.
@@ -84,6 +89,20 @@ type Agent struct {
 	// exactly the thing someone wants to hear about, and a default of "tell
 	// nobody" would make the feature look broken to whoever added the agent.
 	NotifyChannels StringSlice `json:"notify_channels" gorm:"column:notify_channels;type:jsonb"`
+
+	// CPU/memory/disk alert thresholds, each independently optional. nil means
+	// that metric is not watched. A breach fires once when crossed and once
+	// when it recovers - see AgentService.RecordMetrics.
+	CPUThresholdPercent    *int `json:"cpu_threshold_percent" gorm:"column:cpu_threshold_percent"`
+	MemoryThresholdPercent *int `json:"memory_threshold_percent" gorm:"column:memory_threshold_percent"`
+	DiskThresholdPercent   *int `json:"disk_threshold_percent" gorm:"column:disk_threshold_percent"`
+	// *AlertActive is true while a threshold breach is open, mirroring how
+	// Status itself gates the offline alert: the flag is the one-shot record
+	// of "is there an open alert for this metric right now", not a counter.
+	CPUAlertActive    bool `json:"-" gorm:"column:cpu_alert_active"`
+	MemoryAlertActive bool `json:"-" gorm:"column:memory_alert_active"`
+	DiskAlertActive   bool `json:"-" gorm:"column:disk_alert_active"`
+
 	Hostname       *string     `json:"hostname" gorm:"column:hostname"`
 	OSVersion      *string     `json:"os_version" gorm:"column:os_version"`
 	AgentVersion   *string     `json:"agent_version" gorm:"column:agent_version"`
