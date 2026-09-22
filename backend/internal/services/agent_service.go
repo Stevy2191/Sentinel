@@ -340,6 +340,13 @@ func (s *AgentService) RecordMetrics(ctx context.Context, agent *models.Agent, m
 	}
 	metric.AgentID = agent.ID
 
+	// Decided before the transaction: the decision only reads the incoming
+	// sample and the agent's already-loaded state, and doing it here keeps
+	// the transaction body free of anything but database writes.
+	cpu := evaluateThreshold(metric.CPUPercent, agent.CPUThresholdPercent, agent.CPUAlertActive)
+	mem := evaluateThreshold(metric.MemoryPercent, agent.MemoryThresholdPercent, agent.MemoryAlertActive)
+	disk := evaluateThreshold(metric.DiskPercent, agent.DiskThresholdPercent, agent.DiskAlertActive)
+
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(metric).Error; err != nil {
 			return fmt.Errorf("storing metrics: %w", err)
@@ -360,9 +367,12 @@ func (s *AgentService) RecordMetrics(ctx context.Context, agent *models.Agent, m
 		}
 		return tx.Model(&models.Agent{}).Where("id = ?", agent.ID).
 			Updates(map[string]interface{}{
-				"last_heartbeat": time.Now(),
-				"status":         models.AgentActive,
-				"updated_at":     time.Now(),
+				"last_heartbeat":      time.Now(),
+				"status":              models.AgentActive,
+				"updated_at":          time.Now(),
+				"cpu_alert_active":    cpu.newActive,
+				"memory_alert_active": mem.newActive,
+				"disk_alert_active":   disk.newActive,
 			}).Error
 	})
 	if err != nil {
@@ -371,6 +381,26 @@ func (s *AgentService) RecordMetrics(ctx context.Context, agent *models.Agent, m
 	if wasOffline {
 		s.notifyStatusChange(ctx, AgentStatusChange{
 			Agent: *agent, From: models.AgentOffline, To: models.AgentActive,
+		})
+	}
+	// Notified only after the write commits, same reasoning as the offline
+	// recovery above: never announce a change that could still roll back.
+	if cpu.notify {
+		s.notifyThresholdChange(ctx, AgentThresholdChange{
+			Agent: *agent, Metric: ThresholdMetricCPU,
+			Value: *metric.CPUPercent, Threshold: *agent.CPUThresholdPercent, Breached: cpu.breached,
+		})
+	}
+	if mem.notify {
+		s.notifyThresholdChange(ctx, AgentThresholdChange{
+			Agent: *agent, Metric: ThresholdMetricMemory,
+			Value: *metric.MemoryPercent, Threshold: *agent.MemoryThresholdPercent, Breached: mem.breached,
+		})
+	}
+	if disk.notify {
+		s.notifyThresholdChange(ctx, AgentThresholdChange{
+			Agent: *agent, Metric: ThresholdMetricDisk,
+			Value: *metric.DiskPercent, Threshold: *agent.DiskThresholdPercent, Breached: disk.breached,
 		})
 	}
 	return nil
