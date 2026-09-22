@@ -5,7 +5,18 @@
 # HTTP/3 needs a published UDP port this deployment doesn't provide;
 # without this, every client wastes a round trip attempting h3 anyway
 # (Caddy advertises it by default) before falling back to h2.
+#
+# default_sni matters specifically when DOMAIN is a bare IP address (the
+# common case for an internal-only, no-real-hostname deployment): many TLS
+# clients - confirmed for curl, and for at least one real browser hitting a
+# live deployment - send NO SNI extension at all for an IP-literal host,
+# since RFC 6066 says SNI is for names, not addresses. Caddy's automatic
+# HTTPS picks a certificate by matching SNI, so with no SNI presented and no
+# default, it has nothing to offer and the handshake fails outright (a TLS
+# "internal error" alert, not an HTTP error - the client never even reaches
+# this file's routes). default_sni tells it which site to fall back to.
 {
+	default_sni {$DOMAIN}
 	servers {
 		protocols h1 h2
 	}
