@@ -1,0 +1,47 @@
+{$DOMAIN} {
+	__TLS_DIRECTIVE__
+
+	header {
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+		X-XSS-Protection "0"
+	}
+
+	# Liveness probe for the compose healthcheck. A dedicated handle rather
+	# than falling through to the SPA, for the same reason nginx.conf's
+	# /health location exists: the SPA fallback would otherwise answer any
+	# path with index.html and a 200, so the healthcheck would pass no
+	# matter what was actually broken.
+	@health path /health
+	handle @health {
+		respond "ok" 200
+	}
+
+	# Agent installer endpoints. Proxied with the full path preserved (no
+	# prefix stripped) — a monitored host has no reason to know this
+	# container even exists, only the URL it was given.
+	@agentPaths path /scripts/* /agent/*
+	handle @agentPaths {
+		reverse_proxy backend:3001
+	}
+
+	# API proxy. Full path preserved, same as the agent endpoints above.
+	# reverse_proxy forwards the Host header and sets X-Forwarded-* headers
+	# automatically, and handles WebSocket upgrades without extra config —
+	# nginx.conf needs explicit directives for both; Caddy does not.
+	@api path /api/*
+	handle @api {
+		reverse_proxy backend:3001
+	}
+
+	# Everything else: the SPA's static files, falling back to index.html
+	# for client-side routing.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
