@@ -196,6 +196,22 @@ resolve_port() {
   ok "Port $port ($label) is now available."
 }
 
+# detect_host_ip → prints this host's primary outbound IP, or "localhost" if
+# none of the usual tools are available. Consulting the routing table this
+# way sends no actual traffic - `ip route get` just asks the kernel which
+# local address it would use, the same trick this script already uses
+# nowhere else but that is standard for this exact purpose.
+detect_host_ip() {
+  local ip=""
+  if command -v ip >/dev/null 2>&1; then
+    ip=$(ip route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") print $(i+1); exit}')
+  fi
+  if [ -z "$ip" ] && command -v hostname >/dev/null 2>&1; then
+    ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+  fi
+  printf '%s' "${ip:-localhost}"
+}
+
 # ask_port VARNAME LABEL DEFAULT [EXCLUDE_PORT] [MIN]
 # Prompts for a port (MIN-65535, MIN defaults to 1024), optionally requiring
 # it to differ from EXCLUDE_PORT, warns on conflict, and stores the result
@@ -267,15 +283,6 @@ prompt_for_https() {
       ;;
     2)
       HTTPS_MODE="caddy"
-      if ! read -r -p "  Domain name Sentinel will be reached at: " DOMAIN; then DOMAIN=""; fi
-      while [ -z "$DOMAIN" ] || printf '%s' "$DOMAIN" | grep -Eq '[[:space:]:]'; do
-        if [ -n "$DOMAIN" ]; then
-          err "Domain must not contain a port or whitespace - just the hostname."
-        else
-          err "A domain is required for Caddy mode, even for a self-signed cert."
-        fi
-        if ! read -r -p "  Domain name Sentinel will be reached at: " DOMAIN; then DOMAIN=""; fi
-      done
       info "  a) Let's Encrypt - needs a real public domain and this server"
       info "     reachable from the internet on ports 80 and 443 right now"
       info "  b) Self-signed - works anywhere, browsers will warn it's untrusted"
@@ -283,6 +290,17 @@ prompt_for_https() {
       case "${LE_ANSWER:-b}" in
         a|A)
           TLS_MODE="letsencrypt"
+          if ! read -r -p "  Domain name Sentinel will be reached at: " DOMAIN; then DOMAIN=""; fi
+          while [ -z "$DOMAIN" ] || printf '%s' "$DOMAIN" | grep -Eq '[[:space:]:]|^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; do
+            if printf '%s' "$DOMAIN" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+              err "Let's Encrypt cannot issue a certificate for a bare IP address - it needs a real domain name. Use self-signed instead for an IP-only deployment."
+            elif [ -n "$DOMAIN" ]; then
+              err "Domain must not contain a port or whitespace - just the hostname."
+            else
+              err "A domain is required for Let's Encrypt."
+            fi
+            if ! read -r -p "  Domain name Sentinel will be reached at: " DOMAIN; then DOMAIN=""; fi
+          done
           if ! read -r -p "  Email for Let's Encrypt renewal notices: " LETSENCRYPT_EMAIL; then LETSENCRYPT_EMAIL=""; fi
           while [ -z "$LETSENCRYPT_EMAIL" ]; do
             err "Let's Encrypt requires a contact email."
@@ -308,15 +326,31 @@ prompt_for_https() {
         *)
           TLS_MODE="selfsigned"
           COMPOSE_EXTRA_FILE="docker-compose.caddy-selfsigned.yml"
+          # No real hostname is required for a self-signed cert, so this
+          # host's own IP is a sensible default an operator can just accept -
+          # same pattern as the timezone detection above.
+          DOMAIN_DETECTED="$(detect_host_ip)"
+          info "Domain name Sentinel will be reached at (this host's IP by default):"
+          if ! read -r -p "  [${DOMAIN_DETECTED}]: " DOMAIN_INPUT; then DOMAIN_INPUT=""; fi
+          DOMAIN="${DOMAIN_INPUT:-$DOMAIN_DETECTED}"
+          while printf '%s' "$DOMAIN" | grep -Eq '[[:space:]:]'; do
+            err "Domain must not contain a port or whitespace - just the hostname or IP."
+            if ! read -r -p "  [${DOMAIN_DETECTED}]: " DOMAIN_INPUT; then DOMAIN_INPUT=""; fi
+            DOMAIN="${DOMAIN_INPUT:-$DOMAIN_DETECTED}"
+          done
           # A self-signed cert has no external CA to satisfy, so unlike
           # Let's Encrypt there is no reason to also publish a separate
-          # plain-HTTP port - this one port is the only thing this
-          # deployment listens on, and the URL an operator uses directly.
-          info "What port should Sentinel be reached at over HTTPS?"
-          ask_port HTTPS_PORT "HTTPS" 443 "" 1
+          # plain-HTTP port - reusing the web UI port chosen earlier means
+          # this is the only port question for self-signed mode. A separate
+          # "what port for HTTPS" question here previously caused a real
+          # reported bug: an operator answers the earlier "web UI port"
+          # question, then silently accepts this one's own default (443)
+          # without realizing it was a different question, ending up on a
+          # port they never intended.
+          HTTPS_PORT="$FRONTEND_PORT"
           ;;
       esac
-      ok "Caddy will serve ${DOMAIN} (${TLS_MODE})."
+      ok "Caddy will serve ${DOMAIN} (${TLS_MODE}) on port ${HTTPS_PORT}."
       ;;
     *)
       HTTPS_MODE="none"
