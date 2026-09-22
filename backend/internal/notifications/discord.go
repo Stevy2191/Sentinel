@@ -21,8 +21,9 @@ const defaultDiscordTimeout = 30 * time.Second
 
 // Discord embed colors (decimal RGB).
 const (
-	colorDiscordDown = 0xEF4444 // red
-	colorDiscordUp   = 0x10B981 // emerald
+	colorDiscordDown    = 0xEF4444 // red
+	colorDiscordUp      = 0x10B981 // emerald
+	colorDiscordWarning = 0xF59E0B // amber
 )
 
 // DiscordPlugin delivers notifications to a Discord webhook using embeds.
@@ -193,9 +194,13 @@ func (p *DiscordPlugin) deliver(ctx context.Context, payload []byte) error {
 func (p *DiscordPlugin) buildPayload(m *NotificationMessage) discordPayload {
 	emoji := "🟢"
 	color := colorDiscordUp
-	if m.Status == "down" {
+	switch m.Status {
+	case "down":
 		emoji = "🔴"
 		color = colorDiscordDown
+	case "warning":
+		emoji = "🟡"
+		color = colorDiscordWarning
 	}
 
 	fields := []discordEmbedField{

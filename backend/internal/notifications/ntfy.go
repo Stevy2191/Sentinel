@@ -194,6 +194,8 @@ func (p *NtfyPlugin) buildTitle(m *NotificationMessage) string {
 		return fmt.Sprintf("[RECOVERED] %s is UP", m.MonitorName)
 	case "recovered":
 		return fmt.Sprintf("[RECOVERED] %s recovered", m.MonitorName)
+	case "warning":
+		return fmt.Sprintf("[WARNING] %s", m.MonitorName)
 	default:
 		return fmt.Sprintf("[Sentinel] %s status: %s", m.MonitorName, m.Status)
 	}
@@ -230,6 +232,10 @@ func (p *NtfyPlugin) buildTags(m *NotificationMessage) string {
 	switch m.Status {
 	case "down":
 		tags = append(tags, "red_circle")
+	case "warning":
+		// "warning" is a standard GitHub-style emoji shortcode (⚠️) that
+		// ntfy resolves the same way "red_circle"/"green_circle" already are.
+		tags = append(tags, "warning")
 	default:
 		tags = append(tags, "green_circle")
 	}

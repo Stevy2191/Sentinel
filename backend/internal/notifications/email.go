@@ -26,6 +26,7 @@ const (
 
 	colorSuccess = "#10b981" // emerald
 	colorError   = "#ef4444" // red
+	colorWarning = "#f59e0b" // amber
 	colorText    = "#334155" // slate
 	colorMuted   = "#64748b"
 )
@@ -530,6 +531,8 @@ func (p *EmailPlugin) buildSubject(m *NotificationMessage) string {
 		return fmt.Sprintf("[RECOVERED] %s is UP", m.MonitorName)
 	case "recovered":
 		return fmt.Sprintf("[RECOVERED] %s has recovered", m.MonitorName)
+	case "warning":
+		return fmt.Sprintf("[WARNING] %s", m.MonitorName)
 	default:
 		return fmt.Sprintf("[Sentinel] %s status: %s", m.MonitorName, m.Status)
 	}
@@ -544,6 +547,8 @@ func statusStyle(status string) (color, label string) {
 		return colorSuccess, "UP"
 	case "recovered":
 		return colorSuccess, "RECOVERED"
+	case "warning":
+		return colorWarning, "WARNING"
 	default:
 		return colorMuted, strings.ToUpper(status)
 	}

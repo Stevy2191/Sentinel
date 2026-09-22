@@ -191,9 +191,13 @@ func (p *SlackPlugin) deliver(ctx context.Context, payload []byte) error {
 func (p *SlackPlugin) buildPayload(m *NotificationMessage) slackPayload {
 	emoji := "🟢"
 	color := colorSuccess
-	if m.Status == "down" {
+	switch m.Status {
+	case "down":
 		emoji = "🔴"
 		color = colorError
+	case "warning":
+		emoji = "🟡"
+		color = colorWarning
 	}
 
 	fields := []slackText{

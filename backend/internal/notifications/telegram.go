@@ -221,8 +221,11 @@ func (p *TelegramPlugin) deliver(ctx context.Context, payload []byte) error {
 // buildText renders the MarkdownV2 message body, escaping all dynamic content.
 func (p *TelegramPlugin) buildText(m *NotificationMessage) string {
 	emoji := "🟢"
-	if m.Status == "down" {
+	switch m.Status {
+	case "down":
 		emoji = "🔴"
+	case "warning":
+		emoji = "🟡"
 	}
 	base := baseURL()
 

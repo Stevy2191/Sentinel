@@ -586,3 +586,29 @@ func TestResolveSecurityFromEnv(t *testing.T) {
 		})
 	}
 }
+
+func TestStatusStyleWarning(t *testing.T) {
+	color, label := statusStyle("warning")
+	if color != colorWarning {
+		t.Errorf("expected colorWarning, got %q", color)
+	}
+	if label != "WARNING" {
+		t.Errorf("expected WARNING, got %q", label)
+	}
+	// The regression this guards: before "warning" had its own case, an
+	// unrecognized status fell through to the default branch, which is
+	// harmless for statusStyle (it just upper-cases the status) but is
+	// exactly the bug in the plugins that defaulted to green/good instead.
+	if color == colorSuccess {
+		t.Error("warning must not render as the success color")
+	}
+}
+
+func TestBuildSubjectWarning(t *testing.T) {
+	p := &EmailPlugin{}
+	got := p.buildSubject(&NotificationMessage{MonitorName: "web-01", Status: "warning"})
+	want := "[WARNING] web-01"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
