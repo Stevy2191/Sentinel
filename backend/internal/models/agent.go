@@ -103,9 +103,9 @@ type Agent struct {
 	MemoryAlertActive bool `json:"-" gorm:"column:memory_alert_active"`
 	DiskAlertActive   bool `json:"-" gorm:"column:disk_alert_active"`
 
-	Hostname       *string     `json:"hostname" gorm:"column:hostname"`
-	OSVersion      *string     `json:"os_version" gorm:"column:os_version"`
-	AgentVersion   *string     `json:"agent_version" gorm:"column:agent_version"`
+	Hostname     *string `json:"hostname" gorm:"column:hostname"`
+	OSVersion    *string `json:"os_version" gorm:"column:os_version"`
+	AgentVersion *string `json:"agent_version" gorm:"column:agent_version"`
 
 	// ---- What the host reports about itself ----------------------------
 	// Refreshed on each heartbeat rather than stored per sample: these change

@@ -7,13 +7,13 @@ func TestEvaluateThreshold(t *testing.T) {
 	thr := func(v int) *int { return &v }
 
 	cases := []struct {
-		name           string
-		value          *float64
-		threshold      *int
+		name            string
+		value           *float64
+		threshold       *int
 		currentlyActive bool
-		wantActive     bool
-		wantNotify     bool
-		wantBreached   bool
+		wantActive      bool
+		wantNotify      bool
+		wantBreached    bool
 	}{
 		{"not configured, no value", nil, nil, false, false, false, false},
 		{"not configured, has a value", val(95), nil, false, false, false, false},
