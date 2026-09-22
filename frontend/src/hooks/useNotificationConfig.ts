@@ -54,12 +54,14 @@ export interface NotificationConfig {
   updated_at?: string
 }
 
-// TestResult is the payload returned by the /test endpoint.
+// TestResult is the payload returned by either test endpoint. id/last_test_at
+// are only present for the by-id endpoint, which records the result on a
+// stored row - a draft test has no row to record onto.
 export interface TestResult {
-  channel: string
+  id?: string
   test_success: boolean
   test_error: string | null
-  last_test_at: string
+  last_test_at?: string
 }
 
 // Static per-channel presentation metadata (icon, label, description).
@@ -223,8 +225,18 @@ export function useSaveNotificationConfig() {
   return { save, loading, error }
 }
 
+/** Which config to test: a channel already saved under `id`, or a `draft`
+ *  that may never be saved - e.g. a form's current, possibly-unsaved values. */
+export type TestTarget = { id: string } | { draft: Partial<NotificationConfig> }
+
 /**
- * Send a test message through a channel's stored config.
+ * Send a test message through a channel's config.
+ *
+ * A `draft` target is tested exactly as submitted, with nothing written to
+ * the database first - unlike an `id` target (which tests, and records the
+ * result onto, an already-stored row), this is safe to call from a form
+ * before deciding whether to keep it: testing must never be the thing that
+ * silently saves an in-progress channel.
  *
  * recipient overrides where it's sent - only meaningful for email, which has
  * no stored "to" address at all and otherwise just mails the configured
@@ -235,24 +247,33 @@ export function useTestNotificationConfig() {
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<TestResult | null>(null)
 
-  const test = useCallback(async (id: string, recipient?: string): Promise<TestResult | null> => {
-    setLoading(true)
-    setError(null)
-    setResult(null)
-    try {
-      const res = await api.post<{ data: TestResult }>(
-        `${BASE}/${id}/test`,
-        recipient ? { recipient } : {}
-      )
-      setResult(res.data.data)
-      return res.data.data
-    } catch (err) {
-      setError((err as ApiError).message || 'Test request failed')
-      throw err
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const test = useCallback(
+    async (target: TestTarget, recipient?: string): Promise<TestResult | null> => {
+      setLoading(true)
+      setError(null)
+      setResult(null)
+      try {
+        const res =
+          'id' in target
+            ? await api.post<{ data: TestResult }>(
+                `${BASE}/${target.id}/test`,
+                recipient ? { recipient } : {}
+              )
+            : await api.post<{ data: TestResult }>(`${BASE}/test`, {
+                ...target.draft,
+                ...(recipient ? { recipient } : {}),
+              })
+        setResult(res.data.data)
+        return res.data.data
+      } catch (err) {
+        setError((err as ApiError).message || 'Test request failed')
+        throw err
+      } finally {
+        setLoading(false)
+      }
+    },
+    []
+  )
 
   return { test, loading, result, error }
 }

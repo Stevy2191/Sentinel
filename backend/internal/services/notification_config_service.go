@@ -272,3 +272,16 @@ func (s *NotificationConfigService) TestConnection(ctx context.Context, id uuid.
 	s.logger.Printf("[notify-config] test connection for %s (%s): %t", config.Name, config.Channel, success)
 	return success, errMsg, nil
 }
+
+// TestDraftConfig tests a channel configuration directly, without it being
+// persisted anywhere first - the given fields go straight to the channel
+// plugin exactly as TestConnection's config loaded from storage does, so an
+// operator can verify a config (an SMTP password, a webhook URL) before ever
+// deciding to save it. No result is recorded, since there is no row to
+// record it on.
+func (s *NotificationConfigService) TestDraftConfig(ctx context.Context, cfg models.NotificationConfig, recipient string) (bool, string) {
+	if sendErr := s.manager.TestConfig(ctx, cfg, recipient); sendErr != nil {
+		return false, sendErr.Error()
+	}
+	return true, ""
+}

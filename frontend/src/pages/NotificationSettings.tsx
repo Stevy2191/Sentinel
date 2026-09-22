@@ -346,8 +346,7 @@ function ConfigModal({
 
   // Persist the current form, returning the channel's id on success. A new
   // channel has no id until the create call answers, which is why this hands
-  // one back rather than relying on the prop: testing straight after adding
-  // needs the id the server just assigned.
+  // one back rather than relying on the prop.
   const persist = async (): Promise<string | null> => {
     setSubmitAttempted(true)
     if (hasErrors) return null
@@ -368,14 +367,19 @@ function ConfigModal({
     onClose()
   }
 
-  // Test saves the current form first (the backend tests the stored config),
-  // then sends a test message through it.
+  // Tests exactly what's currently in the form, without saving it. This must
+  // never write anything: a "Test" click on a brand-new channel used to save
+  // it first (the backend's by-id test endpoint needs a stored row to test),
+  // which meant a channel appeared in the list - even after a failed test the
+  // operator had no intention of keeping yet - before they even learned
+  // whether the test passed. Posting the draft fields directly needs no
+  // stored row at all, so nothing is persisted unless Save is clicked.
   const handleTest = async () => {
-    const id = await persist()
-    if (!id) return
+    setSubmitAttempted(true)
+    if (hasErrors) return
     const recipient = testRecipient.trim() || undefined
     try {
-      const result = await test(id, recipient)
+      const result = await test({ draft: buildPayload(channel, form) }, recipient)
       if (result?.test_success) {
         push(
           recipient
@@ -386,7 +390,6 @@ function ConfigModal({
       } else {
         push(`✗ Test failed: ${result?.test_error ?? 'unknown error'}`, 'error')
       }
-      onChanged()
     } catch (err) {
       push(`✗ Test failed: ${(err as { message?: string }).message ?? 'error'}`, 'error')
     }

@@ -116,21 +116,33 @@ func bindChannelBody(c *gin.Context) (*models.NotificationConfig, bool) {
 		respondError(c, http.StatusBadRequest, "invalid request body")
 		return nil, false
 	}
+	if !validateChannelConfig(c, &config) {
+		return nil, false
+	}
+	return &config, true
+}
+
+// validateChannelConfig sanity-checks a channel payload already bound from a
+// request body. Its own function, separate from bindChannelBody, so
+// testDraftChannelRequest - which binds a config embedded alongside a
+// sibling "recipient" field bindChannelBody knows nothing about - can share
+// the same checks instead of duplicating them.
+func validateChannelConfig(c *gin.Context, config *models.NotificationConfig) bool {
 	config.Name = strings.TrimSpace(config.Name)
 	if config.Name == "" {
 		respondError(c, http.StatusBadRequest, "name is required")
-		return nil, false
+		return false
 	}
 	if utf8.RuneCountInString(config.Name) > maxChannelNameLength {
 		respondError(c, http.StatusBadRequest,
 			fmt.Sprintf("name must be %d characters or fewer", maxChannelNameLength))
-		return nil, false
+		return false
 	}
 	if !isValidChannel(config.Channel) {
 		respondError(c, http.StatusBadRequest, "channel must be one of: "+strings.Join(validChannels, ", "))
-		return nil, false
+		return false
 	}
-	return &config, true
+	return true
 }
 
 // CreateNotificationConfigHandler handles POST /settings/notification-channels
@@ -205,6 +217,57 @@ func SetChannelEnabledHandler(service *services.NotificationConfigService) gin.H
 			return
 		}
 		respondSuccess(c, http.StatusOK, gin.H{"id": id, "enabled": *req.Enabled})
+	}
+}
+
+// testDraftChannelRequest is the body for POST /settings/notification-channels/test:
+// the full channel configuration to test, embedded alongside the same
+// optional recipient override testChannelRequest carries.
+type testDraftChannelRequest struct {
+	models.NotificationConfig
+	Recipient string `json:"recipient"`
+}
+
+// TestDraftNotificationConfigHandler handles POST /settings/notification-channels/test
+// (admin). Tests a channel configuration straight from the request body,
+// without saving it anywhere first.
+//
+// The by-id test endpoint below requires a channel to already exist because
+// it loads the stored config before testing it - which is exactly the
+// problem this one exists to avoid. The frontend previously worked around
+// that requirement by silently saving the in-progress form before every
+// test, so clicking "Test" on a brand-new channel created a real, persisted
+// row before the operator ever learned whether the test passed - visible in
+// the channel list even after a failed test they had no intention of
+// keeping yet. Testing the submitted fields directly, the same way
+// TestConnection tests a config it already loaded from storage, needs no
+// database row to exist at all.
+func TestDraftNotificationConfigHandler(service *services.NotificationConfigService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req testDraftChannelRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			respondError(c, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if !validateChannelConfig(c, &req.NotificationConfig) {
+			return
+		}
+		recipient := strings.TrimSpace(req.Recipient)
+		if recipient != "" {
+			if _, err := mail.ParseAddress(recipient); err != nil {
+				respondError(c, http.StatusBadRequest, "recipient is not a valid email address")
+				return
+			}
+		}
+		success, testErr := service.TestDraftConfig(c.Request.Context(), req.NotificationConfig, recipient)
+		var testErrOut *string
+		if testErr != "" {
+			testErrOut = &testErr
+		}
+		respondSuccess(c, http.StatusOK, gin.H{
+			"test_success": success,
+			"test_error":   testErrOut,
+		})
 	}
 }
 
@@ -297,6 +360,10 @@ func RegisterNotificationConfigRoutes(rg *gin.RouterGroup, service *services.Not
 	g.GET("/:id", GetNotificationConfigHandler(service))
 	g.PUT("/:id", UpdateNotificationConfigHandler(service))
 	g.PATCH("/:id/enabled", SetChannelEnabledHandler(service))
+	// Registered before the create route only for reading order - gin
+	// resolves "/test" (one segment) and "/:id/test" (two) unambiguously
+	// regardless of registration order, since they're different path shapes.
+	g.POST("/test", TestDraftNotificationConfigHandler(service))
 	g.POST("/:id/test", TestNotificationConfigHandler(service))
 	g.DELETE("/:id", DeleteNotificationConfigHandler(service))
 }
