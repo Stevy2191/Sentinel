@@ -184,23 +184,39 @@ Three ways to serve Sentinel, in order of how much Sentinel itself does:
    security headers.
 2. **No HTTPS.** Plain HTTP, the default — fine for local testing or a
    network you already trust.
-3. **Caddy**, letting Sentinel own HTTPS itself:
+3. **Caddy**, letting Sentinel own HTTPS itself — two variants, matching
+   which override file you layer on top of `docker-compose.yml`
+   (`install.sh` picks the right one for you based on your answers):
 
    ```bash
-   # In .env: DOMAIN=..., TLS_MODE=letsencrypt|selfsigned, LETSENCRYPT_EMAIL=...
-   # (install.sh prompts for all of this)
+   # Let's Encrypt: DOMAIN=<real public domain>, LETSENCRYPT_EMAIL=...
    docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d
+
+   # Self-signed: DOMAIN=<anything - a hostname or a bare IP>
+   docker compose -f docker-compose.yml -f docker-compose.caddy-selfsigned.yml up -d
    ```
 
    `TLS_MODE=letsencrypt` gets a real, publicly-trusted certificate, but only
    works when `DOMAIN` is a real public domain and this server is reachable
    from the internet on ports 80 and 443 during issuance (the standard
    HTTP-01 challenge — there is no DNS-01 support, so an internal-only server
-   with a real domain still can't use this mode). `TLS_MODE=selfsigned` uses
-   Caddy's own internal CA instead: works anywhere, including entirely
-   internal networks, at the cost of a browser warning until someone trusts
-   the certificate manually. Either way, renewal is automatic — no cron job
-   or extra container to maintain.
+   with a real domain still can't use this mode). It always uses ports 80
+   and 443 — 80 to answer the challenge and to redirect, 443 for HTTPS
+   itself — since Caddy's automatic redirect always targets 443 with no
+   port suffix, and anything else would break it.
+
+   `TLS_MODE=selfsigned` uses Caddy's own internal CA instead: works
+   anywhere, including entirely internal networks or a bare IP address (no
+   real hostname needed), at the cost of a browser warning until someone
+   trusts the certificate manually. Unlike Let's Encrypt, there's no
+   external CA to satisfy, so this variant publishes only **one** port —
+   `HTTPS_PORT`, defaulting to 443 but settable to anything (e.g. `3000`),
+   and that's the port you browse to directly over HTTPS
+   (`https://<host>:<HTTPS_PORT>`) with no separate plain-HTTP listener at
+   all.
+
+   Either way, renewal is automatic — no cron job or extra container to
+   maintain.
 
 ### CI/CD
 

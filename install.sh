@@ -267,7 +267,6 @@ prompt_for_https() {
       ;;
     2)
       HTTPS_MODE="caddy"
-      COMPOSE_EXTRA_FILE="docker-compose.caddy.yml"
       if ! read -r -p "  Domain name Sentinel will be reached at: " DOMAIN; then DOMAIN=""; fi
       while [ -z "$DOMAIN" ] || printf '%s' "$DOMAIN" | grep -Eq '[[:space:]:]'; do
         if [ -n "$DOMAIN" ]; then
@@ -297,6 +296,7 @@ prompt_for_https() {
           # which is the "bring your own reverse proxy" mode instead.
           FRONTEND_PORT=80
           HTTPS_PORT=443
+          COMPOSE_EXTRA_FILE="docker-compose.caddy.yml"
           info "Let's Encrypt requires ports 80 and 443 - using those (not the port chosen earlier)."
           if port_in_use "$FRONTEND_PORT"; then
             warn "Port 80 is already in use - Let's Encrypt's challenge will fail until it's free."
@@ -307,8 +307,13 @@ prompt_for_https() {
           ;;
         *)
           TLS_MODE="selfsigned"
-          info "What port should HTTPS run on?"
-          ask_port HTTPS_PORT "HTTPS" 443 "$FRONTEND_PORT" 1
+          COMPOSE_EXTRA_FILE="docker-compose.caddy-selfsigned.yml"
+          # A self-signed cert has no external CA to satisfy, so unlike
+          # Let's Encrypt there is no reason to also publish a separate
+          # plain-HTTP port - this one port is the only thing this
+          # deployment listens on, and the URL an operator uses directly.
+          info "What port should Sentinel be reached at over HTTPS?"
+          ask_port HTTPS_PORT "HTTPS" 443 "" 1
           ;;
       esac
       ok "Caddy will serve ${DOMAIN} (${TLS_MODE})."
