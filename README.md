@@ -168,10 +168,39 @@ docker compose down                 # stop
 docker compose down -v              # stop and DELETE the database volume
 ```
 
+### HTTPS
+
+Three ways to serve Sentinel, in order of how much Sentinel itself does:
+
+1. **Your own reverse proxy** (nginx, Traefik, Nginx Proxy Manager, etc.) in
+   front, terminating TLS there. Nothing to configure here — the bundled
+   frontend already serves plain HTTP and honors `X-Forwarded-Proto` for its
+   security headers.
+2. **No HTTPS.** Plain HTTP, the default — fine for local testing or a
+   network you already trust.
+3. **Caddy**, letting Sentinel own HTTPS itself:
+
+   ```bash
+   # In .env: DOMAIN=..., TLS_MODE=letsencrypt|selfsigned, LETSENCRYPT_EMAIL=...
+   # (install.sh prompts for all of this)
+   docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d
+   ```
+
+   `TLS_MODE=letsencrypt` gets a real, publicly-trusted certificate, but only
+   works when `DOMAIN` is a real public domain and this server is reachable
+   from the internet on ports 80 and 443 during issuance (the standard
+   HTTP-01 challenge — there is no DNS-01 support, so an internal-only server
+   with a real domain still can't use this mode). `TLS_MODE=selfsigned` uses
+   Caddy's own internal CA instead: works anywhere, including entirely
+   internal networks, at the cost of a browser warning until someone trusts
+   the certificate manually. Either way, renewal is automatic — no cron job
+   or extra container to maintain.
+
 ### CI/CD
 
-`.github/workflows/docker-build.yml` builds and pushes both images to GHCR on
-every push to `main` and on `v*` tags. Pull requests build but do not push.
+`.github/workflows/docker-build.yml` builds and pushes all three images
+(`sentinel-backend`, `sentinel-frontend`, `sentinel-frontend-caddy`) to GHCR
+on every push to `main` and on `v*` tags. Pull requests build but do not push.
 
 ---
 
