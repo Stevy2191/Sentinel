@@ -86,6 +86,13 @@ type createAgentRequest struct {
 	// NotifyChannels selects where this agent alerts. Omitted means every
 	// enabled channel; an explicit empty list means nowhere.
 	NotifyChannels *[]string `json:"notify_channels"`
+	// Each threshold: omitted or 0 disables it, 1-100 sets it. Omitted
+	// (rather than DefaultThresholdPercent) is treated as "use the default"
+	// only by CreateAgentHandler, which is the one place a brand-new
+	// threshold configuration is decided.
+	CPUThresholdPercent    *int `json:"cpu_threshold_percent"`
+	MemoryThresholdPercent *int `json:"memory_threshold_percent"`
+	DiskThresholdPercent   *int `json:"disk_threshold_percent"`
 }
 
 // validateAgentSettings applies the shared bounds for create and update.
@@ -111,6 +118,36 @@ func validateAgentSettings(c *gin.Context, name, osType string, interval, retrie
 		return false
 	}
 	return true
+}
+
+// validateThreshold checks a threshold value against the wire's 0-or-1-100
+// convention (see normalizeThreshold in the services package): nil means
+// "not sent", 0 means "disable", 1-100 is a real value. Anything else is
+// rejected with a message naming the field, since create and update each
+// validate three of these under different field names.
+func validateThreshold(c *gin.Context, field string, v *int) bool {
+	if v == nil {
+		return true
+	}
+	if *v < 0 || *v > 100 {
+		respondError(c, http.StatusBadRequest, field+" must be between 1 and 100, or 0 to disable it")
+		return false
+	}
+	return true
+}
+
+// orDefaultThreshold resolves a create request's threshold: omitted becomes
+// the default (a new server should be watched from the start), an explicit
+// 0 still disables it, and anything else passes through.
+func orDefaultThreshold(v *int) *int {
+	if v == nil {
+		d := models.DefaultThresholdPercent
+		return &d
+	}
+	if *v == 0 {
+		return nil
+	}
+	return v
 }
 
 // parseIPOverride validates an operator-supplied address.
@@ -163,6 +200,11 @@ func CreateAgentHandler(agents *services.AgentService, settings *services.Settin
 		if !ok {
 			return
 		}
+		if !validateThreshold(c, "cpu_threshold_percent", req.CPUThresholdPercent) ||
+			!validateThreshold(c, "memory_threshold_percent", req.MemoryThresholdPercent) ||
+			!validateThreshold(c, "disk_threshold_percent", req.DiskThresholdPercent) {
+			return
+		}
 
 		agent := &models.Agent{
 			Name:              name,
@@ -170,6 +212,14 @@ func CreateAgentHandler(agents *services.AgentService, settings *services.Settin
 			CheckInterval:     interval,
 			RetryAttempts:     retries,
 			IPAddressOverride: override,
+			// A newly added server should be watched from the start: omitted
+			// defaults to DefaultThresholdPercent rather than "disabled",
+			// unlike an update, where omitted means "leave alone" (there is
+			// nothing yet to leave alone here). An explicit 0 still disables
+			// it for whoever unchecks a threshold before submitting.
+			CPUThresholdPercent:    orDefaultThreshold(req.CPUThresholdPercent),
+			MemoryThresholdPercent: orDefaultThreshold(req.MemoryThresholdPercent),
+			DiskThresholdPercent:   orDefaultThreshold(req.DiskThresholdPercent),
 		}
 		// nil is left as nil on purpose: it means "every enabled channel",
 		// which is the right default for a server that has gone silent.
@@ -239,6 +289,11 @@ type updateAgentRequest struct {
 	// NotifyChannels omitted leaves the current selection alone; an explicit
 	// empty list turns alerts off for this agent.
 	NotifyChannels *[]string `json:"notify_channels"`
+	// Each threshold: omitted leaves it as it is, 0 disables it, 1-100 sets
+	// it (see normalizeThreshold in the services package).
+	CPUThresholdPercent    *int `json:"cpu_threshold_percent"`
+	MemoryThresholdPercent *int `json:"memory_threshold_percent"`
+	DiskThresholdPercent   *int `json:"disk_threshold_percent"`
 }
 
 // UpdateAgentHandler handles PATCH /api/v1/agents/:agent_id.
@@ -282,12 +337,21 @@ func UpdateAgentHandler(agents *services.AgentService) gin.HandlerFunc {
 			override = parsed
 		}
 
+		if !validateThreshold(c, "cpu_threshold_percent", req.CPUThresholdPercent) ||
+			!validateThreshold(c, "memory_threshold_percent", req.MemoryThresholdPercent) ||
+			!validateThreshold(c, "disk_threshold_percent", req.DiskThresholdPercent) {
+			return
+		}
+
 		settings := services.AgentSettings{
-			Name:          name,
-			OSType:        osType,
-			CheckInterval: interval,
-			RetryAttempts: retries,
-			IPOverride:    override,
+			Name:                   name,
+			OSType:                 osType,
+			CheckInterval:          interval,
+			RetryAttempts:          retries,
+			IPOverride:             override,
+			CPUThresholdPercent:    req.CPUThresholdPercent,
+			MemoryThresholdPercent: req.MemoryThresholdPercent,
+			DiskThresholdPercent:   req.DiskThresholdPercent,
 		}
 		if req.NotifyChannels != nil {
 			channels := models.StringSlice(*req.NotifyChannels)
