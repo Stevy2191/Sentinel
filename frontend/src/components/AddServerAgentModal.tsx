@@ -3,6 +3,7 @@ import { X, Copy, Check, Loader2, ServerCog } from 'lucide-react'
 import { useAgentActions, type CreatedAgent } from '@/hooks/useAgents'
 import AgentSettingsFields, {
   notifyChannelsPayload,
+  thresholdPayload,
   validateAgentSettings,
   type AgentSettings,
 } from '@/components/AgentSettingsFields'
@@ -29,6 +30,14 @@ const BLANK: AgentSettings = {
   // wants to hear about; defaulting to silence would look broken.
   notifyEnabled: true,
   notifyChannels: [],
+  // On by default at a sensible number: a newly added server should be
+  // watched from the start, not silently unmonitored until someone remembers.
+  cpuThresholdEnabled: true,
+  cpuThresholdPercent: 90,
+  memoryThresholdEnabled: true,
+  memoryThresholdPercent: 90,
+  diskThresholdEnabled: true,
+  diskThresholdPercent: 90,
 }
 
 const TABS = ['One-Click Install', 'Docker One-Click', 'Direct Docker Run', 'Manual', 'Uninstall'] as const
@@ -144,6 +153,12 @@ export default function AddServerAgentModal({ isOpen, onClose, onCreated, push, 
         retry_attempts: values.retries,
         ip_address_override: values.ipOverride.trim(),
         notify_channels: notifyChannelsPayload(values),
+        cpu_threshold_percent: thresholdPayload(values.cpuThresholdEnabled, values.cpuThresholdPercent),
+        memory_threshold_percent: thresholdPayload(
+          values.memoryThresholdEnabled,
+          values.memoryThresholdPercent,
+        ),
+        disk_threshold_percent: thresholdPayload(values.diskThresholdEnabled, values.diskThresholdPercent),
       })
       setCreated(result)
       onCreated()
