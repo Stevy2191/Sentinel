@@ -168,9 +168,9 @@ Expected: `Valid configuration` for both.
 cd frontend
 docker build -f Dockerfile.caddy -t sentinel-frontend-caddy:test .
 docker network create caddy-test-net
-docker run -d --rm --name caddy-test-backend --network caddy-test-net \
-  python:3-alpine sh -c "mkdir -p /www && echo hi > /www/marker.txt && cd /www && python3 -m http.server 3001"
-docker run -d --rm --name caddy-test --network caddy-test-net --network-alias backend \
+docker run -d --rm --name caddy-test-backend --network caddy-test-net --network-alias backend \
+  python:3-alpine sh -c "mkdir -p /www/api && echo hi > /www/api/marker.txt && cd /www && python3 -m http.server 3001"
+docker run -d --rm --name caddy-test --network caddy-test-net \
   -p 18443:443 -e DOMAIN=localhost -e TLS_MODE=selfsigned \
   sentinel-frontend-caddy:test
 sleep 3
@@ -182,7 +182,9 @@ docker rm -f caddy-test caddy-test-backend
 docker network rm caddy-test-net
 ```
 
-Expected: `/health` → `ok`. The SPA route → the built `index.html`'s content (confirms `try_files` fallback works against the real built SPA, not a placeholder file). `/api/marker.txt` → the proxy reaches `backend:3001` with the full path preserved (a 200 with `hi`, or, if timing races the fake backend's startup, a 502 naming `backend:3001` specifically — not `connection refused` to the wrong host/port, and not a 404 from the SPA fallback, which would mean the path didn't match the `/api/*` handle at all).
+Expected: `/health` → `ok`. The SPA route → the built `index.html`'s content (confirms `try_files` fallback works against the real built SPA, not a placeholder file). `/api/marker.txt` → `hi`, 200 — the proxy reached `backend:3001` with the full path preserved (the fixture lives at `/www/api/marker.txt`, not `/www/marker.txt`, precisely because the path is never stripped).
+
+> **Note (found during Task 1's execution, not before):** the `--network-alias backend` must go on the *fake-backend* `docker run` above (as written here), not on the `caddy-test` container — attaching it to the wrong one makes `backend` resolve to Caddy's own container, which is not listening on :3001, producing a 502 that superficially looks like a startup race but is not one. The fixture path bug (`/www/marker.txt` vs. `/www/api/marker.txt`) is independent of that and would still 404 even with the alias fixed. Both are fixed in this version of the commands; Task 1's implementer diagnosed and worked around both live, then this text was corrected to match.
 
 - [ ] **Step 6: Commit**
 
