@@ -15,6 +15,10 @@ export interface Agent {
   retry_attempts: number
   /** Channels this server alerts on. null means every enabled channel. */
   notify_channels?: string[] | null
+  /** null means that metric is not watched. */
+  cpu_threshold_percent: number | null
+  memory_threshold_percent: number | null
+  disk_threshold_percent: number | null
   status: AgentStatus
   last_heartbeat: string | null
   /** The address to display: the override when set, else what was detected. */
@@ -86,6 +90,10 @@ export interface CreateAgentInput {
   ip_address_override?: string
   /** null means every enabled channel; an empty array means alert nowhere. */
   notify_channels?: string[] | null
+  /** 0 disables the threshold (the API's clear sentinel); 1-100 sets it. */
+  cpu_threshold_percent?: number
+  memory_threshold_percent?: number
+  disk_threshold_percent?: number
 }
 
 /**
