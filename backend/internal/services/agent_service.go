@@ -25,6 +25,9 @@ type AgentService struct {
 	// onStatusChange is called when an agent goes silent or starts reporting
 	// again. Optional: nil simply means nothing is listening.
 	onStatusChange func(context.Context, AgentStatusChange)
+	// onThresholdChange is called when a metric crosses its configured
+	// threshold, in either direction. Optional, same reasoning.
+	onThresholdChange func(context.Context, AgentThresholdChange)
 }
 
 func NewAgentService(db *gorm.DB) *AgentService {
