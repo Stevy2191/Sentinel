@@ -62,6 +62,16 @@ PORT_DB=5432
 ADMINER_ENABLED=true
 ADMINER_PORT=8080
 
+# HTTPS mode (see prompt_for_https). COMPOSE_EXTRA_FILE is appended to
+# COMPOSE_FILE in .env when set, so a later plain `docker compose ...`
+# keeps using docker-compose.caddy.yml without the operator remembering -f.
+HTTPS_MODE="none"
+DOMAIN=""
+TLS_MODE="selfsigned"
+LETSENCRYPT_EMAIL=""
+HTTPS_PORT=443
+COMPOSE_EXTRA_FILE=""
+
 # port_in_use PORT → returns 0 if something is listening on PORT.
 # Prefer ss/netstat (which read /proc/net and see every listener regardless of
 # owner); lsof without root only sees the current user's sockets and would miss
@@ -239,6 +249,58 @@ check_port_conflicts() {
   echo
 }
 
+# prompt_for_https asks how this install should serve HTTPS. Sets HTTPS_MODE
+# (informational), and when Caddy is chosen: DOMAIN, TLS_MODE,
+# LETSENCRYPT_EMAIL, HTTPS_PORT, and COMPOSE_EXTRA_FILE (which .env's
+# COMPOSE_FILE line uses to make the choice stick for later commands).
+prompt_for_https() {
+  info "${BOLD}HTTPS${RESET}"
+  info "  1) I'll put my own reverse proxy in front (no changes)"
+  info "  2) Let Sentinel handle it automatically via Caddy"
+  info "  3) No HTTPS - plain HTTP, for local testing"
+  if ! read -r -p "Choose [1-3] (default 3): " HTTPS_ANSWER; then HTTPS_ANSWER="3"; fi
+  case "${HTTPS_ANSWER:-3}" in
+    1)
+      HTTPS_MODE="proxy"
+      ok "Using plain HTTP here; put your reverse proxy in front for TLS."
+      ;;
+    2)
+      HTTPS_MODE="caddy"
+      COMPOSE_EXTRA_FILE="docker-compose.caddy.yml"
+      if ! read -r -p "  Domain name Sentinel will be reached at: " DOMAIN; then DOMAIN=""; fi
+      while [ -z "$DOMAIN" ]; do
+        err "A domain is required for Caddy mode, even for a self-signed cert."
+        if ! read -r -p "  Domain name Sentinel will be reached at: " DOMAIN; then DOMAIN=""; fi
+      done
+      info "  a) Let's Encrypt - needs a real public domain and this server"
+      info "     reachable from the internet on ports 80 and 443 right now"
+      info "  b) Self-signed - works anywhere, browsers will warn it's untrusted"
+      if ! read -r -p "  Choose [a/b] (default b): " LE_ANSWER; then LE_ANSWER="b"; fi
+      case "${LE_ANSWER:-b}" in
+        a|A)
+          TLS_MODE="letsencrypt"
+          if ! read -r -p "  Email for Let's Encrypt renewal notices: " LETSENCRYPT_EMAIL; then LETSENCRYPT_EMAIL=""; fi
+          while [ -z "$LETSENCRYPT_EMAIL" ]; do
+            err "Let's Encrypt requires a contact email."
+            if ! read -r -p "  Email for Let's Encrypt renewal notices: " LETSENCRYPT_EMAIL; then LETSENCRYPT_EMAIL=""; fi
+          done
+          ;;
+        *)
+          TLS_MODE="selfsigned"
+          ;;
+      esac
+      info "What port should HTTPS run on?"
+      ask_port HTTPS_PORT "HTTPS" 443 "$FRONTEND_PORT"
+      ok "Caddy will serve ${DOMAIN} (${TLS_MODE})."
+      ;;
+    *)
+      HTTPS_MODE="none"
+      ok "No HTTPS configured; plain HTTP only."
+      ;;
+  esac
+  echo
+}
+
 # prompt_for_adminer asks whether to include the optional Adminer database admin
 # tool and, if so, on which host port. Sets ADMINER_ENABLED (true/false) and,
 # when enabled, ADMINER_PORT.
@@ -337,6 +399,9 @@ echo
 
 # ---- Port conflict check (before anything is started) ----
 check_port_conflicts
+
+# ---- HTTPS mode ----
+prompt_for_https
 
 # ---- Optional database admin tool ----
 prompt_for_adminer
@@ -479,6 +544,14 @@ REPORT_WORKERS='2'
 # Docker images
 DOCKER_REGISTRY='ghcr.io'
 IMAGE_TAG='latest'
+
+# HTTPS (Caddy mode only - see README). Empty COMPOSE_EXTRA_FILE means
+# COMPOSE_FILE is just the base compose file, same as before this feature.
+DOMAIN=$(env_quote "$DOMAIN")
+TLS_MODE=$(env_quote "$TLS_MODE")
+LETSENCRYPT_EMAIL=$(env_quote "$LETSENCRYPT_EMAIL")
+HTTPS_PORT=$(env_quote "$HTTPS_PORT")
+COMPOSE_FILE=$(env_quote "docker-compose.yml${COMPOSE_EXTRA_FILE:+:$COMPOSE_EXTRA_FILE}")
 ENV
 then
   err "Could not write $ENV_TMP."
