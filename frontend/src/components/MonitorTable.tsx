@@ -250,10 +250,18 @@ export default function MonitorTable({
 }: Props) {
   return (
     <div className="overflow-hidden rounded-lg border border-white/10 bg-slate-800/40 backdrop-blur-sm">
-      <div className="overflow-x-auto">
+      {/* max-h + overflow-auto on this same element, not a separate wrapper -
+          position:sticky below only sticks relative to its nearest actual
+          scrolling ancestor, and an outer div scrolling vertically while this
+          one only scrolled horizontally would leave the header unstuck,
+          scrolling away with the rest of the table (confirmed empirically:
+          splitting the two axes across nested divs breaks it). One capped,
+          both-axes-scrollable box is what actually keeps the header pinned
+          while the rows scroll past it. */}
+      <div className="max-h-[65vh] overflow-auto">
         <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-white/10 bg-slate-800/20">
+          <thead className="sticky top-0 z-10">
+            <tr className="border-b border-white/10 bg-slate-900">
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-400">Service Name</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-400">Service Type</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-400">Service Status</th>
