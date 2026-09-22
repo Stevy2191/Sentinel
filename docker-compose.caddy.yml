@@ -17,10 +17,14 @@ services:
       DOMAIN: ${DOMAIN:?Set DOMAIN in .env to use Caddy HTTPS mode}
       TLS_MODE: ${TLS_MODE:-selfsigned}
       LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:-}
-    # Restates the full list: Compose replaces (not merges) a list-type key
-    # like this one when an override restates it, so both ports must be
-    # listed here even though :80 also appears in the base file.
-    ports:
+    # Compose MERGES (concatenates) a list-type key like this one across
+    # files by default, rather than replacing it - confirmed empirically.
+    # Restating the base file's own "${FRONTEND_PORT:-3000}:80" entry here
+    # happens to be harmless (an identical duplicate mapping is a no-op),
+    # but !override is used anyway so this doesn't silently depend on that
+    # coincidence - if the base file's default ever changes, this still
+    # ends up with exactly these two entries, not three.
+    ports: !override
       - "${FRONTEND_PORT:-3000}:80"
       - "${HTTPS_PORT:-443}:443"
     # nginx.conf's healthcheck curls plain HTTP; this container only serves
