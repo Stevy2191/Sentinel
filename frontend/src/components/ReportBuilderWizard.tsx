@@ -3,21 +3,17 @@ import { useNavigate } from 'react-router-dom'
 import { Check, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
 import { useMonitors } from '@/hooks/useMonitors'
 import { useMonitorGroups } from '@/hooks/useMonitorGroups'
-import {
-  useMonitorTags,
-  useReportTemplates,
-  useSavedReports,
-  waitForReportJob,
-} from '@/hooks/useReportBuilder'
+import { useMonitorTags, useSavedReports, waitForReportJob } from '@/hooks/useReportBuilder'
 import PeriodSelector, { DEFAULT_PERIOD, describePeriod } from '@/components/PeriodSelector'
-import type { ReportPeriod, ReportScopeType } from '@/types/reports'
+import { REPORT_TYPE_LABEL } from '@/types/reports'
+import type { ReportPeriod, ReportScopeType, ReportType } from '@/types/reports'
 
 type WizardStep = 1 | 2 | 3 | 4
 
 const STEPS = [
   { number: 1, title: 'Scope' },
   { number: 2, title: 'Period' },
-  { number: 3, title: 'Template' },
+  { number: 3, title: 'Report Type' },
   { number: 4, title: 'Details' },
 ] as const
 
@@ -31,13 +27,12 @@ interface ReportBuilderWizardProps {
 
 /**
  * ReportBuilderWizard walks through defining a saved report: what it covers,
- * over what period, in which template, with optional title and description.
+ * over what period, of which type, with optional title and description.
  * Generating it renders a PDF immediately.
  */
 export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProps) {
   const navigate = useNavigate()
   const { createReport } = useSavedReports()
-  const { templates, listTemplates } = useReportTemplates()
   const { monitors, loading: monitorsLoading } = useMonitors()
   const { groups, loading: groupsLoading } = useMonitorGroups()
   const { tags, listTags, loading: tagsLoading } = useMonitorTags()
@@ -51,23 +46,14 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
   const [scopeType, setScopeType] = useState<ReportScopeType>('monitors')
   const [selection, setSelection] = useState<string[]>([])
   const [period, setPeriod] = useState<ReportPeriod>(DEFAULT_PERIOD)
-  const [templateId, setTemplateId] = useState('')
+  const [reportType, setReportType] = useState<ReportType>('uptime')
   const [customTitle, setCustomTitle] = useState('')
   const [customDescription, setCustomDescription] = useState('')
 
-  // Templates and tags are fetched once, not on every step change.
+  // Tags are fetched once, not on every step change.
   useEffect(() => {
-    listTemplates()
     listTags()
-  }, [listTemplates, listTags])
-
-  // Preselect the default template so step 3 is not a dead end if the user
-  // clicks straight through.
-  useEffect(() => {
-    if (!templateId && templates.length > 0) {
-      setTemplateId((templates.find((t) => t.is_default) ?? templates[0]).id)
-    }
-  }, [templates, templateId])
+  }, [listTags])
 
   // Options for the active scope tab. Tags are their own identity - there is no
   // separate id - so the value and the label are the same string.
@@ -118,9 +104,8 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
     ) {
       return 'Choose both a start and an end date'
     }
-    if (step === 3 && !templateId) return 'Choose a template'
     return null
-  }, [step, name, selection, scopeType, period, templateId])
+  }, [step, name, selection, scopeType, period])
 
   const generate = async () => {
     setGenerating(true)
@@ -136,7 +121,7 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
 
       const result = await createReport({
         name: name.trim(),
-        template_id: templateId,
+        report_type: reportType,
         scope_type: scopeType,
         scope_data: scopeData,
         ...period,
@@ -280,31 +265,23 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
 
       {step === 3 && (
         <div className="rd-card space-y-3 p-5">
-          <span className="vs-eyebrow block">Template</span>
-          {templates.length === 0 && (
-            <p className="text-sm" style={{ color: 'var(--vs-text-dim)' }}>
-              No templates found.
-            </p>
-          )}
-          {templates.map((t) => (
+          <span className="vs-eyebrow block">Report type</span>
+          {(['uptime', 'incident'] as const).map((t) => (
             <button
-              key={t.id}
+              key={t}
               type="button"
-              onClick={() => setTemplateId(t.id)}
+              onClick={() => setReportType(t)}
               className="w-full rounded-md p-4 text-left"
               style={{
-                border: `1px solid ${templateId === t.id ? 'var(--vs-ecg)' : 'var(--vs-line)'}`,
+                border: `1px solid ${reportType === t ? 'var(--vs-ecg)' : 'var(--vs-line)'}`,
               }}
             >
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="font-medium">{t.name}</p>
-                  <p className="mt-1 text-xs" style={{ color: 'var(--vs-text-dim)' }}>
-                    Sections: {t.sections.join(', ').replace(/_/g, ' ')}
-                  </p>
-                </div>
-                {t.is_default && <span className="vs-eyebrow">Default</span>}
-              </div>
+              <p className="font-medium">{REPORT_TYPE_LABEL[t]}</p>
+              <p className="mt-1 text-xs" style={{ color: 'var(--vs-text-dim)' }}>
+                {t === 'uptime'
+                  ? 'Uptime vs. SLA, with a cumulative-uptime graph and a per-monitor breakdown.'
+                  : 'Every incident in scope, with root cause and resolution detail.'}
+              </p>
             </button>
           ))}
         </div>
@@ -341,7 +318,7 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
             </p>
             <p className="mt-1">
               {selection.length} {scopeType} · {describePeriod(period)} ·{' '}
-              {templates.find((t) => t.id === templateId)?.name ?? 'no template'}
+              {REPORT_TYPE_LABEL[reportType]}
             </p>
           </div>
         </div>
