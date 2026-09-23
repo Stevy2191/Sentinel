@@ -5,13 +5,12 @@
 export type ReportScopeType = 'monitors' | 'tags' | 'groups' | 'types'
 export type ScheduleType = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'custom'
 
-export interface ReportTemplate {
-  id: string
-  name: string
-  is_default: boolean
-  /** Section keys, in render order: sla_compliance, incident_summary, charts, custom. */
-  sections: string[]
-  created_at: string
+/** The two fixed report types. No template system, no section picker. */
+export type ReportType = 'uptime' | 'incident'
+
+export const REPORT_TYPE_LABEL: Record<ReportType, string> = {
+  uptime: 'Uptime Report',
+  incident: 'Incident Report',
 }
 
 export interface IncidentSummary {
@@ -47,7 +46,7 @@ export interface ReportGeneration {
 export interface SavedReport {
   id: string
   name: string
-  template_name: string
+  report_type: ReportType
   scope_type: ReportScopeType
   time_range_days: number
   /** The window in words — "August 2026", "Q2 2026", "Last 7 days". */
@@ -90,7 +89,7 @@ export interface ReportScopeData {
 
 export interface CreateReportPayload {
   name: string
-  template_id: string
+  report_type: ReportType
   scope_type: ReportScopeType
   scope_data: ReportScopeData
   /** Required only for a rolling period, which is the default on the server. */
