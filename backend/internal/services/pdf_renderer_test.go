@@ -42,7 +42,14 @@ func sampleReportData() *ReportData {
 				Uptime: 97.10, IncidentCount: 0, SLATarget: f64(99.5), SLAMet: false,
 			},
 		},
-		Warnings: []string{"monitor \"legacy\" omitted: loading incidents: timeout"},
+		Warnings:     []string{"monitor \"legacy\" omitted: loading incidents: timeout"},
+		EffectiveSLA: 99.5,
+		UptimeSeries: []UptimeSeriesPoint{
+			{Date: start, Uptime: 100.0},
+			{Date: start.AddDate(0, 0, 10), Uptime: 99.8},
+			{Date: start.AddDate(0, 0, 20), Uptime: 99.4},
+			{Date: end, Uptime: 99.6},
+		},
 	}
 }
 
@@ -109,6 +116,12 @@ func TestRenderReportToPDFHonoursReportType(t *testing.T) {
 	}
 	if strings.Contains(uptime, "Root cause") {
 		t.Error("uptime report should not include incident detail")
+	}
+	if !strings.Contains(uptime, "Uptime vs. SLA target") {
+		t.Error("uptime report is missing the uptime-vs-SLA graph")
+	}
+	if !strings.Contains(uptime, "SLA target 99.50%") {
+		t.Error("uptime report graph is missing its SLA reference line label")
 	}
 
 	incident := render(models.ReportTypeIncident, "incident")
