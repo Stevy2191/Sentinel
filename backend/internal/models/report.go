@@ -30,36 +30,21 @@ var ValidScopeTypes = map[string]bool{
 	ScopeTypeTypes:    true,
 }
 
-// Report section names a template may include.
+// Report types. Every report is exactly one of these - there is no template
+// system to configure sections from.
 const (
-	SectionSLACompliance   = "sla_compliance"
-	SectionIncidentSummary = "incident_summary"
-	SectionCharts          = "charts"
-	SectionCustom          = "custom"
-
-	// SectionExecutiveSummary is the headline figures against the previous
-	// equivalent period — whether things got better or worse.
-	SectionExecutiveSummary = "executive_summary"
-	// SectionTimeline is every incident in the scope ordered by time rather
-	// than grouped by monitor.
-	SectionTimeline = "timeline"
-	// SectionAvailability breaks the window into days or weeks, so a bad day is
-	// visible instead of averaged away.
-	SectionAvailability = "availability_breakdown"
-	// SectionPerformance is response-time behaviour per monitor.
-	SectionPerformance = "performance"
+	// ReportTypeUptime renders uptime vs. SLA: the summary tiles, a
+	// cumulative-uptime graph, and a per-monitor SLA table.
+	ReportTypeUptime = "uptime"
+	// ReportTypeIncident renders the full incident list for the scope, with
+	// root cause and resolution detail.
+	ReportTypeIncident = "incident"
 )
 
-// ValidReportSections lists the accepted section names.
-var ValidReportSections = map[string]bool{
-	SectionSLACompliance:    true,
-	SectionIncidentSummary:  true,
-	SectionCharts:           true,
-	SectionCustom:           true,
-	SectionExecutiveSummary: true,
-	SectionTimeline:         true,
-	SectionAvailability:     true,
-	SectionPerformance:      true,
+// ValidReportTypes lists the accepted report_type values.
+var ValidReportTypes = map[string]bool{
+	ReportTypeUptime:   true,
+	ReportTypeIncident: true,
 }
 
 // Report access types.
@@ -134,43 +119,12 @@ func (s ReportScope) Validate(scopeType string) error {
 	return nil
 }
 
-// ReportTemplate defines which sections a report renders, in order.
-type ReportTemplate struct {
-	ID        uuid.UUID   `json:"id" gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
-	Name      string      `json:"name" gorm:"column:name;not null"`
-	IsDefault bool        `json:"is_default" gorm:"column:is_default"`
-	Sections  StringSlice `json:"sections" gorm:"column:sections_json;type:jsonb;not null"`
-	CreatedAt time.Time   `json:"created_at" gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt time.Time   `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
-}
-
-// TableName tells GORM which table backs the ReportTemplate model.
-func (ReportTemplate) TableName() string {
-	return "report_templates"
-}
-
-// Validate checks the template names at least one recognized section.
-func (rt *ReportTemplate) Validate() error {
-	if rt.Name == "" {
-		return errors.New("template name is required")
-	}
-	if len(rt.Sections) == 0 {
-		return errors.New("template must define at least one section")
-	}
-	for _, s := range rt.Sections {
-		if !ValidReportSections[s] {
-			return errors.New("unknown report section: " + s)
-		}
-	}
-	return nil
-}
-
 // Report is a saved report definition. Generating it produces a ReportGeneration.
 type Report struct {
 	ID            uuid.UUID   `json:"id" gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
 	UserID        uuid.UUID   `json:"user_id" gorm:"column:user_id;type:uuid;not null"`
 	Name          string      `json:"name" gorm:"column:name;not null"`
-	TemplateID    uuid.UUID   `json:"template_id" gorm:"column:template_id;type:uuid;not null"`
+	ReportType    string      `json:"report_type" gorm:"column:report_type;not null"`
 	ScopeType     string      `json:"scope_type" gorm:"column:scope_type;not null"`
 	ScopeData     ReportScope `json:"scope_data" gorm:"column:scope_data;type:jsonb;not null"`
 	TimeRangeDays int         `json:"time_range_days" gorm:"column:time_range_days;not null"`
@@ -200,8 +154,8 @@ func (r *Report) Validate() error {
 	if r.Name == "" {
 		return errors.New("report name is required")
 	}
-	if r.TemplateID == uuid.Nil {
-		return errors.New("template_id is required")
+	if !ValidReportTypes[r.ReportType] {
+		return errors.New("report_type must be one of: uptime, incident")
 	}
 	if !ValidScopeTypes[r.ScopeType] {
 		return errors.New("scope_type must be one of: monitors, tags, groups")
