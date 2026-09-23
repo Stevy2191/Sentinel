@@ -154,10 +154,12 @@ func (s *PDFRendererService) GetPDFFileSize(pdfFilename string) (int, error) {
 // ---- report-type layouts ---------------------------------------------------
 
 // drawPDFUptimeReport assembles the fixed Uptime Report layout: the summary
-// tiles and the per-monitor SLA table. Task 9 adds a cumulative-uptime-vs-SLA
-// graph between the two, once ReportData carries the series data it needs.
+// tiles, the cumulative-uptime-vs-SLA graph, and the per-monitor SLA table.
 func drawPDFUptimeReport(pdf *fpdf.Fpdf, data *ReportData) {
 	drawPDFSummary(pdf, data)
+	if len(data.UptimeSeries) >= 2 {
+		drawPDFUptimeGraph(pdf, data.UptimeSeries, data.EffectiveSLA, data.ReportLocation())
+	}
 	drawPDFSLASection(pdf, data)
 }
 
@@ -176,6 +178,13 @@ func setColor(pdf *fpdf.Fpdf, c [3]int, fill bool) {
 		return
 	}
 	pdf.SetTextColor(c[0], c[1], c[2])
+}
+
+// setDrawColor sets the stroke color fpdf uses for Line and the "D"/"DF"
+// rectangle styles - distinct from setColor's fill/text targets, neither of
+// which affects a stroked line or border.
+func setDrawColor(pdf *fpdf.Fpdf, c [3]int) {
+	pdf.SetDrawColor(c[0], c[1], c[2])
 }
 
 // uptimeColor grades an uptime percentage the same way the HTML report does.
@@ -282,6 +291,104 @@ func drawPDFSummary(pdf *fpdf.Fpdf, data *ReportData) {
 		pdf.CellFormat(w-6, 8, pdfText(t.value), "", 0, "L", false, 0, "")
 	}
 	pdf.SetY(y + 24)
+}
+
+// drawPDFUptimeGraph draws the cumulative-uptime-vs-SLA line chart: an axis
+// box, a flat SLA reference bar, and the cumulative-uptime line connecting
+// each sample point. Built from fpdf's own line/rect primitives - no image
+// pipeline, matching why this package draws PDFs directly at all (see the
+// package doc comment above).
+func drawPDFUptimeGraph(pdf *fpdf.Fpdf, series []UptimeSeriesPoint, slaTarget float64, loc *time.Location) {
+	if len(series) < 2 {
+		return
+	}
+	drawSectionHeading(pdf, "Uptime vs. SLA target")
+
+	const chartH = 55.0
+	const axisLabelW = 14.0
+	x0 := pdfMarginLeft + axisLabelW
+	chartW := pdfContentW - axisLabelW
+	y0 := pdf.GetY()
+
+	// The floor is the lowest value actually on the chart rather than always
+	// zero: uptime rarely drops below the high nineties, and a 0-100 axis would
+	// draw every report as a flat line pinned to the top, hiding the one thing
+	// an SLA chart exists to show.
+	lo := slaTarget
+	for _, p := range series {
+		if p.Uptime < lo {
+			lo = p.Uptime
+		}
+	}
+	lo = math.Floor(lo) - 1
+	if lo < 0 {
+		lo = 0
+	}
+	hi := 100.0
+	if hi <= lo {
+		hi = lo + 1
+	}
+	yFor := func(pct float64) float64 {
+		frac := (pct - lo) / (hi - lo)
+		if frac < 0 {
+			frac = 0
+		} else if frac > 1 {
+			frac = 1
+		}
+		return y0 + chartH*(1-frac)
+	}
+
+	pdf.SetFont("Helvetica", "", 7)
+	for i := 0; i <= 4; i++ {
+		frac := float64(i) / 4
+		val := lo + (hi-lo)*frac
+		y := y0 + chartH*(1-frac)
+		setColor(pdf, pdfRule, true)
+		pdf.Rect(x0, y, chartW, 0.15, "F")
+		setColor(pdf, pdfMuted, false)
+		pdf.SetXY(pdfMarginLeft, y-2)
+		pdf.CellFormat(axisLabelW-1, 4, fmt.Sprintf("%.0f%%", val), "", 0, "R", false, 0, "")
+	}
+	setDrawColor(pdf, pdfRule)
+	pdf.SetLineWidth(0.2)
+	pdf.Rect(x0, y0, chartW, chartH, "D")
+
+	// SLA reference line: a thin flat bar the full width of the chart.
+	setColor(pdf, pdfWarning, true)
+	pdf.Rect(x0, yFor(slaTarget)-0.25, chartW, 0.5, "F")
+	pdf.SetXY(x0+2, yFor(slaTarget)-5)
+	pdf.SetFont("Helvetica", "B", 7)
+	setColor(pdf, pdfWarning, false)
+	pdf.CellFormat(60, 4, pdfText(fmt.Sprintf("SLA target %.2f%%", slaTarget)), "", 0, "L", false, 0, "")
+
+	// The cumulative-uptime line: one segment between each pair of consecutive
+	// samples.
+	setDrawColor(pdf, pdfAccent)
+	pdf.SetLineWidth(0.6)
+	n := len(series)
+	for i := 0; i < n-1; i++ {
+		x1 := x0 + chartW*float64(i)/float64(n-1)
+		x2 := x0 + chartW*float64(i+1)/float64(n-1)
+		pdf.Line(x1, yFor(series[i].Uptime), x2, yFor(series[i+1].Uptime))
+	}
+	pdf.SetLineWidth(0.2)
+
+	// X-axis date labels: first, middle, and last sample only, so the axis
+	// stays readable instead of crowding thirty overlapping labels.
+	pdf.SetFont("Helvetica", "", 7)
+	setColor(pdf, pdfMuted, false)
+	label := func(i int, align string) {
+		x := x0 + chartW*float64(i)/float64(n-1)
+		pdf.SetXY(x-15, y0+chartH+1.5)
+		pdf.CellFormat(30, 4, series[i].Date.In(loc).Format("Jan 2"), "", 0, align, false, 0, "")
+	}
+	label(0, "L")
+	label(n-1, "R")
+	if mid := (n - 1) / 2; mid > 0 && mid < n-1 {
+		label(mid, "C")
+	}
+
+	pdf.SetY(y0 + chartH + 9)
 }
 
 func drawPDFSLASection(pdf *fpdf.Fpdf, data *ReportData) {
