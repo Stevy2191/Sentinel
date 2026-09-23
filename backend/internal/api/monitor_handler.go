@@ -168,6 +168,13 @@ func CreateMonitorHandler(monitorService *services.MonitorService, settingsServi
 				c.Request.Context(), models.DefaultMonitorCheckInterval)
 		}
 
+		// The same 0-means-clear sentinel UpdateMonitor uses for this field, so
+		// a client that always sends 0 for "no override" behaves identically
+		// whether it is creating or editing.
+		if monitor.SLATarget != nil && *monitor.SLATarget == 0 {
+			monitor.SLATarget = nil
+		}
+
 		if err := monitor.Validate(); err != nil {
 			respondError(c, http.StatusBadRequest, err.Error())
 			return

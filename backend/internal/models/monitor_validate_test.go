@@ -46,3 +46,37 @@ func TestMonitorValidateURLCheckAppliesOnlyToHTTPTypes(t *testing.T) {
 		t.Errorf("a tcp monitor with a host:port target should be accepted, got: %v", err)
 	}
 }
+
+func f64ptr(v float64) *float64 { return &v }
+
+func TestMonitorValidateSLATarget(t *testing.T) {
+	base := func() *Monitor {
+		return &Monitor{Name: "x", Type: MonitorTypeHTTP, URL: "https://example.com", IntervalSeconds: 60, TimeoutSeconds: 10}
+	}
+
+	cases := []struct {
+		name    string
+		target  *float64
+		wantErr bool
+	}{
+		{"nil is valid (no override)", nil, false},
+		{"zero is valid (treated as unset)", f64ptr(0), false},
+		{"a realistic target is valid", f64ptr(99.9), false},
+		{"the maximum is valid", f64ptr(100), false},
+		{"negative is rejected", f64ptr(-1), true},
+		{"over 100 is rejected", f64ptr(100.5), true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := base()
+			m.SLATarget = c.target
+			err := m.Validate()
+			if c.wantErr && err == nil {
+				t.Error("expected an error")
+			}
+			if !c.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
