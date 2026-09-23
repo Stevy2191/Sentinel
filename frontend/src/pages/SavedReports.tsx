@@ -10,7 +10,7 @@ import {
   formatFileSize,
   useSavedReports,
 } from '@/hooks/useReportBuilder'
-import type { SavedReport } from '@/types/reports'
+import { REPORT_TYPE_LABEL, type SavedReport } from '@/types/reports'
 
 interface SavedReportsProps {
   /** 'list' is the hub; 'create' shows the builder wizard. */
@@ -161,7 +161,7 @@ export default function SavedReports({ mode = 'list' }: SavedReportsProps) {
                 >
                   <span>{report.time_range_days}d window</span>
                   <span className="capitalize">{report.scope_type}</span>
-                  <span>{report.template_name}</span>
+                  <span>{REPORT_TYPE_LABEL[report.report_type]}</span>
                   {report.last_generated && (
                     <span>
                       generated{' '}

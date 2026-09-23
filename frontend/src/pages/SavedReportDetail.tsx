@@ -25,7 +25,7 @@ import {
   useSavedReports,
   useShareLinks,
 } from '@/hooks/useReportBuilder'
-import type { ReportSchedule } from '@/types/reports'
+import { REPORT_TYPE_LABEL, type ReportSchedule } from '@/types/reports'
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
@@ -206,7 +206,7 @@ export default function SavedReportDetail() {
         <div>
           <h1 className="vs-title text-2xl">{report.name}</h1>
           <p className="mt-1 text-sm" style={{ color: 'var(--vs-text-dim)' }}>
-            {report.template_name} · {report.scope_type} · {report.time_range_days} day window
+            {REPORT_TYPE_LABEL[report.report_type]} · {report.scope_type} · {report.time_range_days} day window
           </p>
         </div>
         <button className="rd-btn rd-btn-secondary" onClick={() => navigate('/reports')}>
