@@ -166,6 +166,10 @@ func AuthStatusHandler(authService *services.AuthService, settingsService *servi
 			// the UI formats timestamps with it so the screen and a rendered
 			// report agree, and it is a display convention, not a secret.
 			"report_timezone": settingsService.ReportTimezone(ctx),
+			// Same reasoning as default_check_interval above: the monitor-create
+			// form shows this in its SLA Target helper text, and it is a UI
+			// default, not a secret.
+			"default_sla_target": settingsService.DefaultSLATarget(ctx),
 		})
 	}
 }

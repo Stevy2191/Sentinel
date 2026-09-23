@@ -34,6 +34,7 @@ func GetSettingsHandler(settingsService *services.SettingsService, defaultInterv
 			"sentinel_external_url":  settingsService.GetString(ctx, models.SettingSentinelExternalURL, ""),
 			"sentinel_internal_url":  settingsService.GetString(ctx, models.SettingSentinelInternalURL, ""),
 			"report_timezone":        settingsService.ReportTimezone(ctx),
+			"default_sla_target":     settingsService.DefaultSLATarget(ctx),
 		})
 	}
 }
@@ -53,6 +54,9 @@ type updateSystemRequest struct {
 	SentinelInternalURL *string `json:"sentinel_internal_url"`
 	// ReportTimezone is the IANA zone rendered reports are written in.
 	ReportTimezone *string `json:"report_timezone"`
+	// DefaultSLATarget is the uptime percentage a monitor is held to when it
+	// carries no override of its own.
+	DefaultSLATarget *float64 `json:"default_sla_target"`
 }
 
 // UpdateSystemSettingsHandler handles PATCH /api/v1/settings/system (admin).
@@ -161,6 +165,20 @@ func UpdateSystemSettingsHandler(settingsService *services.SettingsService, sche
 			}
 		}
 
+		if req.DefaultSLATarget != nil {
+			n := *req.DefaultSLATarget
+			if n < models.MinSLATargetPercent || n > models.MaxSLATargetPercent {
+				respondError(c, http.StatusBadRequest,
+					fmt.Sprintf("default_sla_target must be between %.1f and %.1f",
+						models.MinSLATargetPercent, models.MaxSLATargetPercent))
+				return
+			}
+			if err := settingsService.SetFloat(ctx, models.SettingDefaultSLATarget, n); err != nil {
+				respondInternal(c, "UpdateSystemSettingsHandler", err)
+				return
+			}
+		}
+
 		for _, u := range []struct {
 			value *string
 			key   string
@@ -192,6 +210,7 @@ func UpdateSystemSettingsHandler(settingsService *services.SettingsService, sche
 			"check_retention_days":   settingsService.CheckRetentionDays(ctx),
 			"sentinel_external_url":  settingsService.GetString(ctx, models.SettingSentinelExternalURL, ""),
 			"sentinel_internal_url":  settingsService.GetString(ctx, models.SettingSentinelInternalURL, ""),
+			"default_sla_target":     settingsService.DefaultSLATarget(ctx),
 			"message":                "System settings updated",
 		})
 	}
