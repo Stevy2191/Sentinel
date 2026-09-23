@@ -403,8 +403,13 @@ export default function Reports() {
             <>
               <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
                 <div className="card p-4 text-center">
-                  <div className={`text-2xl font-bold ${uptimeTextColor(summary.aggregate.avg_uptime)}`}>
-                    {summary.aggregate.avg_uptime.toFixed(2)}%
+                  {/* Null means no active monitors in scope. The guard above already
+                      covers it, but the value is optional at the type level and
+                      "0.00%" would read as an outage rather than as no data. */}
+                  <div className={`text-2xl font-bold ${uptimeTextColor(summary.aggregate.avg_uptime ?? 0)}`}>
+                    {summary.aggregate.avg_uptime != null
+                      ? `${summary.aggregate.avg_uptime.toFixed(2)}%`
+                      : '—'}
                   </div>
                   <div className="text-xs text-slate-500">Avg uptime</div>
                 </div>

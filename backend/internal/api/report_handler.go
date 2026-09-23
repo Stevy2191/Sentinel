@@ -655,6 +655,30 @@ func GetTimelineReportHandler(
 	}
 }
 
+// measurableWindow narrows a reporting window to the part of it a monitor
+// actually existed for, and reports whether any of it is measurable at all.
+//
+// Uptime was previously divided by the whole window however young the monitor
+// was, so the same outage looked smaller the further back the window reached: a
+// monitor added yesterday reported ~100% over ninety days no matter how badly
+// it behaved. Measuring from its creation instead makes every window describe
+// the period the monitor was actually being watched.
+//
+// A monitor created after the window closed returns false. It has nothing to
+// say about that period, and averaging it in as a perfect score would be
+// inventing a result. Only reachable for a historical range, since a window
+// ending now cannot precede an existing monitor.
+func measurableWindow(createdAt, start, end time.Time) (time.Time, bool) {
+	from := start
+	if createdAt.After(from) {
+		from = createdAt
+	}
+	if !from.Before(end) {
+		return time.Time{}, false
+	}
+	return from, true
+}
+
 // GetSummaryReportHandler handles GET /api/v1/reports/summary, returning uptime
 // figures for many monitors plus an aggregate.
 func GetSummaryReportHandler(
@@ -668,9 +692,17 @@ func GetSummaryReportHandler(
 		}
 		ctx := c.Request.Context()
 
-		// Only summarize monitors the user can access (admins see all).
+		// Only summarize monitors the user can access (admins see all), and
+		// only ones that are actually running.
+		//
+		// A paused monitor records no incidents while paused, so it scored a
+		// perfect 100% and pulled the headline average up — over a 90-day
+		// window, something paused for 89 of those days still read as flawless.
+		// It has no uptime to report, so it is left out rather than counted as
+		// good news.
 		userID, _, isAdmin, _ := GetUserFromContext(c)
-		all, err := monitorService.ListAccessibleMonitors(ctx, userID, isAdmin, nil)
+		all, err := monitorService.ListAccessibleMonitors(ctx, userID, isAdmin,
+			map[string]interface{}{"enabled": true})
 		if err != nil {
 			respondInternal(c, "GetSummaryReportHandler", err)
 			return
@@ -699,18 +731,26 @@ func GetSummaryReportHandler(
 		var totalIncidents int64
 		var totalDowntimeMinutes float64
 
+		counted := 0
 		for i := range all {
 			m := all[i]
-			downPct, err := incidentService.GetDowntimePercentage(ctx, m.ID, start, end)
+
+			from, ok := measurableWindow(m.CreatedAt, start, end)
+			if !ok {
+				continue
+			}
+			counted++
+
+			downPct, err := incidentService.GetDowntimePercentage(ctx, m.ID, from, end)
 			if err != nil {
 				downPct = 0
 			}
 			uptime := displayUptime(round2(100-downPct), m.CurrentStatus == "offline")
-			downtime, err := incidentService.GetIncidentDuration(ctx, m.ID, start, end)
+			downtime, err := incidentService.GetIncidentDuration(ctx, m.ID, from, end)
 			if err != nil {
 				downtime = 0
 			}
-			count, err := incidentService.GetIncidentCount(ctx, m.ID, start, end)
+			count, err := incidentService.GetIncidentCount(ctx, m.ID, from, end)
 			if err != nil {
 				count = 0
 			}
@@ -735,9 +775,14 @@ func GetSummaryReportHandler(
 			})
 		}
 
-		avgUptime := 0.0
-		if len(all) > 0 {
-			avgUptime = round2(sumUptime / float64(len(all)))
+		// Null rather than zero when nothing is in scope. Zero renders as
+		// "0.00%", which reads as a total outage when the truth is that there
+		// is nothing to measure — newly reachable now that every monitor being
+		// paused empties this list.
+		var avgUptime *float64
+		if counted > 0 {
+			v := round2(sumUptime / float64(counted))
+			avgUptime = &v
 		} else {
 			worst = 0
 		}

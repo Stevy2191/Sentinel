@@ -218,7 +218,9 @@ export interface SummaryMonitor {
 }
 
 export interface SummaryAggregate {
-  avg_uptime: number
+  /** Null when no active monitors are in scope — there is nothing to average,
+   *  which is different from an average of zero. */
+  avg_uptime: number | null
   best_uptime: number
   worst_uptime: number
   total_incidents: number
