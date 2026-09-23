@@ -77,6 +77,8 @@ interface FormState {
   customInterval: string
   timeout: number
   retryAttempts: number
+  /** Blank means no override; the instance default applies. */
+  slaTarget: string
   /** Ids of the channels this monitor alerts on. Empty means it alerts nowhere. */
   enableNotifications: boolean
   selectedNotifications: string[]
@@ -88,6 +90,7 @@ interface Errors {
   target?: string
   interval?: string
   timeout?: string
+  slaTarget?: string
 }
 
 const field =
@@ -147,7 +150,7 @@ interface Props {
  * full form at /monitors/create still owns those, and this links to it.
  */
 export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }: Props) {
-  const { defaultCheckInterval } = useAppConfig()
+  const { defaultCheckInterval, defaultSLATarget } = useAppConfig()
   const { create, loading } = useCreateMonitor()
   const dialogRef = useRef<HTMLDivElement>(null)
   const firstFieldRef = useRef<HTMLInputElement>(null)
@@ -164,6 +167,7 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
       customInterval: '',
       timeout: 10,
       retryAttempts: 3,
+      slaTarget: '',
       // Notifications are opt-in: a monitor is created silent unless the
       // switch is turned on and channels are chosen.
       enableNotifications: false,
@@ -270,6 +274,14 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
       // The backend rejects this outright; catching it here explains why.
       e.timeout = 'Must be less than the check interval'
     }
+
+    const slaRaw = f.slaTarget.trim()
+    if (slaRaw) {
+      const n = Number(slaRaw)
+      if (!Number.isFinite(n) || n <= 0 || n > 100) {
+        e.slaTarget = 'Must be a number greater than 0 and at most 100'
+      }
+    }
     return e
   }
 
@@ -291,6 +303,11 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
         // Sent only for HTTP, the one type it affects. Other types are left to
         // the column default rather than storing a value the form never showed.
         ...(form.type === 'http' ? { ssl_verify: form.enableSSLVerify } : {}),
+        // 0 is the sentinel for "no override, use the system default" - always
+        // sent rather than omitted, matching the convention the backend uses
+        // for editing (a bare pointer field cannot otherwise distinguish
+        // "omitted" from "explicitly cleared").
+        sla_target: form.slaTarget.trim() ? Number(form.slaTarget.trim()) : 0,
         // The switch decides: off sends an empty set, which the API reads as
         // "alert nobody" rather than as "not specified".
         notify_channels: form.enableNotifications ? form.selectedNotifications : [],
@@ -537,6 +554,25 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
                 />
                 <p className={`mt-1 text-xs ${errors.timeout ? 'text-red-400' : 'text-slate-500'}`}>
                   {errors.timeout ?? 'Maximum time to wait for a response'}
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="cm-sla" className="mb-1 block text-sm font-medium text-white">
+                  SLA Target % (Optional)
+                </label>
+                <input
+                  id="cm-sla"
+                  type="text"
+                  inputMode="decimal"
+                  value={form.slaTarget}
+                  onChange={(e) => set('slaTarget', e.target.value)}
+                  placeholder="e.g., 99.9"
+                  aria-invalid={!!errors.slaTarget}
+                  className={`${field} ${errors.slaTarget ? 'border-red-500/60' : ''}`}
+                />
+                <p className={`mt-1 text-xs ${errors.slaTarget ? 'text-red-400' : 'text-slate-500'}`}>
+                  {errors.slaTarget ?? `Leave blank to use the system default (currently ${defaultSLATarget}%)`}
                 </p>
               </div>
 
