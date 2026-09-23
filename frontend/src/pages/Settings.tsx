@@ -43,6 +43,8 @@ const MAX_INTERVAL = 3600
 const MIN_CHECK_RETENTION = 1
 const MAX_CHECK_RETENTION = 3650
 const MAX_APP_NAME = 40
+const MIN_SLA_TARGET = 0
+const MAX_SLA_TARGET = 100
 
 const TAB_LABEL: Record<Tab, string> = {
   system: 'System',
@@ -78,6 +80,8 @@ interface SystemSettings {
   sentinel_internal_url: string
   /** IANA zone that reports are rendered in and the UI displays times in. */
   report_timezone: string
+  /** Uptime percentage a monitor is held to when it has no override of its own. */
+  default_sla_target: number
 }
 
 function Toggle({
@@ -222,6 +226,7 @@ export default function Settings() {
           sentinel_external_url: r.data.data.sentinel_external_url ?? '',
           sentinel_internal_url: r.data.data.sentinel_internal_url ?? '',
           report_timezone: r.data.data.report_timezone || 'UTC',
+          default_sla_target: r.data.data.default_sla_target,
         })
         setSystemError(null)
       })
@@ -244,6 +249,7 @@ export default function Settings() {
         sentinel_external_url: system.sentinel_external_url.trim(),
         sentinel_internal_url: system.sentinel_internal_url.trim(),
         report_timezone: system.report_timezone,
+        default_sla_target: system.default_sla_target,
       })
       // Re-read the public config so the sidebar, sign-in screen and browser tab
       // pick up a renamed instance without a reload.
@@ -332,6 +338,10 @@ export default function Settings() {
     Number.isFinite(system?.default_check_interval) &&
     (system?.default_check_interval ?? 0) >= MIN_INTERVAL &&
     (system?.default_check_interval ?? 0) <= MAX_INTERVAL
+  const slaValid =
+    Number.isFinite(system?.default_sla_target) &&
+    (system?.default_sla_target ?? -1) >= MIN_SLA_TARGET &&
+    (system?.default_sla_target ?? -1) <= MAX_SLA_TARGET
   const checkRetentionValid =
     !system ||
     (Number.isFinite(system.check_retention_days) &&
@@ -486,6 +496,31 @@ export default function Settings() {
                 )}
               </SettingsCard>
 
+              <SettingsCard
+                title="Default SLA Target"
+                description="The uptime percentage a monitor is held to when it has no target of its own. Reports compare against this unless a monitor overrides it."
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={MIN_SLA_TARGET}
+                    max={MAX_SLA_TARGET}
+                    step={0.1}
+                    value={system.default_sla_target}
+                    onChange={(e) =>
+                      setSystem({ ...system, default_sla_target: Number(e.target.value) })
+                    }
+                    aria-label="Default SLA target percentage"
+                    className="w-32"
+                  />
+                  <span className="text-sm text-slate-400">%</span>
+                </div>
+                {!slaValid && (
+                  <p className="text-xs text-red-400">
+                    Must be between {MIN_SLA_TARGET} and {MAX_SLA_TARGET}.
+                  </p>
+                )}
+              </SettingsCard>
 
               <SettingsCard
                 title="Sentinel URLs"
@@ -650,7 +685,7 @@ export default function Settings() {
                 </p>
                 <button
                   className="btn-primary"
-                  disabled={systemSaving || !nameValid || !intervalValid || !checkRetentionValid || !urlsValid}
+                  disabled={systemSaving || !nameValid || !intervalValid || !checkRetentionValid || !urlsValid || !slaValid}
                   onClick={() => void saveSystem()}
                 >
                   {systemSaving ? 'Saving…' : 'Save System Settings'}
