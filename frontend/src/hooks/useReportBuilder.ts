@@ -7,7 +7,6 @@ import type {
   GenerateReportResult,
   ReportJob,
   ReportSchedule,
-  ReportTemplate,
   SavedReport,
   ShareLink,
   ShareReportResult,
@@ -157,28 +156,6 @@ export function useShareLinks(reportId: string | undefined) {
   )
 
   return { links, loading, listLinks, revokeLink }
-}
-
-/** useReportTemplates loads the templates the wizard offers. */
-export function useReportTemplates() {
-  const [templates, setTemplates] = useState<ReportTemplate[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<ApiError | null>(null)
-
-  const listTemplates = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const { data } = await api.get<ApiResponse<ReportTemplate[]>>('/report-templates')
-      setTemplates(data.data ?? [])
-    } catch (err) {
-      setError(err as ApiError)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  return { templates, loading, error, listTemplates }
 }
 
 /** useReportSchedules manages one report's delivery schedules. */
