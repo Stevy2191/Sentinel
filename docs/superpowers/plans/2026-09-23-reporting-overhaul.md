@@ -531,16 +531,1191 @@ EOF
 
 ---
 
-### Task 3: SLA settings infrastructure
+### Task 3: Retire the template/section dispatch — restore the build
+
+**Files:**
+- Delete: `backend/internal/services/pdf_sections.go`
+- Delete: `backend/internal/services/html_sections.go`
+- Delete: `backend/internal/services/report_html_generator.go`
+- Delete: `backend/internal/services/report_html_generator_test.go`
+- Modify: `backend/internal/services/report_timezone_render_test.go`
+- Modify: `backend/internal/services/pdf_renderer.go` (whole file)
+- Modify: `backend/internal/services/pdf_renderer_test.go`
+- Modify: `backend/internal/services/pdf_encoding_test.go`
+- Modify: `backend/internal/services/report_generator.go`
+- Modify: `backend/internal/services/report_job_queue.go`
+- Modify: `backend/internal/api/report_builder_handler.go`
+
+**Interfaces:**
+- Consumes: `models.ReportTypeUptime`/`ReportTypeIncident`/`ValidReportTypes` (Task 2).
+- Produces: `(*PDFRendererService) RenderReportToPDF(data *ReportData, reportType string, nameHint string) (string, error)` — signature changed from `(data *ReportData, sections []string, nameHint string)`, dispatching on the two fixed report types instead of a section list. `POST /api/v1/reports/generate` now takes `report_type` instead of `template_id`; `GET /api/v1/reports` and its detail responses carry `report_type` instead of `template_name`; `GET /api/v1/report-templates` no longer exists. Tasks 4-8 (backend) build on a working repo from this point forward. Task 9 (PDF renderer graph) adds `drawPDFUptimeGraph` to the layout this task establishes, once Task 8 gives `ReportData` its `UptimeSeries`/`EffectiveSLA` fields. Task 10 (frontend types/hooks) and Tasks 11-12 (frontend components) consume this backend contract.
+
+**Why this task exists, and why it runs immediately after Task 2:** Go compiles one package at a time, as a whole — `pdf_renderer.go`, `report_html_generator.go` (in `internal/services`) and `report_builder_handler.go` (in `internal/api`, which imports `internal/services`) all still reference `models.ReportTemplate` and the removed `models.Section*` constants the moment Task 2 lands, and neither of those packages will compile again until every one of those references is gone. Left as originally sequenced (this work folded into what were Tasks 8 and 9, at the end of the backend work), `internal/services` and `internal/api` would not compile from Task 2's commit until the second-to-last backend task — breaking every intervening task's own `go build`/`go test` verification steps along the way, since Go cannot typecheck part of a package while another file in it has undefined symbols. Retiring the whole template/section dispatch system in one task, right after the model layer changes it depends on, restores a genuinely compiling, genuinely testable repo for every task that follows — each of which can now trust its own literal `go build ./...`/`go test ./...` instructions.
+
+`pdf_sections.go` contains only `drawPDFExecutiveSummary`, `drawPDFTimeline`, `drawPDFAvailability`, `drawPDFPerformance`, and helpers used only by them (`drawTableHeader`, `formatMillis`, `signedDelta`, `signedCountDelta`, `signedDeltaMinutes`, `worstMonitor`, `perfectMonitors`, `joinCapped`) — confirmed via a whole-backend grep that none of these are used anywhere outside that file. It is deleted wholesale, not edited.
+
+`report_html_generator.go`'s `GenerateHTMLReport` has zero live callers anywhere in the codebase today (confirmed by grep: `ReportBuilder.htmlGenerator` is constructed but `.GenerateHTMLReport(...)` is never called) — this is pre-existing dead code, unrelated to the report-type rework, removed as a natural side effect of touching every other file that mentions `ReportTemplate`.
+
+**A note on scope for the PDF renderer:** this task gives `RenderReportToPDF` its final signature and both fixed-layout dispatch functions (`drawPDFUptimeReport`, `drawPDFIncidentReport`), but the Uptime Report's cumulative-uptime-vs-SLA graph is deliberately **not** part of this task. The graph needs `ReportData.UptimeSeries`/`EffectiveSLA`, which don't exist until Task 8 (the aggregator rewrite) adds them — that dependency can't be satisfied yet here, immediately after Task 2. Task 9, immediately after Task 8, adds exactly one function (`drawPDFUptimeGraph`) and one call site to the layout this task builds. Nothing in this task is thrown away or redone by Task 9 — it only adds to what's here.
+
+- [ ] **Step 1: Delete the dead HTML report path and pdf_sections.go**
+
+```bash
+rm backend/internal/services/html_sections.go backend/internal/services/report_html_generator.go \
+   backend/internal/services/report_html_generator_test.go backend/internal/services/pdf_sections.go
+```
+
+- [ ] **Step 2: Remove the one HTML-path test left over in report_timezone_render_test.go**
+
+Replace `backend/internal/services/report_timezone_render_test.go` in full (dropping `TestHTMLReport_RendersInConfiguredZone` and its now-unused `firstLines` helper; `TestReportData_ReportLocationDefaultsToUTC` is unrelated to the HTML path and is unchanged):
+
+```go
+package services
+
+import (
+	"testing"
+	"time"
+)
+
+// A report rendered with no zone configured must say UTC, never the server
+// process's zone — the container's default is not a choice anyone made.
+func TestReportData_ReportLocationDefaultsToUTC(t *testing.T) {
+	var nilData *ReportData
+	if nilData.ReportLocation() != time.UTC {
+		t.Error("nil ReportData should report UTC")
+	}
+	if (&ReportData{}).ReportLocation() != time.UTC {
+		t.Error("unset Location should report UTC")
+	}
+}
+```
+
+- [ ] **Step 3: Write the failing PDF-generation tests**
+
+Replace the two PDF-generation tests near the top of `backend/internal/services/pdf_renderer_test.go`. Change:
+
+```go
+// A generated report must actually be a readable PDF on disk, not merely a call
+// that returned no error.
+func TestRenderReportToPDFWritesAValidFile(t *testing.T) {
+	dir := t.TempDir()
+	r, err := NewPDFRendererService(dir)
+	if err != nil {
+		t.Fatalf("NewPDFRendererService: %v", err)
+	}
+
+	name, err := r.RenderReportToPDF(sampleReportData(), nil, "monthly")
+	if err != nil {
+		t.Fatalf("RenderReportToPDF: %v", err)
+	}
+	if filepath.Base(name) != name {
+		t.Errorf("returned name %q should be a bare file name", name)
+	}
+
+	path := filepath.Join(dir, name)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading generated PDF: %v", err)
+	}
+	if !strings.HasPrefix(string(content), "%PDF-") {
+		t.Errorf("file does not start with the PDF magic bytes: %q", content[:min(8, len(content))])
+	}
+	if len(content) < 1000 {
+		t.Errorf("PDF is suspiciously small (%d bytes) - sections may not have rendered", len(content))
+	}
+
+	size, err := r.GetPDFFileSize(name)
+	if err != nil {
+		t.Fatalf("GetPDFFileSize: %v", err)
+	}
+	if size != len(content) {
+		t.Errorf("GetPDFFileSize = %d, want %d", size, len(content))
+	}
+}
+
+// Each template section must change the output, or section selection is a lie.
+func TestRenderReportToPDFHonoursSections(t *testing.T) {
+	dir := t.TempDir()
+	r, _ := NewPDFRendererService(dir)
+	data := sampleReportData()
+
+	sizeOf := func(sections []string, hint string) int {
+		name, err := r.RenderReportToPDF(data, sections, hint)
+		if err != nil {
+			t.Fatalf("render %v: %v", sections, err)
+		}
+		size, err := r.GetPDFFileSize(name)
+		if err != nil {
+			t.Fatalf("size: %v", err)
+		}
+		return size
+	}
+
+	slaOnly := sizeOf([]string{models.SectionSLACompliance}, "sla")
+	everything := sizeOf([]string{
+		models.SectionCharts, models.SectionSLACompliance,
+		models.SectionIncidentSummary, models.SectionCustom,
+	}, "all")
+
+	if everything <= slaOnly {
+		t.Errorf("a full report (%d bytes) should be larger than SLA-only (%d bytes); sections may be ignored",
+			everything, slaOnly)
+	}
+}
+```
+
+to:
+
+```go
+// A generated report must actually be a readable PDF on disk, not merely a call
+// that returned no error.
+func TestRenderReportToPDFWritesAValidFile(t *testing.T) {
+	dir := t.TempDir()
+	r, err := NewPDFRendererService(dir)
+	if err != nil {
+		t.Fatalf("NewPDFRendererService: %v", err)
+	}
+
+	name, err := r.RenderReportToPDF(sampleReportData(), models.ReportTypeUptime, "monthly")
+	if err != nil {
+		t.Fatalf("RenderReportToPDF: %v", err)
+	}
+	if filepath.Base(name) != name {
+		t.Errorf("returned name %q should be a bare file name", name)
+	}
+
+	path := filepath.Join(dir, name)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading generated PDF: %v", err)
+	}
+	if !strings.HasPrefix(string(content), "%PDF-") {
+		t.Errorf("file does not start with the PDF magic bytes: %q", content[:min(8, len(content))])
+	}
+	if len(content) < 1000 {
+		t.Errorf("PDF is suspiciously small (%d bytes) - sections may not have rendered", len(content))
+	}
+
+	size, err := r.GetPDFFileSize(name)
+	if err != nil {
+		t.Fatalf("GetPDFFileSize: %v", err)
+	}
+	if size != len(content) {
+		t.Errorf("GetPDFFileSize = %d, want %d", size, len(content))
+	}
+}
+
+// Each report type must produce a genuinely different document, or the type
+// selection is a lie.
+func TestRenderReportToPDFHonoursReportType(t *testing.T) {
+	dir := t.TempDir()
+	r, _ := NewPDFRendererService(dir)
+	data := sampleReportData()
+
+	render := func(reportType, hint string) string {
+		name, err := r.RenderReportToPDF(data, reportType, hint)
+		if err != nil {
+			t.Fatalf("render %v: %v", reportType, err)
+		}
+		path, err := r.GetPDFPath(name)
+		if err != nil {
+			t.Fatalf("path: %v", err)
+		}
+		return pdfDrawnText(t, path)
+	}
+
+	uptime := render(models.ReportTypeUptime, "uptime")
+	if !strings.Contains(uptime, "SLA Compliance") {
+		t.Error("uptime report is missing the SLA Compliance section")
+	}
+	if strings.Contains(uptime, "Root cause") {
+		t.Error("uptime report should not include incident detail")
+	}
+
+	incident := render(models.ReportTypeIncident, "incident")
+	if !strings.Contains(incident, "Upstream provider outage") {
+		t.Error("incident report is missing incident detail")
+	}
+	if strings.Contains(incident, "SLA Compliance") {
+		t.Error("incident report should not include the SLA Compliance section")
+	}
+}
+```
+
+(`pdfDrawnText` is defined in `pdf_encoding_test.go`, same package, and is reused here as-is.)
+
+Do **not** add any `UptimeSeries`/`EffectiveSLA` data to `sampleReportData()` in this task — those fields don't exist on `ReportData` yet (Task 8 adds them) and won't compile here. Task 9 extends this same fixture and this same test once the graph exists.
+
+- [ ] **Step 4: Run the tests to verify they fail**
+
+Run: `cd backend && go test ./internal/services/... -run TestRenderReportToPDF -v`
+Expected: FAIL to compile — `RenderReportToPDF`'s second parameter is still `[]string`, and `models.SectionSLACompliance` etc. no longer exist (removed in Task 2).
+
+- [ ] **Step 5: Rewrite pdf_renderer.go**
+
+Replace `backend/internal/services/pdf_renderer.go` in full:
+
+```go
+// Package services - pdf_renderer.go renders aggregated report data to a PDF on
+// disk.
+//
+// The original design shelled out to wkhtmltopdf. That is not viable here: the
+// runtime image is Alpine, which has no wkhtmltopdf package at all, and the
+// project was archived upstream in 2023 with open CVEs while parsing HTML we
+// generate. Drawing the PDF directly keeps the image at ~20MB with no external
+// binary and no subprocess to sandbox, at the cost of CSS fidelity - the layout
+// here is code rather than a stylesheet.
+package services
+
+import (
+	"fmt"
+	"math"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/go-pdf/fpdf"
+
+	"github.com/Stevy2191/Sentinel/backend/internal/models"
+)
+
+// Page geometry and palette, kept close to the HTML report so the two renderings
+// of the same data look like siblings.
+const (
+	pdfMarginLeft  = 15.0
+	pdfMarginTop   = 15.0
+	pdfMarginRight = 15.0
+	pdfPageWidth   = 210.0 // A4 portrait, mm
+	pdfContentW    = pdfPageWidth - pdfMarginLeft - pdfMarginRight
+)
+
+var (
+	pdfInk     = [3]int{26, 26, 26}
+	pdfMuted   = [3]int{102, 102, 102}
+	pdfRule    = [3]int{229, 231, 235}
+	pdfPanel   = [3]int{243, 244, 246}
+	pdfAccent  = [3]int{59, 130, 246}
+	pdfSuccess = [3]int{16, 185, 129}
+	pdfWarning = [3]int{245, 158, 11}
+	pdfDanger  = [3]int{239, 68, 68}
+)
+
+// PDFRendererService writes report PDFs into a single output directory.
+type PDFRendererService struct {
+	outputDir string
+}
+
+// NewPDFRendererService returns a renderer writing to outputDir, creating it if
+// needed. An unusable directory is reported now rather than at the first
+// generation attempt.
+func NewPDFRendererService(outputDir string) (*PDFRendererService, error) {
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return nil, fmt.Errorf("creating report output directory %q: %w", outputDir, err)
+	}
+	return &PDFRendererService{outputDir: outputDir}, nil
+}
+
+// RenderReportToPDF draws data to a PDF and returns the generated file's base
+// name (not its path - callers store the name and resolve it via GetPDFPath).
+// reportType selects the fixed layout: models.ReportTypeUptime or
+// models.ReportTypeIncident.
+func (s *PDFRendererService) RenderReportToPDF(data *ReportData, reportType string, nameHint string) (string, error) {
+	if data == nil {
+		return "", fmt.Errorf("report data is nil")
+	}
+
+	pdf := fpdf.New("P", "mm", "A4", "")
+	pdf.SetMargins(pdfMarginLeft, pdfMarginTop, pdfMarginRight)
+	pdf.SetAutoPageBreak(true, 18)
+	pdf.SetTitle(reportTitle(data), true)
+	pdf.AddPage()
+
+	drawPDFHeader(pdf, data)
+	switch reportType {
+	case models.ReportTypeIncident:
+		drawPDFIncidentReport(pdf, data)
+	default:
+		// Uptime is also the fallback for an unrecognized value, which
+		// Report.Validate already prevents from ever being stored.
+		drawPDFUptimeReport(pdf, data)
+	}
+	drawPDFWarnings(pdf, data)
+	drawPDFFooter(pdf)
+
+	filename := pdfFilename(nameHint)
+	outputPath := filepath.Join(s.outputDir, filename)
+	if err := pdf.OutputFileAndClose(outputPath); err != nil {
+		return "", fmt.Errorf("writing report PDF: %w", err)
+	}
+	return filename, nil
+}
+
+// pdfFilename builds a collision-resistant, filesystem-safe file name.
+func pdfFilename(nameHint string) string {
+	safe := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			return r
+		default:
+			return '-'
+		}
+	}, nameHint)
+	if safe == "" {
+		safe = "report"
+	}
+	if len(safe) > 60 {
+		safe = safe[:60]
+	}
+	return fmt.Sprintf("%d_%s.pdf", time.Now().UnixNano(), safe)
+}
+
+// GetPDFPath resolves a stored file name to its path on disk.
+//
+// The name is treated as untrusted: only a bare base name is accepted, so a
+// stored value containing a path separator or ".." cannot escape outputDir.
+func (s *PDFRendererService) GetPDFPath(pdfFilename string) (string, error) {
+	base := filepath.Base(pdfFilename)
+	if base != pdfFilename || base == "." || base == ".." || base == "" {
+		return "", fmt.Errorf("invalid report file name %q", pdfFilename)
+	}
+	return filepath.Join(s.outputDir, base), nil
+}
+
+// DeletePDF removes a generated report file. A file that is already gone is not
+// an error: the database row is the record that matters, and a half-deleted
+// report is worse than a missing file.
+func (s *PDFRendererService) DeletePDF(pdfFilename string) error {
+	path, err := s.GetPDFPath(pdfFilename)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+// GetPDFFileSize returns the size of a generated report in bytes.
+func (s *PDFRendererService) GetPDFFileSize(pdfFilename string) (int, error) {
+	path, err := s.GetPDFPath(pdfFilename)
+	if err != nil {
+		return 0, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	return int(info.Size()), nil
+}
+
+// ---- report-type layouts ---------------------------------------------------
+
+// drawPDFUptimeReport assembles the fixed Uptime Report layout: the summary
+// tiles and the per-monitor SLA table. Task 9 adds a cumulative-uptime-vs-SLA
+// graph between the two, once ReportData carries the series data it needs.
+func drawPDFUptimeReport(pdf *fpdf.Fpdf, data *ReportData) {
+	drawPDFSummary(pdf, data)
+	drawPDFSLASection(pdf, data)
+}
+
+// drawPDFIncidentReport assembles the fixed Incident Report layout: the
+// summary tiles and the full incident detail list.
+func drawPDFIncidentReport(pdf *fpdf.Fpdf, data *ReportData) {
+	drawPDFSummary(pdf, data)
+	drawPDFIncidentSection(pdf, data)
+}
+
+// ---- drawing helpers -------------------------------------------------------
+
+func setColor(pdf *fpdf.Fpdf, c [3]int, fill bool) {
+	if fill {
+		pdf.SetFillColor(c[0], c[1], c[2])
+		return
+	}
+	pdf.SetTextColor(c[0], c[1], c[2])
+}
+
+// uptimeColor grades an uptime percentage the same way the HTML report does.
+func uptimeColor(pct float64) [3]int {
+	switch {
+	case pct < 95:
+		return pdfDanger
+	case pct < 99:
+		return pdfWarning
+	default:
+		return pdfSuccess
+	}
+}
+
+func drawPDFHeader(pdf *fpdf.Fpdf, data *ReportData) {
+	pdf.SetFont("Helvetica", "B", 22)
+	setColor(pdf, pdfInk, false)
+	pdf.MultiCell(pdfContentW, 9, pdfText(reportTitle(data)), "", "L", false)
+
+	if data.CustomDescription != nil && *data.CustomDescription != "" {
+		pdf.Ln(1)
+		pdf.SetFont("Helvetica", "", 10)
+		setColor(pdf, pdfMuted, false)
+		pdf.MultiCell(pdfContentW, 5, pdfText(*data.CustomDescription), "", "L", false)
+	}
+
+	pdf.Ln(2)
+	pdf.SetFont("Helvetica", "", 9)
+	setColor(pdf, pdfMuted, false)
+	// Every timestamp in the document is written in the report's configured
+	// zone. Without this they rendered in the server process's zone, which in a
+	// container is UTC by default — a timezone nobody chose.
+	loc := data.ReportLocation()
+	pdf.MultiCell(pdfContentW, 5, pdfText(fmt.Sprintf(
+		"Report period: %s to %s\nGenerated: %s",
+		data.TimeRangeStart.In(loc).Format("January 02, 2006"),
+		data.TimeRangeEnd.In(loc).Format("January 02, 2006"),
+		time.Now().In(loc).Format("January 02, 2006 at 15:04 MST"),
+	)), "", "L", false)
+
+	pdf.Ln(2)
+	setColor(pdf, pdfRule, true)
+	pdf.Rect(pdfMarginLeft, pdf.GetY(), pdfContentW, 0.6, "F")
+	pdf.Ln(5)
+}
+
+func drawSectionHeading(pdf *fpdf.Fpdf, title string) {
+	pdf.Ln(3)
+	y := pdf.GetY()
+	setColor(pdf, pdfAccent, true)
+	pdf.Rect(pdfMarginLeft, y, 1.4, 7, "F")
+	pdf.SetX(pdfMarginLeft + 4)
+	pdf.SetFont("Helvetica", "B", 14)
+	setColor(pdf, pdfInk, false)
+	pdf.CellFormat(pdfContentW-4, 7, pdfText(title), "", 1, "L", false, 0, "")
+	pdf.Ln(2)
+}
+
+func drawPDFSummary(pdf *fpdf.Fpdf, data *ReportData) {
+	drawSectionHeading(pdf, "Summary")
+
+	total := len(data.Metrics)
+	healthy, incidents, avgUptime := 0, 0, 0.0
+	for _, m := range data.Metrics {
+		if m.Uptime >= 99.0 {
+			healthy++
+		}
+		incidents += m.IncidentCount
+		avgUptime += m.Uptime
+	}
+	if total > 0 {
+		avgUptime /= float64(total)
+	}
+
+	tiles := []struct {
+		label string
+		value string
+		color [3]int
+	}{
+		{"Services monitored", fmt.Sprintf("%d", total), pdfInk},
+		{"Average uptime", formatUptimePercent(avgUptime), uptimeColor(avgUptime)},
+		{"Total incidents", fmt.Sprintf("%d", incidents), pdfInk},
+		{"Healthy services", fmt.Sprintf("%d", healthy), pdfSuccess},
+	}
+
+	const gap = 4.0
+	w := (pdfContentW - gap*3) / 4
+	y := pdf.GetY()
+	for i, t := range tiles {
+		x := pdfMarginLeft + float64(i)*(w+gap)
+		setColor(pdf, pdfPanel, true)
+		pdf.Rect(x, y, w, 20, "F")
+		setColor(pdf, pdfAccent, true)
+		pdf.Rect(x, y, 1.2, 20, "F")
+
+		pdf.SetXY(x+4, y+3.5)
+		pdf.SetFont("Helvetica", "", 7)
+		setColor(pdf, pdfMuted, false)
+		pdf.CellFormat(w-6, 4, pdfText(strings.ToUpper(t.label)), "", 0, "L", false, 0, "")
+
+		pdf.SetXY(x+4, y+9.5)
+		pdf.SetFont("Helvetica", "B", 15)
+		setColor(pdf, t.color, false)
+		pdf.CellFormat(w-6, 8, pdfText(t.value), "", 0, "L", false, 0, "")
+	}
+	pdf.SetY(y + 24)
+}
+
+func drawPDFSLASection(pdf *fpdf.Fpdf, data *ReportData) {
+	drawSectionHeading(pdf, "SLA Compliance")
+
+	if len(data.Metrics) == 0 {
+		pdf.SetFont("Helvetica", "", 10)
+		setColor(pdf, pdfMuted, false)
+		pdf.MultiCell(pdfContentW, 5, "No monitors in scope for this report.", "", "L", false)
+		return
+	}
+
+	widths := []float64{pdfContentW - 105, 35, 35, 35}
+	headers := []string{"Service", "Uptime", "SLA target", "Status"}
+
+	pdf.SetFont("Helvetica", "B", 9)
+	setColor(pdf, pdfPanel, true)
+	setColor(pdf, pdfInk, false)
+	for i, h := range headers {
+		pdf.CellFormat(widths[i], 8, pdfText(h), "", 0, "L", true, 0, "")
+	}
+	pdf.Ln(-1)
+
+	pdf.SetFont("Helvetica", "", 9)
+	for _, m := range data.Metrics {
+		setColor(pdf, pdfInk, false)
+		pdf.CellFormat(widths[0], 7, pdfText(truncate(m.MonitorName, 46)), "B", 0, "L", false, 0, "")
+		setColor(pdf, uptimeColor(m.Uptime), false)
+		pdf.CellFormat(widths[1], 7, formatUptimePercent(m.Uptime), "B", 0, "L", false, 0, "")
+		setColor(pdf, pdfInk, false)
+		target := 0.0
+		if m.SLATarget != nil {
+			target = *m.SLATarget
+		}
+		pdf.CellFormat(widths[2], 7, fmt.Sprintf("%.2f%%", target), "B", 0, "L", false, 0, "")
+
+		status, color := "Missed", pdfDanger
+		if m.SLAMet {
+			status, color = "Met", pdfSuccess
+		}
+		setColor(pdf, color, false)
+		pdf.CellFormat(widths[3], 7, pdfText(status), "B", 1, "L", false, 0, "")
+	}
+	pdf.Ln(2)
+}
+
+func drawPDFIncidentSection(pdf *fpdf.Fpdf, data *ReportData) {
+	drawSectionHeading(pdf, "Incidents")
+
+	total := 0
+	for _, m := range data.Metrics {
+		total += m.IncidentCount
+	}
+	if total == 0 {
+		pdf.SetFont("Helvetica", "", 10)
+		setColor(pdf, pdfMuted, false)
+		pdf.MultiCell(pdfContentW, 5, "No incidents recorded during this period.", "", "L", false)
+		return
+	}
+
+	pdf.SetFont("Helvetica", "B", 10)
+	setColor(pdf, pdfInk, false)
+	pdf.CellFormat(pdfContentW, 6, fmt.Sprintf("Total incidents: %d", total), "", 1, "L", false, 0, "")
+	pdf.Ln(1)
+
+	for _, m := range data.Metrics {
+		if len(m.Incidents) == 0 {
+			continue
+		}
+		pdf.Ln(2)
+		pdf.SetFont("Helvetica", "B", 11)
+		setColor(pdf, pdfInk, false)
+		pdf.CellFormat(pdfContentW, 6,
+			pdfText(fmt.Sprintf("%s (%d)", truncate(m.MonitorName, 60), len(m.Incidents))), "", 1, "L", false, 0, "")
+
+		for _, inc := range m.Incidents {
+			y := pdf.GetY()
+			setColor(pdf, pdfDanger, true)
+			pdf.Rect(pdfMarginLeft, y, 1.2, 6, "F")
+			pdf.SetX(pdfMarginLeft + 4)
+
+			pdf.SetFont("Helvetica", "B", 9)
+			setColor(pdf, pdfInk, false)
+			pdf.CellFormat(pdfContentW-44, 6, pdfText(inc.StartTime.In(data.ReportLocation()).Format("Jan 02, 2006 15:04")), "", 0, "L", false, 0, "")
+			pdf.SetFont("Helvetica", "", 9)
+			setColor(pdf, pdfMuted, false)
+			pdf.CellFormat(40, 6, pdfText(fmt.Sprintf("%s  %s", formatMinutes(inc.Duration), inc.Status)), "", 1, "R", false, 0, "")
+
+			for _, detail := range [][2]string{
+				{"Root cause", inc.RootCause},
+				{"Resolution", inc.ResolutionNotes},
+			} {
+				if detail[1] == "" {
+					continue
+				}
+				pdf.SetX(pdfMarginLeft + 4)
+				pdf.SetFont("Helvetica", "", 8)
+				setColor(pdf, pdfMuted, false)
+				pdf.MultiCell(pdfContentW-4, 4, pdfText(detail[0]+": "+detail[1]), "", "L", false)
+			}
+			pdf.Ln(1.5)
+		}
+	}
+}
+
+// drawPDFWarnings surfaces monitors the aggregator could not include. A report
+// is a compliance artifact, so an omission is stated on its face rather than
+// left to be noticed by its absence.
+func drawPDFWarnings(pdf *fpdf.Fpdf, data *ReportData) {
+	if len(data.Warnings) == 0 {
+		return
+	}
+	drawSectionHeading(pdf, "Data warnings")
+	pdf.SetFont("Helvetica", "", 9)
+	setColor(pdf, pdfWarning, false)
+	for _, w := range data.Warnings {
+		pdf.MultiCell(pdfContentW, 4.5, pdfText("- "+w), "", "L", false)
+	}
+}
+
+func drawPDFFooter(pdf *fpdf.Fpdf) {
+	pdf.SetY(-15)
+	pdf.SetFont("Helvetica", "I", 8)
+	setColor(pdf, pdfMuted, false)
+	pdf.CellFormat(pdfContentW, 6, "Generated by Sentinel", "", 0, "C", false, 0, "")
+}
+
+// ---- shared helpers --------------------------------------------------------
+
+// reportTitle prefers the caller's custom title over the report's name.
+func reportTitle(data *ReportData) string {
+	if data.CustomTitle != nil && *data.CustomTitle != "" {
+		return *data.CustomTitle
+	}
+	return data.ReportName
+}
+
+// formatMinutes renders a downtime duration compactly (e.g. "2h 15m").
+//
+// Sub-minute outages are shown in seconds rather than as "0m". A monitor on a
+// 30-second interval produces exactly those, and rendering four of them as "0m"
+// next to a 100% uptime figure is how a real outage came to look like nothing
+// happened.
+func formatMinutes(minutes float64) string {
+	if minutes <= 0 {
+		return "0s"
+	}
+	seconds := int(math.Round(minutes * 60))
+	if seconds < 60 {
+		return fmt.Sprintf("%ds", seconds)
+	}
+	total := int(math.Round(minutes))
+	if total < 60 {
+		return fmt.Sprintf("%dm", total)
+	}
+	h, m := total/60, total%60
+	if m == 0 {
+		return fmt.Sprintf("%dh", h)
+	}
+	return fmt.Sprintf("%dh %dm", h, m)
+}
+
+// formatUptimePercent renders an uptime figure without ever rounding a real
+// outage away.
+//
+// "%.2f" turns 99.9954% into "100.00%", which read as a contradiction beside a
+// list of incidents. Anything short of a perfect record is rounded down, so
+// 100% means no recorded downtime at all and nothing else does.
+func formatUptimePercent(pct float64) string {
+	if pct >= 100 {
+		return "100.00%"
+	}
+	floored := math.Floor(pct*100) / 100
+	if floored >= 100 {
+		floored = 99.99
+	}
+	return fmt.Sprintf("%.2f%%", floored)
+}
+
+// truncate shortens s to max runes, marking that it was cut.
+func truncate(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	if max <= 1 {
+		return string(r[:max])
+	}
+	return string(r[:max-1]) + "…"
+}
+```
+
+Note: `setDrawColor` is deliberately not part of this version — nothing in this task's drawing code strokes a line or a "D"/"DF"-style rectangle border yet (`drawPDFSLASection`'s table only uses cell borders via `CellFormat`'s own border parameter, not `Rect`/`Line`). Task 9 adds `setDrawColor` back when it adds the graph, which is the only thing that needs it.
+
+- [ ] **Step 6: Update the encoding probe test's helper and comment**
+
+In `backend/internal/services/pdf_encoding_test.go`, change:
+
+```go
+	name, err := r.RenderReportToPDF(data, []string{models.SectionSLACompliance, models.SectionIncidentSummary}, "probe")
+```
+
+to:
+
+```go
+	name, err := r.RenderReportToPDF(data, models.ReportTypeUptime, "probe")
+```
+
+And in `TestPDF_AccentedMonitorNameSurvives`, change:
+
+```go
+		// An SLA target is required for the row to be drawn at all; without
+		// one the section prints "no targets configured" and the name never
+		// reaches the page.
+		Metrics: []ReportMetrics{{
+```
+
+to:
+
+```go
+		Metrics: []ReportMetrics{{
+```
+
+(The row now draws regardless of `SLATarget`; the comment describing the old filtered behavior is stale.)
+
+- [ ] **Step 7: Run the PDF tests to verify they pass**
+
+Run: `cd backend && go test ./internal/services/... -run 'TestRenderReportToPDF|TestPDF_|TestGetPDFPathRejectsTraversal|TestPDFFilenameIsSanitized|TestFormatMinutes|TestPDFText|TestReportData_ReportLocationDefaultsToUTC' -v`
+Expected: PASS for all.
+
+- [ ] **Step 8: Remove the template lookup from report_generator.go**
+
+In `backend/internal/services/report_generator.go`, change:
+
+```go
+// GenerateAndSaveReport aggregates, renders, and records a report.
+func (rg *ReportGenerator) GenerateAndSaveReport(ctx context.Context, report *models.Report, generatedBy uuid.UUID) (*GeneratedReport, error) {
+	var template models.ReportTemplate
+	if err := rg.db.WithContext(ctx).First(&template, "id = ?", report.TemplateID).Error; err != nil {
+		return nil, fmt.Errorf("loading report template: %w", err)
+	}
+
+	data, err := rg.aggregator.AggregateReportData(ctx, report, generatedBy)
+	if err != nil {
+		return nil, fmt.Errorf("aggregating report data: %w", err)
+	}
+
+	// Stamped before rendering so both the PDF and anything else built from
+	// this data describe the same clock.
+	data.Location = rg.reportLocation(ctx)
+
+	filename, err := rg.pdfRenderer.RenderReportToPDF(data, template.Sections, "report_"+report.ID.String()[:8])
+	if err != nil {
+		return nil, fmt.Errorf("rendering report PDF: %w", err)
+	}
+```
+
+to:
+
+```go
+// GenerateAndSaveReport aggregates, renders, and records a report.
+func (rg *ReportGenerator) GenerateAndSaveReport(ctx context.Context, report *models.Report, generatedBy uuid.UUID) (*GeneratedReport, error) {
+	data, err := rg.aggregator.AggregateReportData(ctx, report, generatedBy)
+	if err != nil {
+		return nil, fmt.Errorf("aggregating report data: %w", err)
+	}
+
+	// Stamped before rendering so both the PDF and anything else built from
+	// this data describe the same clock.
+	data.Location = rg.reportLocation(ctx)
+
+	filename, err := rg.pdfRenderer.RenderReportToPDF(data, report.ReportType, "report_"+report.ID.String()[:8])
+	if err != nil {
+		return nil, fmt.Errorf("rendering report PDF: %w", err)
+	}
+```
+
+- [ ] **Step 9: Remove the now-unreachable classify case in report_job_queue.go**
+
+In `backend/internal/services/report_job_queue.go`, change:
+
+```go
+	switch {
+	case strings.Contains(msg, "loading report template"):
+		return "report template could not be loaded"
+	case strings.Contains(msg, "aggregating report data"):
+```
+
+to:
+
+```go
+	switch {
+	case strings.Contains(msg, "aggregating report data"):
+```
+
+(`GenerateAndSaveReport` no longer produces a "loading report template" error, since Step 8 removed the lookup that wrapped it.)
+
+- [ ] **Step 10: Rewrite report_builder_handler.go's report-type surface**
+
+In `backend/internal/api/report_builder_handler.go`:
+
+10a. Remove the unused `errors` import. Change:
+
+```go
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"net/http"
+	"os"
+	"strconv"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+
+	"github.com/Stevy2191/Sentinel/backend/internal/models"
+	"github.com/Stevy2191/Sentinel/backend/internal/services"
+)
+```
+
+to:
+
+```go
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"net/http"
+	"os"
+	"strconv"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+
+	"github.com/Stevy2191/Sentinel/backend/internal/models"
+	"github.com/Stevy2191/Sentinel/backend/internal/services"
+)
+```
+
+10b. Drop the `htmlGenerator` field. Change:
+
+```go
+// ReportBuilder holds the dependencies the report-builder endpoints need.
+type ReportBuilder struct {
+	db            *gorm.DB
+	aggregator    *services.ReportAggregatorService
+	pdfRenderer   *services.PDFRendererService
+	htmlGenerator *services.HTMLReportGenerator
+	// scheduler is used when deleting a report: the database cascades its
+	// schedules away, but their cron jobs would otherwise keep firing against
+	// rows that no longer exist.
+	scheduler *services.ReportSchedulerService
+	// jobs renders reports off the request path.
+	jobs *services.ReportJobQueue
+	// audit records who changed what.
+	audit *services.AuditService
+	// settings supplies the report timezone, which period labels are resolved
+	// in so the list agrees with the rendered report.
+	settings *services.SettingsService
+}
+
+// NewReportBuilder returns a handler set bound to its dependencies.
+func NewReportBuilder(
+	db *gorm.DB,
+	aggregator *services.ReportAggregatorService,
+	pdfRenderer *services.PDFRendererService,
+	scheduler *services.ReportSchedulerService,
+	settings *services.SettingsService,
+) *ReportBuilder {
+	return &ReportBuilder{
+		db:            db,
+		aggregator:    aggregator,
+		pdfRenderer:   pdfRenderer,
+		htmlGenerator: services.NewHTMLReportGenerator(),
+		scheduler:     scheduler,
+		settings:      settings,
+	}
+}
+```
+
+to:
+
+```go
+// ReportBuilder holds the dependencies the report-builder endpoints need.
+type ReportBuilder struct {
+	db          *gorm.DB
+	aggregator  *services.ReportAggregatorService
+	pdfRenderer *services.PDFRendererService
+	// scheduler is used when deleting a report: the database cascades its
+	// schedules away, but their cron jobs would otherwise keep firing against
+	// rows that no longer exist.
+	scheduler *services.ReportSchedulerService
+	// jobs renders reports off the request path.
+	jobs *services.ReportJobQueue
+	// audit records who changed what.
+	audit *services.AuditService
+	// settings supplies the report timezone, which period labels are resolved
+	// in so the list agrees with the rendered report.
+	settings *services.SettingsService
+}
+
+// NewReportBuilder returns a handler set bound to its dependencies.
+func NewReportBuilder(
+	db *gorm.DB,
+	aggregator *services.ReportAggregatorService,
+	pdfRenderer *services.PDFRendererService,
+	scheduler *services.ReportSchedulerService,
+	settings *services.SettingsService,
+) *ReportBuilder {
+	return &ReportBuilder{
+		db:          db,
+		aggregator:  aggregator,
+		pdfRenderer: pdfRenderer,
+		scheduler:   scheduler,
+		settings:    settings,
+	}
+}
+```
+
+10c. Change `GenerateReportRequest`. Change:
+
+```go
+// GenerateReportRequest creates a report definition and renders it immediately.
+type GenerateReportRequest struct {
+	Name       string             `json:"name" binding:"required"`
+	TemplateID uuid.UUID          `json:"template_id" binding:"required"`
+	ScopeType  string             `json:"scope_type" binding:"required,oneof=monitors tags groups types"`
+	ScopeData  models.ReportScope `json:"scope_data" binding:"required"`
+```
+
+to:
+
+```go
+// GenerateReportRequest creates a report definition and renders it immediately.
+type GenerateReportRequest struct {
+	Name       string             `json:"name" binding:"required"`
+	ReportType string             `json:"report_type" binding:"required,oneof=uptime incident"`
+	ScopeType  string             `json:"scope_type" binding:"required,oneof=monitors tags groups types"`
+	ScopeData  models.ReportScope `json:"scope_data" binding:"required"`
+```
+
+10d. Change `ReportResponse`. Change:
+
+```go
+// ReportResponse is a report definition plus its generation history.
+type ReportResponse struct {
+	ID            uuid.UUID `json:"id"`
+	Name          string    `json:"name"`
+	TemplateName  string    `json:"template_name"`
+	ScopeType     string    `json:"scope_type"`
+	TimeRangeDays int       `json:"time_range_days"`
+```
+
+to:
+
+```go
+// ReportResponse is a report definition plus its generation history.
+type ReportResponse struct {
+	ID            uuid.UUID `json:"id"`
+	Name          string    `json:"name"`
+	ReportType    string    `json:"report_type"`
+	ScopeType     string    `json:"scope_type"`
+	TimeRangeDays int       `json:"time_range_days"`
+```
+
+10e. Remove the template lookup from `GenerateReport` and use `ReportType` directly. Change:
+
+```go
+	userID, _, _, ok := GetUserFromContext(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	var template models.ReportTemplate
+	if err := h.db.WithContext(c.Request.Context()).
+		First(&template, "id = ?", req.TemplateID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			respondError(c, http.StatusNotFound, "report template not found")
+			return
+		}
+		respondInternal(c, "loading report template", err)
+		return
+	}
+
+	report := models.Report{
+		ID:                uuid.New(),
+		UserID:            userID,
+		Name:              req.Name,
+		TemplateID:        req.TemplateID,
+		ScopeType:         req.ScopeType,
+```
+
+to:
+
+```go
+	userID, _, _, ok := GetUserFromContext(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	report := models.Report{
+		ID:                uuid.New(),
+		UserID:            userID,
+		Name:              req.Name,
+		ReportType:        req.ReportType,
+		ScopeType:         req.ScopeType,
+```
+
+10f. Update the audit log summary. Change:
+
+```go
+	h.audit.Record(c.Request.Context(), actorFrom(c),
+		models.ActionReportCreated, models.ResourceReport, &report.ID,
+		models.AuditChanges{Summary: map[string]any{
+			"name":            report.Name,
+			"scope_type":      report.ScopeType,
+			"time_range_days": report.TimeRangeDays,
+			"template_id":     report.TemplateID,
+		}})
+```
+
+to:
+
+```go
+	h.audit.Record(c.Request.Context(), actorFrom(c),
+		models.ActionReportCreated, models.ResourceReport, &report.ID,
+		models.AuditChanges{Summary: map[string]any{
+			"name":            report.Name,
+			"scope_type":      report.ScopeType,
+			"time_range_days": report.TimeRangeDays,
+			"report_type":     report.ReportType,
+		}})
+```
+
+10g. Remove the template lookup from `buildReportResponse`. Change:
+
+```go
+func (h *ReportBuilder) buildReportResponse(ctx context.Context, report *models.Report, shareToken string) (ReportResponse, error) {
+	var template models.ReportTemplate
+	// A deleted template leaves the name blank rather than failing the listing.
+	h.db.WithContext(ctx).First(&template, "id = ?", report.TemplateID)
+
+	var generations []models.ReportGeneration
+```
+
+to:
+
+```go
+func (h *ReportBuilder) buildReportResponse(ctx context.Context, report *models.Report, shareToken string) (ReportResponse, error) {
+	var generations []models.ReportGeneration
+```
+
+10h. Use `ReportType` in the built response. Change:
+
+```go
+	return ReportResponse{
+		ID:            report.ID,
+		Name:          report.Name,
+		TemplateName:  template.Name,
+		ScopeType:     report.ScopeType,
+		TimeRangeDays: report.TimeRangeDays,
+```
+
+to:
+
+```go
+	return ReportResponse{
+		ID:            report.ID,
+		Name:          report.Name,
+		ReportType:    report.ReportType,
+		ScopeType:     report.ScopeType,
+		TimeRangeDays: report.TimeRangeDays,
+```
+
+10i. Remove `ListTemplates` entirely. Delete:
+
+```go
+// ListTemplates handles GET /api/v1/report-templates. The report builder needs
+// this to offer a template choice; without it the wizard has nothing to select.
+func (h *ReportBuilder) ListTemplates(c *gin.Context) {
+	var templates []models.ReportTemplate
+	if err := h.db.WithContext(c.Request.Context()).
+		Order("is_default DESC, name ASC").Find(&templates).Error; err != nil {
+		respondInternal(c, "listing report templates", err)
+		return
+	}
+	if templates == nil {
+		templates = []models.ReportTemplate{}
+	}
+	respondSuccess(c, http.StatusOK, templates)
+}
+
+```
+
+10j. Remove its route. Change:
+
+```go
+	// Sibling resources the builder UI needs. They sit outside the /reports
+	// group so they do not collide with its ":id" wildcard.
+	rg.GET("/report-templates", builder.ListTemplates)
+	rg.GET("/monitor-tags", builder.ListMonitorTags)
+```
+
+to:
+
+```go
+	// A sibling resource the builder UI needs. It sits outside the /reports
+	// group so it does not collide with its ":id" wildcard.
+	rg.GET("/monitor-tags", builder.ListMonitorTags)
+```
+
+- [ ] **Step 11: Run the full backend build and test suite**
+
+Run: `cd backend && go build ./... && go test ./...`
+Expected: builds cleanly and every test passes. This is the first point since Task 2 where the whole backend is expected to compile — if it does not, check for a remaining reference to `ReportTemplate`, `TemplateID`, or the old `RenderReportToPDF([]string, ...)` shape:
+
+```bash
+grep -rn "ReportTemplate\|TemplateID\|template_id\|HTMLReportGenerator" --include=*.go backend/internal/
+```
+
+Expected: no output.
+
+- [ ] **Step 12: Commit**
+
+```bash
+git add backend/internal/services/pdf_renderer.go backend/internal/services/pdf_renderer_test.go \
+        backend/internal/services/pdf_encoding_test.go backend/internal/services/report_timezone_render_test.go \
+        backend/internal/services/report_generator.go backend/internal/services/report_job_queue.go \
+        backend/internal/api/report_builder_handler.go
+git rm backend/internal/services/pdf_sections.go backend/internal/services/html_sections.go \
+       backend/internal/services/report_html_generator.go backend/internal/services/report_html_generator_test.go
+git commit -m "$(cat <<'EOF'
+feat(reports): retire the template/section dispatch system
+
+RenderReportToPDF drops its section-name dispatch for a two-way branch
+(uptime / incident), each assembling a fixed layout from the existing
+drawing helpers. POST /reports/generate now takes report_type instead
+of template_id; GET /reports and its detail responses carry report_type
+instead of template_name; GET /report-templates is removed. Also
+deletes pdf_sections.go (the section-only drawing helpers this
+replaces) and the HTML report path (report_html_generator.go,
+html_sections.go), which had zero live callers before this change and
+existed only to render the same templates the API surface above no
+longer has.
+
+This restores a compiling backend immediately after the report-type
+model change (Task 2) rather than leaving internal/services and
+internal/api broken until the last backend task - every task from here
+on can trust its own go build/go test steps.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+### Task 4: SLA settings infrastructure
 
 **Files:**
 - Modify: `backend/internal/models/setting.go`
 - Modify: `backend/internal/services/settings_service.go`
 
 **Interfaces:**
-- Produces: `models.SettingDefaultSLATarget = "default_sla_target"`, `models.DefaultSLATargetPercent = 99.9`, `models.MinSLATargetPercent = 0.0`, `models.MaxSLATargetPercent = 100.0`, `(*SettingsService).GetFloat(ctx, key string, fallback float64) float64`, `(*SettingsService).SetFloat(ctx, key string, value float64) error`, `(*SettingsService).DefaultSLATarget(ctx) float64`. Tasks 4, 5, and 7 consume `DefaultSLATarget`.
+- Produces: `models.SettingDefaultSLATarget = "default_sla_target"`, `models.DefaultSLATargetPercent = 99.9`, `models.MinSLATargetPercent = 0.0`, `models.MaxSLATargetPercent = 100.0`, `(*SettingsService).GetFloat(ctx, key string, fallback float64) float64`, `(*SettingsService).SetFloat(ctx, key string, value float64) error`, `(*SettingsService).DefaultSLATarget(ctx) float64`. Tasks 5, 6, and 8 consume `DefaultSLATarget`.
 
-Note on testing: `GetInt`/`SetInt` and `IncidentRetentionDays` — the two closest existing accessors — have no unit tests of their own (confirmed: no `settings_service_test.go` exists in this repo, and none of `SettingsService`'s methods require a database in any test today). `GetFloat`/`SetFloat`/`DefaultSLATarget` mirror them exactly and are left at the same level of coverage rather than introducing new test-database infrastructure this codebase does not otherwise have. Correctness here is checked by compiling and by the higher-level `EffectiveSLATarget` unit test in Task 7, which is a pure function and does not need a database.
+Note on testing: `GetInt`/`SetInt` and `IncidentRetentionDays` — the two closest existing accessors — have no unit tests of their own (confirmed: no `settings_service_test.go` exists in this repo, and none of `SettingsService`'s methods require a database in any test today). `GetFloat`/`SetFloat`/`DefaultSLATarget` mirror them exactly and are left at the same level of coverage rather than introducing new test-database infrastructure this codebase does not otherwise have. Correctness here is checked by compiling and by the higher-level `EffectiveSLATarget` unit test in Task 8, which is a pure function and does not need a database.
 
 - [ ] **Step 1: Add the setting key and bounds to setting.go**
 
@@ -636,7 +1811,7 @@ EOF
 
 ---
 
-### Task 4: Monitor SLA target — validation and update handling
+### Task 5: Monitor SLA target — validation and update handling
 
 **Files:**
 - Modify: `backend/internal/models/monitor.go:255-298` (`Validate`)
@@ -646,8 +1821,8 @@ EOF
 - Modify: `backend/internal/api/monitor_handler.go:156-190` (`CreateMonitorHandler`)
 
 **Interfaces:**
-- Consumes: `models.MinSLATargetPercent`/`MaxSLATargetPercent` (Task 3).
-- Produces: `Monitor.SLATarget` (already existed) is now validated and is handled on update. `0` is the sentinel meaning "no override" on both the create and update paths — Task 7's `EffectiveSLATarget`/report aggregation assumes a monitor's stored `SLATarget` is either `nil` or a real 1-100 value, never a stray `0`.
+- Consumes: `models.MinSLATargetPercent`/`MaxSLATargetPercent` (Task 4).
+- Produces: `Monitor.SLATarget` (already existed) is now validated and is handled on update. `0` is the sentinel meaning "no override" on both the create and update paths — Task 8's `EffectiveSLATarget`/report aggregation assumes a monitor's stored `SLATarget` is either `nil` or a real 1-100 value, never a stray `0`.
 
 `CreateMonitorHandler` already binds directly to `models.Monitor` (`c.ShouldBindJSON(&monitor)`), so `sla_target` is already accepted on create with no DTO change — only the zero-normalization below is new there.
 
@@ -832,14 +2007,14 @@ EOF
 
 ---
 
-### Task 5: Settings API — expose default_sla_target
+### Task 6: Settings API — expose default_sla_target
 
 **Files:**
 - Modify: `backend/internal/api/settings_handler.go`
 - Modify: `backend/internal/api/auth_handler.go`
 
 **Interfaces:**
-- Consumes: `SettingsService.DefaultSLATarget`/`SetFloat` (Task 3).
+- Consumes: `SettingsService.DefaultSLATarget`/`SetFloat` (Task 4).
 - Produces: `GET /api/v1/settings` and `PATCH /api/v1/settings/system` both carry `default_sla_target`. `GET /api/v1/auth/status` also carries it, the same way it already carries `default_check_interval` (public, needed by the monitor-create form, not a secret). Task 13 (frontend Settings page) and Task 14 (frontend monitor form's helper text) consume this field.
 
 No existing test file covers this handler (`settings_handler_test.go` does not exist), matching the rest of `settings_handler.go` — this task is implementation-only, verified by a build and a manual curl.
@@ -1008,14 +2183,14 @@ EOF
 
 ---
 
-### Task 6: Report period cleanup — remove PreviousPeriod
+### Task 7: Report period cleanup — remove PreviousPeriod
 
 **Files:**
 - Modify: `backend/internal/models/report_period.go:157-194` (delete)
 - Modify: `backend/internal/models/report_period_test.go:148-183` (delete)
 
 **Interfaces:**
-- Produces: nothing new. `Report.PreviousPeriod`/`Report.PreviousPeriodLabel` no longer exist — confirmed via grep to have exactly one caller, the period-comparison block in `report_aggregator.go`'s `AggregateReportData`, which Task 7 (the very next task) removes as dead code (the comparison-against-the-previous-period feature is not part of either new report type). This task runs immediately before Task 7, not earlier, specifically so that gap is one task wide: deleting these two functions breaks `report_aggregator.go`'s compile (its only caller) until Task 7 removes that caller, and no other task in between needs `report_aggregator.go`, `go build ./...`, or `go test ./...` to succeed.
+- Produces: nothing new. `Report.PreviousPeriod`/`Report.PreviousPeriodLabel` no longer exist — confirmed via grep to have exactly one caller, the period-comparison block in `report_aggregator.go`'s `AggregateReportData`, which Task 8 (the very next task) removes as dead code (the comparison-against-the-previous-period feature is not part of either new report type). This task runs immediately before Task 8, not earlier, specifically so that gap is one task wide: deleting these two functions breaks `report_aggregator.go`'s compile (its only caller) until Task 8 removes that caller, and no other task in between needs `report_aggregator.go`, `go build ./...`, or `go test ./...` to succeed.
 
 - [ ] **Step 1: Delete the two PreviousPeriod tests**
 
@@ -1117,10 +2292,10 @@ The file's `import` block (`errors`, `fmt`, `time`) is unchanged — `fmt` is st
 - [ ] **Step 4: Confirm the only break this causes is the expected one**
 
 Run: `cd backend && grep -rn "PreviousPeriod" --include=*.go .`
-Expected: exactly two matches, both in `report_aggregator.go` (`report.PreviousPeriod(...)` and `report.PreviousPeriodLabel(...)`, inside `AggregateReportData`'s period-comparison block). That is the one caller Task 7 removes next — do not fix it here.
+Expected: exactly two matches, both in `report_aggregator.go` (`report.PreviousPeriod(...)` and `report.PreviousPeriodLabel(...)`, inside `AggregateReportData`'s period-comparison block). That is the one caller Task 8 removes next — do not fix it here.
 
 Run: `cd backend && go build ./...`
-Expected: fails with exactly those two errors (`report.PreviousPeriod undefined`, `report.PreviousPeriodLabel undefined`, both in `report_aggregator.go`). Any other error means something in this task's own change is broken. `go build ./internal/models/...` on its own succeeds — the break is confined to `internal/services` and whatever imports it, resolved by Task 7 immediately following this one.
+Expected: fails with exactly those two errors (`report.PreviousPeriod undefined`, `report.PreviousPeriodLabel undefined`, both in `report_aggregator.go`). Any other error means something in this task's own change is broken. `go build ./internal/models/...` on its own succeeds — the break is confined to `internal/services` and whatever imports it, resolved by Task 8 immediately following this one.
 
 - [ ] **Step 5: Commit**
 
@@ -1142,7 +2317,7 @@ EOF
 
 ---
 
-### Task 7: Report aggregator rewrite — shared MeasurableWindow, EffectiveSLATarget, uptime series, dead-code removal
+### Task 8: Report aggregator rewrite — shared MeasurableWindow, EffectiveSLATarget, uptime series, dead-code removal
 
 **Files:**
 - Modify: `backend/internal/services/report_aggregator.go` (whole file)
@@ -1152,8 +2327,8 @@ EOF
 - Delete: `backend/internal/services/report_insights_test.go`
 
 **Interfaces:**
-- Consumes: `SettingsService.DefaultSLATarget` (Task 3).
-- Produces: `services.MeasurableWindow(createdAt, start, end time.Time) (time.Time, bool)`, `services.EffectiveSLATarget(monitorOverride *float64, systemDefault float64) float64`, `services.UptimeSeriesPoint{Date, Uptime}`, `ReportData.UptimeSeries []UptimeSeriesPoint`, `ReportData.EffectiveSLA float64`. `ReportData.Timeline`/`Previous`/`Availability`/`Performance` no longer exist. Task 8 (PDF renderer) consumes `UptimeSeries` and `EffectiveSLA`; `api.GetSummaryReportHandler` consumes `MeasurableWindow`.
+- Consumes: `SettingsService.DefaultSLATarget` (Task 4).
+- Produces: `services.MeasurableWindow(createdAt, start, end time.Time) (time.Time, bool)`, `services.EffectiveSLATarget(monitorOverride *float64, systemDefault float64) float64`, `services.UptimeSeriesPoint{Date, Uptime}`, `ReportData.UptimeSeries []UptimeSeriesPoint`, `ReportData.EffectiveSLA float64`. `ReportData.Timeline`/`Previous`/`Availability`/`Performance` no longer exist. Task 9 (PDF renderer graph) consumes `UptimeSeries` and `EffectiveSLA`; `api.GetSummaryReportHandler` consumes `MeasurableWindow`.
 
 - [ ] **Step 1: Write the failing tests for the two new pure functions**
 
@@ -1871,7 +3046,7 @@ to:
 - [ ] **Step 7: Run the full backend build and test suite**
 
 Run: `cd backend && go build ./... && go test ./...`
-Expected: builds and all tests pass. If `pdf_renderer.go`/`pdf_sections.go` fail to compile at this point (they still reference the now-removed `ReportData.Timeline`/`Previous`/`Availability`/`Performance` fields and old `RenderReportToPDF` call shape), that is expected and resolved in Task 8 — do not attempt to fix `pdf_*.go` files in this task.
+Expected: builds and all tests pass. Task 3 already retired the old section-dispatch system in `pdf_renderer.go`, so this task's build check has no caveat: `ReportData.Timeline`/`Previous`/`Availability`/`Performance` have no remaining callers anywhere in the backend once this task's own dead-code removal lands.
 
 - [ ] **Step 8: Commit**
 
@@ -1898,185 +3073,21 @@ EOF
 
 ---
 
-### Task 8: PDF renderer rewrite — two fixed layouts and the uptime graph
+### Task 9: Add the uptime-vs-SLA graph to the PDF renderer
 
 **Files:**
-- Delete: `backend/internal/services/pdf_sections.go`
-- Modify: `backend/internal/services/pdf_renderer.go` (whole file)
+- Modify: `backend/internal/services/pdf_renderer.go`
 - Modify: `backend/internal/services/pdf_renderer_test.go`
-- Modify: `backend/internal/services/pdf_encoding_test.go`
 
 **Interfaces:**
-- Consumes: `models.ReportTypeUptime`/`ReportTypeIncident` (Task 2), `ReportData.UptimeSeries`/`EffectiveSLA` (Task 7).
-- Produces: `(*PDFRendererService) RenderReportToPDF(data *ReportData, reportType string, nameHint string) (string, error)` — signature changed from `(data *ReportData, sections []string, nameHint string)`. Task 9 (`report_generator.go`) calls this with the new signature.
+- Consumes: `ReportData.UptimeSeries []UptimeSeriesPoint`/`ReportData.EffectiveSLA float64` (Task 8), the `drawPDFUptimeReport` layout and `pdfRule`/`pdfAccent`/`pdfWarning`/`pdfMuted` palette Task 3 already established in `pdf_renderer.go`.
+- Produces: `drawPDFUptimeGraph(pdf *fpdf.Fpdf, series []UptimeSeriesPoint, slaTarget float64, loc *time.Location)`, wired into `drawPDFUptimeReport` between the summary tiles and the SLA table.
 
-`pdf_sections.go` contains only `drawPDFExecutiveSummary`, `drawPDFTimeline`, `drawPDFAvailability`, `drawPDFPerformance`, and helpers used only by them (`drawTableHeader`, `formatMillis`, `signedDelta`, `signedCountDelta`, `signedDeltaMinutes`, `worstMonitor`, `perfectMonitors`, `joinCapped`) — confirmed via a whole-backend grep that none of these are used anywhere outside that file. It is deleted wholesale, not edited.
+This is the only remaining piece of the original PDF-renderer rewrite: Task 3 already gave `RenderReportToPDF` its final signature and both fixed layouts, but could not add the graph itself, since `ReportData` didn't yet carry `UptimeSeries`/`EffectiveSLA` — Task 8 (the aggregator rewrite) just added them. This task adds exactly one function and one call site; nothing else in `pdf_renderer.go` changes.
 
-- [ ] **Step 1: Delete pdf_sections.go**
+- [ ] **Step 1: Extend the test fixture and write the failing assertions**
 
-```bash
-rm backend/internal/services/pdf_sections.go
-```
-
-- [ ] **Step 2: Write the failing tests**
-
-Replace the two PDF-generation tests near the top of `backend/internal/services/pdf_renderer_test.go`. Change:
-
-```go
-// A generated report must actually be a readable PDF on disk, not merely a call
-// that returned no error.
-func TestRenderReportToPDFWritesAValidFile(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewPDFRendererService(dir)
-	if err != nil {
-		t.Fatalf("NewPDFRendererService: %v", err)
-	}
-
-	name, err := r.RenderReportToPDF(sampleReportData(), nil, "monthly")
-	if err != nil {
-		t.Fatalf("RenderReportToPDF: %v", err)
-	}
-	if filepath.Base(name) != name {
-		t.Errorf("returned name %q should be a bare file name", name)
-	}
-
-	path := filepath.Join(dir, name)
-	content, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("reading generated PDF: %v", err)
-	}
-	if !strings.HasPrefix(string(content), "%PDF-") {
-		t.Errorf("file does not start with the PDF magic bytes: %q", content[:min(8, len(content))])
-	}
-	if len(content) < 1000 {
-		t.Errorf("PDF is suspiciously small (%d bytes) - sections may not have rendered", len(content))
-	}
-
-	size, err := r.GetPDFFileSize(name)
-	if err != nil {
-		t.Fatalf("GetPDFFileSize: %v", err)
-	}
-	if size != len(content) {
-		t.Errorf("GetPDFFileSize = %d, want %d", size, len(content))
-	}
-}
-
-// Each template section must change the output, or section selection is a lie.
-func TestRenderReportToPDFHonoursSections(t *testing.T) {
-	dir := t.TempDir()
-	r, _ := NewPDFRendererService(dir)
-	data := sampleReportData()
-
-	sizeOf := func(sections []string, hint string) int {
-		name, err := r.RenderReportToPDF(data, sections, hint)
-		if err != nil {
-			t.Fatalf("render %v: %v", sections, err)
-		}
-		size, err := r.GetPDFFileSize(name)
-		if err != nil {
-			t.Fatalf("size: %v", err)
-		}
-		return size
-	}
-
-	slaOnly := sizeOf([]string{models.SectionSLACompliance}, "sla")
-	everything := sizeOf([]string{
-		models.SectionCharts, models.SectionSLACompliance,
-		models.SectionIncidentSummary, models.SectionCustom,
-	}, "all")
-
-	if everything <= slaOnly {
-		t.Errorf("a full report (%d bytes) should be larger than SLA-only (%d bytes); sections may be ignored",
-			everything, slaOnly)
-	}
-}
-```
-
-to:
-
-```go
-// A generated report must actually be a readable PDF on disk, not merely a call
-// that returned no error.
-func TestRenderReportToPDFWritesAValidFile(t *testing.T) {
-	dir := t.TempDir()
-	r, err := NewPDFRendererService(dir)
-	if err != nil {
-		t.Fatalf("NewPDFRendererService: %v", err)
-	}
-
-	name, err := r.RenderReportToPDF(sampleReportData(), models.ReportTypeUptime, "monthly")
-	if err != nil {
-		t.Fatalf("RenderReportToPDF: %v", err)
-	}
-	if filepath.Base(name) != name {
-		t.Errorf("returned name %q should be a bare file name", name)
-	}
-
-	path := filepath.Join(dir, name)
-	content, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("reading generated PDF: %v", err)
-	}
-	if !strings.HasPrefix(string(content), "%PDF-") {
-		t.Errorf("file does not start with the PDF magic bytes: %q", content[:min(8, len(content))])
-	}
-	if len(content) < 1000 {
-		t.Errorf("PDF is suspiciously small (%d bytes) - sections may not have rendered", len(content))
-	}
-
-	size, err := r.GetPDFFileSize(name)
-	if err != nil {
-		t.Fatalf("GetPDFFileSize: %v", err)
-	}
-	if size != len(content) {
-		t.Errorf("GetPDFFileSize = %d, want %d", size, len(content))
-	}
-}
-
-// Each report type must produce a genuinely different document, or the type
-// selection is a lie.
-func TestRenderReportToPDFHonoursReportType(t *testing.T) {
-	dir := t.TempDir()
-	r, _ := NewPDFRendererService(dir)
-	data := sampleReportData()
-
-	render := func(reportType, hint string) string {
-		name, err := r.RenderReportToPDF(data, reportType, hint)
-		if err != nil {
-			t.Fatalf("render %v: %v", reportType, err)
-		}
-		path, err := r.GetPDFPath(name)
-		if err != nil {
-			t.Fatalf("path: %v", err)
-		}
-		return pdfDrawnText(t, path)
-	}
-
-	uptime := render(models.ReportTypeUptime, "uptime")
-	if !strings.Contains(uptime, "SLA Compliance") {
-		t.Error("uptime report is missing the SLA Compliance section")
-	}
-	if strings.Contains(uptime, "Root cause") {
-		t.Error("uptime report should not include incident detail")
-	}
-
-	incident := render(models.ReportTypeIncident, "incident")
-	if !strings.Contains(incident, "Upstream provider outage") {
-		t.Error("incident report is missing incident detail")
-	}
-	if strings.Contains(incident, "SLA Compliance") {
-		t.Error("incident report should not include the SLA Compliance section")
-	}
-}
-```
-
-(`pdfDrawnText` is defined in `pdf_encoding_test.go`, same package, and is reused here as-is.)
-
-Also update `sampleReportData()` in the same file so the fixture actually
-exercises the graph — without this, `len(data.UptimeSeries) >= 2` in
-`drawPDFUptimeReport` is always false and `drawPDFUptimeGraph`, the single
-newest and highest-risk piece of drawing code in this task, is never called
-by any test. Change:
+In `backend/internal/services/pdf_renderer_test.go`, update `sampleReportData()` so the fixture actually exercises the graph — without this, `len(data.UptimeSeries) >= 2` in `drawPDFUptimeReport` is always false and `drawPDFUptimeGraph`, the single newest and highest-risk piece of drawing code in this task, is never called by any test. Change:
 
 ```go
 		Warnings: []string{"monitor \"legacy\" omitted: loading incidents: timeout"},
@@ -2099,10 +3110,7 @@ to:
 }
 ```
 
-And extend `TestRenderReportToPDFHonoursReportType`'s uptime-report
-assertions to confirm the graph itself drew, not merely that the SLA table
-beside it did — add these two checks right after the existing
-`uptime := render(...)` call, before `incident := render(...)`:
+Then extend `TestRenderReportToPDFHonoursReportType`'s uptime-report assertions to confirm the graph itself drew, not merely that the SLA table beside it did — add these two checks right after the existing `uptime := render(...)` call, before `incident := render(...)`:
 
 ```go
 	if !strings.Contains(uptime, "Uptime vs. SLA target") {
@@ -2113,171 +3121,39 @@ beside it did — add these two checks right after the existing
 	}
 ```
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [ ] **Step 2: Run the test to verify it fails**
 
-Run: `cd backend && go test ./internal/services/... -run TestRenderReportToPDF -v`
-Expected: FAIL to compile — `RenderReportToPDF`'s second parameter is still `[]string`, and `models.SectionSLACompliance` etc. no longer exist (removed in Task 2).
+Run: `cd backend && go test ./internal/services/... -run TestRenderReportToPDFHonoursReportType -v`
+Expected: FAIL — the two new assertions find no "Uptime vs. SLA target" text, since `drawPDFUptimeGraph` doesn't exist yet and `drawPDFUptimeReport` never calls it.
 
-- [ ] **Step 4: Rewrite pdf_renderer.go**
+- [ ] **Step 3: Add drawPDFUptimeGraph and wire it in**
 
-Replace `backend/internal/services/pdf_renderer.go` in full:
+In `backend/internal/services/pdf_renderer.go`, add `"math"` usage stays as-is (already imported and used by `formatMinutes`/`formatUptimePercent`). Add this helper immediately after `setColor` (Task 3 did not need a stroke-color helper; the graph does, for `Line` and the "D"-style `Rect` border):
 
 ```go
-// Package services - pdf_renderer.go renders aggregated report data to a PDF on
-// disk.
-//
-// The original design shelled out to wkhtmltopdf. That is not viable here: the
-// runtime image is Alpine, which has no wkhtmltopdf package at all, and the
-// project was archived upstream in 2023 with open CVEs while parsing HTML we
-// generate. Drawing the PDF directly keeps the image at ~20MB with no external
-// binary and no subprocess to sandbox, at the cost of CSS fidelity - the layout
-// here is code rather than a stylesheet.
-package services
-
-import (
-	"fmt"
-	"math"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
-
-	"github.com/go-pdf/fpdf"
-
-	"github.com/Stevy2191/Sentinel/backend/internal/models"
-)
-
-// Page geometry and palette, kept close to the HTML report so the two renderings
-// of the same data look like siblings.
-const (
-	pdfMarginLeft  = 15.0
-	pdfMarginTop   = 15.0
-	pdfMarginRight = 15.0
-	pdfPageWidth   = 210.0 // A4 portrait, mm
-	pdfContentW    = pdfPageWidth - pdfMarginLeft - pdfMarginRight
-)
-
-var (
-	pdfInk     = [3]int{26, 26, 26}
-	pdfMuted   = [3]int{102, 102, 102}
-	pdfRule    = [3]int{229, 231, 235}
-	pdfPanel   = [3]int{243, 244, 246}
-	pdfAccent  = [3]int{59, 130, 246}
-	pdfSuccess = [3]int{16, 185, 129}
-	pdfWarning = [3]int{245, 158, 11}
-	pdfDanger  = [3]int{239, 68, 68}
-)
-
-// PDFRendererService writes report PDFs into a single output directory.
-type PDFRendererService struct {
-	outputDir string
+// setDrawColor sets the stroke color fpdf uses for Line and the "D"/"DF"
+// rectangle styles - distinct from setColor's fill/text targets, neither of
+// which affects a stroked line or border.
+func setDrawColor(pdf *fpdf.Fpdf, c [3]int) {
+	pdf.SetDrawColor(c[0], c[1], c[2])
 }
+```
 
-// NewPDFRendererService returns a renderer writing to outputDir, creating it if
-// needed. An unusable directory is reported now rather than at the first
-// generation attempt.
-func NewPDFRendererService(outputDir string) (*PDFRendererService, error) {
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return nil, fmt.Errorf("creating report output directory %q: %w", outputDir, err)
-	}
-	return &PDFRendererService{outputDir: outputDir}, nil
+Then change `drawPDFUptimeReport` from:
+
+```go
+// drawPDFUptimeReport assembles the fixed Uptime Report layout: the summary
+// tiles and the per-monitor SLA table. Task 9 adds a cumulative-uptime-vs-SLA
+// graph between the two, once ReportData carries the series data it needs.
+func drawPDFUptimeReport(pdf *fpdf.Fpdf, data *ReportData) {
+	drawPDFSummary(pdf, data)
+	drawPDFSLASection(pdf, data)
 }
+```
 
-// RenderReportToPDF draws data to a PDF and returns the generated file's base
-// name (not its path - callers store the name and resolve it via GetPDFPath).
-// reportType selects the fixed layout: models.ReportTypeUptime or
-// models.ReportTypeIncident.
-func (s *PDFRendererService) RenderReportToPDF(data *ReportData, reportType string, nameHint string) (string, error) {
-	if data == nil {
-		return "", fmt.Errorf("report data is nil")
-	}
+to:
 
-	pdf := fpdf.New("P", "mm", "A4", "")
-	pdf.SetMargins(pdfMarginLeft, pdfMarginTop, pdfMarginRight)
-	pdf.SetAutoPageBreak(true, 18)
-	pdf.SetTitle(reportTitle(data), true)
-	pdf.AddPage()
-
-	drawPDFHeader(pdf, data)
-	switch reportType {
-	case models.ReportTypeIncident:
-		drawPDFIncidentReport(pdf, data)
-	default:
-		// Uptime is also the fallback for an unrecognized value, which
-		// Report.Validate already prevents from ever being stored.
-		drawPDFUptimeReport(pdf, data)
-	}
-	drawPDFWarnings(pdf, data)
-	drawPDFFooter(pdf)
-
-	filename := pdfFilename(nameHint)
-	outputPath := filepath.Join(s.outputDir, filename)
-	if err := pdf.OutputFileAndClose(outputPath); err != nil {
-		return "", fmt.Errorf("writing report PDF: %w", err)
-	}
-	return filename, nil
-}
-
-// pdfFilename builds a collision-resistant, filesystem-safe file name.
-func pdfFilename(nameHint string) string {
-	safe := strings.Map(func(r rune) rune {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
-			return r
-		default:
-			return '-'
-		}
-	}, nameHint)
-	if safe == "" {
-		safe = "report"
-	}
-	if len(safe) > 60 {
-		safe = safe[:60]
-	}
-	return fmt.Sprintf("%d_%s.pdf", time.Now().UnixNano(), safe)
-}
-
-// GetPDFPath resolves a stored file name to its path on disk.
-//
-// The name is treated as untrusted: only a bare base name is accepted, so a
-// stored value containing a path separator or ".." cannot escape outputDir.
-func (s *PDFRendererService) GetPDFPath(pdfFilename string) (string, error) {
-	base := filepath.Base(pdfFilename)
-	if base != pdfFilename || base == "." || base == ".." || base == "" {
-		return "", fmt.Errorf("invalid report file name %q", pdfFilename)
-	}
-	return filepath.Join(s.outputDir, base), nil
-}
-
-// DeletePDF removes a generated report file. A file that is already gone is not
-// an error: the database row is the record that matters, and a half-deleted
-// report is worse than a missing file.
-func (s *PDFRendererService) DeletePDF(pdfFilename string) error {
-	path, err := s.GetPDFPath(pdfFilename)
-	if err != nil {
-		return err
-	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
-}
-
-// GetPDFFileSize returns the size of a generated report in bytes.
-func (s *PDFRendererService) GetPDFFileSize(pdfFilename string) (int, error) {
-	path, err := s.GetPDFPath(pdfFilename)
-	if err != nil {
-		return 0, err
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return 0, err
-	}
-	return int(info.Size()), nil
-}
-
-// ---- report-type layouts ---------------------------------------------------
-
+```go
 // drawPDFUptimeReport assembles the fixed Uptime Report layout: the summary
 // tiles, the cumulative-uptime-vs-SLA graph, and the per-monitor SLA table.
 func drawPDFUptimeReport(pdf *fpdf.Fpdf, data *ReportData) {
@@ -2287,137 +3163,11 @@ func drawPDFUptimeReport(pdf *fpdf.Fpdf, data *ReportData) {
 	}
 	drawPDFSLASection(pdf, data)
 }
+```
 
-// drawPDFIncidentReport assembles the fixed Incident Report layout: the
-// summary tiles and the full incident detail list.
-func drawPDFIncidentReport(pdf *fpdf.Fpdf, data *ReportData) {
-	drawPDFSummary(pdf, data)
-	drawPDFIncidentSection(pdf, data)
-}
+Then add the graph function itself, immediately after `drawPDFSummary`:
 
-// ---- drawing helpers -------------------------------------------------------
-
-func setColor(pdf *fpdf.Fpdf, c [3]int, fill bool) {
-	if fill {
-		pdf.SetFillColor(c[0], c[1], c[2])
-		return
-	}
-	pdf.SetTextColor(c[0], c[1], c[2])
-}
-
-// setDrawColor sets the stroke color fpdf uses for Line and the "D"/"DF"
-// rectangle styles - distinct from setColor's fill/text targets, neither of
-// which affects a stroked line or border.
-func setDrawColor(pdf *fpdf.Fpdf, c [3]int) {
-	pdf.SetDrawColor(c[0], c[1], c[2])
-}
-
-// uptimeColor grades an uptime percentage the same way the HTML report does.
-func uptimeColor(pct float64) [3]int {
-	switch {
-	case pct < 95:
-		return pdfDanger
-	case pct < 99:
-		return pdfWarning
-	default:
-		return pdfSuccess
-	}
-}
-
-func drawPDFHeader(pdf *fpdf.Fpdf, data *ReportData) {
-	pdf.SetFont("Helvetica", "B", 22)
-	setColor(pdf, pdfInk, false)
-	pdf.MultiCell(pdfContentW, 9, pdfText(reportTitle(data)), "", "L", false)
-
-	if data.CustomDescription != nil && *data.CustomDescription != "" {
-		pdf.Ln(1)
-		pdf.SetFont("Helvetica", "", 10)
-		setColor(pdf, pdfMuted, false)
-		pdf.MultiCell(pdfContentW, 5, pdfText(*data.CustomDescription), "", "L", false)
-	}
-
-	pdf.Ln(2)
-	pdf.SetFont("Helvetica", "", 9)
-	setColor(pdf, pdfMuted, false)
-	// Every timestamp in the document is written in the report's configured
-	// zone. Without this they rendered in the server process's zone, which in a
-	// container is UTC by default — a timezone nobody chose.
-	loc := data.ReportLocation()
-	pdf.MultiCell(pdfContentW, 5, pdfText(fmt.Sprintf(
-		"Report period: %s to %s\nGenerated: %s",
-		data.TimeRangeStart.In(loc).Format("January 02, 2006"),
-		data.TimeRangeEnd.In(loc).Format("January 02, 2006"),
-		time.Now().In(loc).Format("January 02, 2006 at 15:04 MST"),
-	)), "", "L", false)
-
-	pdf.Ln(2)
-	setColor(pdf, pdfRule, true)
-	pdf.Rect(pdfMarginLeft, pdf.GetY(), pdfContentW, 0.6, "F")
-	pdf.Ln(5)
-}
-
-func drawSectionHeading(pdf *fpdf.Fpdf, title string) {
-	pdf.Ln(3)
-	y := pdf.GetY()
-	setColor(pdf, pdfAccent, true)
-	pdf.Rect(pdfMarginLeft, y, 1.4, 7, "F")
-	pdf.SetX(pdfMarginLeft + 4)
-	pdf.SetFont("Helvetica", "B", 14)
-	setColor(pdf, pdfInk, false)
-	pdf.CellFormat(pdfContentW-4, 7, pdfText(title), "", 1, "L", false, 0, "")
-	pdf.Ln(2)
-}
-
-func drawPDFSummary(pdf *fpdf.Fpdf, data *ReportData) {
-	drawSectionHeading(pdf, "Summary")
-
-	total := len(data.Metrics)
-	healthy, incidents, avgUptime := 0, 0, 0.0
-	for _, m := range data.Metrics {
-		if m.Uptime >= 99.0 {
-			healthy++
-		}
-		incidents += m.IncidentCount
-		avgUptime += m.Uptime
-	}
-	if total > 0 {
-		avgUptime /= float64(total)
-	}
-
-	tiles := []struct {
-		label string
-		value string
-		color [3]int
-	}{
-		{"Services monitored", fmt.Sprintf("%d", total), pdfInk},
-		{"Average uptime", formatUptimePercent(avgUptime), uptimeColor(avgUptime)},
-		{"Total incidents", fmt.Sprintf("%d", incidents), pdfInk},
-		{"Healthy services", fmt.Sprintf("%d", healthy), pdfSuccess},
-	}
-
-	const gap = 4.0
-	w := (pdfContentW - gap*3) / 4
-	y := pdf.GetY()
-	for i, t := range tiles {
-		x := pdfMarginLeft + float64(i)*(w+gap)
-		setColor(pdf, pdfPanel, true)
-		pdf.Rect(x, y, w, 20, "F")
-		setColor(pdf, pdfAccent, true)
-		pdf.Rect(x, y, 1.2, 20, "F")
-
-		pdf.SetXY(x+4, y+3.5)
-		pdf.SetFont("Helvetica", "", 7)
-		setColor(pdf, pdfMuted, false)
-		pdf.CellFormat(w-6, 4, pdfText(strings.ToUpper(t.label)), "", 0, "L", false, 0, "")
-
-		pdf.SetXY(x+4, y+9.5)
-		pdf.SetFont("Helvetica", "B", 15)
-		setColor(pdf, t.color, false)
-		pdf.CellFormat(w-6, 8, pdfText(t.value), "", 0, "L", false, 0, "")
-	}
-	pdf.SetY(y + 24)
-}
-
+```go
 // drawPDFUptimeGraph draws the cumulative-uptime-vs-SLA line chart: an axis
 // box, a flat SLA reference bar, and the cumulative-uptime line connecting
 // each sample point. Built from fpdf's own line/rect primitives - no image
@@ -2515,731 +3265,29 @@ func drawPDFUptimeGraph(pdf *fpdf.Fpdf, series []UptimeSeriesPoint, slaTarget fl
 
 	pdf.SetY(y0 + chartH + 9)
 }
-
-func drawPDFSLASection(pdf *fpdf.Fpdf, data *ReportData) {
-	drawSectionHeading(pdf, "SLA Compliance")
-
-	if len(data.Metrics) == 0 {
-		pdf.SetFont("Helvetica", "", 10)
-		setColor(pdf, pdfMuted, false)
-		pdf.MultiCell(pdfContentW, 5, "No monitors in scope for this report.", "", "L", false)
-		return
-	}
-
-	widths := []float64{pdfContentW - 105, 35, 35, 35}
-	headers := []string{"Service", "Uptime", "SLA target", "Status"}
-
-	pdf.SetFont("Helvetica", "B", 9)
-	setColor(pdf, pdfPanel, true)
-	setColor(pdf, pdfInk, false)
-	for i, h := range headers {
-		pdf.CellFormat(widths[i], 8, pdfText(h), "", 0, "L", true, 0, "")
-	}
-	pdf.Ln(-1)
-
-	pdf.SetFont("Helvetica", "", 9)
-	for _, m := range data.Metrics {
-		setColor(pdf, pdfInk, false)
-		pdf.CellFormat(widths[0], 7, pdfText(truncate(m.MonitorName, 46)), "B", 0, "L", false, 0, "")
-		setColor(pdf, uptimeColor(m.Uptime), false)
-		pdf.CellFormat(widths[1], 7, formatUptimePercent(m.Uptime), "B", 0, "L", false, 0, "")
-		setColor(pdf, pdfInk, false)
-		target := 0.0
-		if m.SLATarget != nil {
-			target = *m.SLATarget
-		}
-		pdf.CellFormat(widths[2], 7, fmt.Sprintf("%.2f%%", target), "B", 0, "L", false, 0, "")
-
-		status, color := "Missed", pdfDanger
-		if m.SLAMet {
-			status, color = "Met", pdfSuccess
-		}
-		setColor(pdf, color, false)
-		pdf.CellFormat(widths[3], 7, pdfText(status), "B", 1, "L", false, 0, "")
-	}
-	pdf.Ln(2)
-}
-
-func drawPDFIncidentSection(pdf *fpdf.Fpdf, data *ReportData) {
-	drawSectionHeading(pdf, "Incidents")
-
-	total := 0
-	for _, m := range data.Metrics {
-		total += m.IncidentCount
-	}
-	if total == 0 {
-		pdf.SetFont("Helvetica", "", 10)
-		setColor(pdf, pdfMuted, false)
-		pdf.MultiCell(pdfContentW, 5, "No incidents recorded during this period.", "", "L", false)
-		return
-	}
-
-	pdf.SetFont("Helvetica", "B", 10)
-	setColor(pdf, pdfInk, false)
-	pdf.CellFormat(pdfContentW, 6, fmt.Sprintf("Total incidents: %d", total), "", 1, "L", false, 0, "")
-	pdf.Ln(1)
-
-	for _, m := range data.Metrics {
-		if len(m.Incidents) == 0 {
-			continue
-		}
-		pdf.Ln(2)
-		pdf.SetFont("Helvetica", "B", 11)
-		setColor(pdf, pdfInk, false)
-		pdf.CellFormat(pdfContentW, 6,
-			pdfText(fmt.Sprintf("%s (%d)", truncate(m.MonitorName, 60), len(m.Incidents))), "", 1, "L", false, 0, "")
-
-		for _, inc := range m.Incidents {
-			y := pdf.GetY()
-			setColor(pdf, pdfDanger, true)
-			pdf.Rect(pdfMarginLeft, y, 1.2, 6, "F")
-			pdf.SetX(pdfMarginLeft + 4)
-
-			pdf.SetFont("Helvetica", "B", 9)
-			setColor(pdf, pdfInk, false)
-			pdf.CellFormat(pdfContentW-44, 6, pdfText(inc.StartTime.In(data.ReportLocation()).Format("Jan 02, 2006 15:04")), "", 0, "L", false, 0, "")
-			pdf.SetFont("Helvetica", "", 9)
-			setColor(pdf, pdfMuted, false)
-			pdf.CellFormat(40, 6, pdfText(fmt.Sprintf("%s  %s", formatMinutes(inc.Duration), inc.Status)), "", 1, "R", false, 0, "")
-
-			for _, detail := range [][2]string{
-				{"Root cause", inc.RootCause},
-				{"Resolution", inc.ResolutionNotes},
-			} {
-				if detail[1] == "" {
-					continue
-				}
-				pdf.SetX(pdfMarginLeft + 4)
-				pdf.SetFont("Helvetica", "", 8)
-				setColor(pdf, pdfMuted, false)
-				pdf.MultiCell(pdfContentW-4, 4, pdfText(detail[0]+": "+detail[1]), "", "L", false)
-			}
-			pdf.Ln(1.5)
-		}
-	}
-}
-
-// drawPDFWarnings surfaces monitors the aggregator could not include. A report
-// is a compliance artifact, so an omission is stated on its face rather than
-// left to be noticed by its absence.
-func drawPDFWarnings(pdf *fpdf.Fpdf, data *ReportData) {
-	if len(data.Warnings) == 0 {
-		return
-	}
-	drawSectionHeading(pdf, "Data warnings")
-	pdf.SetFont("Helvetica", "", 9)
-	setColor(pdf, pdfWarning, false)
-	for _, w := range data.Warnings {
-		pdf.MultiCell(pdfContentW, 4.5, pdfText("- "+w), "", "L", false)
-	}
-}
-
-func drawPDFFooter(pdf *fpdf.Fpdf) {
-	pdf.SetY(-15)
-	pdf.SetFont("Helvetica", "I", 8)
-	setColor(pdf, pdfMuted, false)
-	pdf.CellFormat(pdfContentW, 6, "Generated by Sentinel", "", 0, "C", false, 0, "")
-}
-
-// ---- shared helpers --------------------------------------------------------
-
-// reportTitle prefers the caller's custom title over the report's name.
-func reportTitle(data *ReportData) string {
-	if data.CustomTitle != nil && *data.CustomTitle != "" {
-		return *data.CustomTitle
-	}
-	return data.ReportName
-}
-
-// formatMinutes renders a downtime duration compactly (e.g. "2h 15m").
-//
-// Sub-minute outages are shown in seconds rather than as "0m". A monitor on a
-// 30-second interval produces exactly those, and rendering four of them as "0m"
-// next to a 100% uptime figure is how a real outage came to look like nothing
-// happened.
-func formatMinutes(minutes float64) string {
-	if minutes <= 0 {
-		return "0s"
-	}
-	seconds := int(math.Round(minutes * 60))
-	if seconds < 60 {
-		return fmt.Sprintf("%ds", seconds)
-	}
-	total := int(math.Round(minutes))
-	if total < 60 {
-		return fmt.Sprintf("%dm", total)
-	}
-	h, m := total/60, total%60
-	if m == 0 {
-		return fmt.Sprintf("%dh", h)
-	}
-	return fmt.Sprintf("%dh %dm", h, m)
-}
-
-// formatUptimePercent renders an uptime figure without ever rounding a real
-// outage away.
-//
-// "%.2f" turns 99.9954% into "100.00%", which read as a contradiction beside a
-// list of incidents. Anything short of a perfect record is rounded down, so
-// 100% means no recorded downtime at all and nothing else does.
-func formatUptimePercent(pct float64) string {
-	if pct >= 100 {
-		return "100.00%"
-	}
-	floored := math.Floor(pct*100) / 100
-	if floored >= 100 {
-		floored = 99.99
-	}
-	return fmt.Sprintf("%.2f%%", floored)
-}
-
-// truncate shortens s to max runes, marking that it was cut.
-func truncate(s string, max int) string {
-	r := []rune(s)
-	if len(r) <= max {
-		return s
-	}
-	if max <= 1 {
-		return string(r[:max])
-	}
-	return string(r[:max-1]) + "…"
-}
 ```
 
-- [ ] **Step 5: Update the encoding probe test's helper and comment**
+- [ ] **Step 4: Run the tests to verify they pass**
 
-In `backend/internal/services/pdf_encoding_test.go`, change:
-
-```go
-	name, err := r.RenderReportToPDF(data, []string{models.SectionSLACompliance, models.SectionIncidentSummary}, "probe")
-```
-
-to:
-
-```go
-	name, err := r.RenderReportToPDF(data, models.ReportTypeUptime, "probe")
-```
-
-And in `TestPDF_AccentedMonitorNameSurvives`, change:
-
-```go
-		// An SLA target is required for the row to be drawn at all; without
-		// one the section prints "no targets configured" and the name never
-		// reaches the page.
-		Metrics: []ReportMetrics{{
-```
-
-to:
-
-```go
-		Metrics: []ReportMetrics{{
-```
-
-(The row now draws regardless of `SLATarget`; the comment describing the old filtered behavior is stale.)
-
-- [ ] **Step 6: Run the tests to verify they pass**
-
-Run: `cd backend && go test ./internal/services/... -run 'TestRenderReportToPDF|TestPDF_|TestGetPDFPathRejectsTraversal|TestPDFFilenameIsSanitized|TestFormatMinutes|TestPDFText' -v`
+Run: `cd backend && go test ./internal/services/... -run 'TestRenderReportToPDF|TestPDF_' -v`
 Expected: PASS for all.
 
-- [ ] **Step 7: Run the full backend build**
-
-Run: `cd backend && go build ./...`
-Expected: still fails at this point if Task 9 has not yet run (`report_generator.go` and `report_builder_handler.go` still call the old three-argument-with-sections shape indirectly via `template.Sections`, and `report_builder_handler.go` still references `models.ReportTemplate`). That is expected — Task 9 resolves it. If Tasks 7 and 8 are both done, running `go vet ./internal/services/...` alone should be clean for this package.
-
-Run: `cd backend && go vet ./internal/services/...`
-Expected: no errors.
-
-- [ ] **Step 8: Commit**
-
-```bash
-git add backend/internal/services/pdf_renderer.go backend/internal/services/pdf_renderer_test.go \
-        backend/internal/services/pdf_encoding_test.go
-git rm backend/internal/services/pdf_sections.go
-git commit -m "$(cat <<'EOF'
-feat(reports): two fixed PDF layouts and the uptime-vs-SLA graph
-
-RenderReportToPDF drops its section-name dispatch for a two-way branch
-(uptime / incident), each assembling a fixed layout from the existing
-drawing helpers. Adds drawPDFUptimeGraph, a cumulative-uptime-vs-SLA
-line chart built from fpdf's own Line/Rect primitives - no new
-dependency. Deletes pdf_sections.go (executive summary, timeline,
-availability, performance), which existed only to support the section
-system this replaces.
-
-Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
-EOF
-)"
-```
-
----
-
-### Task 9: Report builder handler contract, dead HTML report path, generator/job-queue cleanup
-
-**Files:**
-- Delete: `backend/internal/services/html_sections.go`
-- Delete: `backend/internal/services/report_html_generator.go`
-- Delete: `backend/internal/services/report_html_generator_test.go`
-- Modify: `backend/internal/services/report_timezone_render_test.go`
-- Modify: `backend/internal/services/report_generator.go`
-- Modify: `backend/internal/services/report_job_queue.go`
-- Modify: `backend/internal/api/report_builder_handler.go`
-
-**Interfaces:**
-- Consumes: `models.ReportTypeUptime`/`ReportTypeIncident`/`ValidReportTypes` (Task 2), the new `RenderReportToPDF` signature (Task 8).
-- Produces: `POST /api/v1/reports/generate` now takes `report_type` instead of `template_id`; `GET /api/v1/reports` and its detail responses carry `report_type` instead of `template_name`; `GET /api/v1/report-templates` no longer exists. Task 10 (frontend types/hooks) and Tasks 11-12 (frontend components) consume this contract.
-
-`report_html_generator.go`'s `GenerateHTMLReport` has zero live callers anywhere in the codebase today (confirmed by grep: `ReportBuilder.htmlGenerator` is constructed but `.GenerateHTMLReport(...)` is never called) - this is pre-existing dead code, unrelated to the report-type rework, that this task removes as a natural side effect of touching every other file that mentions `ReportTemplate`.
-
-- [ ] **Step 1: Delete the dead HTML report path**
-
-```bash
-rm backend/internal/services/html_sections.go backend/internal/services/report_html_generator.go \
-   backend/internal/services/report_html_generator_test.go
-```
-
-- [ ] **Step 2: Remove the one HTML-path test left over in report_timezone_render_test.go**
-
-Replace `backend/internal/services/report_timezone_render_test.go` in full (dropping `TestHTMLReport_RendersInConfiguredZone` and its now-unused `firstLines` helper; `TestReportData_ReportLocationDefaultsToUTC` is unrelated to the HTML path and is unchanged):
-
-```go
-package services
-
-import (
-	"testing"
-	"time"
-)
-
-// A report rendered with no zone configured must say UTC, never the server
-// process's zone — the container's default is not a choice anyone made.
-func TestReportData_ReportLocationDefaultsToUTC(t *testing.T) {
-	var nilData *ReportData
-	if nilData.ReportLocation() != time.UTC {
-		t.Error("nil ReportData should report UTC")
-	}
-	if (&ReportData{}).ReportLocation() != time.UTC {
-		t.Error("unset Location should report UTC")
-	}
-}
-```
-
-- [ ] **Step 3: Remove the template lookup from report_generator.go**
-
-In `backend/internal/services/report_generator.go`, change:
-
-```go
-// GenerateAndSaveReport aggregates, renders, and records a report.
-func (rg *ReportGenerator) GenerateAndSaveReport(ctx context.Context, report *models.Report, generatedBy uuid.UUID) (*GeneratedReport, error) {
-	var template models.ReportTemplate
-	if err := rg.db.WithContext(ctx).First(&template, "id = ?", report.TemplateID).Error; err != nil {
-		return nil, fmt.Errorf("loading report template: %w", err)
-	}
-
-	data, err := rg.aggregator.AggregateReportData(ctx, report, generatedBy)
-	if err != nil {
-		return nil, fmt.Errorf("aggregating report data: %w", err)
-	}
-
-	// Stamped before rendering so both the PDF and anything else built from
-	// this data describe the same clock.
-	data.Location = rg.reportLocation(ctx)
-
-	filename, err := rg.pdfRenderer.RenderReportToPDF(data, template.Sections, "report_"+report.ID.String()[:8])
-	if err != nil {
-		return nil, fmt.Errorf("rendering report PDF: %w", err)
-	}
-```
-
-to:
-
-```go
-// GenerateAndSaveReport aggregates, renders, and records a report.
-func (rg *ReportGenerator) GenerateAndSaveReport(ctx context.Context, report *models.Report, generatedBy uuid.UUID) (*GeneratedReport, error) {
-	data, err := rg.aggregator.AggregateReportData(ctx, report, generatedBy)
-	if err != nil {
-		return nil, fmt.Errorf("aggregating report data: %w", err)
-	}
-
-	// Stamped before rendering so both the PDF and anything else built from
-	// this data describe the same clock.
-	data.Location = rg.reportLocation(ctx)
-
-	filename, err := rg.pdfRenderer.RenderReportToPDF(data, report.ReportType, "report_"+report.ID.String()[:8])
-	if err != nil {
-		return nil, fmt.Errorf("rendering report PDF: %w", err)
-	}
-```
-
-- [ ] **Step 4: Remove the now-unreachable classify case in report_job_queue.go**
-
-In `backend/internal/services/report_job_queue.go`, change:
-
-```go
-	switch {
-	case strings.Contains(msg, "loading report template"):
-		return "report template could not be loaded"
-	case strings.Contains(msg, "aggregating report data"):
-```
-
-to:
-
-```go
-	switch {
-	case strings.Contains(msg, "aggregating report data"):
-```
-
-(`GenerateAndSaveReport` no longer produces a "loading report template" error, since Step 3 removed the lookup that wrapped it.)
-
-- [ ] **Step 5: Rewrite report_builder_handler.go's report-type surface**
-
-In `backend/internal/api/report_builder_handler.go`:
-
-5a. Remove the unused `errors` import. Change:
-
-```go
-import (
-	"context"
-	"crypto/rand"
-	"encoding/hex"
-	"errors"
-	"fmt"
-	"net/http"
-	"os"
-	"strconv"
-	"time"
-
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
-	"gorm.io/gorm"
-
-	"github.com/Stevy2191/Sentinel/backend/internal/models"
-	"github.com/Stevy2191/Sentinel/backend/internal/services"
-)
-```
-
-to:
-
-```go
-import (
-	"context"
-	"crypto/rand"
-	"encoding/hex"
-	"fmt"
-	"net/http"
-	"os"
-	"strconv"
-	"time"
-
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
-	"gorm.io/gorm"
-
-	"github.com/Stevy2191/Sentinel/backend/internal/models"
-	"github.com/Stevy2191/Sentinel/backend/internal/services"
-)
-```
-
-5b. Drop the `htmlGenerator` field. Change:
-
-```go
-// ReportBuilder holds the dependencies the report-builder endpoints need.
-type ReportBuilder struct {
-	db            *gorm.DB
-	aggregator    *services.ReportAggregatorService
-	pdfRenderer   *services.PDFRendererService
-	htmlGenerator *services.HTMLReportGenerator
-	// scheduler is used when deleting a report: the database cascades its
-	// schedules away, but their cron jobs would otherwise keep firing against
-	// rows that no longer exist.
-	scheduler *services.ReportSchedulerService
-	// jobs renders reports off the request path.
-	jobs *services.ReportJobQueue
-	// audit records who changed what.
-	audit *services.AuditService
-	// settings supplies the report timezone, which period labels are resolved
-	// in so the list agrees with the rendered report.
-	settings *services.SettingsService
-}
-
-// NewReportBuilder returns a handler set bound to its dependencies.
-func NewReportBuilder(
-	db *gorm.DB,
-	aggregator *services.ReportAggregatorService,
-	pdfRenderer *services.PDFRendererService,
-	scheduler *services.ReportSchedulerService,
-	settings *services.SettingsService,
-) *ReportBuilder {
-	return &ReportBuilder{
-		db:            db,
-		aggregator:    aggregator,
-		pdfRenderer:   pdfRenderer,
-		htmlGenerator: services.NewHTMLReportGenerator(),
-		scheduler:     scheduler,
-		settings:      settings,
-	}
-}
-```
-
-to:
-
-```go
-// ReportBuilder holds the dependencies the report-builder endpoints need.
-type ReportBuilder struct {
-	db          *gorm.DB
-	aggregator  *services.ReportAggregatorService
-	pdfRenderer *services.PDFRendererService
-	// scheduler is used when deleting a report: the database cascades its
-	// schedules away, but their cron jobs would otherwise keep firing against
-	// rows that no longer exist.
-	scheduler *services.ReportSchedulerService
-	// jobs renders reports off the request path.
-	jobs *services.ReportJobQueue
-	// audit records who changed what.
-	audit *services.AuditService
-	// settings supplies the report timezone, which period labels are resolved
-	// in so the list agrees with the rendered report.
-	settings *services.SettingsService
-}
-
-// NewReportBuilder returns a handler set bound to its dependencies.
-func NewReportBuilder(
-	db *gorm.DB,
-	aggregator *services.ReportAggregatorService,
-	pdfRenderer *services.PDFRendererService,
-	scheduler *services.ReportSchedulerService,
-	settings *services.SettingsService,
-) *ReportBuilder {
-	return &ReportBuilder{
-		db:          db,
-		aggregator:  aggregator,
-		pdfRenderer: pdfRenderer,
-		scheduler:   scheduler,
-		settings:    settings,
-	}
-}
-```
-
-5c. Change `GenerateReportRequest`. Change:
-
-```go
-// GenerateReportRequest creates a report definition and renders it immediately.
-type GenerateReportRequest struct {
-	Name       string             `json:"name" binding:"required"`
-	TemplateID uuid.UUID          `json:"template_id" binding:"required"`
-	ScopeType  string             `json:"scope_type" binding:"required,oneof=monitors tags groups types"`
-	ScopeData  models.ReportScope `json:"scope_data" binding:"required"`
-```
-
-to:
-
-```go
-// GenerateReportRequest creates a report definition and renders it immediately.
-type GenerateReportRequest struct {
-	Name       string             `json:"name" binding:"required"`
-	ReportType string             `json:"report_type" binding:"required,oneof=uptime incident"`
-	ScopeType  string             `json:"scope_type" binding:"required,oneof=monitors tags groups types"`
-	ScopeData  models.ReportScope `json:"scope_data" binding:"required"`
-```
-
-5d. Change `ReportResponse`. Change:
-
-```go
-// ReportResponse is a report definition plus its generation history.
-type ReportResponse struct {
-	ID            uuid.UUID `json:"id"`
-	Name          string    `json:"name"`
-	TemplateName  string    `json:"template_name"`
-	ScopeType     string    `json:"scope_type"`
-	TimeRangeDays int       `json:"time_range_days"`
-```
-
-to:
-
-```go
-// ReportResponse is a report definition plus its generation history.
-type ReportResponse struct {
-	ID            uuid.UUID `json:"id"`
-	Name          string    `json:"name"`
-	ReportType    string    `json:"report_type"`
-	ScopeType     string    `json:"scope_type"`
-	TimeRangeDays int       `json:"time_range_days"`
-```
-
-5e. Remove the template lookup from `GenerateReport` and use `ReportType` directly. Change:
-
-```go
-	userID, _, _, ok := GetUserFromContext(c)
-	if !ok {
-		respondError(c, http.StatusUnauthorized, "unauthorized")
-		return
-	}
-
-	var template models.ReportTemplate
-	if err := h.db.WithContext(c.Request.Context()).
-		First(&template, "id = ?", req.TemplateID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			respondError(c, http.StatusNotFound, "report template not found")
-			return
-		}
-		respondInternal(c, "loading report template", err)
-		return
-	}
-
-	report := models.Report{
-		ID:                uuid.New(),
-		UserID:            userID,
-		Name:              req.Name,
-		TemplateID:        req.TemplateID,
-		ScopeType:         req.ScopeType,
-```
-
-to:
-
-```go
-	userID, _, _, ok := GetUserFromContext(c)
-	if !ok {
-		respondError(c, http.StatusUnauthorized, "unauthorized")
-		return
-	}
-
-	report := models.Report{
-		ID:                uuid.New(),
-		UserID:            userID,
-		Name:              req.Name,
-		ReportType:        req.ReportType,
-		ScopeType:         req.ScopeType,
-```
-
-5f. Update the audit log summary. Change:
-
-```go
-	h.audit.Record(c.Request.Context(), actorFrom(c),
-		models.ActionReportCreated, models.ResourceReport, &report.ID,
-		models.AuditChanges{Summary: map[string]any{
-			"name":            report.Name,
-			"scope_type":      report.ScopeType,
-			"time_range_days": report.TimeRangeDays,
-			"template_id":     report.TemplateID,
-		}})
-```
-
-to:
-
-```go
-	h.audit.Record(c.Request.Context(), actorFrom(c),
-		models.ActionReportCreated, models.ResourceReport, &report.ID,
-		models.AuditChanges{Summary: map[string]any{
-			"name":            report.Name,
-			"scope_type":      report.ScopeType,
-			"time_range_days": report.TimeRangeDays,
-			"report_type":     report.ReportType,
-		}})
-```
-
-5g. Remove the template lookup from `buildReportResponse`. Change:
-
-```go
-func (h *ReportBuilder) buildReportResponse(ctx context.Context, report *models.Report, shareToken string) (ReportResponse, error) {
-	var template models.ReportTemplate
-	// A deleted template leaves the name blank rather than failing the listing.
-	h.db.WithContext(ctx).First(&template, "id = ?", report.TemplateID)
-
-	var generations []models.ReportGeneration
-```
-
-to:
-
-```go
-func (h *ReportBuilder) buildReportResponse(ctx context.Context, report *models.Report, shareToken string) (ReportResponse, error) {
-	var generations []models.ReportGeneration
-```
-
-5h. Use `ReportType` in the built response. Change:
-
-```go
-	return ReportResponse{
-		ID:            report.ID,
-		Name:          report.Name,
-		TemplateName:  template.Name,
-		ScopeType:     report.ScopeType,
-		TimeRangeDays: report.TimeRangeDays,
-```
-
-to:
-
-```go
-	return ReportResponse{
-		ID:            report.ID,
-		Name:          report.Name,
-		ReportType:    report.ReportType,
-		ScopeType:     report.ScopeType,
-		TimeRangeDays: report.TimeRangeDays,
-```
-
-5i. Remove `ListTemplates` entirely. Delete:
-
-```go
-// ListTemplates handles GET /api/v1/report-templates. The report builder needs
-// this to offer a template choice; without it the wizard has nothing to select.
-func (h *ReportBuilder) ListTemplates(c *gin.Context) {
-	var templates []models.ReportTemplate
-	if err := h.db.WithContext(c.Request.Context()).
-		Order("is_default DESC, name ASC").Find(&templates).Error; err != nil {
-		respondInternal(c, "listing report templates", err)
-		return
-	}
-	if templates == nil {
-		templates = []models.ReportTemplate{}
-	}
-	respondSuccess(c, http.StatusOK, templates)
-}
-
-```
-
-5j. Remove its route. Change:
-
-```go
-	// Sibling resources the builder UI needs. They sit outside the /reports
-	// group so they do not collide with its ":id" wildcard.
-	rg.GET("/report-templates", builder.ListTemplates)
-	rg.GET("/monitor-tags", builder.ListMonitorTags)
-```
-
-to:
-
-```go
-	// A sibling resource the builder UI needs. It sits outside the /reports
-	// group so it does not collide with its ":id" wildcard.
-	rg.GET("/monitor-tags", builder.ListMonitorTags)
-```
-
-- [ ] **Step 6: Run the full backend build and test suite**
+- [ ] **Step 5: Run the full backend build**
 
 Run: `cd backend && go build ./... && go test ./...`
-Expected: builds cleanly and every test passes. This is the first point since Task 2 where the whole backend is expected to compile — if it does not, check for a remaining reference to `ReportTemplate`, `TemplateID`, or the old `RenderReportToPDF([]string, ...)` shape:
+Expected: builds cleanly and every test passes.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-grep -rn "ReportTemplate\|TemplateID\|template_id\|HTMLReportGenerator" --include=*.go backend/internal/
-```
-
-Expected: no output.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add backend/internal/services/report_generator.go backend/internal/services/report_job_queue.go \
-        backend/internal/services/report_timezone_render_test.go backend/internal/api/report_builder_handler.go
-git rm backend/internal/services/html_sections.go backend/internal/services/report_html_generator.go \
-       backend/internal/services/report_html_generator_test.go
+git add backend/internal/services/pdf_renderer.go backend/internal/services/pdf_renderer_test.go
 git commit -m "$(cat <<'EOF'
-feat(reports): report_type replaces template_id across the builder API
+feat(reports): add the cumulative-uptime-vs-SLA graph to the PDF renderer
 
-POST /reports/generate now takes report_type instead of template_id;
-GET /reports and its detail responses carry report_type instead of
-template_name; GET /report-templates is removed. Also deletes the HTML
-report path (report_html_generator.go, html_sections.go), which had
-zero live callers before this change and existed only to render the
-same templates the API surface above no longer has.
+drawPDFUptimeGraph draws an axis box, a flat SLA reference bar, and
+the cumulative-uptime line connecting each sample point, using fpdf's
+own Line/Rect primitives - no new dependency. Wired into
+drawPDFUptimeReport between the summary tiles and the SLA table.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
 EOF
@@ -3255,7 +3303,7 @@ EOF
 - Modify: `frontend/src/hooks/useReportBuilder.ts`
 
 **Interfaces:**
-- Consumes: the backend contract from Task 9 (`report_type` field, no `/report-templates` endpoint).
+- Consumes: the backend contract from Task 3 (`report_type` field, no `/report-templates` endpoint).
 - Produces: `export type ReportType = 'uptime' | 'incident'`, `export const REPORT_TYPE_LABEL: Record<ReportType, string>`. `ReportTemplate` and `useReportTemplates` no longer exist. Tasks 11, 12 consume `ReportType`/`REPORT_TYPE_LABEL`.
 
 This is a types-and-data-layer-only task with no independent runtime behavior to test; frontend tests are the type checker (`tsc`) plus the manual verification performed once the components that use these types are updated in Tasks 11-12. There is no existing frontend unit test suite covering `useReportBuilder.ts` to extend.
@@ -4328,7 +4376,7 @@ EOF
 - Modify: `frontend/src/pages/Settings.tsx`
 
 **Interfaces:**
-- Consumes: `GET /settings`/`PATCH /settings/system`'s `default_sla_target` field (Task 5).
+- Consumes: `GET /settings`/`PATCH /settings/system`'s `default_sla_target` field (Task 6).
 
 - [ ] **Step 1: Add the bounds constants**
 
@@ -4622,10 +4670,10 @@ EOF
 - Modify: `frontend/src/components/MonitorForm.tsx`
 
 **Interfaces:**
-- Consumes: `Monitor.sla_target`/`MonitorInput.sla_target` (this task adds them), the backend `0`-means-clear convention from Task 4, `GET /auth/status`'s `default_sla_target` field (Task 5).
+- Consumes: `Monitor.sla_target`/`MonitorInput.sla_target` (this task adds them), the backend `0`-means-clear convention from Task 5, `GET /auth/status`'s `default_sla_target` field (Task 6).
 - Produces: `useAppConfig().defaultSLATarget: number` — the same pattern `defaultCheckInterval` already establishes on this context, for the same reason: a value the monitor-create form needs that any authenticated user may reach, not only an admin.
 
-Both components always send `sla_target` (never omit it), using `0` for "leave blank" — the same sentinel Task 4's `applyMonitorUpdates`/`CreateMonitorHandler` normalize to `nil`. This makes editing a monitor down to a blank field actually clear a previously-set override, not just leave it untouched (a bare `*float64` on the wire cannot otherwise distinguish "omitted" from "explicitly cleared").
+Both components always send `sla_target` (never omit it), using `0` for "leave blank" — the same sentinel Task 5's `applyMonitorUpdates`/`CreateMonitorHandler` normalize to `nil`. This makes editing a monitor down to a blank field actually clear a previously-set override, not just leave it untouched (a bare `*float64` on the wire cannot otherwise distinguish "omitted" from "explicitly cleared").
 
 - [ ] **Step 0: Add defaultSLATarget to AppConfigContext**
 
@@ -4634,7 +4682,7 @@ X%)") needs the real current default, and `CreateMonitorModal.tsx`/
 `MonitorForm.tsx` already get `defaultCheckInterval` from this same
 context rather than fetching `/settings` themselves (admin-only, while any
 authenticated user may create a monitor) — `default_sla_target` follows
-the identical path, now that Task 5 put it on `/auth/status` too.
+the identical path, now that Task 6 put it on `/auth/status` too.
 
 In `frontend/src/context/AppConfigContext.tsx`, change:
 
@@ -5490,22 +5538,22 @@ EOF
 ## Self-Review
 
 **Spec coverage:**
-- Two fixed report types replacing templates/sections → Tasks 1, 2, 8, 9, 10, 11, 12.
-- Global default SLA target + per-monitor override → Tasks 3, 4, 5, 13, 14.
-- Uptime computation unified on `measurableWindow` → Task 7.
-- The graph (cumulative uptime % vs. SLA, fpdf native primitives, no new dependency) → Task 8.
+- Two fixed report types replacing templates/sections → Tasks 1, 2, 3, 10, 11, 12.
+- Global default SLA target + per-monitor override → Tasks 4, 5, 6, 13, 14.
+- Uptime computation unified on `measurableWindow` → Task 8.
+- The graph (cumulative uptime % vs. SLA, fpdf native primitives, no new dependency) → Task 9.
 - Full wipe of reports/schedules/history, no migration path → Task 1.
 - Report scheduling needs no changes → confirmed unmodified throughout; no task touches `report_schedule.go`, `report_scheduler.go`, or `report_schedule_handler.go`.
 - Scope and period pickers carry over unchanged → confirmed unmodified in Tasks 11, 12 (only the template/type step and display strings change).
-- Dead code discovered during research (`pdf_sections.go`, `html_sections.go`, `report_insights.go` + test, `report_html_generator.go` + test, `PreviousPeriod`/`PreviousPeriodLabel`) → Tasks 6, 7, 8, 9.
+- Dead code discovered during research (`pdf_sections.go`, `html_sections.go`, `report_insights.go` + test, `report_html_generator.go` + test, `PreviousPeriod`/`PreviousPeriodLabel`) → Tasks 3, 7, 8.
 
 **Placeholder scan:** every task's code blocks are complete, copy-paste-ready Go/TypeScript/SQL — no `TODO`, no "similar to Task N", no prose standing in for code.
 
 **Type consistency check:**
-- `services.MeasurableWindow` (Task 7) is the exact name `api.GetSummaryReportHandler` (same task) calls as `services.MeasurableWindow`.
-- `services.EffectiveSLATarget` (Task 7) matches its two unit-test call sites and its use inside `calculateMonitorMetrics`/`AggregateReportData` in the same task.
-- `ReportData.UptimeSeries`/`EffectiveSLA` (Task 7) are read by `drawPDFUptimeReport` (Task 8) under the same field names.
-- `models.ReportTypeUptime`/`ReportTypeIncident` (Task 2) are the exact strings `RenderReportToPDF`'s switch (Task 8), `GenerateReportRequest.ReportType`'s `oneof` binding (Task 9), and the frontend's `ReportType`/`REPORT_TYPE_LABEL` (Task 10) all agree on (`"uptime"`/`"incident"`).
-- `Report.ReportType` (Task 2) is what `report_generator.go` (Task 9) passes to `RenderReportToPDF` and what `buildReportResponse`/`GenerateReport` (Task 9) read and write — no lingering `TemplateID`.
-- `MonitorInput.sla_target`/`Monitor.sla_target` (Task 14) match the backend's `sla_target` JSON tag on `Monitor.SLATarget` (already existed, validated in Task 4) — same key name on both sides of the wire.
-- The `0`-means-clear sentinel is applied identically in three places: `CreateMonitorHandler` (Task 4, backend), `applyMonitorUpdates` (Task 4, backend), and both frontend forms (Task 14) — all three treat `0`/blank the same way.
+- `services.MeasurableWindow` (Task 8) is the exact name `api.GetSummaryReportHandler` (same task) calls as `services.MeasurableWindow`.
+- `services.EffectiveSLATarget` (Task 8) matches its two unit-test call sites and its use inside `calculateMonitorMetrics`/`AggregateReportData` in the same task.
+- `ReportData.UptimeSeries`/`EffectiveSLA` (Task 8) are read by `drawPDFUptimeGraph`, wired into `drawPDFUptimeReport` in Task 9, under the same field names.
+- `models.ReportTypeUptime`/`ReportTypeIncident` (Task 2) are the exact strings `RenderReportToPDF`'s switch (Task 3), `GenerateReportRequest.ReportType`'s `oneof` binding (Task 3), and the frontend's `ReportType`/`REPORT_TYPE_LABEL` (Task 10) all agree on (`"uptime"`/`"incident"`).
+- `Report.ReportType` (Task 2) is what `report_generator.go` (Task 3) passes to `RenderReportToPDF` and what `buildReportResponse`/`GenerateReport` (Task 3) read and write — no lingering `TemplateID`.
+- `MonitorInput.sla_target`/`Monitor.sla_target` (Task 14) match the backend's `sla_target` JSON tag on `Monitor.SLATarget` (already existed, validated in Task 5) — same key name on both sides of the wire.
+- The `0`-means-clear sentinel is applied identically in three places: `CreateMonitorHandler` (Task 5, backend), `applyMonitorUpdates` (Task 5, backend), and both frontend forms (Task 14) — all three treat `0`/blank the same way.
