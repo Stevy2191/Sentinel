@@ -16,6 +16,8 @@ export interface MonitorFormValues {
   retries: number
   failure_threshold: number
   tags: string
+  /** Blank means no override; the instance default applies. */
+  sla_target: string
   /** null = all channels, [] = none, [...] = only those. */
   notify_channels: string[] | null
 }
@@ -32,6 +34,7 @@ export const emptyMonitorForm: MonitorFormValues = {
   retries: 3,
   failure_threshold: 2,
   tags: '',
+  sla_target: '',
   notify_channels: null,
 }
 
@@ -49,6 +52,7 @@ export function monitorToForm(m: Monitor): MonitorFormValues {
     retries: m.retries,
     failure_threshold: m.failure_threshold ?? 2,
     tags: (m.tags ?? []).join(', '),
+    sla_target: m.sla_target != null ? String(m.sla_target) : '',
     notify_channels: m.notify_channels ?? null,
   }
 }
@@ -99,6 +103,12 @@ export function validateMonitorForm(v: MonitorFormValues): Errors {
       e.headers = 'Headers must be valid JSON'
     }
   }
+  if (v.sla_target.trim()) {
+    const n = Number(v.sla_target.trim())
+    if (!Number.isFinite(n) || n <= 0 || n > 100) {
+      e.sla_target = 'Must be a number greater than 0 and at most 100'
+    }
+  }
   return e
 }
 
@@ -121,6 +131,10 @@ export function monitorFormToInput(v: MonitorFormValues): MonitorInput {
   const tags = v.tags.split(',').map((t) => t.trim()).filter(Boolean)
   if (tags.length) input.tags = tags
   input.notify_channels = v.notify_channels
+  // 0 is the sentinel for "no override, use the system default" - always sent
+  // rather than omitted, so editing a monitor down to a blank field actually
+  // clears a previously-set override instead of leaving it untouched.
+  input.sla_target = v.sla_target.trim() ? Number(v.sla_target.trim()) : 0
   return input
 }
 
@@ -176,7 +190,7 @@ export default function MonitorForm({
   // A new monitor starts at the instance's configured interval (Settings →
   // System), so the field agrees with what the API would apply if the value
   // were omitted. An existing monitor's own value always wins over it.
-  const { defaultCheckInterval } = useAppConfig()
+  const { defaultCheckInterval, defaultSLATarget } = useAppConfig()
   const [values, setValues] = useState<MonitorFormValues>({
     ...emptyMonitorForm,
     interval_seconds: defaultCheckInterval,
@@ -341,6 +355,23 @@ export default function MonitorForm({
             onChange={(e) => set('tags', e.target.value)}
             placeholder="prod, critical"
           />
+        </Field>
+        <Field
+          label="SLA Target"
+          help={`Percentage uptime this monitor is held to in reports. Leave blank to use the system default (currently ${defaultSLATarget}%).`}
+          error={errors.sla_target}
+        >
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              inputMode="decimal"
+              className={`${inputCls} w-32`}
+              value={values.sla_target}
+              onChange={(e) => set('sla_target', e.target.value)}
+              placeholder="e.g. 99.9"
+            />
+            <span className="text-sm text-slate-400">%</span>
+          </div>
         </Field>
       </div>
 

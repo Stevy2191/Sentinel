@@ -49,6 +49,8 @@ export interface Monitor {
   retries: number
   /** Consecutive failed checks required before an incident opens. */
   failure_threshold: number
+  /** Uptime percentage this monitor is held to. Null uses the system default. */
+  sla_target?: number | null
   current_status: MonitorStatus
   last_check_at: string | null
   last_response_time_ms: number
@@ -99,6 +101,8 @@ export interface MonitorInput {
   // Verify the TLS certificate on HTTPS checks. Omitted means verify, which is
   // also the column default — never send undefined meaning "off".
   ssl_verify?: boolean
+  /** Uptime percentage this monitor is held to. Omit or 0 uses the system default. */
+  sla_target?: number
 }
 
 export interface MonitorFilters extends PaginationParams {

@@ -4,6 +4,8 @@ import { setDisplayTimezone } from '@/utils/formatters'
 export const DEFAULT_APP_NAME = 'Sentinel'
 /** Mirrors models.DefaultMonitorCheckInterval on the backend. */
 export const DEFAULT_CHECK_INTERVAL = 60
+/** Mirrors models.DefaultSLATargetPercent on the backend. */
+export const DEFAULT_SLA_TARGET = 99.9
 
 interface AppConfig {
   /** The instance's display name, as set in Settings → System. */
@@ -14,6 +16,8 @@ interface AppConfig {
   setupRequired: boolean
   /** The interval, in seconds, a newly created monitor starts with. */
   defaultCheckInterval: number
+  /** The uptime percentage a monitor is held to when it has no override. */
+  defaultSLATarget: number
   /** The IANA zone reports are rendered in, and that the UI displays times in.
    *  Undefined until the config loads, when the browser's zone is used. */
   reportTimezone: string | undefined
@@ -30,6 +34,7 @@ const AppConfigContext = createContext<AppConfig>({
   setupRequired: false,
   reportTimezone: undefined,
   defaultCheckInterval: DEFAULT_CHECK_INTERVAL,
+  defaultSLATarget: DEFAULT_SLA_TARGET,
   loaded: false,
   refresh: async () => {},
 })
@@ -51,6 +56,7 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
   const [registrationEnabled, setRegistrationEnabled] = useState(false)
   const [setupRequired, setSetupRequired] = useState(false)
   const [defaultCheckInterval, setDefaultCheckInterval] = useState(DEFAULT_CHECK_INTERVAL)
+  const [defaultSLATarget, setDefaultSLATarget] = useState(DEFAULT_SLA_TARGET)
   const [reportTimezone, setReportTimezone] = useState<string | undefined>(undefined)
   const [loaded, setLoaded] = useState(false)
 
@@ -69,6 +75,11 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
           ? data.default_check_interval
           : DEFAULT_CHECK_INTERVAL
       )
+      setDefaultSLATarget(
+        Number.isFinite(data.default_sla_target) && data.default_sla_target > 0
+          ? data.default_sla_target
+          : DEFAULT_SLA_TARGET
+      )
       // Applied to the formatters immediately, so every timestamp on screen
       // is in the same zone the server writes into reports.
       const tz = typeof data.report_timezone === 'string' ? data.report_timezone : undefined
@@ -81,6 +92,7 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
       setRegistrationEnabled(false)
       setSetupRequired(false)
       setDefaultCheckInterval(DEFAULT_CHECK_INTERVAL)
+      setDefaultSLATarget(DEFAULT_SLA_TARGET)
     } finally {
       setLoaded(true)
     }
@@ -96,7 +108,7 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
   }, [appName])
 
   return (
-    <AppConfigContext.Provider value={{ appName, registrationEnabled, setupRequired, defaultCheckInterval, reportTimezone, loaded, refresh }}>
+    <AppConfigContext.Provider value={{ appName, registrationEnabled, setupRequired, defaultCheckInterval, defaultSLATarget, reportTimezone, loaded, refresh }}>
       {children}
     </AppConfigContext.Provider>
   )
