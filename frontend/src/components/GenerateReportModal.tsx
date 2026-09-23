@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { FileText, Loader2, Download, ExternalLink, Check, AlertTriangle } from 'lucide-react'
 import {
   useSavedReports,
-  useReportTemplates,
   useMonitorTags,
   waitForReportJob,
   downloadReportPDF,
@@ -11,7 +10,8 @@ import {
 import { useMonitors } from '@/hooks/useMonitors'
 import { useMonitorGroups } from '@/hooks/useMonitorGroups'
 import PeriodSelector, { DEFAULT_PERIOD, describePeriod } from '@/components/PeriodSelector'
-import type { ReportPeriod, ReportScopeType, ReportTemplate } from '@/types/reports'
+import { REPORT_TYPE_LABEL } from '@/types/reports'
+import type { ReportPeriod, ReportScopeType, ReportType } from '@/types/reports'
 
 /** What a report covers, when the caller already knows — a monitor's own page. */
 export interface FixedScope {
@@ -19,28 +19,6 @@ export interface FixedScope {
   ids: string[]
   /** How to describe it in the dialog, e.g. the monitor's name. */
   label: string
-}
-
-/**
- * What each report section contains, in the reader's terms rather than the
- * template's. Templates are rows in the database, so a report type is described
- * by the sections it carries — one added later needs no change here.
- */
-const SECTION_LABEL: Record<string, string> = {
-  executive_summary: 'Headline figures vs the previous period',
-  availability_breakdown: 'Uptime day by day',
-  timeline: 'What happened, in order',
-  performance: 'Response times',
-  sla_compliance: 'Uptime and SLA compliance',
-  incident_summary: 'Incidents and downtime',
-  charts: 'Summary figures',
-  custom: 'Custom notes',
-}
-
-function describe(template: ReportTemplate): string {
-  const sections = template.sections ?? []
-  if (sections.length === 0) return 'No sections'
-  return sections.map((s) => SECTION_LABEL[s] ?? s.replace(/_/g, ' ')).join(' · ')
 }
 
 // Webhook is absent: it receives rather than checks, so it has no incidents.
@@ -62,11 +40,9 @@ type Phase =
 /**
  * Generates a report in one dialog.
  *
- * The wizard asks four questions across four steps, which is right when a scope
- * needs assembling from several groups and a custom title. Most of the time the
- * question is "last month, these services, that report", and that fits in one
- * screen. Given a fixedScope — a monitor's own page — the scope picker is
- * dropped entirely, since it is already answered.
+ * Most of the time the question is "last month, these services, that report",
+ * and that fits in one screen. Given a fixedScope — a monitor's own page — the
+ * scope picker is dropped entirely, since it is already answered.
  */
 export default function GenerateReportModal({
   isOpen,
@@ -79,29 +55,20 @@ export default function GenerateReportModal({
 }) {
   const navigate = useNavigate()
   const { createReport } = useSavedReports()
-  const { templates, loading: templatesLoading, listTemplates } = useReportTemplates()
   const { monitors, loading: monitorsLoading } = useMonitors()
   const { groups, loading: groupsLoading } = useMonitorGroups()
   const { tags, listTags, loading: tagsLoading } = useMonitorTags()
 
-  const [templateID, setTemplateID] = useState('')
+  const [reportType, setReportType] = useState<ReportType>('uptime')
   const [period, setPeriod] = useState<ReportPeriod>(DEFAULT_PERIOD)
   const [scopeType, setScopeType] = useState<ReportScopeType>('monitors')
   const [selection, setSelection] = useState<string[]>([])
   const [phase, setPhase] = useState<Phase>({ kind: 'form' })
 
   useEffect(() => {
-    if (!isOpen) return
-    void listTemplates()
-    if (!fixedScope) void listTags()
-  }, [isOpen, fixedScope, listTemplates, listTags])
-
-  // Default to the template marked default, which is the broadest report.
-  useEffect(() => {
-    if (!templateID && templates.length > 0) {
-      setTemplateID((templates.find((t) => t.is_default) ?? templates[0]).id)
-    }
-  }, [templates, templateID])
+    if (!isOpen || fixedScope) return
+    void listTags()
+  }, [isOpen, fixedScope, listTags])
 
   // Reopening should start a fresh form rather than show the previous result.
   useEffect(() => {
@@ -137,11 +104,6 @@ export default function GenerateReportModal({
     (scopeType === 'tags' && tagsLoading) ||
     (scopeType === 'types' && monitorsLoading)
 
-  const template = useMemo(
-    () => templates.find((t) => t.id === templateID),
-    [templates, templateID],
-  )
-
   const effectiveScope: FixedScope | null = fixedScope
     ? fixedScope
     : selection.length > 0
@@ -157,7 +119,7 @@ export default function GenerateReportModal({
 
   const periodValid =
     period.period_kind !== 'custom' || (!!period.period_start && !!period.period_end)
-  const canGenerate = !!template && !!effectiveScope && periodValid
+  const canGenerate = !!effectiveScope && periodValid
 
   if (!isOpen) return null
 
@@ -175,17 +137,18 @@ export default function GenerateReportModal({
   }
 
   const generate = async () => {
-    if (!template || !effectiveScope || !periodValid) return
+    if (!effectiveScope || !periodValid) return
     setPhase({ kind: 'working', message: 'Creating the report…' })
     let reportID: string | undefined
     try {
+      const label = REPORT_TYPE_LABEL[reportType]
       const result = await createReport({
-        name: `${effectiveScope.label} — ${template.name}`,
-        template_id: template.id,
+        name: `${effectiveScope.label} — ${label}`,
+        report_type: reportType,
         scope_type: effectiveScope.scope_type,
         scope_data: scopeData(effectiveScope),
         ...period,
-        custom_title: `${effectiveScope.label}: ${template.name}`,
+        custom_title: `${effectiveScope.label}: ${label}`,
         custom_description: describePeriod(period),
       })
       reportID = result.id
@@ -300,56 +263,50 @@ export default function GenerateReportModal({
 
             <fieldset>
               <legend className="mb-2 text-sm font-medium text-white">Report type</legend>
-              {templatesLoading && templates.length === 0 ? (
-                <div className="flex items-center gap-2 text-sm text-slate-400">
-                  <Loader2 className="h-4 w-4 animate-spin" /> Loading report types…
-                </div>
-              ) : templates.length === 0 ? (
-                <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300">
-                  No report types are configured.
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {templates.map((t) => (
-                    <label
-                      key={t.id}
-                      className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition ${
-                        templateID === t.id
-                          ? 'border-primary-500/60 bg-primary-500/10'
-                          : 'border-white/10 bg-slate-800/40 hover:border-white/25'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="report-template"
-                        className="mt-1"
-                        checked={templateID === t.id}
-                        onChange={() => setTemplateID(t.id)}
-                      />
-                      <span className="min-w-0">
-                        <span className="block text-sm font-medium text-white">{t.name}</span>
-                        <span className="block text-xs text-slate-400">{describe(t)}</span>
+              <div className="space-y-2">
+                {(['uptime', 'incident'] as const).map((t) => (
+                  <label
+                    key={t}
+                    className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition ${
+                      reportType === t
+                        ? 'border-primary-500/60 bg-primary-500/10'
+                        : 'border-white/10 bg-slate-800/40 hover:border-white/25'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="report-type"
+                      className="mt-1"
+                      checked={reportType === t}
+                      onChange={() => setReportType(t)}
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-white">
+                        {REPORT_TYPE_LABEL[t]}
                       </span>
-                    </label>
-                  ))}
-                </div>
-              )}
+                      <span className="block text-xs text-slate-400">
+                        {t === 'uptime'
+                          ? 'Uptime vs. SLA, with a cumulative-uptime graph and a per-monitor breakdown.'
+                          : 'Every incident in scope, with root cause and resolution detail.'}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
             </fieldset>
 
             <p className="rounded-lg border border-white/10 bg-slate-800/40 p-3 text-xs text-slate-400">
-              {canGenerate && template && effectiveScope ? (
+              {canGenerate && effectiveScope ? (
                 <>
-                  <span className="text-slate-200">{template.name}</span> for{' '}
+                  <span className="text-slate-200">{REPORT_TYPE_LABEL[reportType]}</span> for{' '}
                   <span className="text-slate-200">{effectiveScope.label}</span>,{' '}
                   {describePeriod(period).toLowerCase()}. Saved under Reports, where it can be
                   shared or scheduled.
                 </>
               ) : !effectiveScope ? (
                 'Choose at least one thing to report on.'
-              ) : !periodValid ? (
-                'Choose both dates for a custom period.'
               ) : (
-                'Choose a report type.'
+                'Choose both dates for a custom period.'
               )}
             </p>
 
