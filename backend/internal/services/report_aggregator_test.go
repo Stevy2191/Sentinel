@@ -133,3 +133,109 @@ func TestUptimePercent(t *testing.T) {
 }
 
 func ptrTime(t time.Time) *time.Time { return &t }
+
+func TestMeasurableWindow(t *testing.T) {
+	start := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)
+
+	t.Run("a monitor older than the window is unclamped", func(t *testing.T) {
+		from, ok := MeasurableWindow(start.AddDate(0, -1, 0), start, end)
+		if !ok || !from.Equal(start) {
+			t.Errorf("from=%v ok=%v, want %v true", from, ok, start)
+		}
+	})
+
+	t.Run("a monitor created mid-window is clamped to its creation", func(t *testing.T) {
+		created := start.AddDate(0, 0, 3)
+		from, ok := MeasurableWindow(created, start, end)
+		if !ok || !from.Equal(created) {
+			t.Errorf("from=%v ok=%v, want %v true", from, ok, created)
+		}
+	})
+
+	t.Run("a monitor created after the window has nothing to measure", func(t *testing.T) {
+		_, ok := MeasurableWindow(end.AddDate(0, 0, 1), start, end)
+		if ok {
+			t.Error("expected ok=false for a monitor created after the window closed")
+		}
+	})
+
+	t.Run("a monitor created exactly at the window's end has nothing to measure", func(t *testing.T) {
+		_, ok := MeasurableWindow(end, start, end)
+		if ok {
+			t.Error("expected ok=false when creation equals the window end")
+		}
+	})
+}
+
+func TestEffectiveSLATarget(t *testing.T) {
+	f64 := func(v float64) *float64 { return &v }
+
+	if got := EffectiveSLATarget(nil, 99.9); got != 99.9 {
+		t.Errorf("nil override: got %v, want the system default 99.9", got)
+	}
+	if got := EffectiveSLATarget(f64(95), 99.9); got != 95 {
+		t.Errorf("override: got %v, want 95", got)
+	}
+	if got := EffectiveSLATarget(f64(0), 99.9); got != 0 {
+		t.Errorf("EffectiveSLATarget takes the pointer at face value: got %v, want 0", got)
+	}
+	if got := EffectiveSLATarget(f64(100), 99.9); got != 100 {
+		t.Errorf("boundary override: got %v, want 100", got)
+	}
+}
+
+func TestComputeUptimeSeries(t *testing.T) {
+	s := &ReportAggregatorService{}
+	monitorID := uuid.New()
+	start := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 0, 10)
+
+	// An outage on day 3 should show up as a dip that day and partially
+	// recover as later, clean days join the cumulative average - not a flat
+	// line, and not a permanent drop to the outage's instantaneous percentage.
+	outageStart := start.AddDate(0, 0, 3)
+	outageEnd := outageStart.Add(12 * time.Hour)
+
+	byMonitor := []monitorIncidentsForTest{{
+		id:        monitorID,
+		from:      start,
+		incidents: []incidentWindow{{start: outageStart, end: &outageEnd}},
+	}}
+
+	points := computeUptimeSeriesFromIncidents(s, byMonitor, start, end)
+	if len(points) != uptimeSeriesPoints {
+		t.Fatalf("got %d points, want %d", len(points), uptimeSeriesPoints)
+	}
+
+	dayIndex := func(daysFromStart int) int {
+		// Sample i covers start+((i+1)/uptimeSeriesPoints)*window; find the
+		// first sample whose date has passed the given day boundary.
+		target := start.AddDate(0, 0, daysFromStart)
+		for i, p := range points {
+			if !p.Date.Before(target) {
+				return i
+			}
+		}
+		return len(points) - 1
+	}
+
+	beforeOutage := points[dayIndex(2)]
+	if beforeOutage.Uptime != 100 {
+		t.Errorf("before the outage, cumulative uptime = %v, want 100", beforeOutage.Uptime)
+	}
+
+	dayOfOutage := points[dayIndex(4)]
+	if dayOfOutage.Uptime >= 100 || dayOfOutage.Uptime <= 0 {
+		t.Errorf("the sample covering the outage = %v, want a dip strictly between 0 and 100", dayOfOutage.Uptime)
+	}
+
+	last := points[len(points)-1]
+	if last.Uptime <= dayOfOutage.Uptime {
+		t.Errorf("cumulative uptime should partially recover as clean days accumulate: day-of-outage=%v last=%v",
+			dayOfOutage.Uptime, last.Uptime)
+	}
+	if last.Uptime >= 100 {
+		t.Errorf("the outage must still be reflected at the end of the window, got %v", last.Uptime)
+	}
+}

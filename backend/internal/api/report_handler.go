@@ -655,30 +655,6 @@ func GetTimelineReportHandler(
 	}
 }
 
-// measurableWindow narrows a reporting window to the part of it a monitor
-// actually existed for, and reports whether any of it is measurable at all.
-//
-// Uptime was previously divided by the whole window however young the monitor
-// was, so the same outage looked smaller the further back the window reached: a
-// monitor added yesterday reported ~100% over ninety days no matter how badly
-// it behaved. Measuring from its creation instead makes every window describe
-// the period the monitor was actually being watched.
-//
-// A monitor created after the window closed returns false. It has nothing to
-// say about that period, and averaging it in as a perfect score would be
-// inventing a result. Only reachable for a historical range, since a window
-// ending now cannot precede an existing monitor.
-func measurableWindow(createdAt, start, end time.Time) (time.Time, bool) {
-	from := start
-	if createdAt.After(from) {
-		from = createdAt
-	}
-	if !from.Before(end) {
-		return time.Time{}, false
-	}
-	return from, true
-}
-
 // GetSummaryReportHandler handles GET /api/v1/reports/summary, returning uptime
 // figures for many monitors plus an aggregate.
 func GetSummaryReportHandler(
@@ -735,7 +711,7 @@ func GetSummaryReportHandler(
 		for i := range all {
 			m := all[i]
 
-			from, ok := measurableWindow(m.CreatedAt, start, end)
+			from, ok := services.MeasurableWindow(m.CreatedAt, start, end)
 			if !ok {
 				continue
 			}

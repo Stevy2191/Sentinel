@@ -3,6 +3,8 @@ package api
 import (
 	"testing"
 	"time"
+
+	"github.com/Stevy2191/Sentinel/backend/internal/services"
 )
 
 func TestMeasurableWindow(t *testing.T) {
@@ -12,7 +14,7 @@ func TestMeasurableWindow(t *testing.T) {
 
 	t.Run("monitor older than the window is measured over the whole window", func(t *testing.T) {
 		created := end.AddDate(0, 0, -200)
-		from, ok := measurableWindow(created, start90, end)
+		from, ok := services.MeasurableWindow(created, start90, end)
 		if !ok || !from.Equal(start90) {
 			t.Fatalf("from=%v ok=%v, want the window start %v", from, ok, start90)
 		}
@@ -22,7 +24,7 @@ func TestMeasurableWindow(t *testing.T) {
 	// did not exist for.
 	t.Run("younger monitor is measured from its creation", func(t *testing.T) {
 		created := end.AddDate(0, 0, -10)
-		from, ok := measurableWindow(created, start90, end)
+		from, ok := services.MeasurableWindow(created, start90, end)
 		if !ok {
 			t.Fatal("a 10-day-old monitor is measurable in a 90-day window")
 		}
@@ -36,7 +38,7 @@ func TestMeasurableWindow(t *testing.T) {
 
 	t.Run("created after the window closed is not measurable", func(t *testing.T) {
 		created := end.Add(time.Hour)
-		if _, ok := measurableWindow(created, start30, end); ok {
+		if _, ok := services.MeasurableWindow(created, start30, end); ok {
 			t.Fatal("a monitor created after the window should be excluded, not scored 100%")
 		}
 	})
@@ -44,13 +46,13 @@ func TestMeasurableWindow(t *testing.T) {
 	// Exactly at the boundary there is no measurable time, so it is excluded
 	// rather than dividing by zero.
 	t.Run("created exactly at the window end is not measurable", func(t *testing.T) {
-		if _, ok := measurableWindow(end, start30, end); ok {
+		if _, ok := services.MeasurableWindow(end, start30, end); ok {
 			t.Fatal("zero measurable time should be excluded")
 		}
 	})
 
 	t.Run("created exactly at the window start uses the whole window", func(t *testing.T) {
-		from, ok := measurableWindow(start30, start30, end)
+		from, ok := services.MeasurableWindow(start30, start30, end)
 		if !ok || !from.Equal(start30) {
 			t.Fatalf("from=%v ok=%v, want %v", from, ok, start30)
 		}
@@ -65,7 +67,7 @@ func TestMeasurableWindow_RemovesTheLongWindowFlattery(t *testing.T) {
 	downtime := 2 * time.Hour
 
 	uptimeOver := func(start time.Time) float64 {
-		from, ok := measurableWindow(created, start, end)
+		from, ok := services.MeasurableWindow(created, start, end)
 		if !ok {
 			t.Fatal("expected a measurable window")
 		}

@@ -18,11 +18,9 @@ import (
 // the report's own scope definition.
 type ReportAggregatorService struct {
 	db *gorm.DB
-	// settings supplies the report timezone, which calendar periods are
-	// resolved in: "September" has to mean September where the reader is, and a
-	// boundary taken in the wrong zone moves every figure by a few hours at
-	// each end. Nil is tolerated and means UTC, keeping the service usable in
-	// tests.
+	// settings supplies the report timezone and the default SLA target. Nil is
+	// tolerated (keeping the service usable in tests): timezone falls back to
+	// UTC, SLA target falls back to models.DefaultSLATargetPercent.
 	settings *SettingsService
 }
 
@@ -39,6 +37,42 @@ func (s *ReportAggregatorService) reportLocation(ctx context.Context) *time.Loca
 	return s.settings.ReportLocation(ctx)
 }
 
+// MeasurableWindow narrows a reporting window to the part of it a monitor
+// actually existed for, and reports whether any of it is measurable at all.
+//
+// Uptime measured over the whole window regardless of the monitor's age made
+// the same outage look smaller the further back the window reached: a monitor
+// added yesterday reported ~100% over ninety days no matter how badly it
+// behaved. Measuring from creation instead makes every window describe only
+// the period the monitor was actually being watched.
+//
+// A monitor created at or after the window's end returns false: it has
+// nothing to say about that period, and averaging it in as a perfect score
+// would be inventing a result.
+//
+// Shared between this aggregator and GetSummaryReportHandler (api package),
+// which applied this exact clamp first - api importing from services is the
+// existing direction, so the definition lives here rather than there.
+func MeasurableWindow(createdAt, start, end time.Time) (time.Time, bool) {
+	from := start
+	if createdAt.After(from) {
+		from = createdAt
+	}
+	if !from.Before(end) {
+		return time.Time{}, false
+	}
+	return from, true
+}
+
+// EffectiveSLATarget resolves the SLA target a monitor is held to: its own
+// override when set, otherwise the instance-wide default.
+func EffectiveSLATarget(monitorOverride *float64, systemDefault float64) float64 {
+	if monitorOverride != nil {
+		return *monitorOverride
+	}
+	return systemDefault
+}
+
 // ReportMetrics is one monitor's contribution to a report.
 type ReportMetrics struct {
 	MonitorID   uuid.UUID `json:"monitor_id"`
@@ -47,11 +81,12 @@ type ReportMetrics struct {
 	// DowntimeMinutes is fractional on purpose. Truncating to whole minutes
 	// made every outage shorter than 60s count as zero, so a report could show
 	// incidents alongside 100% uptime.
-	DowntimeMinutes float64  `json:"downtime_minutes"`
-	IncidentCount   int      `json:"incident_count"`
-	SLATarget       *float64 `json:"sla_target"`
-	// SLAMet is meaningful only when SLATarget is non-nil; a monitor with no
-	// target is not "failing", it is simply not under an SLA.
+	DowntimeMinutes float64 `json:"downtime_minutes"`
+	IncidentCount   int     `json:"incident_count"`
+	// SLATarget is always populated now - the monitor's own override, or the
+	// instance-wide default when it has none. There is no longer a monitor
+	// with "no SLA": every monitor is held to at least the system default.
+	SLATarget *float64          `json:"sla_target"`
 	SLAMet    bool              `json:"sla_met"`
 	Incidents []IncidentSummary `json:"incidents"`
 }
@@ -70,6 +105,14 @@ type IncidentSummary struct {
 	ResolutionNotes string  `json:"resolution_notes"`
 }
 
+// UptimeSeriesPoint is one sample of the cumulative-uptime-to-date line: the
+// uptime percentage across every monitor in scope, from the report's start
+// through Date.
+type UptimeSeriesPoint struct {
+	Date   time.Time `json:"date"`
+	Uptime float64   `json:"uptime"`
+}
+
 // ReportData is the fully aggregated payload handed to a renderer.
 type ReportData struct {
 	ReportName        string          `json:"report_name"`
@@ -79,19 +122,16 @@ type ReportData struct {
 	TimeRangeEnd      time.Time       `json:"time_range_end"`
 	Metrics           []ReportMetrics `json:"metrics"`
 	// Warnings names monitors that could not be aggregated. A report is a
-	// compliance artifact, so a dropped monitor is surfaced rather than silently
-	// omitted from the results.
+	// compliance artifact, so a dropped monitor is surfaced rather than
+	// silently omitted from the results.
 	Warnings []string `json:"warnings,omitempty"`
-	// Timeline is every incident in the scope, ordered by time rather than
-	// grouped by monitor, so a bad afternoon reads as one story.
-	Timeline []TimelineEvent `json:"timeline,omitempty"`
-	// Previous compares this period against the one before it. Nil when there
-	// is nothing to compare against.
-	Previous *PeriodComparison `json:"previous,omitempty"`
-	// Availability breaks the window into days, or weeks when it is long.
-	Availability []DayAvailability `json:"availability,omitempty"`
-	// Performance is response-time behaviour per monitor.
-	Performance []PerformanceStat `json:"performance,omitempty"`
+	// UptimeSeries is the cumulative-uptime-to-date line the Uptime Report
+	// graphs, aggregated across every monitor in scope.
+	UptimeSeries []UptimeSeriesPoint `json:"uptime_series,omitempty"`
+	// EffectiveSLA is the SLA target the graph's reference line is drawn at:
+	// the effective target (override or system default) averaged across every
+	// monitor in scope.
+	EffectiveSLA float64 `json:"effective_sla"`
 	// Location is the timezone every timestamp in the rendered report is
 	// written in. Carried on the data rather than read by each renderer so a
 	// PDF and its HTML equivalent cannot disagree about what time it was.
@@ -102,7 +142,8 @@ type ReportData struct {
 // ReportLocation is the zone a report renders in, defaulting to UTC.
 //
 // Never falls back to time.Local: that is the server process's zone, which is
-// whatever the container was started with and not a choice anyone made.
+// whatever the container was given, which is not a deliberate choice by
+// anyone.
 func (d *ReportData) ReportLocation() *time.Location {
 	if d == nil || d.Location == nil {
 		return time.UTC
@@ -110,8 +151,8 @@ func (d *ReportData) ReportLocation() *time.Location {
 	return d.Location
 }
 
-// AggregateReportData assembles everything a report needs. Monitors that fail to
-// aggregate are recorded in Warnings rather than failing the whole report.
+// AggregateReportData assembles everything a report needs. Monitors that fail
+// to aggregate are recorded in Warnings rather than failing the whole report.
 func (s *ReportAggregatorService) AggregateReportData(ctx context.Context, report *models.Report, requestedBy uuid.UUID) (*ReportData, error) {
 	if report == nil {
 		return nil, fmt.Errorf("report is nil")
@@ -169,93 +210,50 @@ func (s *ReportAggregatorService) AggregateReportData(ctx context.Context, repor
 		return nil, fmt.Errorf("loading monitors for report: %w", err)
 	}
 
+	systemDefaultSLA := models.DefaultSLATargetPercent
+	if s.settings != nil {
+		systemDefaultSLA = s.settings.DefaultSLATarget(ctx)
+	}
+
+	// A monitor that did not exist for any part of the window has nothing to
+	// say about it, and is left out entirely rather than averaged in as a
+	// perfect score it never earned - the same clamp GetSummaryReportHandler
+	// already applied, now shared via MeasurableWindow.
+	measurable := make([]models.Monitor, 0, len(monitors))
+	windowStart := make(map[uuid.UUID]time.Time, len(monitors))
+	var slaSum float64
 	for i := range monitors {
-		metrics, err := s.calculateMonitorMetrics(ctx, monitors[i], startTime, endTime)
+		from, ok := MeasurableWindow(monitors[i].CreatedAt, startTime, endTime)
+		if !ok {
+			continue
+		}
+		measurable = append(measurable, monitors[i])
+		windowStart[monitors[i].ID] = from
+		slaSum += EffectiveSLATarget(monitors[i].SLATarget, systemDefaultSLA)
+	}
+
+	for i := range measurable {
+		metrics, err := s.calculateMonitorMetrics(ctx, measurable[i],
+			windowStart[measurable[i].ID], endTime, systemDefaultSLA)
 		if err != nil {
 			data.Warnings = append(data.Warnings,
-				fmt.Sprintf("monitor %q (%s) omitted: %v", monitors[i].Name, monitors[i].ID, err))
+				fmt.Sprintf("monitor %q (%s) omitted: %v", measurable[i].Name, measurable[i].ID, err))
 			continue
 		}
 		data.Metrics = append(data.Metrics, metrics)
 	}
 
-	data.Timeline = buildTimeline(data.Metrics)
-	data.Availability = availabilityBuckets(data.Metrics, startTime, endTime, loc)
-
-	// Response times and the previous period are extra queries, so a failure in
-	// either degrades the report rather than failing it: the sections that did
-	// aggregate are still worth delivering.
-	if perf, err := s.performanceStats(ctx, monitors, startTime, endTime); err != nil {
-		data.Warnings = append(data.Warnings, fmt.Sprintf("response times unavailable: %v", err))
-	} else {
-		data.Performance = perf
-	}
-
-	prevStart, prevEnd := report.PreviousPeriod(time.Now(), loc)
-	if prev, err := s.periodSummary(ctx, monitors, prevStart, prevEnd); err != nil {
-		data.Warnings = append(data.Warnings, fmt.Sprintf("previous period unavailable: %v", err))
-	} else {
-		current := summarize(data.Metrics)
-		prev.Label = report.PreviousPeriodLabel(time.Now(), loc)
-		prev.UptimeDelta = round2(current.uptime - prev.Uptime)
-		prev.IncidentDelta = current.incidents - prev.IncidentCount
-		prev.DowntimeDelta = round2(current.downtime - prev.DowntimeMinutes)
-		data.Previous = prev
+	if len(measurable) > 0 {
+		data.EffectiveSLA = round2(slaSum / float64(len(measurable)))
+		series, err := s.computeUptimeSeries(ctx, measurable, windowStart, startTime, endTime)
+		if err != nil {
+			data.Warnings = append(data.Warnings, fmt.Sprintf("uptime graph unavailable: %v", err))
+		} else {
+			data.UptimeSeries = series
+		}
 	}
 
 	return data, nil
-}
-
-// aggregateTotals are the headline figures for one window.
-type aggregateTotals struct {
-	uptime    float64
-	incidents int
-	downtime  float64
-}
-
-// summarize averages per-monitor metrics into the figures the summary shows.
-func summarize(metrics []ReportMetrics) aggregateTotals {
-	if len(metrics) == 0 {
-		return aggregateTotals{uptime: 0}
-	}
-	var t aggregateTotals
-	for _, m := range metrics {
-		t.uptime += m.Uptime
-		t.incidents += m.IncidentCount
-		t.downtime += m.DowntimeMinutes
-	}
-	t.uptime = round2(t.uptime / float64(len(metrics)))
-	t.downtime = round2(t.downtime)
-	return t
-}
-
-// periodSummary computes just the headline figures for a window, without the
-// per-incident detail a full aggregation carries. The comparison needs three
-// numbers, not a second copy of the whole report.
-func (s *ReportAggregatorService) periodSummary(
-	ctx context.Context,
-	monitors []models.Monitor,
-	start, end time.Time,
-) (*PeriodComparison, error) {
-	summary := &PeriodComparison{Start: start, End: end}
-	if len(monitors) == 0 || !end.After(start) {
-		return summary, nil
-	}
-
-	var totals aggregateTotals
-	for i := range monitors {
-		metrics, err := s.calculateMonitorMetrics(ctx, monitors[i], start, end)
-		if err != nil {
-			return nil, err
-		}
-		totals.uptime += metrics.Uptime
-		totals.incidents += metrics.IncidentCount
-		totals.downtime += metrics.DowntimeMinutes
-	}
-	summary.Uptime = round2(totals.uptime / float64(len(monitors)))
-	summary.IncidentCount = totals.incidents
-	summary.DowntimeMinutes = round2(totals.downtime)
-	return summary, nil
 }
 
 // getMonitorIDsForScope resolves a report's scope to the monitor IDs it covers.
@@ -314,17 +312,21 @@ func (s *ReportAggregatorService) getMonitorIDsForScope(ctx context.Context, sco
 	}
 }
 
-// calculateMonitorMetrics computes one monitor's uptime and incident summary
-// over [startTime, endTime].
+// calculateMonitorMetrics computes one monitor's uptime, SLA outcome, and
+// incident summary over [startTime, endTime]. systemDefaultSLA is the
+// instance-wide default, used whenever the monitor carries no override of its
+// own.
 func (s *ReportAggregatorService) calculateMonitorMetrics(
 	ctx context.Context,
 	monitor models.Monitor,
 	startTime, endTime time.Time,
+	systemDefaultSLA float64,
 ) (ReportMetrics, error) {
+	target := EffectiveSLATarget(monitor.SLATarget, systemDefaultSLA)
 	metrics := ReportMetrics{
 		MonitorID:   monitor.ID,
 		MonitorName: monitor.Name,
-		SLATarget:   monitor.SLATarget,
+		SLATarget:   &target,
 		Incidents:   []IncidentSummary{},
 	}
 
@@ -347,10 +349,7 @@ func (s *ReportAggregatorService) calculateMonitorMetrics(
 	metrics.DowntimeMinutes = totalDowntimeMinutes
 	metrics.IncidentCount = len(incidents)
 	metrics.Uptime = uptimePercent(startTime, endTime, totalDowntimeMinutes)
-
-	if monitor.SLATarget != nil {
-		metrics.SLAMet = metrics.Uptime >= *monitor.SLATarget
-	}
+	metrics.SLAMet = metrics.Uptime >= target
 
 	return metrics, nil
 }
@@ -417,4 +416,115 @@ func uptimePercent(startTime, endTime time.Time, downtimeMinutes float64) float6
 		up = 0
 	}
 	return up / totalMinutes * 100
+}
+
+// uptimeSeriesPoints is how many samples the cumulative-uptime graph plots.
+// Enough to show shape over a typical reporting window without turning into
+// noise, and small enough that the whole series costs one incident query per
+// monitor rather than one per monitor per sample.
+const uptimeSeriesPoints = 30
+
+// monitorIncidentsForTest and incidentWindow let computeUptimeSeries's
+// arithmetic be exercised without a database - see
+// TestComputeUptimeSeries/computeUptimeSeriesFromIncidents.
+type monitorIncidentsForTest struct {
+	id        uuid.UUID
+	from      time.Time
+	incidents []incidentWindow
+}
+
+type incidentWindow struct {
+	start time.Time
+	end   *time.Time
+}
+
+// computeUptimeSeries samples cumulative uptime at evenly spaced points across
+// [start, end]. windowStart carries each monitor's own measurable start (its
+// creation time, when that is later than start), so a monitor added mid-period
+// contributes only the minutes it actually existed for at every sample.
+func (s *ReportAggregatorService) computeUptimeSeries(
+	ctx context.Context,
+	monitors []models.Monitor,
+	windowStart map[uuid.UUID]time.Time,
+	start, end time.Time,
+) ([]UptimeSeriesPoint, error) {
+	if len(monitors) == 0 || !end.After(start) {
+		return nil, nil
+	}
+
+	// One incident query per monitor, covering the whole window - reused for
+	// every sample point below instead of re-querying per point.
+	byMonitor := make([]monitorIncidentsForTest, 0, len(monitors))
+	for _, m := range monitors {
+		from := windowStart[m.ID]
+		var incidents []models.Incident
+		if err := s.db.WithContext(ctx).
+			Where("monitor_id = ?", m.ID).
+			Where("start_time <= ?", end).
+			Where("end_time IS NULL OR end_time >= ?", from).
+			Order("start_time ASC").
+			Find(&incidents).Error; err != nil {
+			return nil, fmt.Errorf("loading incidents for uptime series: %w", err)
+		}
+		windows := make([]incidentWindow, 0, len(incidents))
+		for _, inc := range incidents {
+			windows = append(windows, incidentWindow{start: inc.StartTime, end: inc.EndTime})
+		}
+		byMonitor = append(byMonitor, monitorIncidentsForTest{id: m.ID, from: from, incidents: windows})
+	}
+
+	return computeUptimeSeriesFromIncidents(s, byMonitor, start, end), nil
+}
+
+// computeUptimeSeriesFromIncidents is computeUptimeSeries's arithmetic, free
+// of the database so it can be unit tested directly against a synthetic set
+// of incidents.
+func computeUptimeSeriesFromIncidents(_ *ReportAggregatorService, byMonitor []monitorIncidentsForTest, start, end time.Time) []UptimeSeriesPoint {
+	points := make([]UptimeSeriesPoint, 0, uptimeSeriesPoints)
+	step := end.Sub(start) / time.Duration(uptimeSeriesPoints)
+	for i := 1; i <= uptimeSeriesPoints; i++ {
+		sampleEnd := start.Add(step * time.Duration(i))
+		if i == uptimeSeriesPoints {
+			sampleEnd = end
+		}
+
+		var totalMinutes, downMinutes float64
+		for _, mi := range byMonitor {
+			if !mi.from.Before(sampleEnd) {
+				// Not measurable yet at this sample point.
+				continue
+			}
+			asIncidents := make([]models.Incident, 0, len(mi.incidents))
+			for _, w := range mi.incidents {
+				asIncidents = append(asIncidents, models.Incident{StartTime: w.start, EndTime: w.end})
+			}
+			_, minutes := summarizeIncidents(asIncidents, mi.from, sampleEnd)
+			totalMinutes += sampleEnd.Sub(mi.from).Minutes()
+			downMinutes += minutes
+		}
+
+		points = append(points, UptimeSeriesPoint{
+			Date:   sampleEnd,
+			Uptime: aggregateUptimePercent(totalMinutes, downMinutes),
+		})
+	}
+	return points
+}
+
+// aggregateUptimePercent is uptimePercent generalized to pre-summed
+// total/down minutes across possibly many monitors, each contributing only
+// its own measurable time, rather than a single [start,end] span.
+func aggregateUptimePercent(totalMinutes, downMinutes float64) float64 {
+	if totalMinutes <= 0 {
+		return 100
+	}
+	up := totalMinutes - downMinutes
+	if up < 0 {
+		up = 0
+	}
+	return round2(up / totalMinutes * 100)
+}
+
+func round2(v float64) float64 {
+	return float64(int64(v*100+0.5)) / 100
 }
