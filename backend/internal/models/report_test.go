@@ -83,7 +83,7 @@ func TestReportValidate(t *testing.T) {
 	valid := func() *Report {
 		return &Report{
 			Name:          "Monthly SLA",
-			TemplateID:    uuid.New(),
+			ReportType:    ReportTypeUptime,
 			ScopeType:     ScopeTypeTags,
 			ScopeData:     ReportScope{Tags: []string{"prod"}},
 			TimeRangeDays: 30,
@@ -96,7 +96,8 @@ func TestReportValidate(t *testing.T) {
 
 	cases := map[string]func(*Report){
 		"missing name":          func(r *Report) { r.Name = "" },
-		"missing template":      func(r *Report) { r.TemplateID = uuid.Nil },
+		"missing report type":   func(r *Report) { r.ReportType = "" },
+		"unknown report type":   func(r *Report) { r.ReportType = "weekly_digest" },
 		"bad scope type":        func(r *Report) { r.ScopeType = "everything" },
 		"zero time range":       func(r *Report) { r.TimeRangeDays = 0 },
 		"negative time range":   func(r *Report) { r.TimeRangeDays = -7 },
@@ -113,19 +114,15 @@ func TestReportValidate(t *testing.T) {
 	}
 }
 
-func TestReportTemplateValidate(t *testing.T) {
-	ok := &ReportTemplate{Name: "Standard", Sections: StringSlice{SectionSLACompliance, SectionCharts}}
-	if err := ok.Validate(); err != nil {
-		t.Fatalf("valid template rejected: %v", err)
+func TestReportValidateAcceptsIncidentType(t *testing.T) {
+	r := &Report{
+		Name:          "Incidents",
+		ReportType:    ReportTypeIncident,
+		ScopeType:     ScopeTypeMonitors,
+		ScopeData:     ReportScope{MonitorIDs: []uuid.UUID{uuid.New()}},
+		TimeRangeDays: 7,
 	}
-
-	if err := (&ReportTemplate{Sections: StringSlice{SectionCharts}}).Validate(); err == nil {
-		t.Error("expected an error for a template with no name")
-	}
-	if err := (&ReportTemplate{Name: "Empty"}).Validate(); err == nil {
-		t.Error("expected an error for a template with no sections")
-	}
-	if err := (&ReportTemplate{Name: "Bad", Sections: StringSlice{"pie_charts"}}).Validate(); err == nil {
-		t.Error("expected an error for an unknown section")
+	if err := r.Validate(); err != nil {
+		t.Errorf("incident report rejected: %v", err)
 	}
 }
