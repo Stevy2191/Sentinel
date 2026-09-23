@@ -235,8 +235,6 @@ func (q *ReportJobQueue) render(ctx context.Context, job *models.ReportJob) (*Ge
 func classifyJobError(err error) string {
 	msg := err.Error()
 	switch {
-	case strings.Contains(msg, "loading report template"):
-		return "report template could not be loaded"
 	case strings.Contains(msg, "aggregating report data"):
 		return "could not gather monitor data for this report"
 	case strings.Contains(msg, "rendering report PDF"):

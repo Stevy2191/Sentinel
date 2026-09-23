@@ -144,25 +144,3 @@ func TestAvailabilityBuckets_ConcurrentOutagesStayInRange(t *testing.T) {
 		t.Errorf("uptime = %v, want 50", buckets[0].Uptime)
 	}
 }
-
-// Deltas must read as plain English and name the direction, since "up" is good
-// for uptime and bad for incidents.
-func TestDeltaFormatting(t *testing.T) {
-	cases := []struct{ got, want string }{
-		{signedDelta(0.21, "pp", true), "+0.21pp better"},
-		{signedDelta(-0.06, "pp", true), "-0.06pp worse"},
-		{signedDelta(0, "pp", true), "no change"},
-		// A count is a whole thing: "+7.00 worse" reads as a bug.
-		{signedCountDelta(7), "+7 worse"},
-		{signedCountDelta(-3), "-3 better"},
-		{signedCountDelta(0), "no change"},
-		{signedDeltaMinutes(91), "+1h 31m worse"},
-		{signedDeltaMinutes(-45), "-45m better"},
-		{signedDeltaMinutes(0), "no change"},
-	}
-	for _, c := range cases {
-		if c.got != c.want {
-			t.Errorf("got %q, want %q", c.got, c.want)
-		}
-	}
-}

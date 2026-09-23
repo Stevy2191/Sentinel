@@ -14,6 +14,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"html"
 	"mime"
 	"os"
 	"path/filepath"
@@ -300,6 +301,8 @@ func (m *ReportMailer) textBody(email ReportEmail) string {
 	b.WriteString("\nGenerated automatically by Sentinel.\n")
 	return b.String()
 }
+
+func esc(s string) string { return html.EscapeString(s) }
 
 func (m *ReportMailer) htmlBody(email ReportEmail) string {
 	var extras strings.Builder

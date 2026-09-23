@@ -44,7 +44,7 @@ func renderProbe(t *testing.T, data *ReportData) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	name, err := r.RenderReportToPDF(data, []string{models.SectionSLACompliance, models.SectionIncidentSummary}, "probe")
+	name, err := r.RenderReportToPDF(data, models.ReportTypeUptime, "probe")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,9 +82,6 @@ func TestPDF_AccentedMonitorNameSurvives(t *testing.T) {
 		ReportName:     "Accents",
 		TimeRangeStart: time.Now().Add(-24 * time.Hour),
 		TimeRangeEnd:   time.Now(),
-		// An SLA target is required for the row to be drawn at all; without
-		// one the section prints "no targets configured" and the name never
-		// reaches the page.
 		Metrics: []ReportMetrics{{
 			MonitorName: "Café Müller",
 			Uptime:      99.9,

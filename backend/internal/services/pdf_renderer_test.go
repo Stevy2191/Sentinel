@@ -55,7 +55,7 @@ func TestRenderReportToPDFWritesAValidFile(t *testing.T) {
 		t.Fatalf("NewPDFRendererService: %v", err)
 	}
 
-	name, err := r.RenderReportToPDF(sampleReportData(), nil, "monthly")
+	name, err := r.RenderReportToPDF(sampleReportData(), models.ReportTypeUptime, "monthly")
 	if err != nil {
 		t.Fatalf("RenderReportToPDF: %v", err)
 	}
@@ -84,33 +84,39 @@ func TestRenderReportToPDFWritesAValidFile(t *testing.T) {
 	}
 }
 
-// Each template section must change the output, or section selection is a lie.
-func TestRenderReportToPDFHonoursSections(t *testing.T) {
+// Each report type must produce a genuinely different document, or the type
+// selection is a lie.
+func TestRenderReportToPDFHonoursReportType(t *testing.T) {
 	dir := t.TempDir()
 	r, _ := NewPDFRendererService(dir)
 	data := sampleReportData()
 
-	sizeOf := func(sections []string, hint string) int {
-		name, err := r.RenderReportToPDF(data, sections, hint)
+	render := func(reportType, hint string) string {
+		name, err := r.RenderReportToPDF(data, reportType, hint)
 		if err != nil {
-			t.Fatalf("render %v: %v", sections, err)
+			t.Fatalf("render %v: %v", reportType, err)
 		}
-		size, err := r.GetPDFFileSize(name)
+		path, err := r.GetPDFPath(name)
 		if err != nil {
-			t.Fatalf("size: %v", err)
+			t.Fatalf("path: %v", err)
 		}
-		return size
+		return pdfDrawnText(t, path)
 	}
 
-	slaOnly := sizeOf([]string{models.SectionSLACompliance}, "sla")
-	everything := sizeOf([]string{
-		models.SectionCharts, models.SectionSLACompliance,
-		models.SectionIncidentSummary, models.SectionCustom,
-	}, "all")
+	uptime := render(models.ReportTypeUptime, "uptime")
+	if !strings.Contains(uptime, "SLA Compliance") {
+		t.Error("uptime report is missing the SLA Compliance section")
+	}
+	if strings.Contains(uptime, "Root cause") {
+		t.Error("uptime report should not include incident detail")
+	}
 
-	if everything <= slaOnly {
-		t.Errorf("a full report (%d bytes) should be larger than SLA-only (%d bytes); sections may be ignored",
-			everything, slaOnly)
+	incident := render(models.ReportTypeIncident, "incident")
+	if !strings.Contains(incident, "Upstream provider outage") {
+		t.Error("incident report is missing incident detail")
+	}
+	if strings.Contains(incident, "SLA Compliance") {
+		t.Error("incident report should not include the SLA Compliance section")
 	}
 }
 
