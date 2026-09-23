@@ -227,20 +227,21 @@ export function useAgentSummary(): { value: string; subtitle: string } {
     if (loading) return { value: '—', subtitle: 'loading' }
     // A bare zero says nothing about why. Nothing can be reported until an
     // agent is installed somewhere, so the card says that instead.
-    if (agents.length === 0) return { value: 'None yet', subtitle: 'add a server agent' }
+    if (agents.length === 0) return { value: '0', subtitle: 'add a server agent' }
 
     const active = agents.filter((a) => a.status === 'active').length
     const offline = agents.filter((a) => a.status === 'offline').length
     const pending = agents.filter((a) => a.status === 'pending').length
 
-    // Leads with whatever needs attention: an agent that has stopped reporting
-    // matters more than the total, and one still to be installed is work
-    // outstanding rather than a fault.
-    let subtitle = `of ${agents.length} registered`
+    // The headline is the total registered, matching the other cards.
+    // The subtitle leads with whatever needs attention: an agent that has
+    // stopped reporting matters more than the count, and one still to be
+    // installed is work outstanding rather than a fault.
+    let subtitle = `${active} reporting`
     if (offline > 0) subtitle = `${offline} not reporting`
     else if (pending > 0) subtitle = `${pending} awaiting install`
 
-    return { value: `${active} online`, subtitle }
+    return { value: String(agents.length), subtitle }
   }, [agents, loading])
 }
 

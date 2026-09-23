@@ -108,7 +108,7 @@ export function useSSLSummary(): { value: string; subtitle: string } {
     if (certificates.length === 0) {
       // A bare zero reads as "nothing is wrong" when in fact nothing is being
       // watched, so the card says which it is.
-      return { value: 'None yet', subtitle: 'add a domain to watch' }
+      return { value: '0', subtitle: 'add a domain to watch' }
     }
 
     const expired = certificates.filter(
@@ -119,16 +119,16 @@ export function useSSLSummary(): { value: string; subtitle: string } {
     ).length
     const unreadable = certificates.filter((c) => c.status === 'unknown').length
 
-    // Leads with whatever needs attention, in the order it would bite:
-    // something already expired, then something about to, then something that
-    // could not be read at all.
-    let subtitle = `of ${certificates.length} watched`
+    // The headline is the total, so the card says how much is on that page
+    // and reads like the others. The subtitle keeps the signal, leading
+    // with whatever needs attention in the order it would bite: something
+    // already expired, then about to, then something unreadable.
+    let subtitle = 'all valid'
     if (expired > 0) subtitle = `${expired} expired`
     else if (expiring > 0) subtitle = `${expiring} expiring soon`
     else if (unreadable > 0) subtitle = `${unreadable} could not be checked`
 
-    const healthy = certificates.length - expired - expiring
-    return { value: `${healthy} valid`, subtitle }
+    return { value: String(certificates.length), subtitle }
   }, [certificates, loading])
 }
 

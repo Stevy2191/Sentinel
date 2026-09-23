@@ -5,9 +5,10 @@ import { useAgentSummary } from '@/hooks/useAgents'
 import { useSystemResources } from '@/hooks/useSystemResources'
 import { useSSLSummary } from '@/hooks/useSSLCertificates'
 import { useSummaryReport } from '@/hooks/useReports'
+import { useStatusPages } from '@/hooks/useStatusPages'
+import { useSavedReports } from '@/hooks/useReportBuilder'
 import { useCardShimmer } from '@/hooks/useCardShimmer'
 import ShimmerStatCard from '@/components/ShimmerStatCard'
-import ShimmerTypeCard from '@/components/ShimmerTypeCard'
 import { REPORT_PERIODS, type ReportPeriod } from '@/utils/reportPeriods'
 
 const REFRESH_MS = 30_000
@@ -58,9 +59,15 @@ export default function Overview() {
   const { monitors, refetch } = useMonitors()
   const agentSummary = useAgentSummary()
   const sslSummary = useSSLSummary()
+  const { pages: statusPages } = useStatusPages()
+  const { reports: savedReports, listReports } = useSavedReports()
   const { resources: host } = useSystemResources()
   const [refreshedAt, setRefreshedAt] = useState(() => Date.now())
   const [period, setPeriod] = useState<ReportPeriod>('30d')
+
+  useEffect(() => {
+    void listReports()
+  }, [listReports])
 
   useEffect(() => {
     const t = window.setInterval(() => {
@@ -86,16 +93,16 @@ export default function Overview() {
     periodRange.end
   )
 
+  // One id per card on the page. These must match the section card keys, or
+  // hovering a card lights up nothing.
   const shimmer = useCardShimmer([
     'operational',
-    'responseTime',
-    'incidents',
-    'agents',
-    'dns',
-    'http',
-    'ping',
-    'tcp',
+    'uptime',
     'ssl',
+    'agents',
+    'statusPages',
+    'incidents',
+    'reports',
   ])
 
   // "Paused" is a configuration state, so a disabled monitor counts as paused
@@ -122,18 +129,72 @@ export default function Overview() {
     return { avgResponse, timedCount: timed.length }
   }, [monitors])
 
-  const byType = useMemo(() => {
-    const keys = ['dns', 'http', 'ping', 'tcp'] as const
-    return keys.map((key) => {
-      const of = monitors.filter((m) => m.type === key)
-      return {
-        key,
-        label: key.toUpperCase(),
-        count: of.length,
-        online: of.filter((m) => m.enabled && m.current_status === 'online').length,
-      }
-    })
-  }, [monitors])
+  const periodHeading =
+    REPORT_PERIODS.find((pp) => pp.key === period)?.heading.toLowerCase() ?? 'last 30 days'
+
+  // One card per section of the sidebar, in the same order, so the overview
+  // reads as a map of the app rather than an arbitrary set of figures. Every
+  // card leads with a count of what is on that page and opens it.
+  const sectionCards = useMemo(
+    () => [
+      {
+        key: 'uptime',
+        title: 'Uptime Monitoring',
+        to: '/uptime',
+        colorType: 'monitoring' as const,
+        value: String(counts.total),
+        subtitle:
+          counts.total === 0
+            ? 'add a monitor'
+            : counts.down > 0
+              ? `${counts.down} down`
+              : counts.paused > 0
+                ? `${counts.paused} paused`
+                : 'all up',
+      },
+      {
+        key: 'ssl',
+        title: 'SSL & Domains',
+        to: '/ssl',
+        colorType: 'ssl' as const,
+        value: sslSummary.value,
+        subtitle: sslSummary.subtitle,
+      },
+      {
+        key: 'agents',
+        title: 'Server Monitoring',
+        to: '/servers',
+        colorType: 'agents' as const,
+        value: agentSummary.value,
+        subtitle: agentSummary.subtitle,
+      },
+      {
+        key: 'statusPages',
+        title: 'Status Pages',
+        to: '/status-pages',
+        colorType: 'statusPages' as const,
+        value: String(statusPages.length),
+        subtitle: statusPages.length === 0 ? 'none published' : 'published',
+      },
+      {
+        key: 'incidents',
+        title: 'Incidents',
+        to: '/incidents',
+        colorType: 'incidents' as const,
+        value: String(summary?.aggregate.total_incidents ?? 0),
+        subtitle: periodHeading,
+      },
+      {
+        key: 'reports',
+        title: 'Reports',
+        to: '/reports',
+        colorType: 'reports' as const,
+        value: String(savedReports.length),
+        subtitle: savedReports.length === 0 ? 'none saved' : 'saved',
+      },
+    ],
+    [counts, sslSummary, agentSummary, statusPages, summary, periodHeading, savedReports],
+  )
 
   const lastUpdated = useMemo(
     () => new Date(refreshedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -145,8 +206,6 @@ export default function Overview() {
   const mainCard = anyDown
     ? { bg: 'from-yellow-600/20', border: 'border-yellow-500/30', text: 'text-yellow-400' }
     : { bg: 'from-emerald-600/20', border: 'border-emerald-500/30', text: 'text-emerald-400' }
-  const periodHeading =
-    REPORT_PERIODS.find((pp) => pp.key === period)?.heading.toLowerCase() ?? 'last 30 days'
   const periodUptime = periodSummary?.aggregate.avg_uptime
 
   return (
@@ -219,6 +278,14 @@ export default function Overview() {
                     </option>
                   ))}
                 </select>
+                {/* Average response lives here rather than in the card row: every
+                    card there opens a page, and this opens nothing. It reads as a
+                    companion to the uptime figure above it. */}
+                <div className="mt-2 text-xs text-slate-400">
+                  {overview.avgResponse > 0
+                    ? `${overview.avgResponse}ms average response across ${overview.timedCount}`
+                    : 'No response times recorded yet'}
+                </div>
               </div>
             </div>
 
@@ -263,80 +330,27 @@ export default function Overview() {
             )}
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <ShimmerStatCard
-              title="Avg Response Time"
-              value={overview.avgResponse > 0 ? `${overview.avgResponse}ms` : '—'}
-              subtitle={overview.timedCount > 0 ? `across ${overview.timedCount}` : 'no data yet'}
-              colorType="responseTime"
-              onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'responseTime')}
-              onMouseEnter={() => shimmer.handleCardMouseEnter('responseTime')}
-              onMouseLeave={() => shimmer.handleCardMouseLeave('responseTime')}
-              showShimmer={shimmer.isShown('responseTime')}
-              shimmerStyle={shimmer.getShimmerStyle('responseTime')}
-            />
-            <ShimmerStatCard
-              title="Total Incidents"
-              value={summary?.aggregate.total_incidents ?? 0}
-              subtitle={periodHeading}
-              colorType="incidents"
-              onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'incidents')}
-              onMouseEnter={() => shimmer.handleCardMouseEnter('incidents')}
-              onMouseLeave={() => shimmer.handleCardMouseLeave('incidents')}
-              showShimmer={shimmer.isShown('incidents')}
-              shimmerStyle={shimmer.getShimmerStyle('incidents')}
-            />
-            <ShimmerStatCard
-              title="SSL & Domains"
-              value={sslSummary.value}
-              subtitle={sslSummary.subtitle}
-              colorType="ssl"
-              onClick={() => navigate('/ssl')}
-              onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'ssl')}
-              onMouseEnter={() => shimmer.handleCardMouseEnter('ssl')}
-              onMouseLeave={() => shimmer.handleCardMouseLeave('ssl')}
-              showShimmer={shimmer.isShown('ssl')}
-              shimmerStyle={shimmer.getShimmerStyle('ssl')}
-            />
-            <ShimmerStatCard
-              title="Monitoring Agents"
-              value={agentSummary.value}
-              subtitle={agentSummary.subtitle}
-              colorType="agents"
-              onClick={() => navigate('/servers')}
-              onMouseMove={(e) => shimmer.handleCardMouseMove(e, 'agents')}
-              onMouseEnter={() => shimmer.handleCardMouseEnter('agents')}
-              onMouseLeave={() => shimmer.handleCardMouseLeave('agents')}
-              showShimmer={shimmer.isShown('agents')}
-              shimmerStyle={shimmer.getShimmerStyle('agents')}
-            />
-          </div>
-        </div>
-
-        <div>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-            {byType
-              .filter((t) => t.count > 0)
-              .map((t) => (
-                <ShimmerTypeCard
-                  key={t.key}
-                  label={t.label}
-                  count={t.count}
-                  online={t.online}
-                  colorType={t.key}
-                  onClick={() => navigate(`/uptime?type=${t.key}`)}
-                  onMouseMove={(e) => shimmer.handleCardMouseMove(e, t.key)}
-                  onMouseEnter={() => shimmer.handleCardMouseEnter(t.key)}
-                  onMouseLeave={() => shimmer.handleCardMouseLeave(t.key)}
-                  showShimmer={shimmer.isShown(t.key)}
-                  shimmerStyle={shimmer.getShimmerStyle(t.key)}
-                />
-              ))}
-            {byType.every((t) => t.count === 0) && (
-              <div className="col-span-full rounded-lg border border-white/10 bg-slate-800/40 p-4 text-sm text-slate-400 backdrop-blur-sm">
-                No monitors configured yet.
-              </div>
-            )}
+          {/* One card per section, in the order of the sidebar, each showing how
+              many things are on that page and opening it when clicked. The
+              per-type breakdown that used to sit below answered a question the
+              uptime page answers better, and gave no card at all to the sections
+              that have no types. */}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            {sectionCards.map((card) => (
+              <ShimmerStatCard
+                key={card.key}
+                title={card.title}
+                value={card.value}
+                subtitle={card.subtitle}
+                colorType={card.colorType}
+                onClick={() => navigate(card.to)}
+                onMouseMove={(e) => shimmer.handleCardMouseMove(e, card.key)}
+                onMouseEnter={() => shimmer.handleCardMouseEnter(card.key)}
+                onMouseLeave={() => shimmer.handleCardMouseLeave(card.key)}
+                showShimmer={shimmer.isShown(card.key)}
+                shimmerStyle={shimmer.getShimmerStyle(card.key)}
+              />
+            ))}
           </div>
         </div>
       </div>

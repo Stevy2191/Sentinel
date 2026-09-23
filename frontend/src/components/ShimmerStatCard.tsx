@@ -4,7 +4,7 @@ interface ShimmerStatCardProps {
   title: string
   value: string | number
   subtitle?: string
-  colorType: 'monitoring' | 'responseTime' | 'incidents' | 'agents' | 'ssl'
+  colorType: 'monitoring' | 'responseTime' | 'incidents' | 'agents' | 'ssl' | 'statusPages' | 'reports'
   onMouseMove: (e: React.MouseEvent) => void
   onMouseEnter: () => void
   onMouseLeave: () => void
@@ -43,6 +43,24 @@ const colorMap = {
     border: 'border-red-500/30',
     glow: 'bg-red-500/10',
     glowHover: 'group-hover:bg-red-500/20',
+  },
+  statusPages: {
+    hoverBorder: 'hover:border-cyan-500/50',
+    bg: 'from-cyan-600/15',
+    text: 'text-cyan-400',
+    subtle: 'text-cyan-400/70',
+    border: 'border-cyan-500/30',
+    glow: 'bg-cyan-500/10',
+    glowHover: 'group-hover:bg-cyan-500/20',
+  },
+  reports: {
+    hoverBorder: 'hover:border-amber-500/50',
+    bg: 'from-amber-600/15',
+    text: 'text-amber-400',
+    subtle: 'text-amber-400/70',
+    border: 'border-amber-500/30',
+    glow: 'bg-amber-500/10',
+    glowHover: 'group-hover:bg-amber-500/20',
   },
   ssl: {
     hoverBorder: 'hover:border-purple-500/50',
