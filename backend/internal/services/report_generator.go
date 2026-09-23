@@ -50,11 +50,6 @@ type GeneratedReport struct {
 
 // GenerateAndSaveReport aggregates, renders, and records a report.
 func (rg *ReportGenerator) GenerateAndSaveReport(ctx context.Context, report *models.Report, generatedBy uuid.UUID) (*GeneratedReport, error) {
-	var template models.ReportTemplate
-	if err := rg.db.WithContext(ctx).First(&template, "id = ?", report.TemplateID).Error; err != nil {
-		return nil, fmt.Errorf("loading report template: %w", err)
-	}
-
 	data, err := rg.aggregator.AggregateReportData(ctx, report, generatedBy)
 	if err != nil {
 		return nil, fmt.Errorf("aggregating report data: %w", err)
@@ -64,7 +59,7 @@ func (rg *ReportGenerator) GenerateAndSaveReport(ctx context.Context, report *mo
 	// this data describe the same clock.
 	data.Location = rg.reportLocation(ctx)
 
-	filename, err := rg.pdfRenderer.RenderReportToPDF(data, template.Sections, "report_"+report.ID.String()[:8])
+	filename, err := rg.pdfRenderer.RenderReportToPDF(data, report.ReportType, "report_"+report.ID.String()[:8])
 	if err != nil {
 		return nil, fmt.Errorf("rendering report PDF: %w", err)
 	}

@@ -60,8 +60,9 @@ func NewPDFRendererService(outputDir string) (*PDFRendererService, error) {
 
 // RenderReportToPDF draws data to a PDF and returns the generated file's base
 // name (not its path - callers store the name and resolve it via GetPDFPath).
-// sections selects which parts of the report are drawn, in the order given.
-func (s *PDFRendererService) RenderReportToPDF(data *ReportData, sections []string, nameHint string) (string, error) {
+// reportType selects the fixed layout: models.ReportTypeUptime or
+// models.ReportTypeIncident.
+func (s *PDFRendererService) RenderReportToPDF(data *ReportData, reportType string, nameHint string) (string, error) {
 	if data == nil {
 		return "", fmt.Errorf("report data is nil")
 	}
@@ -73,28 +74,13 @@ func (s *PDFRendererService) RenderReportToPDF(data *ReportData, sections []stri
 	pdf.AddPage()
 
 	drawPDFHeader(pdf, data)
-	for _, section := range sectionsOrDefault(sections) {
-		switch section {
-		case models.SectionSLACompliance:
-			drawPDFSLASection(pdf, data)
-		case models.SectionIncidentSummary:
-			drawPDFIncidentSection(pdf, data)
-		case models.SectionCharts:
-			// "charts" predates the richer sections and has always drawn the
-			// summary tiles. Kept as-is so existing templates render what they
-			// always did; new templates use the sections below instead.
-			drawPDFSummary(pdf, data)
-		case models.SectionExecutiveSummary:
-			drawPDFExecutiveSummary(pdf, data)
-		case models.SectionTimeline:
-			drawPDFTimeline(pdf, data)
-		case models.SectionAvailability:
-			drawPDFAvailability(pdf, data)
-		case models.SectionPerformance:
-			drawPDFPerformance(pdf, data)
-		case models.SectionCustom:
-			drawPDFCustomSection(pdf, data)
-		}
+	switch reportType {
+	case models.ReportTypeIncident:
+		drawPDFIncidentReport(pdf, data)
+	default:
+		// Uptime is also the fallback for an unrecognized value, which
+		// Report.Validate already prevents from ever being stored.
+		drawPDFUptimeReport(pdf, data)
 	}
 	drawPDFWarnings(pdf, data)
 	drawPDFFooter(pdf)
@@ -163,6 +149,23 @@ func (s *PDFRendererService) GetPDFFileSize(pdfFilename string) (int, error) {
 		return 0, err
 	}
 	return int(info.Size()), nil
+}
+
+// ---- report-type layouts ---------------------------------------------------
+
+// drawPDFUptimeReport assembles the fixed Uptime Report layout: the summary
+// tiles and the per-monitor SLA table. Task 9 adds a cumulative-uptime-vs-SLA
+// graph between the two, once ReportData carries the series data it needs.
+func drawPDFUptimeReport(pdf *fpdf.Fpdf, data *ReportData) {
+	drawPDFSummary(pdf, data)
+	drawPDFSLASection(pdf, data)
+}
+
+// drawPDFIncidentReport assembles the fixed Incident Report layout: the
+// summary tiles and the full incident detail list.
+func drawPDFIncidentReport(pdf *fpdf.Fpdf, data *ReportData) {
+	drawPDFSummary(pdf, data)
+	drawPDFIncidentSection(pdf, data)
 }
 
 // ---- drawing helpers -------------------------------------------------------
@@ -284,16 +287,10 @@ func drawPDFSummary(pdf *fpdf.Fpdf, data *ReportData) {
 func drawPDFSLASection(pdf *fpdf.Fpdf, data *ReportData) {
 	drawSectionHeading(pdf, "SLA Compliance")
 
-	withTargets := make([]ReportMetrics, 0, len(data.Metrics))
-	for _, m := range data.Metrics {
-		if m.SLATarget != nil {
-			withTargets = append(withTargets, m)
-		}
-	}
-	if len(withTargets) == 0 {
+	if len(data.Metrics) == 0 {
 		pdf.SetFont("Helvetica", "", 10)
 		setColor(pdf, pdfMuted, false)
-		pdf.MultiCell(pdfContentW, 5, "No SLA targets configured for the monitored services.", "", "L", false)
+		pdf.MultiCell(pdfContentW, 5, "No monitors in scope for this report.", "", "L", false)
 		return
 	}
 
@@ -309,13 +306,17 @@ func drawPDFSLASection(pdf *fpdf.Fpdf, data *ReportData) {
 	pdf.Ln(-1)
 
 	pdf.SetFont("Helvetica", "", 9)
-	for _, m := range withTargets {
+	for _, m := range data.Metrics {
 		setColor(pdf, pdfInk, false)
 		pdf.CellFormat(widths[0], 7, pdfText(truncate(m.MonitorName, 46)), "B", 0, "L", false, 0, "")
 		setColor(pdf, uptimeColor(m.Uptime), false)
 		pdf.CellFormat(widths[1], 7, formatUptimePercent(m.Uptime), "B", 0, "L", false, 0, "")
 		setColor(pdf, pdfInk, false)
-		pdf.CellFormat(widths[2], 7, fmt.Sprintf("%.2f%%", *m.SLATarget), "B", 0, "L", false, 0, "")
+		target := 0.0
+		if m.SLATarget != nil {
+			target = *m.SLATarget
+		}
+		pdf.CellFormat(widths[2], 7, fmt.Sprintf("%.2f%%", target), "B", 0, "L", false, 0, "")
 
 		status, color := "Missed", pdfDanger
 		if m.SLAMet {
@@ -386,16 +387,6 @@ func drawPDFIncidentSection(pdf *fpdf.Fpdf, data *ReportData) {
 	}
 }
 
-func drawPDFCustomSection(pdf *fpdf.Fpdf, data *ReportData) {
-	if data.CustomDescription == nil || *data.CustomDescription == "" {
-		return
-	}
-	drawSectionHeading(pdf, "Notes")
-	pdf.SetFont("Helvetica", "", 10)
-	setColor(pdf, pdfInk, false)
-	pdf.MultiCell(pdfContentW, 5, pdfText(*data.CustomDescription), "", "L", false)
-}
-
 // drawPDFWarnings surfaces monitors the aggregator could not include. A report
 // is a compliance artifact, so an omission is stated on its face rather than
 // left to be noticed by its absence.
@@ -426,15 +417,6 @@ func reportTitle(data *ReportData) string {
 		return *data.CustomTitle
 	}
 	return data.ReportName
-}
-
-// sectionsOrDefault falls back to a sensible report when a template names no
-// sections, so a misconfigured template still produces something useful.
-func sectionsOrDefault(sections []string) []string {
-	if len(sections) == 0 {
-		return []string{models.SectionCharts, models.SectionSLACompliance, models.SectionIncidentSummary}
-	}
-	return sections
 }
 
 // formatMinutes renders a downtime duration compactly (e.g. "2h 15m").

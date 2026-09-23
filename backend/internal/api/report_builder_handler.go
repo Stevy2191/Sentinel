@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -28,10 +27,9 @@ import (
 
 // ReportBuilder holds the dependencies the report-builder endpoints need.
 type ReportBuilder struct {
-	db            *gorm.DB
-	aggregator    *services.ReportAggregatorService
-	pdfRenderer   *services.PDFRendererService
-	htmlGenerator *services.HTMLReportGenerator
+	db          *gorm.DB
+	aggregator  *services.ReportAggregatorService
+	pdfRenderer *services.PDFRendererService
 	// scheduler is used when deleting a report: the database cascades its
 	// schedules away, but their cron jobs would otherwise keep firing against
 	// rows that no longer exist.
@@ -54,12 +52,11 @@ func NewReportBuilder(
 	settings *services.SettingsService,
 ) *ReportBuilder {
 	return &ReportBuilder{
-		db:            db,
-		aggregator:    aggregator,
-		pdfRenderer:   pdfRenderer,
-		htmlGenerator: services.NewHTMLReportGenerator(),
-		scheduler:     scheduler,
-		settings:      settings,
+		db:          db,
+		aggregator:  aggregator,
+		pdfRenderer: pdfRenderer,
+		scheduler:   scheduler,
+		settings:    settings,
 	}
 }
 
@@ -98,7 +95,7 @@ func actorFrom(c *gin.Context) services.Actor {
 // GenerateReportRequest creates a report definition and renders it immediately.
 type GenerateReportRequest struct {
 	Name       string             `json:"name" binding:"required"`
-	TemplateID uuid.UUID          `json:"template_id" binding:"required"`
+	ReportType string             `json:"report_type" binding:"required,oneof=uptime incident"`
 	ScopeType  string             `json:"scope_type" binding:"required,oneof=monitors tags groups types"`
 	ScopeData  models.ReportScope `json:"scope_data" binding:"required"`
 	// TimeRangeDays is required only for a rolling period, which is the default
@@ -119,7 +116,7 @@ type GenerateReportRequest struct {
 type ReportResponse struct {
 	ID            uuid.UUID `json:"id"`
 	Name          string    `json:"name"`
-	TemplateName  string    `json:"template_name"`
+	ReportType    string    `json:"report_type"`
 	ScopeType     string    `json:"scope_type"`
 	TimeRangeDays int       `json:"time_range_days"`
 	// PeriodLabel names the window in words — "August 2026", "Q2 2026",
@@ -191,22 +188,11 @@ func (h *ReportBuilder) GenerateReport(c *gin.Context) {
 		return
 	}
 
-	var template models.ReportTemplate
-	if err := h.db.WithContext(c.Request.Context()).
-		First(&template, "id = ?", req.TemplateID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			respondError(c, http.StatusNotFound, "report template not found")
-			return
-		}
-		respondInternal(c, "loading report template", err)
-		return
-	}
-
 	report := models.Report{
 		ID:                uuid.New(),
 		UserID:            userID,
 		Name:              req.Name,
-		TemplateID:        req.TemplateID,
+		ReportType:        req.ReportType,
 		ScopeType:         req.ScopeType,
 		ScopeData:         req.ScopeData,
 		TimeRangeDays:     req.TimeRangeDays,
@@ -264,7 +250,7 @@ func (h *ReportBuilder) GenerateReport(c *gin.Context) {
 			"name":            report.Name,
 			"scope_type":      report.ScopeType,
 			"time_range_days": report.TimeRangeDays,
-			"template_id":     report.TemplateID,
+			"report_type":     report.ReportType,
 		}})
 
 	// 202: accepted, not done. The caller polls job_url until the job reaches a
@@ -583,10 +569,6 @@ func (h *ReportBuilder) serveGeneration(c *gin.Context, reportID, generationID u
 // shareToken, when non-empty, produces public download URLs instead of
 // authenticated ones.
 func (h *ReportBuilder) buildReportResponse(ctx context.Context, report *models.Report, shareToken string) (ReportResponse, error) {
-	var template models.ReportTemplate
-	// A deleted template leaves the name blank rather than failing the listing.
-	h.db.WithContext(ctx).First(&template, "id = ?", report.TemplateID)
-
 	var generations []models.ReportGeneration
 	if err := h.db.WithContext(ctx).Where("report_id = ?", report.ID).
 		Order("generated_at DESC").Find(&generations).Error; err != nil {
@@ -616,7 +598,7 @@ func (h *ReportBuilder) buildReportResponse(ctx context.Context, report *models.
 	return ReportResponse{
 		ID:            report.ID,
 		Name:          report.Name,
-		TemplateName:  template.Name,
+		ReportType:    report.ReportType,
 		ScopeType:     report.ScopeType,
 		TimeRangeDays: report.TimeRangeDays,
 		// Resolved in the report timezone, so a calendar label in the list
@@ -647,21 +629,6 @@ func generateShareToken() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
-}
-
-// ListTemplates handles GET /api/v1/report-templates. The report builder needs
-// this to offer a template choice; without it the wizard has nothing to select.
-func (h *ReportBuilder) ListTemplates(c *gin.Context) {
-	var templates []models.ReportTemplate
-	if err := h.db.WithContext(c.Request.Context()).
-		Order("is_default DESC, name ASC").Find(&templates).Error; err != nil {
-		respondInternal(c, "listing report templates", err)
-		return
-	}
-	if templates == nil {
-		templates = []models.ReportTemplate{}
-	}
-	respondSuccess(c, http.StatusOK, templates)
 }
 
 // ListMonitorTags handles GET /api/v1/monitor-tags, returning every distinct tag
@@ -981,9 +948,8 @@ func RegisterReportBuilderRoutes(rg *gin.RouterGroup, builder *ReportBuilder) {
 	reports.DELETE("/:id/shares/:share_id", builder.RevokeShare)
 	reports.DELETE("/:id", builder.DeleteReport)
 
-	// Sibling resources the builder UI needs. They sit outside the /reports
-	// group so they do not collide with its ":id" wildcard.
-	rg.GET("/report-templates", builder.ListTemplates)
+	// A sibling resource the builder UI needs. It sits outside the /reports
+	// group so it does not collide with its ":id" wildcard.
 	rg.GET("/monitor-tags", builder.ListMonitorTags)
 }
 
