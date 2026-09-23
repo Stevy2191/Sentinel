@@ -176,6 +176,20 @@ func applyMonitorUpdates(target, updates *models.Monitor) {
 	if updates.NotifyChannels != nil {
 		target.NotifyChannels = updates.NotifyChannels
 	}
+
+	// A pointer field cannot otherwise distinguish "the caller omitted this"
+	// from "the caller wants it cleared" - both unmarshal to nil. 0 is the
+	// sentinel for "clear the override, use the system default", the same
+	// convention FailureThreshold and the agent resource thresholds use for
+	// their own optional numeric fields.
+	if updates.SLATarget != nil {
+		if *updates.SLATarget == 0 {
+			target.SLATarget = nil
+		} else {
+			target.SLATarget = updates.SLATarget
+		}
+	}
+
 	target.Enabled = updates.Enabled
 }
 

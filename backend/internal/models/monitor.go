@@ -294,6 +294,17 @@ func (m *Monitor) Validate() error {
 			MinFailureThreshold, MaxFailureThreshold, m.FailureThreshold)
 	}
 
+	// Zero is accepted as "not supplied" - normalized to nil by the handlers
+	// before Validate ever sees it in practice (the same convention
+	// FailureThreshold uses), since SLATarget is a *float64 and the wire
+	// format cannot otherwise distinguish "omitted" from "explicitly
+	// cleared". A non-zero value out of bounds is still rejected here.
+	if m.SLATarget != nil && *m.SLATarget != 0 &&
+		(*m.SLATarget < MinSLATargetPercent || *m.SLATarget > MaxSLATargetPercent) {
+		return fmt.Errorf("sla_target must be between %.1f and %.1f, got %.2f",
+			MinSLATargetPercent, MaxSLATargetPercent, *m.SLATarget)
+	}
+
 	return nil
 }
 
