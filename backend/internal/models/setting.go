@@ -57,6 +57,10 @@ const (
 	// downloaded and shared, and the timestamps inside it must mean the same
 	// thing to everyone who opens it, not depend on who pressed Generate.
 	SettingReportTimezone = "report_timezone"
+
+	// SettingDefaultSLATarget is the uptime percentage a monitor is held to
+	// when it carries no override of its own.
+	SettingDefaultSLATarget = "default_sla_target"
 )
 
 // Bounds and defaults for the system settings above.
@@ -90,6 +94,12 @@ const (
 	DefaultIncidentRetentionDays = 90
 	MinIncidentRetentionDays     = 7
 	MaxIncidentRetentionDays     = 365
+
+	// DefaultSLATargetPercent is the instance-wide SLA target until an admin
+	// sets one, and the fallback a monitor's own override replaces.
+	DefaultSLATargetPercent = 99.9
+	MinSLATargetPercent     = 0.0
+	MaxSLATargetPercent     = 100.0
 )
 
 // DefaultReportTimezone is used until an administrator sets one. UTC rather

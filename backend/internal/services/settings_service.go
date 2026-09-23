@@ -175,6 +175,29 @@ func (s *SettingsService) SeedInt(ctx context.Context, key string, value int) (b
 	return true, nil
 }
 
+// GetFloat returns a float64 setting, falling back when absent or unparseable.
+func (s *SettingsService) GetFloat(ctx context.Context, key string, fallback float64) float64 {
+	raw, ok, err := s.getString(ctx, key)
+	if err != nil {
+		s.logger.Printf("[settings] %v; using default %g for %q", err, fallback, key)
+		return fallback
+	}
+	if !ok {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	if err != nil {
+		s.logger.Printf("[settings] value %q for %q is not a float; using default %g", raw, key, fallback)
+		return fallback
+	}
+	return parsed
+}
+
+// SetFloat stores a float64 setting.
+func (s *SettingsService) SetFloat(ctx context.Context, key string, value float64) error {
+	return s.setString(ctx, key, strconv.FormatFloat(value, 'f', -1, 64))
+}
+
 // AppName returns the instance's display name, defaulting to "Sentinel".
 func (s *SettingsService) AppName(ctx context.Context) string {
 	return s.GetString(ctx, models.SettingAppName, models.DefaultAppName)
@@ -214,6 +237,18 @@ func (s *SettingsService) IncidentRetentionDays(ctx context.Context) int {
 		return models.DefaultIncidentRetentionDays
 	}
 	return days
+}
+
+// DefaultSLATarget returns the instance-wide SLA target, clamped to a sane
+// range the same way IncidentRetentionDays clamps its own stored value.
+func (s *SettingsService) DefaultSLATarget(ctx context.Context) float64 {
+	target := s.GetFloat(ctx, models.SettingDefaultSLATarget, models.DefaultSLATargetPercent)
+	if target < models.MinSLATargetPercent || target > models.MaxSLATargetPercent {
+		s.logger.Printf("[settings] stored %s=%g is out of range; using %g",
+			models.SettingDefaultSLATarget, target, models.DefaultSLATargetPercent)
+		return models.DefaultSLATargetPercent
+	}
+	return target
 }
 
 // RegistrationEnabled reports whether new-user self-registration is currently
