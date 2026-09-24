@@ -36,6 +36,20 @@ import ShimmerStatCard from '@/components/ShimmerStatCard'
 
 const REFRESH_MS = 30_000
 const DEFAULT_GROUP_COLOR = '#10b981'
+const COLLAPSED_GROUPS_KEY = 'sentinel:uptimeCollapsedGroups'
+
+// Which groups are collapsed must survive leaving this page (e.g. opening a
+// monitor) and coming back - a sibling route, so React unmounts this page
+// entirely rather than merely hiding it. Persisting to localStorage, rather
+// than only in-memory state, is what makes it survive the remount.
+function loadCollapsedGroups(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_GROUPS_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
 
 // useDebounced returns a value that only updates after `ms` of no changes.
 function useDebounced<T>(value: T, ms: number): T {
@@ -414,7 +428,7 @@ export default function UptimeMonitoring() {
 
   const [createOpen, setCreateOpen] = useState(false)
   const [refreshedAt, setRefreshedAt] = useState(() => Date.now())
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(loadCollapsedGroups)
   const [modal, setModal] = useState<{ mode: 'create' | 'edit'; group?: MonitorGroup } | null>(null)
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebounced(search, 300)
@@ -558,7 +572,17 @@ export default function UptimeMonitoring() {
     return map
   }, [filtered])
 
-  const toggleGroup = (id: string) => setCollapsed((c) => ({ ...c, [id]: !c[id] }))
+  const toggleGroup = (id: string) =>
+    setCollapsed((c) => {
+      const next = { ...c, [id]: !c[id] }
+      try {
+        localStorage.setItem(COLLAPSED_GROUPS_KEY, JSON.stringify(next))
+      } catch {
+        // Private browsing or a full quota - the toggle still works for this
+        // page's lifetime, it just won't survive leaving and coming back.
+      }
+      return next
+    })
   const toggleTag = (t: string) =>
     setSelectedTags((cur) => (cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]))
 
