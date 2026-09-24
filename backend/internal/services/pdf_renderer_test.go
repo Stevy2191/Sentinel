@@ -131,6 +131,9 @@ func TestRenderReportToPDFHonoursReportType(t *testing.T) {
 	if strings.Contains(incident, "SLA Compliance") {
 		t.Error("incident report should not include the SLA Compliance section")
 	}
+	if strings.Contains(incident, "Uptime vs. SLA target") {
+		t.Error("incident report should not include the uptime-vs-SLA graph")
+	}
 }
 
 // A stored file name is untrusted input by the time it reaches the filesystem.
