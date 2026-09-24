@@ -50,7 +50,7 @@ import {
 import type { Check, MonitorInput } from '@/types'
 import MonitorTypeBadge from '@/components/MonitorTypeBadge'
 import MonitorPerformance from '@/components/MonitorPerformance'
-import { Sparkline, STATUS_COLOR, uptimeColor as windowUptimeColor } from '@/components/UptimeSparkline'
+import { Sparkline, hourlySparklinePoints, STATUS_COLOR, uptimeColor as windowUptimeColor } from '@/components/UptimeSparkline'
 
 // Format a Date for a datetime-local input (local time, minute precision).
 function toLocalInput(d: Date): string {
@@ -488,7 +488,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
             </div>
             <div className="rounded-lg border border-white/10 bg-slate-800/40 p-3 backdrop-blur-sm">
               {uptime ? (
-                <Sparkline data={uptime.hourly_data} className="h-12" />
+                <Sparkline data={hourlySparklinePoints(uptime.hourly_data)} className="h-12" />
               ) : (
                 <div className="flex h-12 items-center text-xs text-slate-400">
                   {uptimeLoading ? 'Loading…' : 'No data'}
