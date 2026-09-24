@@ -157,6 +157,13 @@ func BulkCreateMonitorsHandler(monitorService *services.MonitorService) gin.Hand
 			}
 			monitor.Enabled = true
 
+			// The same 0-means-clear sentinel CreateMonitorHandler uses for this
+			// field, so a bulk-imported row that sends 0 for "no override" behaves
+			// identically to a single create.
+			if monitor.SLATarget != nil && *monitor.SLATarget == 0 {
+				monitor.SLATarget = nil
+			}
+
 			if err := monitor.Validate(); err != nil {
 				row.Error = err.Error()
 				results = append(results, row)
