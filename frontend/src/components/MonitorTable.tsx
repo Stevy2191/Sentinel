@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useMonitorUptime } from '@/hooks/useMonitorUptime'
-import { Sparkline, uptimeColor } from '@/components/UptimeSparkline'
+import { Sparkline, hourlySparklinePoints, uptimeColor } from '@/components/UptimeSparkline'
 import MonitorRowActions from '@/components/MonitorRowActions'
 import { formatLastResponseTime } from '@/utils/formatters'
 import { monitorAccess, badgeToneClass } from '@/utils/monitorAccess'
@@ -138,7 +138,7 @@ function MonitorRow({
                 ))}
               </div>
             ) : (
-              <Sparkline data={uptime?.hourly_data ?? []} className="h-6 w-24" />
+              <Sparkline data={hourlySparklinePoints(uptime?.hourly_data ?? [])} className="h-6 w-24" />
             )}
             <span
               className={`whitespace-nowrap text-xs font-medium tabular-nums ${

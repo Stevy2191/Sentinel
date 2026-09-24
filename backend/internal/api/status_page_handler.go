@@ -267,15 +267,58 @@ func UpdateMonitorPositionHandler(statusPageService *services.StatusPageService)
 	}
 }
 
-// publicHourlyBuckets trims the full hourly-bucket shape down to what an
-// unauthenticated viewer should see: the health signal, not exact downtime
-// clock times or maintenance detail.
-func publicHourlyBuckets(hourly []gin.H) []gin.H {
-	out := make([]gin.H, 0, len(hourly))
-	for _, h := range hourly {
-		out = append(out, gin.H{"hour": h["hour"], "uptime": h["uptime"], "status": h["status"]})
+const publicStatusDays = 90
+
+// computeDailyUptimeBuckets buckets checks into the 90 UTC calendar days
+// ending at now, each summarized purely by pass/fail counts - no incident- or
+// maintenance-derived spans, since the public status page never surfaces
+// exact downtime clock times. Used only here; the authenticated endpoints
+// have their own, hourly, view (see computeHourlyUptimeBuckets).
+func computeDailyUptimeBuckets(checks []models.Check, now time.Time) []gin.H {
+	type bucket struct{ total, failed int }
+	buckets := make(map[time.Time]*bucket)
+	truncDay := func(t time.Time) time.Time {
+		t = t.UTC()
+		return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 	}
-	return out
+	for _, ch := range checks {
+		k := truncDay(ch.Timestamp)
+		b := buckets[k]
+		if b == nil {
+			b = &bucket{}
+			buckets[k] = b
+		}
+		b.total++
+		if ch.Status != "success" {
+			b.failed++
+		}
+	}
+
+	daily := make([]gin.H, 0, publicStatusDays)
+	curDay := truncDay(now)
+	for i := publicStatusDays - 1; i >= 0; i-- {
+		k := curDay.AddDate(0, 0, -i)
+		b := buckets[k]
+		status := "nodata"
+		uptime := 0.0
+		if b != nil && b.total > 0 {
+			uptime = round2(float64(b.total-b.failed) / float64(b.total) * 100)
+			switch {
+			case b.failed == 0:
+				status = "up"
+			case b.failed == b.total:
+				status = "down"
+			default:
+				status = "partial"
+			}
+		}
+		daily = append(daily, gin.H{
+			"date":   k.Format("2006-01-02"),
+			"uptime": uptime,
+			"status": status,
+		})
+	}
+	return daily
 }
 
 // GetPublicStatusPageHandler handles GET /api/v1/public/status/:slug. This
@@ -284,7 +327,6 @@ func publicHourlyBuckets(hourly []gin.H) []gin.H {
 func GetPublicStatusPageHandler(
 	statusPageService *services.StatusPageService,
 	incidentService *services.IncidentService,
-	monitorService *services.MonitorService,
 	checkService *services.CheckService,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -312,7 +354,7 @@ func GetPublicStatusPageHandler(
 		}
 
 		now := time.Now().UTC()
-		windowStart := now.Add(-24 * time.Hour)
+		windowStart := now.AddDate(0, 0, -publicStatusDays)
 		var online, offline int
 		monitorsResp := make([]gin.H, 0, len(monitors))
 		for _, m := range monitors {
@@ -328,27 +370,24 @@ func GetPublicStatusPageHandler(
 				lastCheck = m.LastCheckAt.UTC().Format(time.RFC3339)
 			}
 
-			// The 24-hour health strip: same bucketing the authenticated uptime
-			// history endpoint uses, trimmed of exact downtime/maintenance detail
-			// before it leaves the server.
-			var hourly []gin.H
-			checks, checksErr := checkService.GetChecksInRange(ctx, m.ID, windowStart, now, 0, 0)
-			incidents, incidentsErr := incidentService.GetOverlappingIncidents(ctx, m.ID, windowStart, now)
-			maintenanceWindows, maintErr := monitorService.GetMaintenanceHistory(ctx, m.ID, windowStart, now)
-			if checksErr == nil && incidentsErr == nil && maintErr == nil {
-				hourly = computeHourlyUptimeBuckets(checks, incidents, maintenanceWindows, now, m.CreatedAt)
+			// The 90-day health strip: a lighter-weight bucketing than the
+			// authenticated endpoints use, since the public page never needs
+			// exact downtime spans - just the daily pass/fail signal.
+			daily := make([]gin.H, 0, publicStatusDays)
+			if checks, err := checkService.GetChecksInRange(ctx, m.ID, windowStart, now, 0, 0); err != nil {
+				log.Printf("[statuspage] daily buckets failed for monitor %s: %v", m.ID, err)
 			} else {
-				log.Printf("[statuspage] hourly buckets failed for monitor %s: checks=%v incidents=%v maintenance=%v",
-					m.ID, checksErr, incidentsErr, maintErr)
+				daily = computeDailyUptimeBuckets(checks, now)
 			}
 
 			monitorsResp = append(monitorsResp, gin.H{
-				"id":          m.ID,
-				"name":        m.Name,
-				"group":       groupByMonitor[m.ID],
-				"status":      m.CurrentStatus,
-				"last_check":  lastCheck,
-				"hourly_data": publicHourlyBuckets(hourly),
+				"id":         m.ID,
+				"name":       m.Name,
+				"group":      groupByMonitor[m.ID],
+				"status":     m.CurrentStatus,
+				"last_check": lastCheck,
+				"uptime_90d": uptimePercent(ctx, incidentService, m.ID, m.CurrentStatus == "offline", windowStart, now),
+				"daily_data": daily,
 			})
 		}
 
@@ -395,8 +434,7 @@ func RegisterPublicStatusRoutes(
 	router *gin.Engine,
 	statusPageService *services.StatusPageService,
 	incidentService *services.IncidentService,
-	monitorService *services.MonitorService,
 	checkService *services.CheckService,
 ) {
-	router.GET("/api/v1/public/status/:slug", GetPublicStatusPageHandler(statusPageService, incidentService, monitorService, checkService))
+	router.GET("/api/v1/public/status/:slug", GetPublicStatusPageHandler(statusPageService, incidentService, checkService))
 }

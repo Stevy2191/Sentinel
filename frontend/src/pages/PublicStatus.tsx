@@ -1,9 +1,9 @@
 import { useMemo } from 'react'
 import { useParams } from 'react-router-dom'
 import { ShieldCheck } from 'lucide-react'
-import { formatDistanceToNow, parseISO } from 'date-fns'
+import { formatDistanceToNow, format, parseISO } from 'date-fns'
 import { usePublicStatusPage } from '@/hooks/usePublicStatus'
-import { Sparkline } from '@/components/UptimeSparkline'
+import { Sparkline, uptimeColor } from '@/components/UptimeSparkline'
 import type { MonitorStatus, PublicMonitor } from '@/types'
 
 const DEFAULT_THEME = '#10b981'
@@ -23,17 +23,54 @@ function statusDotClass(status: MonitorStatus): string {
   return 'bg-slate-400'
 }
 
+function statusTextClass(status: MonitorStatus): string {
+  if (status === 'online') return 'text-emerald-400'
+  if (status === 'offline') return 'text-red-400'
+  return 'text-slate-400'
+}
+
+function statusLabel(status: MonitorStatus): string {
+  if (status === 'online') return 'Operational'
+  if (status === 'offline') return 'Down'
+  return 'Unknown'
+}
+
+/** "Jun 27" for a tooltip label. parseISO reads a bare date ("2026-06-27") as
+ * local midnight rather than UTC midnight, so formatting it back in the same
+ * local zone can't shift the calendar day - the two paired functions this
+ * file already used for timestamps elsewhere. */
+function dayLabel(iso: string): string {
+  try {
+    return format(parseISO(iso), 'MMM d')
+  } catch {
+    return iso
+  }
+}
+
 // A stacked row rather than a card: this page is a quick health glance, not a
-// dashboard, so a monitor is just its name, a status dot, and the same
-// 24-hour bar strip the internal Uptime Monitoring table draws.
+// dashboard. Two lines per monitor: name + 90-day uptime and a status word on
+// top, the same Sparkline bar strip the internal Uptime Monitoring table uses
+// underneath - just fed 90 daily buckets instead of 24 hourly ones.
 function MonitorRow({ m }: { m: PublicMonitor }) {
+  const points = useMemo(
+    () => m.daily_data.map((d) => ({ label: dayLabel(d.date), uptime: d.uptime, status: d.status })),
+    [m.daily_data]
+  )
   return (
-    <div className="flex items-center justify-between gap-4 p-4">
-      <div className="flex min-w-0 items-center gap-2.5">
-        <span className={`h-2 w-2 shrink-0 rounded-full ${statusDotClass(m.status)}`} />
-        <span className="truncate font-medium">{m.name}</span>
+    <div className="space-y-2.5 p-4">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <span className="truncate font-medium">{m.name}</span>
+          <span className={`whitespace-nowrap text-sm font-medium tabular-nums ${uptimeColor(m.uptime_90d)}`}>
+            {m.uptime_90d.toFixed(3)}%
+          </span>
+        </div>
+        <span className={`flex shrink-0 items-center gap-1.5 text-sm font-medium ${statusTextClass(m.status)}`}>
+          <span className={`h-2 w-2 rounded-full ${statusDotClass(m.status)}`} />
+          {statusLabel(m.status)}
+        </span>
       </div>
-      <Sparkline data={m.hourly_data} className="h-6 w-40 shrink-0" />
+      <Sparkline data={points} className="h-8 w-full" />
     </div>
   )
 }
@@ -127,6 +164,11 @@ export default function PublicStatus() {
         </div>
 
         {/* Monitors grouped, stacked */}
+        {monitors.length > 0 && (
+          <h2 className="text-lg font-semibold">
+            Uptime <span className="font-normal text-slate-400">Last 90 days</span>
+          </h2>
+        )}
         {monitors.length === 0 ? (
           <div className="rounded-lg border border-white/10 p-10 text-center text-slate-400">
             No monitors on this status page yet.

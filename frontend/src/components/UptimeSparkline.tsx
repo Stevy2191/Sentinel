@@ -1,12 +1,23 @@
-import type { HourStatus } from '@/hooks/useMonitorUptime'
+import type { HourPoint, HourStatus } from '@/hooks/useMonitorUptime'
 
-/** The subset of an hourly bucket Sparkline actually draws - deliberately
- * narrow so a trimmed response (e.g. the public status page's, which omits
- * exact downtime clock times) can be drawn by the same component. */
+/** What Sparkline actually draws for one bucket, whatever it represents (an
+ * hour or a day) - deliberately narrow so a trimmed response (e.g. the public
+ * status page's, which omits exact downtime clock times) can be drawn by the
+ * same component. `label` names the bucket in the tooltip ("14:00", "Jun 27"). */
 export interface SparklinePoint {
-  hour: number
+  label: string
   uptime: number
   status: HourStatus
+}
+
+/** Adapts hourly buckets (used by the monitor detail page and the internal
+ * Uptime Monitoring table) into Sparkline's generic shape. */
+export function hourlySparklinePoints(data: HourPoint[]): SparklinePoint[] {
+  return data.map((d) => ({
+    label: `${String(d.hour).padStart(2, '0')}:00`,
+    uptime: d.uptime,
+    status: d.status,
+  }))
 }
 
 /**
@@ -27,9 +38,10 @@ export function uptimeColor(pct: number): string {
 }
 
 /**
- * Sparkline renders 24 hourly bars coloured by status. Bar height reflects the
- * hour's uptime, with a floor so down and no-data hours stay visible rather
- * than collapsing to nothing. Native title tooltips name the hour and status.
+ * Sparkline renders a row of buckets (hourly or daily) coloured by status. Bar
+ * height reflects the bucket's uptime, with a floor so down and no-data
+ * buckets stay visible rather than collapsing to nothing. Native title
+ * tooltips name the bucket and status.
  */
 export function Sparkline({ data, className }: { data: SparklinePoint[]; className?: string }) {
   const height = (d: SparklinePoint) => (d.status === 'nodata' ? 15 : Math.max(12, d.uptime))
@@ -38,9 +50,7 @@ export function Sparkline({ data, className }: { data: SparklinePoint[]; classNa
       {data.map((d, i) => (
         <div
           key={i}
-          title={`${String(d.hour).padStart(2, '0')}:00 — ${d.status}${
-            d.status === 'nodata' ? '' : ` (${d.uptime}%)`
-          }`}
+          title={`${d.label} — ${d.status}${d.status === 'nodata' ? '' : ` (${d.uptime}%)`}`}
           className="flex-1 rounded-sm"
           style={{ height: `${height(d)}%`, minWidth: 2, backgroundColor: STATUS_COLOR[d.status] }}
         />
