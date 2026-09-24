@@ -302,9 +302,24 @@ func drawPDFUptimeGraph(pdf *fpdf.Fpdf, series []UptimeSeriesPoint, slaTarget fl
 	if len(series) < 2 {
 		return
 	}
-	drawSectionHeading(pdf, "Uptime vs. SLA target")
 
 	const chartH = 55.0
+
+	// fpdf's auto-page-break only fires on Cell/MultiCell, never on the
+	// Rect/Line primitives this whole function draws with. A long
+	// custom_description rendered earlier via MultiCell can leave GetY() deep
+	// enough down the page that the chart would draw past the bottom margin
+	// (or overlap the footer) with no error. Force a fresh page first when
+	// the heading plus the chart itself would not fit in what's left.
+	const chartMargin = 20.0 // heading + axis labels + breathing room
+	_, pageH := pdf.GetPageSize()
+	_, _, _, bottom := pdf.GetMargins()
+	if pdf.GetY()+chartH+chartMargin > pageH-bottom {
+		pdf.AddPage()
+	}
+
+	drawSectionHeading(pdf, "Uptime vs. SLA target")
+
 	const axisLabelW = 14.0
 	x0 := pdfMarginLeft + axisLabelW
 	chartW := pdfContentW - axisLabelW
