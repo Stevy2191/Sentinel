@@ -285,15 +285,23 @@ export interface AddMonitorToPageInput {
 
 // ---- Public status page ----------------------------------------------------
 
+// The health signal only - no exact downtime clock times or maintenance
+// detail, since this travels to an unauthenticated viewer. Structurally
+// compatible with Sparkline's SparklinePoint so the same bar component draws
+// both this and the authenticated hourly_data.
+export interface PublicHourPoint {
+  hour: number
+  uptime: number
+  status: 'up' | 'down' | 'partial' | 'nodata'
+}
+
 export interface PublicMonitor {
   id: string
   name: string
   group: string
   status: MonitorStatus
   last_check: string | null
-  response_time_ms: number
-  uptime: { last_7_days: number; last_30_days: number; last_90_days: number }
-  recent_incidents: { start: string; end: string | null; duration_minutes: number }[]
+  hourly_data: PublicHourPoint[]
 }
 
 export interface PublicSummary {

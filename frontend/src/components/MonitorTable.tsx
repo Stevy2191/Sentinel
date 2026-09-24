@@ -1,14 +1,10 @@
-import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useMonitorUptime, type RecentCheck } from '@/hooks/useMonitorUptime'
-import { uptimeColor } from '@/components/UptimeSparkline'
+import { useMonitorUptime } from '@/hooks/useMonitorUptime'
+import { Sparkline, uptimeColor } from '@/components/UptimeSparkline'
 import MonitorRowActions from '@/components/MonitorRowActions'
 import { formatLastResponseTime } from '@/utils/formatters'
 import { monitorAccess, badgeToneClass } from '@/utils/monitorAccess'
 import type { Monitor } from '@/types'
-
-// The reference draws twenty bars in the uptime column.
-const BARS = 20
 
 /** Colour for the response-time cell: fast, acceptable, slow. */
 function responseColor(ms: number): string {
@@ -58,59 +54,6 @@ const statusPill: Record<Tone, { cls: string; dot: string; label: string }> = {
   },
 }
 
-// Bar colour per check outcome. A timeout is distinguished from an outright
-// failure: both are down, but they fail differently and it is worth seeing.
-const barClass: Record<RecentCheck['status'], string> = {
-  success: 'bg-emerald-500',
-  failed: 'bg-red-500',
-  timeout: 'bg-yellow-500',
-}
-
-/** "2:05 PM" — enough to place a check without crowding the tooltip. */
-function checkTitle(c: RecentCheck): string {
-  const when = new Date(c.timestamp).toLocaleString([], {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-  const detail =
-    c.status === 'success' ? `${c.response_time_ms}ms` : c.error_message || c.status
-  return `${when} · ${detail}`
-}
-
-function UptimeBars({ checks, loading }: { checks: RecentCheck[]; loading: boolean }) {
-  // Oldest-to-newest left-to-right (the API already orders them that way), with
-  // empty slots padding the left when the monitor has run fewer than BARS times.
-  const cells = useMemo(() => {
-    const recent = checks.slice(-BARS)
-    const pad = Array.from({ length: Math.max(0, BARS - recent.length) }, () => null)
-    return [...pad, ...recent]
-  }, [checks])
-
-  if (loading) {
-    return (
-      <div className="flex gap-px">
-        {Array.from({ length: BARS }).map((_, i) => (
-          <div key={i} className="h-3 w-1 animate-pulse rounded-sm bg-slate-700" />
-        ))}
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex gap-px">
-      {cells.map((c, i) => (
-        <div
-          key={i}
-          className={`h-3 w-1 rounded-sm ${c ? barClass[c.status] : 'bg-slate-800'}`}
-          title={c ? checkTitle(c) : 'no check yet'}
-        />
-      ))}
-    </div>
-  )
-}
-
 interface RowProps {
   monitor: Monitor
   uptime24h: number | null
@@ -136,13 +79,11 @@ function MonitorRow({
   const access = monitorAccess(monitor)
   const tone = toneOf(monitor)
   const pill = statusPill[tone]
-  // Pass rate over the same checks the strip draws, so the cell is internally
-  // consistent. Falls back to the summary endpoint's 24h figure only until this
-  // row's own request lands. The 24h/7d/30d windows are still shown, labelled,
-  // in the detail panel that opens beneath the row.
-  const recent = uptime?.recent_checks ?? []
-  const checkCount = Math.min(recent.length, BARS)
-  const pct = uptime ? uptime.recent_uptime : uptime24h
+  // Uptime over the same 24 hourly buckets the strip draws, so the cell is
+  // internally consistent. Falls back to the summary endpoint's 24h figure
+  // only until this row's own request lands. The 7d/30d windows are still
+  // shown, labelled, in the detail panel that opens beneath the row.
+  const pct = uptime ? uptime.uptime_24h : uptime24h
   const checked = monitor.last_check_at
     ? new Date(monitor.last_check_at).toLocaleTimeString([], {
         hour: '2-digit',
@@ -190,7 +131,15 @@ function MonitorRow({
 
         <td className="px-4 py-3">
           <div className="flex items-center gap-2">
-            <UptimeBars checks={uptime?.recent_checks ?? []} loading={loading} />
+            {loading && !uptime ? (
+              <div className="flex h-6 w-24 items-end gap-px">
+                {Array.from({ length: 24 }).map((_, i) => (
+                  <div key={i} className="w-full flex-1 animate-pulse rounded-sm bg-slate-700" style={{ height: '40%' }} />
+                ))}
+              </div>
+            ) : (
+              <Sparkline data={uptime?.hourly_data ?? []} className="h-6 w-24" />
+            )}
             <span
               className={`whitespace-nowrap text-xs font-medium tabular-nums ${
                 pct != null ? uptimeColor(pct) : 'text-slate-500'
@@ -199,12 +148,9 @@ function MonitorRow({
               {pct != null ? `${pct.toFixed(1)}%` : '\u2014'}
             </span>
           </div>
-          {/* Both the strip and the percentage describe the same sample: the
-              last N checks, whenever they happened. The caption names the real
-              count so a monitor with only six checks does not claim twenty. */}
-          <div className="text-xs text-slate-500">
-            {checkCount > 0 ? `Last ${checkCount} check${checkCount === 1 ? '' : 's'}` : 'No checks yet'}
-          </div>
+          {/* The strip and the percentage describe the same sample: the last
+              24 hourly buckets, whatever their check activity. */}
+          <div className="text-xs text-slate-500">Last 24 hours</div>
         </td>
 
         <td className="px-4 py-3 text-xs text-slate-500">{checked}</td>
@@ -237,7 +183,7 @@ interface Props {
 
 /**
  * MonitorTable — the reference's "Monitored Services" table: name, type,
- * status, response time, a twenty-bar uptime strip, last check, actions.
+ * status, response time, a 24-hour uptime strip, last check, actions.
  * A row expands in place into the full monitor detail panel.
  */
 export default function MonitorTable({
