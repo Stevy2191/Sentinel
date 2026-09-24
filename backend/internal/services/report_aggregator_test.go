@@ -186,7 +186,6 @@ func TestEffectiveSLATarget(t *testing.T) {
 }
 
 func TestComputeUptimeSeries(t *testing.T) {
-	s := &ReportAggregatorService{}
 	monitorID := uuid.New()
 	start := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 	end := start.AddDate(0, 0, 10)
@@ -197,13 +196,13 @@ func TestComputeUptimeSeries(t *testing.T) {
 	outageStart := start.AddDate(0, 0, 3)
 	outageEnd := outageStart.Add(12 * time.Hour)
 
-	byMonitor := []monitorIncidentsForTest{{
+	byMonitor := []monitorIncidentWindows{{
 		id:        monitorID,
 		from:      start,
 		incidents: []incidentWindow{{start: outageStart, end: &outageEnd}},
 	}}
 
-	points := computeUptimeSeriesFromIncidents(s, byMonitor, start, end)
+	points := computeUptimeSeriesFromIncidents(byMonitor, start, end)
 	if len(points) != uptimeSeriesPoints {
 		t.Fatalf("got %d points, want %d", len(points), uptimeSeriesPoints)
 	}
@@ -237,5 +236,66 @@ func TestComputeUptimeSeries(t *testing.T) {
 	}
 	if last.Uptime >= 100 {
 		t.Errorf("the outage must still be reflected at the end of the window, got %v", last.Uptime)
+	}
+}
+
+// TestComputeUptimeSeriesSkipsUnmeasurablePeriods is the regression test for
+// the "fabricated 100%" bug: when nothing in scope existed yet at a sample
+// point, totalMinutes was 0 and aggregateUptimePercent(0, 0) returned 100,
+// so early samples showed a flat, fabricated perfect score instead of no
+// data at all. The window here has two monitors: an older one that becomes
+// measurable a few days in (never incident-free once it exists) and a newer
+// one that only joins at the window's midpoint - mirroring the real-world
+// case of a report whose monitors were created at different times.
+func TestComputeUptimeSeriesSkipsUnmeasurablePeriods(t *testing.T) {
+	start := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 0, 10)
+
+	// The older monitor isn't measurable until day 3 of the 10-day window -
+	// before that, NOTHING in scope exists yet. It never has an incident, so
+	// once it does become measurable its samples are genuinely 100%, not
+	// fabricated.
+	oldFrom := start.AddDate(0, 0, 3)
+	// The newer monitor doesn't join until the window's midpoint, and has a
+	// short outage right when it comes online so its contribution to the
+	// aggregate is visible once it's in scope.
+	newFrom := start.AddDate(0, 0, 5)
+	newOutageEnd := newFrom.Add(6 * time.Hour)
+
+	byMonitor := []monitorIncidentWindows{
+		{id: uuid.New(), from: oldFrom, incidents: nil},
+		{id: uuid.New(), from: newFrom, incidents: []incidentWindow{{start: newFrom, end: &newOutageEnd}}},
+	}
+
+	points := computeUptimeSeriesFromIncidents(byMonitor, start, end)
+
+	// Before day 3, no monitor in scope existed at all. The fix must skip
+	// those samples rather than emit a fabricated 100% for them - so the
+	// series must come back shorter than the full sample count.
+	if len(points) >= uptimeSeriesPoints {
+		t.Fatalf("got %d points, want fewer than %d - samples before any monitor existed must be skipped, not fabricated",
+			len(points), uptimeSeriesPoints)
+	}
+
+	// The earliest surviving point must not predate the moment something
+	// actually became measurable.
+	if points[0].Date.Before(oldFrom) {
+		t.Errorf("earliest point date = %v, want not before %v (when the older monitor became measurable)", points[0].Date, oldFrom)
+	}
+
+	// Between day 3 and day 5, only the older, incident-free monitor is in
+	// scope, so its uptime there is genuinely 100% - this must not be
+	// confused with (or masked by) the fabricated 100% the bug produced for
+	// the unmeasurable period before it.
+	if points[0].Uptime != 100 {
+		t.Errorf("first measurable point uptime = %v, want 100 (the only monitor in scope has no incidents)", points[0].Uptime)
+	}
+
+	// Once the newer monitor joins partway through and immediately has an
+	// outage, the aggregate must reflect it - proving the newer monitor's
+	// data is actually counted once it exists, not silently ignored.
+	last := points[len(points)-1]
+	if last.Uptime >= 100 {
+		t.Errorf("final point uptime = %v, want < 100 once the newer monitor's outage is in scope", last.Uptime)
 	}
 }
