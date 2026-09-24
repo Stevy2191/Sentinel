@@ -136,6 +136,87 @@ func TestRenderReportToPDFHonoursReportType(t *testing.T) {
 	}
 }
 
+func TestAllPerfect(t *testing.T) {
+	cases := []struct {
+		name   string
+		series []UptimeSeriesPoint
+		want   bool
+	}{
+		{"empty series", nil, true},
+		{"all exactly 100", []UptimeSeriesPoint{{Uptime: 100}, {Uptime: 100}}, true},
+		{"one point short of perfect", []UptimeSeriesPoint{{Uptime: 100}, {Uptime: 99.99}}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := allPerfect(c.series); got != c.want {
+				t.Errorf("allPerfect(%v) = %v, want %v", c.series, got, c.want)
+			}
+		})
+	}
+}
+
+// A flat, genuinely perfect record is a lie waiting to happen if drawn as a
+// chart: the uptime line and the axis's own top border sit at the same
+// coordinate, so the graph would look like it never rendered. This is the
+// regression test for the real report a Washington County monitor produced -
+// 24 monitors, zero incidents ever, and the resulting PDF looked empty.
+func TestRenderReportToPDFShowsPerfectUptimeBanner(t *testing.T) {
+	dir := t.TempDir()
+	r, _ := NewPDFRendererService(dir)
+	data := sampleReportData()
+	for i := range data.UptimeSeries {
+		data.UptimeSeries[i].Uptime = 100
+	}
+
+	name, err := r.RenderReportToPDF(data, models.ReportTypeUptime, "perfect")
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	path, err := r.GetPDFPath(name)
+	if err != nil {
+		t.Fatalf("path: %v", err)
+	}
+	text := pdfDrawnText(t, path)
+
+	if !strings.Contains(text, "Uptime vs. SLA target") {
+		t.Error("missing the trend section's own heading")
+	}
+	if !strings.Contains(text, "100% uptime throughout this period") {
+		t.Error("missing the perfect-record banner text")
+	}
+	if strings.Contains(text, "SLA target 99.50%") {
+		t.Error("a flat 100% record should show the banner, not the graph's SLA reference line")
+	}
+}
+
+// A report whose scope has too little measurable history to plot (fewer than
+// two series points survive the fabricated-100%-point fix) must say so
+// plainly rather than silently omitting the whole trend section, which reads
+// as a missing feature rather than an honest "not yet" answer.
+func TestRenderReportToPDFShowsNoHistoryBanner(t *testing.T) {
+	dir := t.TempDir()
+	r, _ := NewPDFRendererService(dir)
+	data := sampleReportData()
+	data.UptimeSeries = nil
+
+	name, err := r.RenderReportToPDF(data, models.ReportTypeUptime, "no-history")
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	path, err := r.GetPDFPath(name)
+	if err != nil {
+		t.Fatalf("path: %v", err)
+	}
+	text := pdfDrawnText(t, path)
+
+	if !strings.Contains(text, "Uptime vs. SLA target") {
+		t.Error("missing the trend section's own heading")
+	}
+	if !strings.Contains(text, "Not enough measurable history yet") {
+		t.Error("missing the no-history banner text")
+	}
+}
+
 // A stored file name is untrusted input by the time it reaches the filesystem.
 func TestGetPDFPathRejectsTraversal(t *testing.T) {
 	dir := t.TempDir()

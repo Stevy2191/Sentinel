@@ -154,12 +154,11 @@ func (s *PDFRendererService) GetPDFFileSize(pdfFilename string) (int, error) {
 // ---- report-type layouts ---------------------------------------------------
 
 // drawPDFUptimeReport assembles the fixed Uptime Report layout: the summary
-// tiles, the cumulative-uptime-vs-SLA graph, and the per-monitor SLA table.
+// tiles, the cumulative-uptime-vs-SLA graph (or a plain-language banner when
+// there is no meaningful trend to chart), and the per-monitor SLA table.
 func drawPDFUptimeReport(pdf *fpdf.Fpdf, data *ReportData) {
 	drawPDFSummary(pdf, data)
-	if len(data.UptimeSeries) >= 2 {
-		drawPDFUptimeGraph(pdf, data.UptimeSeries, data.EffectiveSLA, data.ReportLocation())
-	}
+	drawPDFUptimeTrend(pdf, data.UptimeSeries, data.EffectiveSLA, data.ReportLocation())
 	drawPDFSLASection(pdf, data)
 }
 
@@ -293,11 +292,73 @@ func drawPDFSummary(pdf *fpdf.Fpdf, data *ReportData) {
 	pdf.SetY(y + 24)
 }
 
+// allPerfect reports whether every sample in series is exactly 100% uptime -
+// a genuinely perfect record, not just a value that rounds to it.
+// aggregateUptimePercent runs every value through round2, so a true 100%
+// arrives here as the exact float 100, never 99.9954-rounds-to-100.
+func allPerfect(series []UptimeSeriesPoint) bool {
+	for _, p := range series {
+		if p.Uptime != 100 {
+			return false
+		}
+	}
+	return true
+}
+
+// drawPDFUptimeTrend draws the "Uptime vs. SLA target" section: the
+// cumulative-uptime-vs-SLA line chart when there is a real trend to show, or
+// a plain-language banner in its place when there isn't - either because too
+// little of the window is measurable yet to plot anything, or because uptime
+// was a flat, genuine 100% and a chart would only draw two lines pinned to
+// the very top, which reads as a missing graph rather than a good one.
+func drawPDFUptimeTrend(pdf *fpdf.Fpdf, series []UptimeSeriesPoint, slaTarget float64, loc *time.Location) {
+	switch {
+	case len(series) < 2:
+		drawPDFUptimeBanner(pdf, "Not enough measurable history yet to chart a trend for this period.")
+	case allPerfect(series):
+		drawPDFUptimeBanner(pdf, "100% uptime throughout this period - no incidents to chart.")
+	default:
+		drawPDFUptimeGraph(pdf, series, slaTarget, loc)
+	}
+}
+
+// drawPDFUptimeBanner draws a short status message under the trend section's
+// own heading, sized and styled to sit where the graph otherwise would so
+// the report's layout does not jump around depending on which one renders.
+func drawPDFUptimeBanner(pdf *fpdf.Fpdf, message string) {
+	drawSectionHeading(pdf, "Uptime vs. SLA target")
+
+	const bannerH = 18.0
+	// Same page-fit guard as the graph itself: force a fresh page rather than
+	// let a long custom_description push this past the bottom margin.
+	_, pageH := pdf.GetPageSize()
+	_, _, _, bottom := pdf.GetMargins()
+	if pdf.GetY()+bannerH > pageH-bottom {
+		pdf.AddPage()
+		drawSectionHeading(pdf, "Uptime vs. SLA target")
+	}
+
+	y := pdf.GetY()
+	setColor(pdf, pdfPanel, true)
+	pdf.Rect(pdfMarginLeft, y, pdfContentW, bannerH, "F")
+	setColor(pdf, pdfSuccess, true)
+	pdf.Rect(pdfMarginLeft, y, 1.4, bannerH, "F")
+
+	pdf.SetXY(pdfMarginLeft+6, y)
+	pdf.SetFont("Helvetica", "", 10)
+	setColor(pdf, pdfInk, false)
+	pdf.CellFormat(pdfContentW-12, bannerH, pdfText(message), "", 0, "L", false, 0, "")
+
+	pdf.SetY(y + bannerH + 4)
+}
+
 // drawPDFUptimeGraph draws the cumulative-uptime-vs-SLA line chart: an axis
 // box, a flat SLA reference bar, and the cumulative-uptime line connecting
 // each sample point. Built from fpdf's own line/rect primitives - no image
 // pipeline, matching why this package draws PDFs directly at all (see the
-// package doc comment above).
+// package doc comment above). Callers should route through
+// drawPDFUptimeTrend rather than call this directly - it assumes a real,
+// non-flat-100% series worth charting.
 func drawPDFUptimeGraph(pdf *fpdf.Fpdf, series []UptimeSeriesPoint, slaTarget float64, loc *time.Location) {
 	if len(series) < 2 {
 		return
@@ -343,6 +404,15 @@ func drawPDFUptimeGraph(pdf *fpdf.Fpdf, series []UptimeSeriesPoint, slaTarget fl
 	if hi <= lo {
 		hi = lo + 1
 	}
+	// A small top pad keeps a genuine 100% value's line visually separated
+	// from the axis box's own top border. Without it, a flat 100% record
+	// (the common "everything's fine" case) draws its line exactly on top of
+	// the box's top edge - two things at the same coordinate read as one,
+	// which looks like the graph never rendered at all. Applied through the
+	// same yFor every reader (gridlines, the SLA line, the uptime line) goes
+	// through, so nothing drifts out of alignment with anything else.
+	const topPad = 3.0
+	usableH := chartH - topPad
 	yFor := func(pct float64) float64 {
 		frac := (pct - lo) / (hi - lo)
 		if frac < 0 {
@@ -350,14 +420,14 @@ func drawPDFUptimeGraph(pdf *fpdf.Fpdf, series []UptimeSeriesPoint, slaTarget fl
 		} else if frac > 1 {
 			frac = 1
 		}
-		return y0 + chartH*(1-frac)
+		return y0 + topPad + usableH*(1-frac)
 	}
 
 	pdf.SetFont("Helvetica", "", 7)
 	for i := 0; i <= 4; i++ {
 		frac := float64(i) / 4
 		val := lo + (hi-lo)*frac
-		y := y0 + chartH*(1-frac)
+		y := yFor(val)
 		setColor(pdf, pdfRule, true)
 		pdf.Rect(x0, y, chartW, 0.15, "F")
 		setColor(pdf, pdfMuted, false)
