@@ -424,10 +424,13 @@ func uptimePercent(startTime, endTime time.Time, downtimeMinutes float64) float6
 // monitor rather than one per monitor per sample.
 const uptimeSeriesPoints = 30
 
-// monitorIncidentsForTest and incidentWindow let computeUptimeSeries's
-// arithmetic be exercised without a database - see
+// monitorIncidentWindows is the per-monitor intermediate representation
+// computeUptimeSeries builds from the database and hands to
+// computeUptimeSeriesFromIncidents - one incident query's worth of data per
+// monitor, reused across every sample point. It also lets that arithmetic be
+// exercised without a database in tests - see
 // TestComputeUptimeSeries/computeUptimeSeriesFromIncidents.
-type monitorIncidentsForTest struct {
+type monitorIncidentWindows struct {
 	id        uuid.UUID
 	from      time.Time
 	incidents []incidentWindow
@@ -454,7 +457,7 @@ func (s *ReportAggregatorService) computeUptimeSeries(
 
 	// One incident query per monitor, covering the whole window - reused for
 	// every sample point below instead of re-querying per point.
-	byMonitor := make([]monitorIncidentsForTest, 0, len(monitors))
+	byMonitor := make([]monitorIncidentWindows, 0, len(monitors))
 	for _, m := range monitors {
 		from := windowStart[m.ID]
 		var incidents []models.Incident
@@ -470,16 +473,16 @@ func (s *ReportAggregatorService) computeUptimeSeries(
 		for _, inc := range incidents {
 			windows = append(windows, incidentWindow{start: inc.StartTime, end: inc.EndTime})
 		}
-		byMonitor = append(byMonitor, monitorIncidentsForTest{id: m.ID, from: from, incidents: windows})
+		byMonitor = append(byMonitor, monitorIncidentWindows{id: m.ID, from: from, incidents: windows})
 	}
 
-	return computeUptimeSeriesFromIncidents(s, byMonitor, start, end), nil
+	return computeUptimeSeriesFromIncidents(byMonitor, start, end), nil
 }
 
 // computeUptimeSeriesFromIncidents is computeUptimeSeries's arithmetic, free
 // of the database so it can be unit tested directly against a synthetic set
 // of incidents.
-func computeUptimeSeriesFromIncidents(_ *ReportAggregatorService, byMonitor []monitorIncidentsForTest, start, end time.Time) []UptimeSeriesPoint {
+func computeUptimeSeriesFromIncidents(byMonitor []monitorIncidentWindows, start, end time.Time) []UptimeSeriesPoint {
 	points := make([]UptimeSeriesPoint, 0, uptimeSeriesPoints)
 	step := end.Sub(start) / time.Duration(uptimeSeriesPoints)
 	for i := 1; i <= uptimeSeriesPoints; i++ {
@@ -503,6 +506,11 @@ func computeUptimeSeriesFromIncidents(_ *ReportAggregatorService, byMonitor []mo
 			downMinutes += minutes
 		}
 
+		if totalMinutes <= 0 {
+			// No monitor in scope existed yet at this sample - emitting a point
+			// here would fabricate a perfect score for a period with no data.
+			continue
+		}
 		points = append(points, UptimeSeriesPoint{
 			Date:   sampleEnd,
 			Uptime: aggregateUptimePercent(totalMinutes, downMinutes),
