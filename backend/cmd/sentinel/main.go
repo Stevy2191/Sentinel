@@ -284,7 +284,7 @@ func run() error {
 	router.GET("/api/health", health)
 	// Public auth endpoints (register/login/mfa-verify) + public status pages.
 	api.RegisterAuthRoutes(router, authService, settingsService)
-	api.RegisterPublicStatusRoutes(router, statusPageService, incidentService)
+	api.RegisterPublicStatusRoutes(router, statusPageService, incidentService, monitorService, checkService)
 	// Share-token report access: public by design, so outside the authenticated
 	// v1 group (same split as the public status pages above).
 	api.RegisterPublicReportRoutes(router, reportBuilder)

@@ -267,10 +267,26 @@ func UpdateMonitorPositionHandler(statusPageService *services.StatusPageService)
 	}
 }
 
+// publicHourlyBuckets trims the full hourly-bucket shape down to what an
+// unauthenticated viewer should see: the health signal, not exact downtime
+// clock times or maintenance detail.
+func publicHourlyBuckets(hourly []gin.H) []gin.H {
+	out := make([]gin.H, 0, len(hourly))
+	for _, h := range hourly {
+		out = append(out, gin.H{"hour": h["hour"], "uptime": h["uptime"], "status": h["status"]})
+	}
+	return out
+}
+
 // GetPublicStatusPageHandler handles GET /api/v1/public/status/:slug. This
 // endpoint is public and requires no authentication. Unpublished pages return
 // 404 so their existence is not leaked.
-func GetPublicStatusPageHandler(statusPageService *services.StatusPageService, incidentService *services.IncidentService) gin.HandlerFunc {
+func GetPublicStatusPageHandler(
+	statusPageService *services.StatusPageService,
+	incidentService *services.IncidentService,
+	monitorService *services.MonitorService,
+	checkService *services.CheckService,
+) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		slug := c.Param("slug")
 		ctx := c.Request.Context()
@@ -296,6 +312,7 @@ func GetPublicStatusPageHandler(statusPageService *services.StatusPageService, i
 		}
 
 		now := time.Now().UTC()
+		windowStart := now.Add(-24 * time.Hour)
 		var online, offline int
 		monitorsResp := make([]gin.H, 0, len(monitors))
 		for _, m := range monitors {
@@ -311,38 +328,27 @@ func GetPublicStatusPageHandler(statusPageService *services.StatusPageService, i
 				lastCheck = m.LastCheckAt.UTC().Format(time.RFC3339)
 			}
 
-			// Recent incidents (up to 5) over the last 90 days.
-			recent := make([]gin.H, 0, 5)
-			if incs, err := incidentService.GetIncidents(ctx, m.ID, now.AddDate(0, 0, -90), now); err == nil {
-				for i, inc := range incs {
-					if i >= 5 {
-						break
-					}
-					var endVal interface{}
-					if inc.EndTime != nil {
-						endVal = inc.EndTime.UTC().Format(time.RFC3339)
-					}
-					recent = append(recent, gin.H{
-						"start":            inc.StartTime.UTC().Format(time.RFC3339),
-						"end":              endVal,
-						"duration_minutes": inc.DurationSeconds / 60,
-					})
-				}
+			// The 24-hour health strip: same bucketing the authenticated uptime
+			// history endpoint uses, trimmed of exact downtime/maintenance detail
+			// before it leaves the server.
+			var hourly []gin.H
+			checks, checksErr := checkService.GetChecksInRange(ctx, m.ID, windowStart, now, 0, 0)
+			incidents, incidentsErr := incidentService.GetOverlappingIncidents(ctx, m.ID, windowStart, now)
+			maintenanceWindows, maintErr := monitorService.GetMaintenanceHistory(ctx, m.ID, windowStart, now)
+			if checksErr == nil && incidentsErr == nil && maintErr == nil {
+				hourly = computeHourlyUptimeBuckets(checks, incidents, maintenanceWindows, now, m.CreatedAt)
+			} else {
+				log.Printf("[statuspage] hourly buckets failed for monitor %s: checks=%v incidents=%v maintenance=%v",
+					m.ID, checksErr, incidentsErr, maintErr)
 			}
 
 			monitorsResp = append(monitorsResp, gin.H{
-				"id":               m.ID,
-				"name":             m.Name,
-				"group":            groupByMonitor[m.ID],
-				"status":           m.CurrentStatus,
-				"last_check":       lastCheck,
-				"response_time_ms": m.LastResponseTimeMs,
-				"uptime": gin.H{
-					"last_7_days":  uptimePercent(ctx, incidentService, m.ID, m.CurrentStatus == "offline", now.AddDate(0, 0, -7), now),
-					"last_30_days": uptimePercent(ctx, incidentService, m.ID, m.CurrentStatus == "offline", now.AddDate(0, 0, -30), now),
-					"last_90_days": uptimePercent(ctx, incidentService, m.ID, m.CurrentStatus == "offline", now.AddDate(0, 0, -90), now),
-				},
-				"recent_incidents": recent,
+				"id":          m.ID,
+				"name":        m.Name,
+				"group":       groupByMonitor[m.ID],
+				"status":      m.CurrentStatus,
+				"last_check":  lastCheck,
+				"hourly_data": publicHourlyBuckets(hourly),
 			})
 		}
 
@@ -385,6 +391,12 @@ func RegisterStatusPageRoutes(rg *gin.RouterGroup, statusPageService *services.S
 // middleware). It lives under /api/ so it does not collide with the SPA route of
 // the same human-facing name (/public/status/:slug), which the web server serves
 // as the app.
-func RegisterPublicStatusRoutes(router *gin.Engine, statusPageService *services.StatusPageService, incidentService *services.IncidentService) {
-	router.GET("/api/v1/public/status/:slug", GetPublicStatusPageHandler(statusPageService, incidentService))
+func RegisterPublicStatusRoutes(
+	router *gin.Engine,
+	statusPageService *services.StatusPageService,
+	incidentService *services.IncidentService,
+	monitorService *services.MonitorService,
+	checkService *services.CheckService,
+) {
+	router.GET("/api/v1/public/status/:slug", GetPublicStatusPageHandler(statusPageService, incidentService, monitorService, checkService))
 }

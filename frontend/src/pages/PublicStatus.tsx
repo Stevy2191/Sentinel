@@ -1,25 +1,12 @@
 import { useMemo } from 'react'
 import { useParams } from 'react-router-dom'
-import {
-  ShieldCheck,
-  CheckCircle2,
-  XCircle,
-  Gauge,
-  Activity,
-  AlertTriangle,
-} from 'lucide-react'
-import { formatDistanceToNow, format, parseISO } from 'date-fns'
+import { ShieldCheck } from 'lucide-react'
+import { formatDistanceToNow, parseISO } from 'date-fns'
 import { usePublicStatusPage } from '@/hooks/usePublicStatus'
-import { formatResponseTime, formatDowntime } from '@/utils/formatters'
-import type { PublicMonitor } from '@/types'
+import { Sparkline } from '@/components/UptimeSparkline'
+import type { MonitorStatus, PublicMonitor } from '@/types'
 
 const DEFAULT_THEME = '#10b981'
-
-function uptimeColor(pct: number): string {
-  if (pct >= 99) return '#10b981'
-  if (pct >= 95) return '#eab308'
-  return '#ef4444'
-}
 
 function relative(iso: string | null | undefined): string {
   if (!iso) return 'never'
@@ -30,87 +17,23 @@ function relative(iso: string | null | undefined): string {
   }
 }
 
-function StatTile({
-  label,
-  value,
-  sub,
-  icon: Icon,
-  tone,
-}: {
-  label: string
-  value: string
-  sub?: string
-  icon: typeof Activity
-  tone: string
-}) {
-  return (
-    <div className="rounded-lg border border-white/10 bg-slate-800/40 p-5 backdrop-blur-sm">
-      <div className="flex items-center gap-3">
-        <div className={`rounded-lg p-2 ${tone}`}>
-          <Icon className="h-5 w-5" />
-        </div>
-        <div>
-          <div className="text-xl font-bold">{value}</div>
-          <div className="text-xs text-slate-400">
-            {label}
-            {sub ? ` · ${sub}` : ''}
-          </div>
-        </div>
-      </div>
-    </div>
-  )
+function statusDotClass(status: MonitorStatus): string {
+  if (status === 'online') return 'bg-emerald-500'
+  if (status === 'offline') return 'bg-red-500 animate-pulse'
+  return 'bg-slate-400'
 }
 
-function UptimeBar({ label, pct }: { label: string; pct: number }) {
+// A stacked row rather than a card: this page is a quick health glance, not a
+// dashboard, so a monitor is just its name, a status dot, and the same
+// 24-hour bar strip the internal Uptime Monitoring table draws.
+function MonitorRow({ m }: { m: PublicMonitor }) {
   return (
-    <div>
-      <div className="flex justify-between text-xs text-slate-400">
-        <span>{label}</span>
-        <span className="font-medium" style={{ color: uptimeColor(pct) }}>
-          {pct.toFixed(2)}%
-        </span>
+    <div className="flex items-center justify-between gap-4 p-4">
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span className={`h-2 w-2 shrink-0 rounded-full ${statusDotClass(m.status)}`} />
+        <span className="truncate font-medium">{m.name}</span>
       </div>
-      <div className="mt-1 h-1.5 overflow-hidden rounded bg-white/10">
-        <div
-          className="h-full rounded"
-          style={{ width: `${Math.max(0, Math.min(100, pct))}%`, backgroundColor: uptimeColor(pct) }}
-        />
-      </div>
-    </div>
-  )
-}
-
-function MonitorCard({ m }: { m: PublicMonitor }) {
-  const online = m.status === 'online'
-  const offline = m.status === 'offline'
-  return (
-    <div className="rounded-lg border border-white/10 bg-slate-800/40 p-5 backdrop-blur-sm">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 font-semibold">{m.name}</div>
-        <span
-          className={`flex shrink-0 items-center gap-1.5 text-sm font-medium ${
-            online ? 'text-emerald-500' : offline ? 'text-red-500' : 'text-slate-400'
-          }`}
-        >
-          <span
-            className={`h-2 w-2 rounded-full ${
-              online ? 'bg-emerald-500 animate-pulse' : offline ? 'bg-red-500 animate-pulse' : 'bg-slate-400'
-            }`}
-          />
-          {online ? 'Online' : offline ? 'Offline' : 'Unknown'}
-        </span>
-      </div>
-
-      <div className="mt-2 flex justify-between text-xs text-slate-400">
-        <span>{relative(m.last_check)}</span>
-        <span>{formatResponseTime(m.response_time_ms)}</span>
-      </div>
-
-      <div className="mt-4 space-y-2">
-        <UptimeBar label="Last 7 days" pct={m.uptime.last_7_days} />
-        <UptimeBar label="Last 30 days" pct={m.uptime.last_30_days} />
-        <UptimeBar label="Last 90 days" pct={m.uptime.last_90_days} />
-      </div>
+      <Sparkline data={m.hourly_data} className="h-6 w-40 shrink-0" />
     </div>
   )
 }
@@ -119,14 +42,10 @@ function Skeleton() {
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-6">
       <div className="h-8 w-1/3 animate-pulse rounded bg-white/10" />
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="h-20 animate-pulse rounded-lg bg-white/10" />
-        ))}
-      </div>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="h-40 animate-pulse rounded-lg bg-white/10" />
+      <div className="h-14 animate-pulse rounded-lg bg-white/10" />
+      <div className="space-y-2 rounded-lg border border-white/10 p-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="h-12 animate-pulse rounded-lg bg-white/10" />
         ))}
       </div>
     </div>
@@ -149,26 +68,9 @@ export default function PublicStatus() {
 
   const derived = useMemo(() => {
     const total = summary?.total_monitors ?? monitors.length
-    const online = summary?.online ?? 0
     const offline = summary?.offline ?? 0
-    const responders = monitors.filter((m) => m.response_time_ms > 0)
-    const avgResp = responders.length
-      ? Math.round(responders.reduce((s, m) => s + m.response_time_ms, 0) / responders.length)
-      : 0
-    const avg7 = monitors.length
-      ? monitors.reduce((s, m) => s + m.uptime.last_7_days, 0) / monitors.length
-      : 100
-    return { total, online, offline, avgResp, avg7 }
+    return { total, offline }
   }, [summary, monitors])
-
-  // Aggregate the most recent incidents across all monitors.
-  const recentIncidents = useMemo(() => {
-    const all = monitors.flatMap((m) =>
-      m.recent_incidents.map((inc) => ({ ...inc, monitorName: m.name }))
-    )
-    all.sort((a, b) => b.start.localeCompare(a.start))
-    return all.slice(0, 5)
-  }, [monitors])
 
   if (loading) return <Skeleton />
 
@@ -224,38 +126,7 @@ export default function PublicStatus() {
             : `${derived.offline} of ${derived.total} systems experiencing issues`}
         </div>
 
-        {/* Summary tiles */}
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <StatTile
-            label="Online"
-            value={String(derived.online)}
-            sub={derived.total ? `${Math.round((derived.online / derived.total) * 100)}%` : '—'}
-            icon={CheckCircle2}
-            tone="bg-emerald-500/20 text-emerald-400"
-          />
-          <StatTile
-            label="Offline"
-            value={String(derived.offline)}
-            sub={derived.total ? `${Math.round((derived.offline / derived.total) * 100)}%` : '—'}
-            icon={XCircle}
-            tone="bg-red-500/20 text-red-400"
-          />
-          <StatTile
-            label="Avg Response"
-            value={formatResponseTime(derived.avgResp)}
-            icon={Gauge}
-            tone="bg-amber-500/20 text-amber-400"
-          />
-          <StatTile
-            label="Uptime"
-            value={`${derived.avg7.toFixed(2)}%`}
-            sub="7 days"
-            icon={Activity}
-            tone="bg-blue-500/20 text-blue-400"
-          />
-        </div>
-
-        {/* Monitors grouped */}
+        {/* Monitors grouped, stacked */}
         {monitors.length === 0 ? (
           <div className="rounded-lg border border-white/10 p-10 text-center text-slate-400">
             No monitors on this status page yet.
@@ -264,47 +135,15 @@ export default function PublicStatus() {
           groups.map(([groupName, groupMonitors]) => (
             <section key={groupName || 'ungrouped'} className="space-y-3">
               {groupName && <h2 className="text-lg font-semibold">{groupName}</h2>}
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {groupMonitors.map((m) => (
-                  <MonitorCard key={m.id} m={m} />
-                ))}
+              <div className="rounded-lg border border-white/10 bg-slate-800/40 backdrop-blur-sm">
+                <div className="divide-y divide-white/5">
+                  {groupMonitors.map((m) => (
+                    <MonitorRow key={m.id} m={m} />
+                  ))}
+                </div>
               </div>
             </section>
           ))
-        )}
-
-        {/* Recent incidents */}
-        {recentIncidents.length > 0 && (
-          <section className="space-y-3">
-            <h2 className="flex items-center gap-2 text-lg font-semibold">
-              <AlertTriangle className="h-5 w-5 text-amber-500" /> Recent Incidents
-            </h2>
-            <div className="rounded-lg border border-white/10 bg-slate-800/40 backdrop-blur-sm">
-              <div className="divide-y divide-white/5">
-                {recentIncidents.map((inc, i) => (
-                  <div key={i} className="flex items-center justify-between gap-4 p-4 text-sm">
-                    <div className="min-w-0">
-                      <div className="font-medium">{inc.monitorName}</div>
-                      <div className="text-xs text-slate-500">
-                        {(() => {
-                          try {
-                            const start = format(parseISO(inc.start), 'MMM d, HH:mm')
-                            const end = inc.end ? format(parseISO(inc.end), 'HH:mm') : 'ongoing'
-                            return `${start} – ${end} UTC`
-                          } catch {
-                            return inc.start
-                          }
-                        })()}
-                      </div>
-                    </div>
-                    <span className="shrink-0 text-slate-500">
-                      {formatDowntime(inc.duration_minutes)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
         )}
 
         {/* Footer */}
