@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Plus, Pencil, Trash2, ExternalLink, ArrowLeft, Globe } from 'lucide-react'
+import { Plus, Pencil, Trash2, ExternalLink, ArrowLeft, Globe, Search } from 'lucide-react'
 import {
   useStatusPages,
   useStatusPage,
@@ -288,29 +288,77 @@ function StatusPageDetailView() {
   const { update: updatePosition } = useUpdateMonitorPosition(slug)
 
   const [showAdd, setShowAdd] = useState(false)
-  const [selMonitor, setSelMonitor] = useState('')
+  const [selMonitors, setSelMonitors] = useState<Set<string>>(new Set())
+  const [monitorFilter, setMonitorFilter] = useState('')
   const [groupName, setGroupName] = useState('')
+  const [adding, setAdding] = useState(false)
 
   const pageMonitorIds = useMemo(() => new Set(monitors.map((m) => m.id)), [monitors])
   const available = useMemo(
     () => allMonitors.filter((m) => !pageMonitorIds.has(m.id)),
     [allMonitors, pageMonitorIds]
   )
+  const filteredAvailable = useMemo(() => {
+    const q = monitorFilter.trim().toLowerCase()
+    if (!q) return available
+    return available.filter((m) => m.name.toLowerCase().includes(q) || m.url.toLowerCase().includes(q))
+  }, [available, monitorFilter])
+  const allFilteredSelected =
+    filteredAvailable.length > 0 && filteredAvailable.every((m) => selMonitors.has(m.id))
 
+  const toggleMonitor = (id: string) => {
+    setSelMonitors((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  const toggleSelectAllFiltered = () => {
+    setSelMonitors((prev) => {
+      const next = new Set(prev)
+      if (allFilteredSelected) {
+        filteredAvailable.forEach((m) => next.delete(m.id))
+      } else {
+        filteredAvailable.forEach((m) => next.add(m.id))
+      }
+      return next
+    })
+  }
+  const closeAdd = () => {
+    setShowAdd(false)
+    setSelMonitors(new Set())
+    setMonitorFilter('')
+    setGroupName('')
+  }
+
+  // Added one request at a time (the API takes a single monitor per call), so
+  // position increments correctly across the whole batch and a failure partway
+  // through still leaves the earlier ones added rather than losing the batch.
   const handleAdd = async () => {
-    if (!slug || !selMonitor) return
+    if (!slug || selMonitors.size === 0) return
+    setAdding(true)
+    let nextPosition = monitors.length + 1
+    let addedCount = 0
     try {
-      await add(
-        { monitor_id: selMonitor, group_name: groupName || undefined, position: monitors.length + 1 },
-        slug
-      )
-      push('Monitor added', 'success')
-      setShowAdd(false)
-      setSelMonitor('')
-      setGroupName('')
+      for (const monitorId of selMonitors) {
+        await add({ monitor_id: monitorId, group_name: groupName || undefined, position: nextPosition }, slug)
+        nextPosition += 1
+        addedCount += 1
+      }
+      push(addedCount === 1 ? 'Monitor added' : `${addedCount} monitors added`, 'success')
+      closeAdd()
       await refetch()
     } catch (err) {
-      push((err as { message?: string }).message || 'Failed to add monitor', 'error')
+      push(
+        `${(err as { message?: string }).message || 'Failed to add monitor'}${
+          addedCount > 0 ? ` (${addedCount} added before the error)` : ''
+        }`,
+        'error'
+      )
+      await refetch()
+    } finally {
+      setAdding(false)
     }
   }
 
@@ -416,29 +464,62 @@ function StatusPageDetailView() {
 
       {showAdd && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="card w-full max-w-md p-6">
-            <h3 className="text-lg font-semibold">Add Monitor to Page</h3>
-            <div className="mt-4 space-y-4">
-              <label className="block">
-                <span className="mb-1 block text-sm font-medium">Monitor</span>
-                <select
-                  className="w-full rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white placeholder-slate-500"
-                  value={selMonitor}
-                  onChange={(e) => setSelMonitor(e.target.value)}
-                >
-                  <option value="">Select a monitor…</option>
-                  {available.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
-                {available.length === 0 && (
-                  <span className="mt-1 block text-xs text-slate-500">
-                    All monitors are already on this page.
-                  </span>
+          <div className="card flex max-h-[85vh] w-full max-w-md flex-col p-6">
+            <h3 className="text-lg font-semibold">Add Monitors to Page</h3>
+            <div className="mt-4 flex min-h-0 flex-1 flex-col space-y-4">
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="text-sm font-medium">Monitors</span>
+                  {filteredAvailable.length > 0 && (
+                    <button
+                      type="button"
+                      className="text-xs text-primary-400 hover:underline"
+                      onClick={toggleSelectAllFiltered}
+                    >
+                      {allFilteredSelected ? 'Deselect all' : 'Select all'}
+                    </button>
+                  )}
+                </div>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    className="w-full rounded-md border border-white/10 bg-slate-900/60 py-2 pl-9 pr-3 text-sm text-white placeholder-slate-500"
+                    placeholder="Search by name or URL"
+                    value={monitorFilter}
+                    onChange={(e) => setMonitorFilter(e.target.value)}
+                  />
+                </div>
+                {available.length === 0 ? (
+                  <p className="mt-2 text-xs text-slate-500">All monitors are already on this page.</p>
+                ) : (
+                  <div className="mt-2 max-h-64 space-y-1 overflow-y-auto rounded-md border border-white/10 p-2">
+                    {filteredAvailable.length === 0 ? (
+                      <p className="p-2 text-xs text-slate-500">No monitors match "{monitorFilter}".</p>
+                    ) : (
+                      filteredAvailable.map((m) => (
+                        <label
+                          key={m.id}
+                          className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-white/5"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selMonitors.has(m.id)}
+                            onChange={() => toggleMonitor(m.id)}
+                            className="h-4 w-4 shrink-0 rounded border-white/20 bg-slate-900/60"
+                          />
+                          <span className="min-w-0 flex-1 truncate">{m.name}</span>
+                          <span className="shrink-0 truncate text-xs text-slate-500">{m.url}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
                 )}
-              </label>
+                {selMonitors.size > 0 && (
+                  <p className="mt-1 text-xs text-slate-400">
+                    {selMonitors.size} monitor{selMonitors.size === 1 ? '' : 's'} selected
+                  </p>
+                )}
+              </div>
               <label className="block">
                 <span className="mb-1 block text-sm font-medium">Group (optional)</span>
                 <input
@@ -447,14 +528,23 @@ function StatusPageDetailView() {
                   onChange={(e) => setGroupName(e.target.value)}
                   placeholder="APIs"
                 />
+                <span className="mt-1 block text-xs text-slate-500">Applied to every monitor added now.</span>
               </label>
             </div>
             <div className="mt-6 flex justify-end gap-2">
-              <button className="btn-secondary" onClick={() => setShowAdd(false)}>
+              <button className="btn-secondary" onClick={closeAdd}>
                 Cancel
               </button>
-              <button className="btn-primary" disabled={!selMonitor} onClick={() => void handleAdd()}>
-                Add
+              <button
+                className="btn-primary"
+                disabled={selMonitors.size === 0 || adding}
+                onClick={() => void handleAdd()}
+              >
+                {adding
+                  ? 'Adding…'
+                  : selMonitors.size > 1
+                    ? `Add ${selMonitors.size} Monitors`
+                    : 'Add Monitor'}
               </button>
             </div>
           </div>
