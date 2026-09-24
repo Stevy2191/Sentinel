@@ -76,7 +76,7 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
           : DEFAULT_CHECK_INTERVAL
       )
       setDefaultSLATarget(
-        Number.isFinite(data.default_sla_target) && data.default_sla_target > 0
+        Number.isFinite(data.default_sla_target) && data.default_sla_target >= 0
           ? data.default_sla_target
           : DEFAULT_SLA_TARGET
       )

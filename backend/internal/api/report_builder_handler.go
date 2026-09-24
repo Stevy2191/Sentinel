@@ -565,7 +565,7 @@ func (h *ReportBuilder) serveGeneration(c *gin.Context, reportID, generationID u
 	c.File(path)
 }
 
-// buildReportResponse assembles a report with its template name and generations.
+// buildReportResponse assembles a report with its report type and generations.
 // shareToken, when non-empty, produces public download URLs instead of
 // authenticated ones.
 func (h *ReportBuilder) buildReportResponse(ctx context.Context, report *models.Report, shareToken string) (ReportResponse, error) {
