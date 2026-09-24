@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { format } from 'date-fns'
-import { Volume2, ExternalLink, Loader2 } from 'lucide-react'
+import { ExternalLink, Loader2 } from 'lucide-react'
 import api from '@/services/api'
 import { useToasts, Toaster } from '@/components/Toast'
 import SettingsCard from '@/components/SettingsCard'
@@ -13,22 +12,8 @@ import { useAuthContext } from '@/context/AuthContext'
 import { useAppConfig, DEFAULT_APP_NAME } from '@/context/AppConfigContext'
 import { useIncidentRetention } from '@/hooks/useIncidents'
 import { useSystemVersion } from '@/hooks/useSystemVersion'
-import {
-  PREF,
-  DEFAULTS,
-  applyStoredPreferences,
-  resetAllPreferences,
-  getString,
-  getBool,
-  setString,
-  setBool,
-  type FontSize,
-  type TimeFormat,
-  type DateFormatPref,
-  type ReportRange,
-} from '@/utils/preferences'
 
-type Tab = 'system' | 'preferences' | 'notifications' | 'about'
+type Tab = 'system' | 'notifications' | 'about'
 
 const GITHUB_URL = 'https://github.com/Stevy2191/Sentinel'
 
@@ -48,15 +33,8 @@ const MAX_SLA_TARGET = 100
 
 const TAB_LABEL: Record<Tab, string> = {
   system: 'System',
-  preferences: 'Preferences',
   notifications: 'Notifications',
   about: 'About',
-}
-
-const dateFmtMap: Record<DateFormatPref, string> = {
-  'MMM DD, YYYY': 'MMM dd, yyyy',
-  'DD/MM/YYYY': 'dd/MM/yyyy',
-  'YYYY-MM-DD': 'yyyy-MM-dd',
 }
 
 /** One address's reachability result from the server-side probe. */
@@ -84,64 +62,6 @@ interface SystemSettings {
   default_sla_target: number
 }
 
-function Toggle({
-  checked,
-  onChange,
-  label,
-}: {
-  checked: boolean
-  onChange: (v: boolean) => void
-  label: string
-}) {
-  return (
-    <label className="flex cursor-pointer items-center justify-between gap-4">
-      <span className="text-sm">{label}</span>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        onClick={() => onChange(!checked)}
-        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
-          checked ? 'bg-primary-600' : 'bg-white/10'
-        }`}
-      >
-        <span
-          className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-            checked ? 'translate-x-5' : 'translate-x-0'
-          }`}
-        />
-      </button>
-    </label>
-  )
-}
-
-function RadioRow<T extends string>({
-  options,
-  value,
-  onChange,
-}: {
-  options: { value: T; label: string }[]
-  value: T
-  onChange: (v: T) => void
-}) {
-  return (
-    <div className="flex flex-wrap gap-2">
-      {options.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          onClick={() => onChange(o.value)}
-          className={`rounded-md px-4 py-2 text-sm font-medium ${
-            value === o.value ? 'bg-primary-600 text-white' : 'bg-white/5 text-slate-300'
-          }`}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  )
-}
-
 /**
  * Reads the API's error message, falling back to something actionable.
  *
@@ -163,7 +83,7 @@ function apiMessage(err: unknown, fallback: string): string {
 export default function Settings() {
   const { toasts, push } = useToasts()
   const { currentUser } = useAuthContext()
-  const { appName, reportTimezone, refresh: refreshAppConfig } = useAppConfig()
+  const { appName, refresh: refreshAppConfig } = useAppConfig()
   const isAdmin = currentUser?.is_admin ?? false
   const version = useSystemVersion()
 
@@ -171,12 +91,12 @@ export default function Settings() {
   // are gated by RequireAdmin, so a non-admin is not shown tabs they cannot use.
   const tabs = useMemo<Tab[]>(
     () =>
-      (['system', 'preferences', 'notifications', 'about'] as Tab[]).filter(
+      (['system', 'notifications', 'about'] as Tab[]).filter(
         (t) => (t !== 'notifications' && t !== 'system') || isAdmin
       ),
     [isAdmin]
   )
-  const [tab, setTab] = useState<Tab>(() => (isAdmin ? 'system' : 'preferences'))
+  const [tab, setTab] = useState<Tab>(() => (isAdmin ? 'system' : 'about'))
 
   // ---- Incident retention (server-side, admin-only) ----
   const { days: retentionDays, bounds: retentionBounds, save: saveRetention } = useIncidentRetention()
@@ -265,75 +185,6 @@ export default function Settings() {
     }
   }
 
-  // ---- Per-user preferences (this browser) ----
-  const [fontSize, setFontSize] = useState<FontSize>(
-    () => getString(PREF.fontSize, DEFAULTS.fontSize) as FontSize
-  )
-  const [soundAlerts, setSoundAlerts] = useState(() => getBool(PREF.soundAlerts, DEFAULTS.soundAlerts))
-  const [desktopNotifications, setDesktopNotifications] = useState(() =>
-    getBool(PREF.desktopNotifications, DEFAULTS.desktopNotifications)
-  )
-  const [timeFormat, setTimeFormat] = useState<TimeFormat>(
-    () => getString(PREF.timeFormat, DEFAULTS.timeFormat) as TimeFormat
-  )
-  const [dateFormat, setDateFormat] = useState<DateFormatPref>(
-    () => getString(PREF.dateFormat, DEFAULTS.dateFormat) as DateFormatPref
-  )
-  const [reportRange, setReportRange] = useState<ReportRange>(
-    () => getString(PREF.reportRange, DEFAULTS.reportRange) as ReportRange
-  )
-
-  const [confirmReset, setConfirmReset] = useState(false)
-
-  const changeFontSize = (v: FontSize) => {
-    setFontSize(v)
-    setString(PREF.fontSize, v)
-    applyStoredPreferences()
-  }
-  const toggleSound = (v: boolean) => {
-    setSoundAlerts(v)
-    setBool(PREF.soundAlerts, v)
-    if (v) playBeep()
-  }
-  const toggleDesktop = async (v: boolean) => {
-    if (v && 'Notification' in window) {
-      const perm = await Notification.requestPermission()
-      if (perm !== 'granted') {
-        push('Desktop notification permission denied', 'error')
-        setDesktopNotifications(false)
-        setBool(PREF.desktopNotifications, false)
-        return
-      }
-    }
-    setDesktopNotifications(v)
-    setBool(PREF.desktopNotifications, v)
-  }
-
-  const savePreferences = () => {
-    setString(PREF.fontSize, fontSize)
-    setBool(PREF.soundAlerts, soundAlerts)
-    setBool(PREF.desktopNotifications, desktopNotifications)
-    setString(PREF.timeFormat, timeFormat)
-    setString(PREF.dateFormat, dateFormat)
-    setString(PREF.reportRange, reportRange)
-    applyStoredPreferences()
-    push('Preferences saved', 'success')
-  }
-
-  const doReset = () => {
-    resetAllPreferences()
-    setFontSize(DEFAULTS.fontSize)
-    setSoundAlerts(DEFAULTS.soundAlerts)
-    setDesktopNotifications(DEFAULTS.desktopNotifications)
-    setTimeFormat(DEFAULTS.timeFormat)
-    setDateFormat(DEFAULTS.dateFormat)
-    setReportRange(DEFAULTS.reportRange)
-    applyStoredPreferences()
-    setConfirmReset(false)
-    push('Preferences reset to defaults', 'success')
-  }
-
-  const now = new Date()
   const intervalValid =
     Number.isFinite(system?.default_check_interval) &&
     (system?.default_check_interval ?? 0) >= MIN_INTERVAL &&
@@ -396,9 +247,7 @@ export default function Settings() {
       <div>
         <h1 className="vs-title text-4xl">Settings</h1>
         <p className="text-sm text-slate-400">
-          {isAdmin
-            ? `Configure this ${appName} instance and your own preferences`
-            : 'Your preferences on this device'}
+          {isAdmin ? `Configure this ${appName} instance` : 'Instance information'}
         </p>
       </div>
 
@@ -696,112 +545,6 @@ export default function Settings() {
         </div>
       )}
 
-      {tab === 'preferences' && (
-        <div className="space-y-6">
-          <p className="text-sm text-slate-400">These are stored in this browser and affect only you.</p>
-
-          <SettingsCard title="Font Size" description="Scales text across the app.">
-            <RadioRow<FontSize>
-              value={fontSize}
-              onChange={changeFontSize}
-              options={[
-                { value: 'compact', label: 'Compact (90%)' },
-                { value: 'normal', label: 'Normal (100%)' },
-                { value: 'large', label: 'Large (110%)' },
-              ]}
-            />
-          </SettingsCard>
-
-          <SettingsCard title="Notifications">
-            <Toggle label="Play sound when alerts occur" checked={soundAlerts} onChange={toggleSound} />
-            <button className="btn-secondary !py-1" onClick={playBeep}>
-              <Volume2 className="h-4 w-4" /> Test sound
-            </button>
-            <Toggle
-              label="Show browser notifications for critical alerts"
-              checked={desktopNotifications}
-              onChange={(v) => void toggleDesktop(v)}
-            />
-          </SettingsCard>
-
-          <SettingsCard title="Time Format">
-            <RadioRow<TimeFormat>
-              value={timeFormat}
-              onChange={(v) => {
-                setTimeFormat(v)
-                setString(PREF.timeFormat, v)
-              }}
-              options={[
-                { value: '12h', label: '12-hour' },
-                { value: '24h', label: '24-hour' },
-              ]}
-            />
-            <div className="text-sm text-slate-500">
-              Preview: {format(now, timeFormat === '12h' ? 'h:mm:ss a' : 'HH:mm:ss')}
-            </div>
-          </SettingsCard>
-
-          {/* The zone is instance-wide, not per-browser: a report is a file that
-              gets emailed and shared, so its timestamps have to mean the same
-              thing to everyone who opens it. Shown here because this is where
-              people look for it, but changed under System. */}
-          <SettingsCard
-            title="Timezone"
-            description="Times across Sentinel, and in generated reports, are shown in this zone."
-          >
-            <p className="text-sm text-white">{reportTimezone ?? 'UTC'}</p>
-            <p className="text-xs text-slate-500">
-              {isAdmin
-                ? 'Set for the whole instance under Settings → System.'
-                : 'Set for the whole instance by an administrator.'}
-            </p>
-          </SettingsCard>
-
-          <SettingsCard title="Date Format">
-            <RadioRow<DateFormatPref>
-              value={dateFormat}
-              onChange={(v) => {
-                setDateFormat(v)
-                setString(PREF.dateFormat, v)
-              }}
-              options={[
-                { value: 'MMM DD, YYYY', label: 'MMM DD, YYYY' },
-                { value: 'DD/MM/YYYY', label: 'DD/MM/YYYY' },
-                { value: 'YYYY-MM-DD', label: 'YYYY-MM-DD' },
-              ]}
-            />
-            <div className="text-sm text-slate-500">Preview: {format(now, dateFmtMap[dateFormat])}</div>
-          </SettingsCard>
-
-          <SettingsCard title="Default Report Range">
-            <RadioRow<ReportRange>
-              value={reportRange}
-              onChange={(v) => {
-                setReportRange(v)
-                setString(PREF.reportRange, v)
-              }}
-              options={[
-                { value: '7d', label: 'Last 7 days' },
-                { value: '30d', label: 'Last 30 days' },
-                { value: '90d', label: 'Last 90 days' },
-                { value: 'custom', label: 'Custom' },
-              ]}
-            />
-          </SettingsCard>
-
-          {/* Scoped to this tab: these buttons only touch browser-local
-              preferences. System settings save themselves on their own tab. */}
-          <div className="flex items-center justify-between border-t border-white/10 pt-4">
-            <button className="btn-secondary text-red-400" onClick={() => setConfirmReset(true)}>
-              Reset to Defaults
-            </button>
-            <button className="btn-primary" onClick={savePreferences}>
-              Save Preferences
-            </button>
-          </div>
-        </div>
-      )}
-
       {tab === 'notifications' && isAdmin && <NotificationSettings />}
 
       {tab === 'about' && (
@@ -870,46 +613,7 @@ export default function Settings() {
         </div>
       )}
 
-      {confirmReset && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="card w-full max-w-sm p-6">
-            <h3 className="text-lg font-semibold">Reset preferences?</h3>
-            <p className="mt-2 text-sm text-slate-400">
-              This restores your browser preferences — font size, sound, time and date format — to
-              their defaults. System settings are not affected.
-            </p>
-            <div className="mt-6 flex justify-end gap-2">
-              <button className="btn-secondary" onClick={() => setConfirmReset(false)}>
-                Cancel
-              </button>
-              <button className="btn-danger" onClick={doReset}>
-                Reset
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <Toaster toasts={toasts} />
     </div>
   )
-}
-
-function playBeep() {
-  try {
-    const ctx = new AudioContext()
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-    osc.connect(gain)
-    gain.connect(ctx.destination)
-    osc.frequency.value = 880
-    gain.gain.value = 0.1
-    osc.start()
-    window.setTimeout(() => {
-      osc.stop()
-      void ctx.close()
-    }, 200)
-  } catch {
-    /* audio not available */
-  }
 }

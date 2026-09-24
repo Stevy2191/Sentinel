@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
+import { format } from 'date-fns'
 import {
   Shield,
   ShieldCheck,
@@ -10,14 +11,36 @@ import {
   X,
   Monitor,
   User,
+  Volume2,
 } from 'lucide-react'
 import api, { type ApiError } from '@/services/api'
 import { useAuthContext } from '@/context/AuthContext'
 import { useToasts, Toaster } from '@/components/Toast'
 import { validatePassword } from '@/utils/passwordValidator'
+import SettingsCard from '@/components/SettingsCard'
+import {
+  PREF,
+  DEFAULTS,
+  applyStoredPreferences,
+  resetAllPreferences,
+  getString,
+  getBool,
+  setString,
+  setBool,
+  type FontSize,
+  type TimeFormat,
+  type DateFormatPref,
+  type ReportRange,
+} from '@/utils/preferences'
 
 const inputCls =
   'w-full rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary-500'
+
+const dateFmtMap: Record<DateFormatPref, string> = {
+  'MMM DD, YYYY': 'MMM dd, yyyy',
+  'DD/MM/YYYY': 'dd/MM/yyyy',
+  'YYYY-MM-DD': 'yyyy-MM-dd',
+}
 
 function Req({ ok, label }: { ok: boolean; label: string }) {
   return (
@@ -26,6 +49,83 @@ function Req({ ok, label }: { ok: boolean; label: string }) {
       {label}
     </div>
   )
+}
+
+function Toggle({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean
+  onChange: (v: boolean) => void
+  label: string
+}) {
+  return (
+    <label className="flex cursor-pointer items-center justify-between gap-4">
+      <span className="text-sm">{label}</span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+          checked ? 'bg-primary-600' : 'bg-white/10'
+        }`}
+      >
+        <span
+          className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+            checked ? 'translate-x-5' : 'translate-x-0'
+          }`}
+        />
+      </button>
+    </label>
+  )
+}
+
+function RadioRow<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { value: T; label: string }[]
+  value: T
+  onChange: (v: T) => void
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          onClick={() => onChange(o.value)}
+          className={`rounded-md px-4 py-2 text-sm font-medium ${
+            value === o.value ? 'bg-primary-600 text-white' : 'bg-white/5 text-slate-300'
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function playBeep() {
+  try {
+    const ctx = new AudioContext()
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.frequency.value = 880
+    gain.gain.value = 0.1
+    osc.start()
+    window.setTimeout(() => {
+      osc.stop()
+      void ctx.close()
+    }, 200)
+  } catch {
+    /* audio not available */
+  }
 }
 
 // legacyCopy copies text using a temporary textarea + document.execCommand, the
@@ -178,6 +278,76 @@ export default function Profile() {
     }
   }
 
+  // ---- Preferences (this browser) ----
+  const [fontSize, setFontSize] = useState<FontSize>(
+    () => getString(PREF.fontSize, DEFAULTS.fontSize) as FontSize
+  )
+  const [soundAlerts, setSoundAlerts] = useState(() => getBool(PREF.soundAlerts, DEFAULTS.soundAlerts))
+  const [desktopNotifications, setDesktopNotifications] = useState(() =>
+    getBool(PREF.desktopNotifications, DEFAULTS.desktopNotifications)
+  )
+  const [timeFormat, setTimeFormat] = useState<TimeFormat>(
+    () => getString(PREF.timeFormat, DEFAULTS.timeFormat) as TimeFormat
+  )
+  const [dateFormat, setDateFormat] = useState<DateFormatPref>(
+    () => getString(PREF.dateFormat, DEFAULTS.dateFormat) as DateFormatPref
+  )
+  const [reportRange, setReportRange] = useState<ReportRange>(
+    () => getString(PREF.reportRange, DEFAULTS.reportRange) as ReportRange
+  )
+
+  const [confirmReset, setConfirmReset] = useState(false)
+
+  const changeFontSize = (v: FontSize) => {
+    setFontSize(v)
+    setString(PREF.fontSize, v)
+    applyStoredPreferences()
+  }
+  const toggleSound = (v: boolean) => {
+    setSoundAlerts(v)
+    setBool(PREF.soundAlerts, v)
+    if (v) playBeep()
+  }
+  const toggleDesktop = async (v: boolean) => {
+    if (v && 'Notification' in window) {
+      const perm = await Notification.requestPermission()
+      if (perm !== 'granted') {
+        push('Desktop notification permission denied', 'error')
+        setDesktopNotifications(false)
+        setBool(PREF.desktopNotifications, false)
+        return
+      }
+    }
+    setDesktopNotifications(v)
+    setBool(PREF.desktopNotifications, v)
+  }
+
+  const savePreferences = () => {
+    setString(PREF.fontSize, fontSize)
+    setBool(PREF.soundAlerts, soundAlerts)
+    setBool(PREF.desktopNotifications, desktopNotifications)
+    setString(PREF.timeFormat, timeFormat)
+    setString(PREF.dateFormat, dateFormat)
+    setString(PREF.reportRange, reportRange)
+    applyStoredPreferences()
+    push('Preferences saved', 'success')
+  }
+
+  const doReset = () => {
+    resetAllPreferences()
+    setFontSize(DEFAULTS.fontSize)
+    setSoundAlerts(DEFAULTS.soundAlerts)
+    setDesktopNotifications(DEFAULTS.desktopNotifications)
+    setTimeFormat(DEFAULTS.timeFormat)
+    setDateFormat(DEFAULTS.dateFormat)
+    setReportRange(DEFAULTS.reportRange)
+    applyStoredPreferences()
+    setConfirmReset(false)
+    push('Preferences reset to defaults', 'success')
+  }
+
+  const now = new Date()
+
   return (
     <div id="profile" className="max-w-2xl space-y-6">
       <div>
@@ -319,6 +489,95 @@ export default function Profile() {
         </p>
       </div>
 
+      {/* Preferences — stored in this browser and affect only you. */}
+      <div>
+        <h2 className="text-lg font-semibold">Preferences</h2>
+        <p className="text-sm text-slate-400">These are stored in this browser and affect only you.</p>
+      </div>
+
+      <SettingsCard title="Font Size" description="Scales text across the app.">
+        <RadioRow<FontSize>
+          value={fontSize}
+          onChange={changeFontSize}
+          options={[
+            { value: 'compact', label: 'Compact (90%)' },
+            { value: 'normal', label: 'Normal (100%)' },
+            { value: 'large', label: 'Large (110%)' },
+          ]}
+        />
+      </SettingsCard>
+
+      <SettingsCard title="Notifications">
+        <Toggle label="Play sound when alerts occur" checked={soundAlerts} onChange={toggleSound} />
+        <button className="btn-secondary !py-1" onClick={playBeep}>
+          <Volume2 className="h-4 w-4" /> Test sound
+        </button>
+        <Toggle
+          label="Show browser notifications for critical alerts"
+          checked={desktopNotifications}
+          onChange={(v) => void toggleDesktop(v)}
+        />
+      </SettingsCard>
+
+      <SettingsCard title="Time Format">
+        <RadioRow<TimeFormat>
+          value={timeFormat}
+          onChange={(v) => {
+            setTimeFormat(v)
+            setString(PREF.timeFormat, v)
+          }}
+          options={[
+            { value: '12h', label: '12-hour' },
+            { value: '24h', label: '24-hour' },
+          ]}
+        />
+        <div className="text-sm text-slate-500">
+          Preview: {format(now, timeFormat === '12h' ? 'h:mm:ss a' : 'HH:mm:ss')}
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title="Date Format">
+        <RadioRow<DateFormatPref>
+          value={dateFormat}
+          onChange={(v) => {
+            setDateFormat(v)
+            setString(PREF.dateFormat, v)
+          }}
+          options={[
+            { value: 'MMM DD, YYYY', label: 'MMM DD, YYYY' },
+            { value: 'DD/MM/YYYY', label: 'DD/MM/YYYY' },
+            { value: 'YYYY-MM-DD', label: 'YYYY-MM-DD' },
+          ]}
+        />
+        <div className="text-sm text-slate-500">Preview: {format(now, dateFmtMap[dateFormat])}</div>
+      </SettingsCard>
+
+      <SettingsCard title="Default Report Range">
+        <RadioRow<ReportRange>
+          value={reportRange}
+          onChange={(v) => {
+            setReportRange(v)
+            setString(PREF.reportRange, v)
+          }}
+          options={[
+            { value: '7d', label: 'Last 7 days' },
+            { value: '30d', label: 'Last 30 days' },
+            { value: '90d', label: 'Last 90 days' },
+            { value: 'custom', label: 'Custom' },
+          ]}
+        />
+      </SettingsCard>
+
+      {/* Scoped to preferences: these buttons only touch browser-local state. */}
+      <div className="flex items-center justify-between border-t border-white/10 pt-4">
+        <button className="btn-secondary text-red-400" onClick={() => setConfirmReset(true)}>
+          Reset to Defaults
+        </button>
+        <button className="btn-primary" onClick={savePreferences}>
+          Save Preferences
+        </button>
+      </div>
+
       {/* MFA enable modal */}
       {step !== 'idle' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -423,6 +682,27 @@ export default function Profile() {
                 onClick={() => void disableMFA()}
               >
                 Disable
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset preferences modal */}
+      {confirmReset && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="card w-full max-w-sm p-6">
+            <h3 className="text-lg font-semibold">Reset preferences?</h3>
+            <p className="mt-2 text-sm text-slate-400">
+              This restores your browser preferences — font size, sound, time and date format — to
+              their defaults. Account and system settings are not affected.
+            </p>
+            <div className="mt-6 flex justify-end gap-2">
+              <button className="btn-secondary" onClick={() => setConfirmReset(false)}>
+                Cancel
+              </button>
+              <button className="btn-danger" onClick={doReset}>
+                Reset
               </button>
             </div>
           </div>
