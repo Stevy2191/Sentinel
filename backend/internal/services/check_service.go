@@ -121,7 +121,40 @@ func (s *CheckService) ExecuteHTTPCheck(ctx context.Context, monitor *models.Mon
 		lastCheck = check
 	}
 
+	// Every attempt failed without reaching the server. Before calling the
+	// service down, ask whether the host's own resolver is the problem: a
+	// resolver that has cached a captive-portal answer — as happens after an
+	// internet outage — sends the check to some other machine, which then
+	// fails on a certificate or a refused connection. The service itself may
+	// be perfectly reachable.
+	if worthRetryingViaPublicDNS(lastCheck) {
+		if check := s.httpViaPublicDNS(ctx, monitor, method); check != nil {
+			return check, nil
+		}
+	}
+
 	return lastCheck, nil
+}
+
+// httpViaPublicDNS re-runs a single attempt resolving through public DNS.
+//
+// Returns a check only when this succeeds where the normal path did not, so a
+// service that is genuinely down still reports the original failure rather
+// than a second, more confusing one. The success is annotated: local DNS being
+// broken is worth knowing about even when the service is up, and a silent
+// recovery would hide it.
+func (s *CheckService) httpViaPublicDNS(ctx context.Context, monitor *models.Monitor, method string) *models.Check {
+	client := publicDNSHTTPClient(s.checkTimeout(monitor), monitor.VerifyTLS())
+
+	check, _ := s.httpAttempt(ctx, monitor, client, method, 0)
+	if check == nil || check.Status != checkSuccess {
+		return nil
+	}
+
+	s.logger.Printf("[http] monitor=%s recovered via public DNS; the host resolver could not reach it", monitor.ID)
+	check.ErrorMessage = "reached via public DNS: this host's own resolver could not reach it, " +
+		"which usually means a stale or hijacked local DNS answer"
+	return check
 }
 
 // httpAttempt performs a single HTTP request. It returns the resulting Check and
