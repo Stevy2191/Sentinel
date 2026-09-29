@@ -114,6 +114,13 @@ export default function BackupRestore({
               password hashes, notification channel secrets and agent tokens — treat a downloaded
               file as you would those.
             </p>
+            {/* Said up front so nobody discovers it during a restore: metric
+                history is left out on purpose, and has its own protection. */}
+            <p className="text-xs text-slate-500">
+              Backups hold configuration and history, not collected network metrics. To protect
+              those, snapshot the database volume — see “Backing up network metrics” in
+              GETTING_STARTED.md.
+            </p>
 
             {error && (
               <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">

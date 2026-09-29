@@ -136,6 +136,33 @@ func (s *BackupService) pathFor(id string) (string, error) {
 	return filepath.Join(s.dir, s.filename(id)), nil
 }
 
+// dumpArgs are the pg_dump arguments for a backup.
+//
+// --clean --if-exists makes the dump able to restore over a populated
+// database: it drops each object before recreating it. That is what lets a
+// restore run without dropping the database itself, which postgres refuses
+// while anything is connected — and the application is always connected.
+//
+// --no-owner and --no-privileges keep the dump portable, so it can be
+// restored into an install whose database role has a different name.
+//
+// --schema=public makes backups configuration only. Sentinel's own tables all
+// live in public; collected network metrics live in the metrics schema and
+// are deliberately left out (they are protected at the volume level). It also
+// keeps extensions out of the dump: with --clean, including timescaledb would
+// make a restore start with DROP EXTENSION, cascading to every hypertable.
+func (s *BackupService) dumpArgs() []string {
+	return []string{
+		"--host", s.db.Host,
+		"--port", s.db.Port,
+		"--username", s.db.User,
+		"--dbname", s.db.Name,
+		"--schema=public",
+		"--clean", "--if-exists",
+		"--no-owner", "--no-privileges",
+	}
+}
+
 // Create dumps the database to a compressed file and returns what it wrote.
 func (s *BackupService) Create(ctx context.Context) (*BackupInfo, error) {
 	if err := s.Available(); err != nil {
@@ -151,21 +178,7 @@ func (s *BackupService) Create(ctx context.Context) (*BackupInfo, error) {
 	runCtx, cancel := context.WithTimeout(ctx, backupTimeout)
 	defer cancel()
 
-	// --clean --if-exists makes the dump able to restore over a populated
-	// database: it drops each object before recreating it. That is what lets a
-	// restore run without dropping the database itself, which postgres refuses
-	// while anything is connected — and the application is always connected.
-	//
-	// --no-owner and --no-privileges keep the dump portable, so it can be
-	// restored into an install whose database role has a different name.
-	cmd := exec.CommandContext(runCtx, "pg_dump",
-		"--host", s.db.Host,
-		"--port", s.db.Port,
-		"--username", s.db.User,
-		"--dbname", s.db.Name,
-		"--clean", "--if-exists",
-		"--no-owner", "--no-privileges",
-	)
+	cmd := exec.CommandContext(runCtx, "pg_dump", s.dumpArgs()...)
 	cmd.Env = s.env()
 
 	var stderr bytes.Buffer
