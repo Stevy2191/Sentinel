@@ -206,6 +206,35 @@ Your data is preserved (it lives in the `postgres_data` volume). If you build
 from source instead, use `docker compose up -d --build` after pulling the latest
 code with `git pull`.
 
+### Upgrading to TimescaleDB
+
+Sentinel's database now runs on TimescaleDB, which is PostgreSQL 16 with an
+extension for time-series data. Existing installs keep their data: the new
+image opens the same data directory.
+
+1. Take a backup in **Settings → Backups**.
+2. Pull the current `docker-compose.yml`. The `postgres` service uses
+   `timescale/timescaledb:2.30.1-pg16` and passes
+   `shared_preload_libraries=timescaledb` on its command line.
+3. Run `docker compose up -d`. The backend enables the extension itself.
+
+If the backend refuses to start with "Sentinel now requires the TimescaleDB
+extension", the postgres service is still on the old image. Repeat step 2.
+
+### Backing up network metrics
+
+**Settings → Backups** holds configuration and history: monitors, sites,
+credentials, reports, incidents and settings. It deliberately leaves out
+collected network metrics, which can grow to many gigabytes.
+
+To protect those too, back up the whole database from the host, for example:
+
+```bash
+docker compose exec -T postgres pg_dump -U sentinel -Fc sentinel > sentinel-full.dump
+```
+
+or snapshot the `postgres_data` Docker volume.
+
 ## Next Steps
 
 - **Deploy on another server** — see the [Deployment guide](README.md#deployment-docker-compose)

@@ -64,6 +64,9 @@ For detailed installation instructions — including manual setup, environment
 configuration, and production deployment — see
 **[GETTING_STARTED.md](GETTING_STARTED.md)**.
 
+> Upgrading an existing install? The database now runs on TimescaleDB. See
+> "Upgrading to TimescaleDB" in GETTING_STARTED.md.
+
 ---
 
 ## API
