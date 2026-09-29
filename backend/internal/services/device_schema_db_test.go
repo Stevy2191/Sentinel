@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"github.com/Stevy2191/Sentinel/backend/internal/models"
 	"github.com/Stevy2191/Sentinel/backend/internal/testdb"
 )
 
@@ -77,5 +78,36 @@ func TestDBDeviceDeleteCascadesInterfaces(t *testing.T) {
 	testdb.Must(t, db.Raw(`SELECT count(*) FROM device_interfaces WHERE device_id = ?`, s.DeviceID).Scan(&n).Error)
 	if n != 0 {
 		t.Errorf("%d interfaces left after deleting their device", n)
+	}
+}
+
+// GORM omits a zero-valued field from INSERT when its gorm tag carries a
+// `default`, so a plain db.Create with Enabled: false (or Present: false)
+// must not silently fall back to the column's SQL default of true.
+func TestDBDeviceCreateKeepsEnabledFalse(t *testing.T) {
+	db := testdb.Open(t)
+	s := seedDevice(t, db, "HQ", "10.0.0.9")
+
+	// A different host from seedDevice's own device (also on the default
+	// port 161 in the same site), so this insert does not collide with it.
+	d := models.Device{
+		SiteID: s.SiteID, CredentialID: s.CredentialID, Name: "paused", Host: "10.0.0.99", Port: 161,
+		Enabled: false, PollInterval: 60, TimeoutMs: 3000, Retries: 1, Status: models.DeviceStatusPaused,
+	}
+	testdb.Must(t, db.Create(&d).Error)
+
+	var reloaded models.Device
+	testdb.Must(t, db.First(&reloaded, "id = ?", d.ID).Error)
+	if reloaded.Enabled {
+		t.Error("Device.Enabled reloaded as true after Create with Enabled: false")
+	}
+
+	iface := models.DeviceInterface{DeviceID: s.DeviceID, IfIndex: 99, Name: "removed", Present: false}
+	testdb.Must(t, db.Create(&iface).Error)
+
+	var reloadedIface models.DeviceInterface
+	testdb.Must(t, db.First(&reloadedIface, "id = ?", iface.ID).Error)
+	if reloadedIface.Present {
+		t.Error("DeviceInterface.Present reloaded as true after Create with Present: false")
 	}
 }

@@ -180,7 +180,7 @@ type Device struct {
 	Name                string      `json:"name" gorm:"column:name;not null"`
 	Host                string      `json:"host" gorm:"column:host;not null"`
 	Port                int         `json:"port" gorm:"column:port;not null;default:161"`
-	Enabled             bool        `json:"enabled" gorm:"column:enabled;not null;default:true"`
+	Enabled             bool        `json:"enabled" gorm:"column:enabled;not null"`
 	PollInterval        int         `json:"poll_interval" gorm:"column:poll_interval;not null;default:60"`
 	TimeoutMs           int         `json:"timeout_ms" gorm:"column:timeout_ms;not null;default:3000"`
 	Retries             int         `json:"retries" gorm:"column:retries;not null;default:1"`
@@ -279,7 +279,7 @@ type DeviceInterface struct {
 	AdminStatus       string    `json:"admin_status" gorm:"column:admin_status"`
 	OperStatus        string    `json:"oper_status" gorm:"column:oper_status"`
 	LastChangeSeconds int64     `json:"last_change_seconds" gorm:"column:last_change_seconds"`
-	Present           bool      `json:"present" gorm:"column:present;not null;default:true"`
+	Present           bool      `json:"present" gorm:"column:present;not null"`
 	UpdatedAt         time.Time `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
 }
 
