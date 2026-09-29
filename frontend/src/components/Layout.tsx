@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Menu, X, RefreshCw, Settings } from 'lucide-react'
 import { useAuthContext } from '@/context/AuthContext'
 import { useAppConfig } from '@/context/AppConfigContext'
 
-// Order matters: the three things Sentinel watches sit together, then what it
+// Order matters: the four things Sentinel watches sit together, then what it
 // publishes, then what it reports after the fact. Incidents was splitting the
 // monitoring group in half.
 const nav = [
@@ -13,11 +13,25 @@ const nav = [
   { to: '/uptime', label: 'Uptime Monitoring' },
   { to: '/ssl', label: 'SSL & Domains' },
   { to: '/servers', label: 'Server Monitoring' },
+  { to: '/network', label: 'Network Monitoring' },
   // What comes out of it.
   { to: '/status-pages', label: 'Status Pages' },
   { to: '/incidents', label: 'Incidents' },
   { to: '/reports', label: 'Reports' },
 ]
+
+// Network Monitoring has its own nav: it will hold sites, devices, maps,
+// dashboards, MIBs and credentials, far more than fits in the main list. Each
+// roadmap phase adds its own entries here, so there is never a dead link.
+// adminOnly entries are hidden from members, as Users is.
+const networkNav: { to: string; label: string; end?: boolean; adminOnly?: boolean }[] = [
+  { to: '/network/sites', label: 'Sites' },
+]
+
+/** Whether a path belongs to the Network Monitoring section. */
+function inNetworkSection(pathname: string): boolean {
+  return pathname === '/network' || pathname.startsWith('/network/')
+}
 
 /**
  * Type size for the sidebar wordmark. A configurable name can be far longer
@@ -50,6 +64,8 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
   const { appName } = useAppConfig()
   const username = currentUser?.username ?? 'User'
   const role = currentUser?.is_admin ? 'Admin' : 'Member'
+  const { pathname } = useLocation()
+  const network = inNetworkSection(pathname)
 
   const go = (path: string) => {
     onNavigate?.()
@@ -71,16 +87,34 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
         >
           {appName}
         </div>
-        <div className="mt-2 text-xs text-slate-400">Uptime Monitor</div>
+        <div className="mt-2 text-xs text-slate-400">{network ? 'Network Monitoring' : 'Uptime Monitor'}</div>
       </div>
 
       {/* Nav */}
       <nav className="flex-1 space-y-1 overflow-y-auto p-4">
-        {nav.map((item) => (
-          <NavLink key={item.to} to={item.to} end={item.end} onClick={onNavigate} className={navClass}>
-            {item.label}
-          </NavLink>
-        ))}
+        {network ? (
+          <>
+            {/* The way back out. A plain button rather than a NavLink so it is
+                never shown as the active page. */}
+            <button className="rd-nav w-full text-left" onClick={() => go('/')}>
+              ← Sentinel
+            </button>
+            <div className="my-2 border-t border-white/10" />
+            {networkNav
+              .filter((item) => !item.adminOnly || currentUser?.is_admin)
+              .map((item) => (
+                <NavLink key={item.to} to={item.to} end={item.end} onClick={onNavigate} className={navClass}>
+                  {item.label}
+                </NavLink>
+              ))}
+          </>
+        ) : (
+          nav.map((item) => (
+            <NavLink key={item.to} to={item.to} end={item.end} onClick={onNavigate} className={navClass}>
+              {item.label}
+            </NavLink>
+          ))
+        )}
       </nav>
 
       {/* User footer */}

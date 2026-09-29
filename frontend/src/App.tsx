@@ -27,6 +27,8 @@ const Reports = lazy(() => import('@/pages/Reports'))
 const SSL = lazy(() => import('@/pages/SSL'))
 const ServerMonitoring = lazy(() => import('@/pages/ServerMonitoring'))
 const ServerDetail = lazy(() => import('@/pages/ServerDetail'))
+const Sites = lazy(() => import('@/pages/network/Sites'))
+const SiteDetail = lazy(() => import('@/pages/network/SiteDetail'))
 const SavedReports = lazy(() => import('@/pages/SavedReports'))
 const SavedReportDetail = lazy(() => import('@/pages/SavedReportDetail'))
 const PublicReport = lazy(() => import('@/pages/PublicReport'))
@@ -84,6 +86,11 @@ export default function App() {
               {/* The page moved to /servers; the old path is kept so existing
                   links and bookmarks still land somewhere useful. */}
               <Route path="/server-monitoring" element={<Navigate to="/servers" replace />} />
+              {/* Network Monitoring. /network has no page of its own until a
+                  network overview exists, so it opens the site list. */}
+              <Route path="/network" element={<Navigate to="/network/sites" replace />} />
+              <Route path="/network/sites" element={<Sites />} />
+              <Route path="/network/sites/:id" element={<SiteDetail />} />
               <Route path="/monitors/create" element={<MonitorDetail mode="create" />} />
               <Route path="/monitors/new/wizard" element={<MonitorWizard />} />
               <Route path="/monitors/bulk" element={<BulkUpload />} />
