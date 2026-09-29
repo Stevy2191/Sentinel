@@ -19,6 +19,11 @@ const (
 	ActionScheduleRun      = "schedule_run"
 	ActionShareLinkCreated = "share_link_created"
 	ActionShareLinkRevoked = "share_link_revoked"
+	ActionSiteCreated      = "site_created"
+	ActionSiteUpdated      = "site_updated"
+	ActionSiteDeleted      = "site_deleted"
+	ActionSiteShared       = "site_shared"
+	ActionSiteUnshared     = "site_unshared"
 )
 
 // Audited resource types.
@@ -26,6 +31,7 @@ const (
 	ResourceReport    = "report"
 	ResourceSchedule  = "schedule"
 	ResourceShareLink = "share_link"
+	ResourceSite      = "site"
 )
 
 // AuditChanges is the JSONB detail on an audit entry. For an update it carries
