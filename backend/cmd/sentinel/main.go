@@ -311,7 +311,7 @@ func run() error {
 	// Saved-report builder: definitions, PDF generation, history, sharing.
 	api.RegisterReportBuilderRoutes(v1, reportBuilder)
 	api.RegisterReportScheduleRoutes(v1, api.NewReportScheduleHandler(db, reportScheduler, auditService))
-	api.RegisterIncidentRoutes(v1, incidentService, monitorService, db)
+	api.RegisterIncidentRoutes(v1, incidentService, monitorService, siteService, db)
 	api.RegisterMonitorGroupRoutes(v1, monitorService, incidentService)
 	api.RegisterMonitorSharingRoutes(v1, monitorService, authService)
 	api.RegisterStatusPageRoutes(v1, statusPageService, incidentService)

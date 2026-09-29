@@ -412,9 +412,11 @@ func (Check) TableName() string {
 // Incident represents a period of downtime for a monitor, opened when it goes
 // offline and closed when it recovers, enriched with human-authored context.
 type Incident struct {
-	ID        uuid.UUID `json:"id" gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
-	MonitorID uuid.UUID `json:"monitor_id" gorm:"column:monitor_id;type:uuid;not null"`
-	StartTime time.Time `json:"start_time" gorm:"column:start_time;not null"`
+	ID uuid.UUID `json:"id" gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
+	// Exactly one of MonitorID and DeviceID is set (incidents_subject_check).
+	MonitorID *uuid.UUID `json:"monitor_id" gorm:"column:monitor_id;type:uuid"`
+	DeviceID  *uuid.UUID `json:"device_id" gorm:"column:device_id;type:uuid"`
+	StartTime time.Time  `json:"start_time" gorm:"column:start_time;not null"`
 	// IncidentType is how the check failed when the incident opened.
 	IncidentType    string     `json:"incident_type" gorm:"column:incident_type;default:down"`
 	EndTime         *time.Time `json:"end_time" gorm:"column:end_time"`
@@ -449,10 +451,10 @@ func (i *Incident) Status() string {
 // tied to the incident that triggered it.
 type Notification struct {
 	ID uuid.UUID `json:"id" gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
-	// Exactly one of MonitorID and AgentID is set: a delivery is about a
-	// monitor or about a server agent, never both.
+	// Exactly one of MonitorID, AgentID and DeviceID is set.
 	MonitorID  *uuid.UUID `json:"monitor_id" gorm:"column:monitor_id;type:uuid"`
 	AgentID    *uuid.UUID `json:"agent_id" gorm:"column:agent_id;type:uuid"`
+	DeviceID   *uuid.UUID `json:"device_id" gorm:"column:device_id;type:uuid"`
 	IncidentID *uuid.UUID `json:"incident_id" gorm:"column:incident_id;type:uuid"`
 	Channel    string     `json:"channel" gorm:"column:channel;not null"`
 	// ChannelID names which configured channel sent this, since several may

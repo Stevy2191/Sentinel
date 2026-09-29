@@ -27,6 +27,7 @@ func loadIncidentForComment(
 	c *gin.Context,
 	incidentService *services.IncidentService,
 	monitorService *services.MonitorService,
+	sites siteAccessChecker,
 	level string,
 ) (uuid.UUID, bool) {
 	incidentID, err := uuid.Parse(c.Param("id"))
@@ -43,7 +44,7 @@ func loadIncidentForComment(
 		respondInternal(c, "loadIncidentForComment", err)
 		return uuid.Nil, false
 	}
-	if !authorizeMonitor(c, monitorService, row.Incident.MonitorID, level) {
+	if !authorizeIncident(c, monitorService, sites, row, level) {
 		return uuid.Nil, false
 	}
 	return incidentID, true
@@ -53,9 +54,10 @@ func loadIncidentForComment(
 func ListIncidentCommentsHandler(
 	incidentService *services.IncidentService,
 	monitorService *services.MonitorService,
+	sites siteAccessChecker,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		incidentID, ok := loadIncidentForComment(c, incidentService, monitorService, "view")
+		incidentID, ok := loadIncidentForComment(c, incidentService, monitorService, sites, "view")
 		if !ok {
 			return
 		}
@@ -75,9 +77,10 @@ func ListIncidentCommentsHandler(
 func AddIncidentCommentHandler(
 	incidentService *services.IncidentService,
 	monitorService *services.MonitorService,
+	sites siteAccessChecker,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		incidentID, ok := loadIncidentForComment(c, incidentService, monitorService, "edit")
+		incidentID, ok := loadIncidentForComment(c, incidentService, monitorService, sites, "edit")
 		if !ok {
 			return
 		}
@@ -138,8 +141,9 @@ func loadOwnComment(
 	c *gin.Context,
 	incidentService *services.IncidentService,
 	monitorService *services.MonitorService,
+	sites siteAccessChecker,
 ) (*models.IncidentComment, bool) {
-	incidentID, ok := loadIncidentForComment(c, incidentService, monitorService, "view")
+	incidentID, ok := loadIncidentForComment(c, incidentService, monitorService, sites, "view")
 	if !ok {
 		return nil, false
 	}
@@ -173,9 +177,10 @@ func loadOwnComment(
 func UpdateIncidentCommentHandler(
 	incidentService *services.IncidentService,
 	monitorService *services.MonitorService,
+	sites siteAccessChecker,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		comment, ok := loadOwnComment(c, incidentService, monitorService)
+		comment, ok := loadOwnComment(c, incidentService, monitorService, sites)
 		if !ok {
 			return
 		}
@@ -201,9 +206,10 @@ func UpdateIncidentCommentHandler(
 func DeleteIncidentCommentHandler(
 	incidentService *services.IncidentService,
 	monitorService *services.MonitorService,
+	sites siteAccessChecker,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		comment, ok := loadOwnComment(c, incidentService, monitorService)
+		comment, ok := loadOwnComment(c, incidentService, monitorService, sites)
 		if !ok {
 			return
 		}

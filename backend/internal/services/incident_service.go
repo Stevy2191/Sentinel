@@ -59,7 +59,7 @@ func (s *IncidentService) CreateIncidentFromCheck(
 	now := time.Now()
 	incident := &models.Incident{
 		ID:              uuid.New(),
-		MonitorID:       monitorID,
+		MonitorID:       &monitorID,
 		StartTime:       startTime,
 		EndTime:         nil,
 		DurationSeconds: 0,
@@ -113,7 +113,7 @@ func (s *IncidentService) CloseIncident(ctx context.Context, incidentID uuid.UUI
 		return nil, fmt.Errorf("closing incident %s: %w", incidentID, err)
 	}
 
-	s.logger.Printf("[incident] closed id=%s monitor=%s duration=%ds", incident.ID, incident.MonitorID, incident.DurationSeconds)
+	s.logger.Printf("[incident] closed id=%s duration=%ds", incident.ID, incident.DurationSeconds)
 	return &incident, nil
 }
 
@@ -329,21 +329,48 @@ type IncidentListOptions struct {
 	Status string // "", "all", "ongoing", "resolved"
 	// MonitorID restricts to one monitor. Nil means every monitor.
 	MonitorID *uuid.UUID
-	// Search matches the monitor's name, case-insensitively.
+	// DeviceID restricts to one device.
+	DeviceID *uuid.UUID
+	// Subject is "", "monitor" or "device".
+	Subject string
+	// Search matches the subject's name.
 	Search string
 	// SortBy is "started" (default) or "duration".
 	SortBy string
 	Desc   bool
 }
 
-// IncidentWithMonitor is a listed incident joined to the monitor it belongs to,
-// so the table can show a name without a request per row.
+// IncidentWithMonitor is a listed incident joined to its subject, so the
+// table can show a name without a request per row. For device incidents the
+// monitor_* fields carry the device's name and host (and type "snmp"), so
+// views built before devices existed still render them.
 type IncidentWithMonitor struct {
 	models.Incident
-	MonitorName string `json:"monitor_name" gorm:"column:monitor_name"`
-	MonitorURL  string `json:"monitor_url" gorm:"column:monitor_url"`
-	MonitorType string `json:"monitor_type" gorm:"column:monitor_type"`
+	MonitorName   string     `json:"monitor_name" gorm:"column:monitor_name"`
+	MonitorURL    string     `json:"monitor_url" gorm:"column:monitor_url"`
+	MonitorType   string     `json:"monitor_type" gorm:"column:monitor_type"`
+	SubjectType   string     `json:"subject_type" gorm:"column:subject_type"`
+	SubjectName   string     `json:"subject_name" gorm:"column:subject_name"`
+	SubjectTarget string     `json:"subject_target" gorm:"column:subject_target"`
+	SiteID        *uuid.UUID `json:"site_id" gorm:"column:site_id"`
+	SiteName      string     `json:"site_name" gorm:"column:site_name"`
 }
+
+// incidentSubjectJoins and incidentSubjectSelect are shared by the list and
+// the detail so the two can never disagree about a row.
+const incidentSubjectJoins = `LEFT JOIN monitors AS m ON m.id = i.monitor_id
+	LEFT JOIN devices AS d ON d.id = i.device_id
+	LEFT JOIN sites AS st ON st.id = d.site_id`
+
+const incidentSubjectSelect = `i.*,
+	COALESCE(m.name, d.name) AS monitor_name,
+	COALESCE(m.url, d.host) AS monitor_url,
+	COALESCE(m.type, 'snmp') AS monitor_type,
+	CASE WHEN i.device_id IS NOT NULL THEN 'device' ELSE 'monitor' END AS subject_type,
+	COALESCE(m.name, d.name) AS subject_name,
+	COALESCE(m.url, d.host) AS subject_target,
+	d.site_id AS site_id,
+	COALESCE(st.name, '') AS site_name`
 
 // ListIncidents returns a page of incidents across all monitors, newest first
 // by default, with the total matching count for pagination.
@@ -363,7 +390,7 @@ func (s *IncidentService) ListIncidents(ctx context.Context, opts IncidentListOp
 
 	base := s.db.WithContext(ctx).
 		Table("incidents AS i").
-		Joins("JOIN monitors AS m ON m.id = i.monitor_id")
+		Joins(incidentSubjectJoins)
 
 	switch opts.Status {
 	case models.IncidentStatusOngoing:
@@ -372,16 +399,30 @@ func (s *IncidentService) ListIncidents(ctx context.Context, opts IncidentListOp
 		base = base.Where("i.end_time IS NOT NULL")
 	}
 	if !opts.Viewer.IsAdmin {
+		// Monitor incidents by monitor ownership or sharing (the monitor list's
+		// rule); device incidents by site sharing (SiteAccess's rule).
 		base = base.Where(
-			"(m.owner_id = ? OR m.id IN (SELECT monitor_id FROM monitor_sharing WHERE shared_with_user_id = ?))",
-			opts.Viewer.UserID, opts.Viewer.UserID,
+			`((i.monitor_id IS NOT NULL AND (m.owner_id = ? OR m.id IN
+				(SELECT monitor_id FROM monitor_sharing WHERE shared_with_user_id = ?)))
+			 OR (i.device_id IS NOT NULL AND d.site_id IN
+				(SELECT site_id FROM site_sharing WHERE shared_with_user_id = ?)))`,
+			opts.Viewer.UserID, opts.Viewer.UserID, opts.Viewer.UserID,
 		)
 	}
 	if opts.MonitorID != nil {
 		base = base.Where("i.monitor_id = ?", *opts.MonitorID)
 	}
+	if opts.DeviceID != nil {
+		base = base.Where("i.device_id = ?", *opts.DeviceID)
+	}
+	switch opts.Subject {
+	case "monitor":
+		base = base.Where("i.monitor_id IS NOT NULL")
+	case "device":
+		base = base.Where("i.device_id IS NOT NULL")
+	}
 	if q := strings.TrimSpace(opts.Search); q != "" {
-		base = base.Where("m.name ILIKE ?", "%"+q+"%")
+		base = base.Where("COALESCE(m.name, d.name) ILIKE ?", "%"+q+"%")
 	}
 
 	var total int64
@@ -403,7 +444,7 @@ func (s *IncidentService) ListIncidents(ctx context.Context, opts IncidentListOp
 
 	var rows []IncidentWithMonitor
 	err := base.Session(&gorm.Session{}).
-		Select("i.*, m.name AS monitor_name, m.url AS monitor_url, m.type AS monitor_type").
+		Select(incidentSubjectSelect).
 		Order(order).
 		Limit(opts.Limit).
 		Offset((opts.Page - 1) * opts.Limit).
@@ -419,8 +460,8 @@ func (s *IncidentService) GetIncidentByID(ctx context.Context, id uuid.UUID) (*I
 	var row IncidentWithMonitor
 	err := s.db.WithContext(ctx).
 		Table("incidents AS i").
-		Joins("JOIN monitors AS m ON m.id = i.monitor_id").
-		Select("i.*, m.name AS monitor_name, m.url AS monitor_url, m.type AS monitor_type").
+		Joins(incidentSubjectJoins).
+		Select(incidentSubjectSelect).
 		Where("i.id = ?", id).
 		Scan(&row).Error
 	if err != nil {
@@ -435,6 +476,10 @@ func (s *IncidentService) GetIncidentByID(ctx context.Context, id uuid.UUID) (*I
 // ChecksDuringIncident returns the checks recorded while the incident was open,
 // oldest first, for the detail timeline. An ongoing incident runs to now.
 func (s *IncidentService) ChecksDuringIncident(ctx context.Context, inc *models.Incident, limit int) ([]models.Check, error) {
+	// Checks belong to monitors; a device incident has none.
+	if inc.MonitorID == nil {
+		return nil, nil
+	}
 	if limit < 1 || limit > 500 {
 		limit = 200
 	}
@@ -444,7 +489,7 @@ func (s *IncidentService) ChecksDuringIncident(ctx context.Context, inc *models.
 	}
 	var checks []models.Check
 	err := s.db.WithContext(ctx).
-		Where("monitor_id = ? AND timestamp >= ? AND timestamp <= ?", inc.MonitorID, inc.StartTime, end).
+		Where("monitor_id = ? AND timestamp >= ? AND timestamp <= ?", *inc.MonitorID, inc.StartTime, end).
 		Order("timestamp ASC").
 		Limit(limit).
 		Find(&checks).Error
@@ -452,6 +497,75 @@ func (s *IncidentService) ChecksDuringIncident(ctx context.Context, inc *models.
 		return nil, fmt.Errorf("loading checks for incident %s: %w", inc.ID, err)
 	}
 	return checks, nil
+}
+
+// OpenDeviceIncident opens an incident for an unreachable device, unless one
+// is already open, in which case that one is returned with opened=false.
+func (s *IncidentService) OpenDeviceIncident(ctx context.Context, deviceID uuid.UUID, start time.Time, reason string) (*models.Incident, bool, error) {
+	if active, err := s.activeDeviceIncident(ctx, deviceID); err != nil || active != nil {
+		return active, false, err
+	}
+	now := time.Now()
+	incident := &models.Incident{
+		ID:           uuid.New(),
+		DeviceID:     &deviceID,
+		StartTime:    start,
+		Severity:     defaultIncidentSeverity,
+		IncidentType: models.IncidentTypeDown,
+		RootCause:    reason,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if err := s.db.WithContext(ctx).Create(incident).Error; err != nil {
+		return nil, false, fmt.Errorf("creating incident for device %s: %w", deviceID, err)
+	}
+	s.logger.Printf("[incident] opened id=%s device=%s", incident.ID, deviceID)
+	return incident, true, nil
+}
+
+// CloseDeviceIncident closes a device's open incident, appending note to its
+// resolution notes when given. Returns nil, nil when nothing is open.
+func (s *IncidentService) CloseDeviceIncident(ctx context.Context, deviceID uuid.UUID, end time.Time, note string) (*models.Incident, error) {
+	active, err := s.activeDeviceIncident(ctx, deviceID)
+	if err != nil || active == nil {
+		return nil, err
+	}
+	if end.Before(active.StartTime) {
+		end = active.StartTime
+	}
+	updates := map[string]any{
+		"end_time":         end,
+		"duration_seconds": int(end.Sub(active.StartTime).Seconds()),
+		"updated_at":       time.Now(),
+	}
+	if note != "" {
+		notes := note
+		if active.ResolutionNotes != "" {
+			notes = active.ResolutionNotes + "\n" + note
+		}
+		updates["resolution_notes"] = notes
+	}
+	if err := s.db.WithContext(ctx).Model(&models.Incident{}).Where("id = ?", active.ID).Updates(updates).Error; err != nil {
+		return nil, fmt.Errorf("closing incident %s: %w", active.ID, err)
+	}
+	var closed models.Incident
+	if err := s.db.WithContext(ctx).First(&closed, "id = ?", active.ID).Error; err != nil {
+		return nil, fmt.Errorf("reloading incident %s: %w", active.ID, err)
+	}
+	s.logger.Printf("[incident] closed id=%s device=%s duration=%ds", closed.ID, deviceID, closed.DurationSeconds)
+	return &closed, nil
+}
+
+func (s *IncidentService) activeDeviceIncident(ctx context.Context, deviceID uuid.UUID) (*models.Incident, error) {
+	var incident models.Incident
+	err := s.db.WithContext(ctx).First(&incident, "device_id = ? AND end_time IS NULL", deviceID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying active incident for device %s: %w", deviceID, err)
+	}
+	return &incident, nil
 }
 
 // ListComments returns an incident's thread, oldest first — the order it was
