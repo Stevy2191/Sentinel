@@ -343,6 +343,20 @@ func (s *BackupService) Restore(ctx context.Context, id string) (*RestoreResult,
 		return nil, ErrBackupNotFound
 	}
 
+	// Checked before anything else, the safety backup included: a backup
+	// from another version cannot be restored, so nothing should happen.
+	backupLatest, err := backupMigration(path)
+	if err != nil {
+		return nil, err
+	}
+	dbLatest, err := s.currentMigration(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkBackupVersion(backupLatest, dbLatest); err != nil {
+		return nil, err
+	}
+
 	result := &RestoreResult{Restored: filepath.Base(path)}
 	if safety, err := s.Create(ctx); err != nil {
 		// Recorded rather than fatal: refusing to restore because the safety
@@ -370,16 +384,7 @@ func (s *BackupService) Restore(ctx context.Context, id string) (*RestoreResult,
 	}
 	defer gz.Close()
 
-	// ON_ERROR_STOP makes psql exit on the first failure instead of carrying
-	// on and reporting success over a half-applied restore.
-	cmd := exec.CommandContext(runCtx, "psql",
-		"--host", s.db.Host,
-		"--port", s.db.Port,
-		"--username", s.db.User,
-		"--dbname", s.db.Name,
-		"--quiet",
-		"--set", "ON_ERROR_STOP=1",
-	)
+	cmd := exec.CommandContext(runCtx, "psql", s.restoreArgs()...)
 	cmd.Env = s.env()
 	cmd.Stdin = gz
 

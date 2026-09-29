@@ -136,11 +136,21 @@ rows for devices that no longer exist, which a restore of an older backup
 can leave behind, are removed by a cleanup job, and retention expires them
 regardless.
 
-**Backups taken before this change** must still restore. They contain no
-TimescaleDB objects, and `--clean` drops only what the dump contains, so the
-extension and the `metrics` schema survive. Their `schema_migrations` table
-lacks `044`, so the migration re-runs on the next boot, harmlessly, since it
-is idempotent.
+**Restores are atomic and version-checked (settled on the sandbox,
+2026-09-29).** The spec first required backups taken before this change to
+still restore. They cannot: the restore replays the dump over the live
+database, a dump only drops what it contains, and `site_sharing`'s foreign key
+to `users` (a table the old dump does drop) aborts it. This predates phase 0 —
+migrations 020 and 039 already made older backups unrestorable the same way —
+and the restore was not transactional, so the failure left the database with
+most constraints and indexes dropped (35 foreign keys down to 4 on the
+sandbox). Two changes, both in `BackupService.Restore`:
+
+- `psql --single-transaction`: a failed restore changes nothing.
+- Before anything else (the safety backup included), the backup's latest
+  migration is read from its `schema_migrations` data and compared with the
+  database's. A backup from an older or newer schema is refused with a 409
+  and a message naming both versions and what to do.
 
 **Settings → Backups** gains one line: backups contain configuration and
 history but not collected network metrics, with a link to the docs section
@@ -340,8 +350,10 @@ container) is deferred to phase 2, where the metrics code needs it.
    `_timescaledb` or `metrics.` content. Restore it; the app works and the
    throwaway hypertable and its row survive. Confirm the two open questions
    from section 2 (`public` schema handling, `pgcrypto`).
-5. Restore a backup taken **before** the switch; 044 re-applies on the next
-   boot and the app works.
+5. Restore a backup taken **before** the switch: it is refused with the
+   version message, and the database is unchanged. Replaying that dump
+   directly with `--single-transaction` fails and leaves every constraint in
+   place.
 6. Rollback drill: drop the throwaway table and the extension, revert the
    image to `postgres:16-alpine`, confirm the database opens and the app
    works; switch forward again.
