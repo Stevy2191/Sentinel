@@ -206,28 +206,53 @@ func (s *DeviceService) Update(ctx context.Context, id uuid.UUID, raw models.Dev
 		"enabled": *in.Enabled, "poll_interval": in.PollInterval, "timeout_ms": in.TimeoutMs,
 		"retries": in.Retries, "notify_channels": in.NotifyChannels, "updated_at": gorm.Expr("now()"),
 	}
-	if in.Name != "" {
-		updates["name"] = in.Name
-	}
 	switch {
-	case before.Enabled && !*in.Enabled:
-		tr := NextDeviceState(before.Status, before.ConsecutiveFailures, PollPaused)
-		updates["status"], updates["consecutive_failures"], updates["status_detail"] = tr.Status, tr.Failures, ""
-		for _, a := range tr.Actions {
-			if a == ActionCloseIncident {
-				if _, err := s.incidents.CloseDeviceIncident(ctx, id, time.Now().UTC(), "Monitoring was paused."); err != nil {
-					return nil, nil, err
-				}
-			}
-		}
+	case in.Name != "" && in.Name != before.Host:
+		// A real, typed name (not just the pre-filled old host coming back
+		// unchanged): it is the user's now, and is never auto-renamed again.
+		updates["name"] = in.Name
+	case before.Name == before.Host:
+		// Still auto-named after its old host: keep following the device
+		// onto its new host, so inventory can still rename it from sysName
+		// (SaveInventory only renames while name == host).
+		updates["name"] = in.Host
+	}
+
+	pausing := before.Enabled && !*in.Enabled
+	var pauseTransition DeviceTransition
+	switch {
+	case pausing:
+		pauseTransition = NextDeviceState(before.Status, before.ConsecutiveFailures, PollPaused)
+		updates["status"], updates["consecutive_failures"], updates["status_detail"] =
+			pauseTransition.Status, pauseTransition.Failures, ""
 	case !before.Enabled && *in.Enabled:
 		updates["status"], updates["consecutive_failures"], updates["last_polled_at"] = models.DeviceStatusPending, 0, nil
 	case in.Host != before.Host || in.Port != before.Port || in.CredentialID != before.CredentialID:
 		// A different target: poll and re-inventory it now.
 		updates["last_polled_at"], updates["last_inventory_at"] = nil, nil
 	}
-	if err := s.db.WithContext(ctx).Model(&models.Device{}).Where("id = ?", id).Updates(updates).Error; err != nil {
-		return nil, nil, mapDeviceWriteError(err)
+
+	// The device's own update and (when pausing) closing its incident must
+	// commit or roll back together: a failed update (e.g. a host+port
+	// collision) must never leave an incident closed for a device that is
+	// still down and still enabled.
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.Device{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+			return mapDeviceWriteError(err)
+		}
+		if pausing {
+			for _, a := range pauseTransition.Actions {
+				if a == ActionCloseIncident {
+					if _, err := s.incidents.CloseDeviceIncidentTx(tx, id, time.Now().UTC(), "Monitoring was paused."); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
 	}
 	after, err := s.getRaw(ctx, id)
 	return before, after, err

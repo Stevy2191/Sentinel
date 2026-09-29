@@ -205,3 +205,86 @@ func TestDBDeviceCredentialUnusableForMissingProfile(t *testing.T) {
 		t.Errorf("DeviceCredential for nonexistent id: %v, want errors.Is ErrCredentialUnusable", err)
 	}
 }
+
+// Changing an unnamed device's host must not leave the old address frozen
+// as its name forever: a device is "unnamed" when its stored name still
+// equals its (old) host, and auto-naming must keep following the device
+// onto its new host so a later inventory can still rename it from sysName.
+func TestDBUpdateHostKeepsAutoNamingCurrent(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	svc := deviceSvc(db)
+	hq := seedDevice(t, db, "HQ", "10.0.0.2")
+
+	d, err := svc.Create(ctx, models.DeviceInput{SiteID: hq.SiteID, CredentialID: hq.CredentialID, Host: "10.0.0.20"}, uuid.Nil)
+	testdb.Must(t, err)
+	if d.Name != "10.0.0.20" {
+		t.Fatalf("setup: name = %q, want the host", d.Name)
+	}
+
+	_, after, err := svc.Update(ctx, d.ID, models.DeviceInput{SiteID: hq.SiteID, CredentialID: hq.CredentialID, Host: "10.0.0.21"})
+	testdb.Must(t, err)
+	if after.Name != "10.0.0.21" {
+		t.Fatalf("after host change: name = %q, want the new host", after.Name)
+	}
+
+	testdb.Must(t, svc.SaveInventory(ctx, d.ID, snmp.Inventory{System: snmp.System{Name: "core-sw-9"}}, time.Now().UTC()))
+	v, err := svc.Get(ctx, d.ID)
+	testdb.Must(t, err)
+	if v.Name != "core-sw-9" {
+		t.Errorf("after inventory: name = %q, want the sysName", v.Name)
+	}
+}
+
+// A name the user typed is never overwritten, including by a host change.
+func TestDBUpdateHostKeepsUserTypedName(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	svc := deviceSvc(db)
+	hq := seedDevice(t, db, "HQ", "10.0.0.2")
+
+	d, err := svc.Create(ctx, models.DeviceInput{SiteID: hq.SiteID, CredentialID: hq.CredentialID, Host: "10.0.0.30", Name: "Core switch"}, uuid.Nil)
+	testdb.Must(t, err)
+
+	_, after, err := svc.Update(ctx, d.ID, models.DeviceInput{SiteID: hq.SiteID, CredentialID: hq.CredentialID, Host: "10.0.0.31"})
+	testdb.Must(t, err)
+	if after.Name != "Core switch" {
+		t.Errorf("user-typed name lost on host change: %q", after.Name)
+	}
+}
+
+// Pausing closes the device's open incident. If the device's own update
+// fails (here: a host+port collision with another device in the same
+// site), the whole pause must fail atomically: the incident stays open and
+// the device stays exactly as it was.
+func TestDBPauseFailureKeepsIncidentOpen(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	s := seedDevice(t, db, "HQ", "10.0.0.2")
+	blocker := uuid.New()
+	testdb.Exec(t, db, `INSERT INTO devices (id, site_id, credential_id, name, host, port) VALUES (?, ?, ?, 'blocker', '10.0.0.5', 161)`,
+		blocker, s.SiteID, s.CredentialID)
+	testdb.Exec(t, db, `UPDATE devices SET status = 'down', consecutive_failures = 4 WHERE id = ?`, s.DeviceID)
+	svc := deviceSvc(db)
+	_, _, err := NewIncidentService(db).OpenDeviceIncident(ctx, s.DeviceID, time.Now().UTC().Add(-time.Hour), "timeout")
+	testdb.Must(t, err)
+
+	off := false
+	_, _, err = svc.Update(ctx, s.DeviceID, models.DeviceInput{
+		SiteID: s.SiteID, CredentialID: s.CredentialID, Host: "10.0.0.5", Port: 161, Enabled: &off,
+	})
+	if !errors.Is(err, ErrDeviceHostTaken) {
+		t.Fatalf("colliding pause: err = %v, want ErrDeviceHostTaken", err)
+	}
+
+	v, err := svc.Get(ctx, s.DeviceID)
+	testdb.Must(t, err)
+	if v.Status != models.DeviceStatusDown || !v.Enabled {
+		t.Errorf("device after failed pause: status=%q enabled=%v, want down/true (unchanged)", v.Status, v.Enabled)
+	}
+	var openCount int64
+	testdb.Must(t, db.Raw(`SELECT count(*) FROM incidents WHERE device_id = ? AND end_time IS NULL`, s.DeviceID).Scan(&openCount).Error)
+	if openCount != 1 {
+		t.Errorf("open incidents after failed pause: %d, want 1 (unchanged)", openCount)
+	}
+}
