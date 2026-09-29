@@ -369,8 +369,19 @@ container) is deferred to phase 2, where the metrics code needs it.
    the Postgres volume; switch the image; run checklist steps 1–3 against
    live.
 
-Rollback on live is the drill from step 6. It stays that simple until
-phase 2 creates real hypertables, which is why phase 0 rehearses it now.
+Rollback on live, as drilled on the sandbox (2026-09-29): drop the extension
+**and** delete 044's row, or a later forward switch never re-creates the
+extension; then return to the previous Sentinel release, backend included,
+because this backend refuses to start without TimescaleDB:
+
+```sql
+DROP EXTENSION timescaledb;
+DELETE FROM schema_migrations WHERE filename = '044_timescaledb.sql';
+```
+
+The empty `metrics` schema can stay. Sites (045) can stay too; the previous
+release ignores them. This stays simple until phase 2 creates real
+hypertables, which is why phase 0 rehearses it now.
 
 ## Risks
 
