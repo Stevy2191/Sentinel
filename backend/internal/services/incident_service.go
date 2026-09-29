@@ -307,8 +307,23 @@ func (s *IncidentService) GetIncidentCount(ctx context.Context, monitorID uuid.U
 	return count, nil
 }
 
+// ErrIncidentViewerRequired is returned by ListIncidents when no viewer is
+// given. Listing without one used to return every incident to every user.
+var ErrIncidentViewerRequired = errors.New("listing incidents requires a viewer")
+
+// IncidentViewer is who is asking for incidents. Admins see every incident;
+// anyone else sees incidents only for monitors they own or have been shared,
+// the same rule as the monitor list (ListAccessibleMonitors).
+type IncidentViewer struct {
+	UserID  uuid.UUID
+	IsAdmin bool
+}
+
 // IncidentListOptions filters and paginates the incidents list.
 type IncidentListOptions struct {
+	// Viewer is required; see ErrIncidentViewerRequired.
+	Viewer *IncidentViewer
+
 	Page   int
 	Limit  int
 	Status string // "", "all", "ongoing", "resolved"
@@ -333,6 +348,11 @@ type IncidentWithMonitor struct {
 // ListIncidents returns a page of incidents across all monitors, newest first
 // by default, with the total matching count for pagination.
 func (s *IncidentService) ListIncidents(ctx context.Context, opts IncidentListOptions) ([]IncidentWithMonitor, int64, error) {
+	// Fails closed: a caller that forgets to say who is asking gets an error,
+	// not every incident in the database.
+	if opts.Viewer == nil {
+		return nil, 0, ErrIncidentViewerRequired
+	}
 	if opts.Page < 1 {
 		opts.Page = 1
 	}
@@ -350,6 +370,12 @@ func (s *IncidentService) ListIncidents(ctx context.Context, opts IncidentListOp
 		base = base.Where("i.end_time IS NULL")
 	case models.IncidentStatusResolved:
 		base = base.Where("i.end_time IS NOT NULL")
+	}
+	if !opts.Viewer.IsAdmin {
+		base = base.Where(
+			"(m.owner_id = ? OR m.id IN (SELECT monitor_id FROM monitor_sharing WHERE shared_with_user_id = ?))",
+			opts.Viewer.UserID, opts.Viewer.UserID,
+		)
 	}
 	if opts.MonitorID != nil {
 		base = base.Where("i.monitor_id = ?", *opts.MonitorID)

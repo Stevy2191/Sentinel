@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -154,10 +155,36 @@ func toIncidentView(row services.IncidentWithMonitor, now time.Time) incidentVie
 	}
 }
 
-// ListIncidentsHandler handles GET /api/v1/incidents.
-func ListIncidentsHandler(incidentService *services.IncidentService) gin.HandlerFunc {
+// incidentLister lists incidents; an interface so the handler is tested
+// without a database.
+type incidentLister interface {
+	ListIncidents(ctx context.Context, opts services.IncidentListOptions) ([]services.IncidentWithMonitor, int64, error)
+}
+
+// incidentDetailReader is what the detail handler reads.
+type incidentDetailReader interface {
+	GetIncidentByID(ctx context.Context, id uuid.UUID) (*services.IncidentWithMonitor, error)
+	ChecksDuringIncident(ctx context.Context, inc *models.Incident, limit int) ([]models.Check, error)
+	NotificationsForIncident(ctx context.Context, incidentID uuid.UUID) ([]models.Notification, error)
+	ListComments(ctx context.Context, incidentID uuid.UUID) ([]models.IncidentComment, error)
+}
+
+// monitorViewChecker answers whether a user may see a monitor.
+type monitorViewChecker interface {
+	CanUserViewMonitor(ctx context.Context, userID, monitorID uuid.UUID) (bool, error)
+}
+
+// ListIncidentsHandler handles GET /api/v1/incidents. Members see incidents
+// only for monitors they own or have been shared; admins see all of them.
+func ListIncidentsHandler(incidentService incidentLister) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		userID, _, isAdmin, ok := GetUserFromContext(c)
+		if !ok {
+			respondAuthError(c, http.StatusUnauthorized, "authentication required")
+			return
+		}
 		opts := services.IncidentListOptions{
+			Viewer: &services.IncidentViewer{UserID: userID, IsAdmin: isAdmin},
 			Page:   atoiOr(c.Query("page"), 1),
 			Limit:  atoiOr(c.Query("limit"), 50),
 			Search: c.Query("search"),
@@ -209,8 +236,9 @@ func ListIncidentsHandler(incidentService *services.IncidentService) gin.Handler
 }
 
 // GetIncidentHandler handles GET /api/v1/incidents/:id, including the checks
-// recorded while the incident was open.
-func GetIncidentHandler(incidentService *services.IncidentService) gin.HandlerFunc {
+// recorded while the incident was open. An incident on a monitor the caller
+// cannot see is a 404, exactly like one that does not exist.
+func GetIncidentHandler(incidentService incidentDetailReader, monitors monitorViewChecker) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := uuid.Parse(c.Param("id"))
 		if err != nil {
@@ -225,6 +253,25 @@ func GetIncidentHandler(incidentService *services.IncidentService) gin.HandlerFu
 			}
 			respondInternal(c, "GetIncidentHandler", err)
 			return
+		}
+
+		// Checked before any detail is loaded, so nothing about an incident
+		// the caller cannot see is read, let alone returned.
+		userID, _, isAdmin, ok := GetUserFromContext(c)
+		if !ok {
+			respondAuthError(c, http.StatusUnauthorized, "authentication required")
+			return
+		}
+		if !isAdmin {
+			allowed, err := monitors.CanUserViewMonitor(c.Request.Context(), userID, row.Incident.MonitorID)
+			if err != nil {
+				respondInternal(c, "GetIncidentHandler access", err)
+				return
+			}
+			if !allowed {
+				respondError(c, http.StatusNotFound, "no such incident")
+				return
+			}
 		}
 
 		checks, err := incidentService.ChecksDuringIncident(c.Request.Context(), &row.Incident, 200)
@@ -317,7 +364,7 @@ func UpdateIncidentRetentionHandler(settingsService *services.SettingsService) g
 // authenticated user, as monitors are; annotating one stays where it was.
 func RegisterIncidentRoutes(rg *gin.RouterGroup, incidentService *services.IncidentService, monitorService *services.MonitorService, db *gorm.DB) {
 	rg.GET("/incidents", ListIncidentsHandler(incidentService))
-	rg.GET("/incidents/:id", GetIncidentHandler(incidentService))
+	rg.GET("/incidents/:id", GetIncidentHandler(incidentService, monitorService))
 	rg.PATCH("/incidents/:id", UpdateIncidentHandler(incidentService, monitorService, db))
 	rg.GET("/incidents/:id/comments", ListIncidentCommentsHandler(incidentService, monitorService))
 	rg.POST("/incidents/:id/comments", AddIncidentCommentHandler(incidentService, monitorService))
