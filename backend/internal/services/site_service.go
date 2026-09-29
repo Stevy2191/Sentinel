@@ -25,9 +25,8 @@ var (
 // site_id column. Delete refuses while any of them has a row for the site, so
 // deleting a site is never a way to silently delete its devices.
 //
-// Empty in phase 0: nothing can belong to a site yet. Each later phase adds
-// its own tables (devices in phase 1, dashboards in 4, maps in 6).
-var siteContentTables = []string{}
+// Phase 1: devices and site-scoped credential profiles.
+var siteContentTables = []string{"devices", "snmp_credentials"}
 
 // SiteShareView is a share with the recipient's name, for the sharing panel.
 type SiteShareView struct {

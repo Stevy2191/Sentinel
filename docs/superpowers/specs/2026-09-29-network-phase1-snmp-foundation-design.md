@@ -188,7 +188,7 @@ CREATE TABLE IF NOT EXISTS devices (
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK (status IN ('pending', 'up', 'down', 'paused', 'error'))
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_site_host ON devices (site_id, lower(host));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_site_host_port ON devices (site_id, lower(host), port);
 CREATE INDEX IF NOT EXISTS idx_devices_site ON devices (site_id);
 
 CREATE TABLE IF NOT EXISTS device_interfaces (
@@ -223,9 +223,10 @@ Notes:
   authentication). Fields that do not belong to the version are cleared.
 - A **site-scoped** credential is offered only for that site's devices; a
   device's credential must be global or scoped to the device's site.
-- **Host** is an IP address or a DNS name. Hosts are unique per site
-  (case-insensitive), not globally: overlapping private ranges across sites
-  are normal for an MSP.
+- **Host** is an IP address or a DNS name. Hosts are unique per site **and
+  port** (case-insensitive), not globally: overlapping private ranges across
+  sites are normal for an MSP, and so are two devices behind one NAT address
+  on different ports.
 - **`status`**: `pending` until the first poll; `up`; `down` (3 consecutive
   failures, incident open); `paused` (disabled); `error` (a configuration
   problem such as a target blocked by network policy, or an unresolvable
@@ -334,8 +335,9 @@ pool, after the reachability poll that finds it due.
 `NotificationMessage` gains `DeviceID *uuid.UUID`, like `AgentID`. Down text:
 "*core-sw-1* at Warehouse (10.20.0.2) has stopped answering SNMP.
 Last answered 14:02 UTC." Recovery: "*core-sw-1* at Warehouse is answering
-again after 12 minutes." Channels come from the device's `notify_channels`;
-none selected means no notification (the incident still opens). The webhook
+again after 12 minutes." Channels come from the device's `notify_channels`,
+with the existing monitor/agent convention: `null` means every enabled
+channel, `[]` means none (the incident still opens). The webhook
 payload carries `device_id`, `device_name`, `site_name` and `host`.
 
 ### 4. API
