@@ -95,7 +95,11 @@ func run() error {
 		return fmt.Errorf("connecting to database: %w", err)
 	}
 
-	// 2. Migrations.
+	// 2. Migrations. TimescaleDB first: migration 044 needs it, and without
+	// this check an old compose file shows up as a bare SQL error.
+	if err := database.RequireTimescale(db); err != nil {
+		return err
+	}
 	if err := runMigrations(db, cfg.MigrationsDir); err != nil {
 		return fmt.Errorf("running migrations: %w", err)
 	}
