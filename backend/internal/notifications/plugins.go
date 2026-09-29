@@ -36,7 +36,12 @@ type NotificationMessage struct {
 	// AgentID is set instead of MonitorID when the alert is about a server
 	// agent. The name and URL fields carry the server's name and address, so
 	// every plugin renders it without needing to know the difference.
-	AgentID          *uuid.UUID    `json:"agent_id,omitempty"`
+	AgentID *uuid.UUID `json:"agent_id,omitempty"`
+	// DeviceID is set instead of MonitorID for a network device alert.
+	// MonitorName/MonitorURL carry the device's name and host, and SiteName
+	// its site, so plugins render it without knowing the difference.
+	DeviceID         *uuid.UUID    `json:"device_id,omitempty"`
+	SiteName         string        `json:"site_name,omitempty"`
 	MonitorName      string        `json:"monitor_name"`
 	MonitorURL       string        `json:"monitor_url"`
 	Status           string        `json:"status"`
@@ -235,9 +240,12 @@ func (m *NotificationManager) StoreNotificationRecord(ctx context.Context, messa
 		CreatedAt:  time.Now().UTC(),
 	}
 	// Exactly one subject, matching the table's check constraint.
-	if message.AgentID != nil {
+	switch {
+	case message.AgentID != nil:
 		record.AgentID = message.AgentID
-	} else {
+	case message.DeviceID != nil:
+		record.DeviceID = message.DeviceID
+	default:
 		monitorID := message.MonitorID
 		record.MonitorID = &monitorID
 	}

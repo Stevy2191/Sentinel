@@ -35,6 +35,7 @@ type webhookPayload struct {
 	Type     string           `json:"type"`
 	Version  string           `json:"version"`
 	Monitor  webhookMonitor   `json:"monitor"`
+	Device   *webhookDevice   `json:"device,omitempty"`
 	Alert    webhookAlert     `json:"alert"`
 	Metrics  webhookMetrics   `json:"metrics"`
 	Incident *webhookIncident `json:"incident,omitempty"`
@@ -46,6 +47,13 @@ type webhookMonitor struct {
 	Name string `json:"name"`
 	URL  string `json:"url"`
 	Type string `json:"type,omitempty"`
+}
+
+type webhookDevice struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Host string `json:"host"`
+	Site string `json:"site,omitempty"`
 }
 
 type webhookAlert struct {
@@ -245,6 +253,13 @@ func (p *WebhookPlugin) buildPayload(m *NotificationMessage) webhookPayload {
 			ID:              m.IncidentID.String(),
 			DurationSeconds: int(m.DowntimeDuration.Seconds()),
 		}
+	}
+
+	if m.DeviceID != nil {
+		payload.Type = "sentinel_device_alert"
+		payload.Device = &webhookDevice{ID: m.DeviceID.String(), Name: m.MonitorName, Host: m.MonitorURL, Site: m.SiteName}
+		payload.Monitor = webhookMonitor{Name: m.MonitorName, URL: m.MonitorURL}
+		payload.Links = webhookLinks{ViewInSentinel: fmt.Sprintf("%s/network/devices/%s", base, *m.DeviceID)}
 	}
 
 	return payload

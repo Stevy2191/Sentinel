@@ -38,7 +38,7 @@ type updateIncidentRequest struct {
 
 // UpdateIncidentHandler handles PATCH /api/v1/incidents/:id, letting an operator
 // annotate an incident with root cause and resolution notes for reporting.
-func UpdateIncidentHandler(incidentService *services.IncidentService, monitorService *services.MonitorService, db *gorm.DB) gin.HandlerFunc {
+func UpdateIncidentHandler(incidentService *services.IncidentService, monitorService *services.MonitorService, sites siteAccessChecker, db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		incidentID, err := uuid.Parse(c.Param("id"))
 		if err != nil {
@@ -53,8 +53,8 @@ func UpdateIncidentHandler(incidentService *services.IncidentService, monitorSer
 		}
 
 		ctx := c.Request.Context()
-		var incident models.Incident
-		if err := db.WithContext(ctx).First(&incident, "id = ?", incidentID).Error; err != nil {
+		row, err := incidentService.GetIncidentByID(ctx, incidentID)
+		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				respondError(c, http.StatusNotFound, "incident not found")
 				return
@@ -62,12 +62,12 @@ func UpdateIncidentHandler(incidentService *services.IncidentService, monitorSer
 			respondInternal(c, "loading incident", err)
 			return
 		}
-
-		// An incident inherits its monitor's permissions: editing the annotation
-		// requires edit rights on the monitor it belongs to.
-		if !authorizeMonitor(c, monitorService, incident.MonitorID, "edit") {
+		// An incident inherits its subject's permissions: editing needs edit
+		// rights on the monitor, or editable access to the device's site.
+		if !authorizeIncident(c, monitorService, sites, row, "edit") {
 			return
 		}
+		incident := row.Incident
 
 		if req.Severity != nil && !validSeverities[*req.Severity] {
 			respondError(c, http.StatusBadRequest, "severity must be one of: low, medium, high, critical")
@@ -169,9 +169,74 @@ type incidentDetailReader interface {
 	ListComments(ctx context.Context, incidentID uuid.UUID) ([]models.IncidentComment, error)
 }
 
-// monitorViewChecker answers whether a user may see a monitor.
-type monitorViewChecker interface {
+// monitorAccessChecker answers whether a user may see or edit a monitor.
+type monitorAccessChecker interface {
 	CanUserViewMonitor(ctx context.Context, userID, monitorID uuid.UUID) (bool, error)
+	CanUserEditMonitor(ctx context.Context, userID, monitorID uuid.UUID) (bool, error)
+}
+
+// siteAccessChecker is SiteService.SiteAccess.
+type siteAccessChecker interface {
+	SiteAccess(ctx context.Context, userID uuid.UUID, isAdmin bool, siteID uuid.UUID) (services.SiteAccessLevel, error)
+}
+
+// incidentAccess is what the caller may do with an incident, decided by its
+// subject: monitor sharing for a monitor incident, site sharing for a device
+// incident.
+type incidentAccess struct{ view, edit bool }
+
+func incidentSubjectAccess(ctx context.Context, monitors monitorAccessChecker, sites siteAccessChecker,
+	userID uuid.UUID, isAdmin bool, row *services.IncidentWithMonitor) (incidentAccess, error) {
+	if isAdmin {
+		return incidentAccess{view: true, edit: true}, nil
+	}
+	switch {
+	case row.Incident.MonitorID != nil:
+		view, err := monitors.CanUserViewMonitor(ctx, userID, *row.Incident.MonitorID)
+		if err != nil || !view {
+			return incidentAccess{}, err
+		}
+		edit, err := monitors.CanUserEditMonitor(ctx, userID, *row.Incident.MonitorID)
+		return incidentAccess{view: true, edit: edit}, err
+	case row.SiteID != nil:
+		level, err := sites.SiteAccess(ctx, userID, false, *row.SiteID)
+		if errors.Is(err, services.ErrSiteNotFound) {
+			return incidentAccess{}, nil
+		}
+		if err != nil {
+			return incidentAccess{}, err
+		}
+		return incidentAccess{view: level >= services.SiteAccessReadonly, edit: level >= services.SiteAccessEditable}, nil
+	default:
+		return incidentAccess{}, nil
+	}
+}
+
+// authorizeIncident writes the response and returns false unless the caller
+// may act on the incident at level ("view" or "edit"). Not being able to see
+// it is a 404, exactly like an incident that does not exist; seeing but not
+// editing is a 403.
+func authorizeIncident(c *gin.Context, monitors monitorAccessChecker, sites siteAccessChecker,
+	row *services.IncidentWithMonitor, level string) bool {
+	userID, _, isAdmin, ok := GetUserFromContext(c)
+	if !ok {
+		respondAuthError(c, http.StatusUnauthorized, "authentication required")
+		return false
+	}
+	access, err := incidentSubjectAccess(c.Request.Context(), monitors, sites, userID, isAdmin, row)
+	if err != nil {
+		respondInternal(c, "incident access", err)
+		return false
+	}
+	if !access.view {
+		respondError(c, http.StatusNotFound, "no such incident")
+		return false
+	}
+	if level == "edit" && !access.edit {
+		respondError(c, http.StatusForbidden, "you do not have permission to edit this incident")
+		return false
+	}
+	return true
 }
 
 // ListIncidentsHandler handles GET /api/v1/incidents. Members see incidents
@@ -210,6 +275,21 @@ func ListIncidentsHandler(incidentService incidentLister) gin.HandlerFunc {
 			}
 			opts.MonitorID = &id
 		}
+		if raw := c.Query("device_id"); raw != "" && raw != "null" {
+			id, err := uuid.Parse(raw)
+			if err != nil {
+				respondError(c, http.StatusBadRequest, "device_id must be a UUID")
+				return
+			}
+			opts.DeviceID = &id
+		}
+		switch subj := c.Query("subject"); subj {
+		case "", "monitor", "device":
+			opts.Subject = subj
+		default:
+			respondError(c, http.StatusBadRequest, "subject must be monitor or device")
+			return
+		}
 		if opts.SortBy != "started" && opts.SortBy != "duration" {
 			respondError(c, http.StatusBadRequest, "sort must be started or duration")
 			return
@@ -238,7 +318,7 @@ func ListIncidentsHandler(incidentService incidentLister) gin.HandlerFunc {
 // GetIncidentHandler handles GET /api/v1/incidents/:id, including the checks
 // recorded while the incident was open. An incident on a monitor the caller
 // cannot see is a 404, exactly like one that does not exist.
-func GetIncidentHandler(incidentService incidentDetailReader, monitors monitorViewChecker) gin.HandlerFunc {
+func GetIncidentHandler(incidentService incidentDetailReader, monitors monitorAccessChecker, sites siteAccessChecker) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := uuid.Parse(c.Param("id"))
 		if err != nil {
@@ -257,21 +337,8 @@ func GetIncidentHandler(incidentService incidentDetailReader, monitors monitorVi
 
 		// Checked before any detail is loaded, so nothing about an incident
 		// the caller cannot see is read, let alone returned.
-		userID, _, isAdmin, ok := GetUserFromContext(c)
-		if !ok {
-			respondAuthError(c, http.StatusUnauthorized, "authentication required")
+		if !authorizeIncident(c, monitors, sites, row, "view") {
 			return
-		}
-		if !isAdmin {
-			allowed, err := monitors.CanUserViewMonitor(c.Request.Context(), userID, row.Incident.MonitorID)
-			if err != nil {
-				respondInternal(c, "GetIncidentHandler access", err)
-				return
-			}
-			if !allowed {
-				respondError(c, http.StatusNotFound, "no such incident")
-				return
-			}
 		}
 
 		checks, err := incidentService.ChecksDuringIncident(c.Request.Context(), &row.Incident, 200)
@@ -362,12 +429,12 @@ func UpdateIncidentRetentionHandler(settingsService *services.SettingsService) g
 
 // RegisterIncidentRoutes mounts the incident endpoints. Reading is open to any
 // authenticated user, as monitors are; annotating one stays where it was.
-func RegisterIncidentRoutes(rg *gin.RouterGroup, incidentService *services.IncidentService, monitorService *services.MonitorService, db *gorm.DB) {
+func RegisterIncidentRoutes(rg *gin.RouterGroup, incidentService *services.IncidentService, monitorService *services.MonitorService, sites siteAccessChecker, db *gorm.DB) {
 	rg.GET("/incidents", ListIncidentsHandler(incidentService))
-	rg.GET("/incidents/:id", GetIncidentHandler(incidentService, monitorService))
-	rg.PATCH("/incidents/:id", UpdateIncidentHandler(incidentService, monitorService, db))
-	rg.GET("/incidents/:id/comments", ListIncidentCommentsHandler(incidentService, monitorService))
-	rg.POST("/incidents/:id/comments", AddIncidentCommentHandler(incidentService, monitorService))
-	rg.PATCH("/incidents/:id/comments/:comment_id", UpdateIncidentCommentHandler(incidentService, monitorService))
-	rg.DELETE("/incidents/:id/comments/:comment_id", DeleteIncidentCommentHandler(incidentService, monitorService))
+	rg.GET("/incidents/:id", GetIncidentHandler(incidentService, monitorService, sites))
+	rg.PATCH("/incidents/:id", UpdateIncidentHandler(incidentService, monitorService, sites, db))
+	rg.GET("/incidents/:id/comments", ListIncidentCommentsHandler(incidentService, monitorService, sites))
+	rg.POST("/incidents/:id/comments", AddIncidentCommentHandler(incidentService, monitorService, sites))
+	rg.PATCH("/incidents/:id/comments/:comment_id", UpdateIncidentCommentHandler(incidentService, monitorService, sites))
+	rg.DELETE("/incidents/:id/comments/:comment_id", DeleteIncidentCommentHandler(incidentService, monitorService, sites))
 }
