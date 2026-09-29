@@ -19,6 +19,10 @@ var (
 	ErrCredentialNameTaken    = errors.New("a credential profile with this name already exists")
 	ErrCredentialInUse        = errors.New("this credential profile is used by devices; move them to another profile first")
 	ErrCredentialSiteMismatch = errors.New("devices in other sites use this profile, so it cannot be limited to one site")
+	// ErrCredentialDecryptFailed wraps a failure to decrypt a stored secret
+	// (wrong/rotated key, corrupt ciphertext), distinguishing it from a
+	// database error in the lookup that came before it.
+	ErrCredentialDecryptFailed = errors.New("credential profile could not be decrypted")
 )
 
 // CredentialView is a profile as the API shows it: never a secret, only
@@ -270,7 +274,7 @@ func (s *SNMPCredentialService) Decrypted(ctx context.Context, id uuid.UUID) (sn
 		src string
 	}{{&out.Community, c.Community}, {&out.AuthPassword, c.AuthPassword}, {&out.PrivPassword, c.PrivPassword}} {
 		if *f.dst, err = cryptutil.Decrypt(f.src); err != nil {
-			return snmp.Credential{}, fmt.Errorf("decrypting credential profile %q: %w", c.Name, err)
+			return snmp.Credential{}, fmt.Errorf("decrypting credential profile %q: %w: %w", c.Name, ErrCredentialDecryptFailed, err)
 		}
 	}
 	return out, nil
