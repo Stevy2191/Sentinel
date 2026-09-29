@@ -2,7 +2,7 @@ BINARY_NAME := sentinel
 BIN_DIR     := bin
 MAIN_PKG    := ./cmd/sentinel
 
-.PHONY: build run dev test tidy clean
+.PHONY: build run dev test test-db tidy clean
 
 ## build: Compile the binary into $(BIN_DIR)/$(BINARY_NAME)
 build:
@@ -24,6 +24,10 @@ dev:
 ## test: Run the test suite
 test:
 	go test ./...
+
+## test-db: Run the tests including database integration tests (needs Docker)
+test-db:
+	./scripts/test-db.sh
 
 ## tidy: Sync go.mod/go.sum with source imports
 tidy:
