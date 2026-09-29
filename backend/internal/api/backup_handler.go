@@ -107,7 +107,7 @@ func RestoreBackupHandler(backups *services.BackupService, audit auditRecorder) 
 
 		result, err := backups.Restore(c.Request.Context(), id)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, err.Error())
+			respondError(c, restoreErrorStatus(err), err.Error())
 			return
 		}
 		respondSuccess(c, http.StatusOK, gin.H{
@@ -131,6 +131,16 @@ func DeleteBackupHandler(backups *services.BackupService, audit auditRecorder) g
 		recordBackupAudit(c, audit, "backup.delete", id, name)
 		respondSuccess(c, http.StatusOK, gin.H{"deleted": true, "filename": name})
 	}
+}
+
+// restoreErrorStatus is the HTTP status for a failed restore. A backup from
+// another version is refused before anything changes, and the fix is the
+// caller's (pick another backup), so it is a conflict rather than a fault.
+func restoreErrorStatus(err error) int {
+	if errors.Is(err, services.ErrBackupVersionMismatch) {
+		return http.StatusConflict
+	}
+	return http.StatusInternalServerError
 }
 
 func respondBackupError(c *gin.Context, err error) {
