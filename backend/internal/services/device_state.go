@@ -42,7 +42,10 @@ type DeviceTransition struct {
 // NextDeviceState is every up/down rule, with no I/O, so each transition is
 // tested directly. Only the third consecutive failure opens an incident, and
 // only recovery from down notifies; a blocked or paused device is not an
-// outage, so any open incident is closed without a recovery notice.
+// outage, so any open incident is closed without a recovery notice. Down is
+// defined as 3 *consecutive* failures, so a blocked poll — which is not a
+// failure to reach the device, just a configuration problem — breaks the run
+// and resets the failure counter to 0 rather than carrying it forward.
 func NextDeviceState(status string, failures int, result PollResult) DeviceTransition {
 	switch result {
 	case PollOK:
@@ -65,9 +68,9 @@ func NextDeviceState(status string, failures int, result PollResult) DeviceTrans
 		return DeviceTransition{next, n, nil}
 	case PollBlocked:
 		if status == models.DeviceStatusDown {
-			return DeviceTransition{models.DeviceStatusError, failures, []DeviceAction{ActionCloseIncident}}
+			return DeviceTransition{models.DeviceStatusError, 0, []DeviceAction{ActionCloseIncident}}
 		}
-		return DeviceTransition{models.DeviceStatusError, failures, nil}
+		return DeviceTransition{models.DeviceStatusError, 0, nil}
 	default: // PollPaused
 		if status == models.DeviceStatusDown {
 			return DeviceTransition{models.DeviceStatusPaused, 0, []DeviceAction{ActionCloseIncident}}

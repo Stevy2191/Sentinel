@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -15,6 +16,23 @@ import (
 	"github.com/Stevy2191/Sentinel/backend/internal/notifications"
 	"github.com/Stevy2191/Sentinel/backend/internal/snmp"
 )
+
+// ErrDeviceNotEnabled is returned (optionally wrapped) by
+// PollerStore.SaveReachability when the device was disabled between being
+// queued and finishing its poll. PollOnce treats it as "this poll no longer
+// matters" rather than a failure: no log, no incident/notification actions,
+// no inventory — the device's own disablement already took care of anything
+// that needed doing.
+var ErrDeviceNotEnabled = errors.New("device is no longer enabled")
+
+// ErrCredentialUnusable is returned (optionally wrapped) by
+// PollerStore.DeviceCredential when the device's credential profile is
+// missing or cannot be decrypted. PollOnce treats this — and only this — as
+// a configuration problem (PollBlocked); any other error from
+// DeviceCredential (a database hiccup, a cancelled context) says nothing
+// about whether the device is reachable, so the poll is skipped entirely
+// rather than recorded as blocked.
+var ErrCredentialUnusable = errors.New("credential profile unusable")
 
 const (
 	pollerTick           = 5 * time.Second
@@ -36,14 +54,27 @@ type ReachabilityUpdate struct {
 // PollerStore is the poller's view of the database (DeviceService).
 type PollerStore interface {
 	DueDevices(ctx context.Context, now time.Time, limit int) ([]models.Device, error)
+	// DeviceCredential returns a device's decrypted credential profile. A
+	// missing or undecryptable profile is returned wrapping
+	// ErrCredentialUnusable; any other error means the lookup itself failed
+	// and says nothing about whether the credential is usable.
 	DeviceCredential(ctx context.Context, credentialID uuid.UUID) (snmp.Credential, error)
 	SiteName(ctx context.Context, siteID uuid.UUID) (string, error)
+	// SaveReachability stores one poll's outcome. It returns
+	// ErrDeviceNotEnabled when the device was disabled between being queued
+	// and finishing its poll (the database implementation returns it on an
+	// update that touched 0 rows, since its WHERE clause requires
+	// enabled = true).
 	SaveReachability(ctx context.Context, deviceID uuid.UUID, u ReachabilityUpdate) error
 	SaveInventory(ctx context.Context, deviceID uuid.UUID, inv snmp.Inventory, at time.Time) error
 	SaveInventoryError(ctx context.Context, deviceID uuid.UUID, detail string, at time.Time) error
 }
 
 // DeviceIncidents opens and closes device incidents (IncidentService).
+// OpenDeviceIncident is idempotent: called again while an incident is
+// already open, it returns that one with opened=false — PollOnce relies on
+// this to retry an open that failed to save on an earlier poll.
+// CloseDeviceIncident returns (nil, nil) when nothing is open.
 type DeviceIncidents interface {
 	OpenDeviceIncident(ctx context.Context, deviceID uuid.UUID, start time.Time, reason string) (*models.Incident, bool, error)
 	CloseDeviceIncident(ctx context.Context, deviceID uuid.UUID, end time.Time, note string) (*models.Incident, error)
@@ -182,21 +213,29 @@ func (p *DevicePoller) PollOnce(ctx context.Context, d models.Device) {
 	var uptime *int64
 
 	cred, err := p.store.DeviceCredential(ctx, d.CredentialID)
-	if err != nil {
+	switch {
+	case err != nil && errors.Is(err, ErrCredentialUnusable):
 		result, detail = PollBlocked, "credential profile unavailable: "+err.Error()
-	} else if ip, err := p.resolve(ctx, d.Host); err != nil {
-		result, detail = PollBlocked, "cannot resolve host: "+err.Error()
-	} else if p.blocked(ip) {
-		result, detail = PollBlocked, fmt.Sprintf("%s is blocked by network policy (ALLOW_PRIVATE_NETWORK_TARGETS)", ip)
-	} else {
-		target = TargetFor(d, ip.String(), cred)
-		pdus, err := p.client.Get(ctx, target, []string{snmp.OIDSysUpTime})
-		if err != nil {
-			result, detail = PollFailed, err.Error()
-		} else if len(pdus) == 1 {
-			if n, ok := pdus[0].Number(); ok {
-				s := int64(n / 100)
-				uptime = &s
+	case err != nil:
+		// Not a verdict about the device at all (a database hiccup, a
+		// cancelled context): nothing to save, nothing to act on.
+		p.logger.Printf("[snmp] looking up credential for %s: %v", d.Host, err)
+		return
+	default:
+		if ip, err := p.resolve(ctx, d.Host); err != nil {
+			result, detail = PollBlocked, "cannot resolve host: "+err.Error()
+		} else if p.blocked(ip) {
+			result, detail = PollBlocked, fmt.Sprintf("%s is blocked by network policy (ALLOW_PRIVATE_NETWORK_TARGETS)", ip)
+		} else {
+			target = TargetFor(d, ip.String(), cred)
+			pdus, err := p.client.Get(ctx, target, []string{snmp.OIDSysUpTime})
+			if err != nil {
+				result, detail = PollFailed, err.Error()
+			} else if len(pdus) == 1 {
+				if n, ok := pdus[0].Number(); ok {
+					s := int64(n / 100)
+					uptime = &s
+				}
 			}
 		}
 	}
@@ -207,10 +246,13 @@ func (p *DevicePoller) PollOnce(ctx context.Context, d models.Device) {
 		update.SeenAt = &now
 	}
 	if err := p.store.SaveReachability(ctx, d.ID, update); err != nil {
+		if errors.Is(err, ErrDeviceNotEnabled) {
+			return
+		}
 		p.logger.Printf("[snmp] saving poll of %s: %v", d.Host, err)
 		return
 	}
-	p.apply(ctx, d, tr.Actions, detail, now)
+	p.apply(ctx, d, tr, detail, now)
 
 	if result == PollOK && (d.LastInventoryAt == nil || now.Sub(*d.LastInventoryAt) >= inventoryInterval) {
 		inv, err := snmp.ReadInventory(ctx, p.client, target)
@@ -231,7 +273,8 @@ func displayName(d models.Device) string {
 	return d.Host
 }
 
-func (p *DevicePoller) apply(ctx context.Context, d models.Device, actions []DeviceAction, detail string, now time.Time) {
+func (p *DevicePoller) apply(ctx context.Context, d models.Device, tr DeviceTransition, detail string, now time.Time) {
+	actions := tr.Actions
 	var incident *models.Incident
 	for _, a := range actions {
 		var err error
@@ -254,6 +297,31 @@ func (p *DevicePoller) apply(ctx context.Context, d models.Device, actions []Dev
 			p.logger.Printf("[snmp] %s for %s: %v", a, d.Host, err)
 		}
 	}
+
+	// A device that stays down keeps making sure its incident is actually
+	// open. OpenDeviceIncident is idempotent, so on every poll that finds the
+	// device still down without having just opened one above (i.e. every
+	// poll after the first that crossed the threshold), this is a no-op once
+	// the incident exists — and the moment it isn't (the earlier open, from
+	// the poll that first crossed the threshold, failed to save), it opens
+	// one now and sends the down notification that poll should have sent.
+	if tr.Status == models.DeviceStatusDown && !containsAction(actions, ActionOpenIncident) {
+		retried, opened, err := p.incidents.OpenDeviceIncident(ctx, d.ID, now, detail)
+		if err != nil {
+			p.logger.Printf("[snmp] retrying incident open for %s: %v", d.Host, err)
+		} else if opened {
+			p.notify(ctx, d, ActionNotifyDown, retried, now)
+		}
+	}
+}
+
+func containsAction(actions []DeviceAction, want DeviceAction) bool {
+	for _, a := range actions {
+		if a == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *DevicePoller) notify(ctx context.Context, d models.Device, a DeviceAction, incident *models.Incident, now time.Time) {
@@ -288,11 +356,18 @@ func (p *DevicePoller) notify(ctx context.Context, d models.Device, a DeviceActi
 		m.Message = fmt.Sprintf("%s at %s (%s) has stopped answering SNMP. Last answered %s.", displayName(d), site, d.Host, last)
 	} else {
 		m.Status, m.PreviousStatus = "recovered", models.DeviceStatusDown
+		// CloseDeviceIncident returning nil (nothing was open, or the close
+		// itself errored) doesn't mean the device was never down — fall back
+		// to the device's own record of when it was last seen, rather than
+		// reporting "less than a minute" for what could be a long outage.
 		dur := time.Duration(0)
-		if incident != nil {
+		switch {
+		case incident != nil:
 			dur = time.Duration(incident.DurationSeconds) * time.Second
-			m.DowntimeDuration = dur
+		case d.LastSeenAt != nil:
+			dur = now.Sub(*d.LastSeenAt)
 		}
+		m.DowntimeDuration = dur
 		m.Message = fmt.Sprintf("%s at %s is answering again after %s.", displayName(d), site, humanDuration(dur))
 	}
 	if err := p.notifier.SendNotification(ctx, m); err != nil {

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"testing"
@@ -58,18 +59,35 @@ type fakeStore struct {
 	saved     []ReachabilityUpdate
 	inventory []snmp.Inventory
 	invErrors []string
+
+	// credErr, when set, is returned by DeviceCredential instead of a
+	// credential. Wrap ErrCredentialUnusable to simulate a missing/bad
+	// profile; any other error simulates a lookup failure unrelated to the
+	// credential itself (e.g. a database hiccup).
+	credErr error
+	// saveReachabilityErr, when set, is returned by SaveReachability instead
+	// of recording the update — set to ErrDeviceNotEnabled to simulate the
+	// device having been disabled while the poll was in flight (0 rows
+	// updated).
+	saveReachabilityErr error
 }
 
 func (s *fakeStore) DueDevices(context.Context, time.Time, int) ([]models.Device, error) {
 	return s.due, nil
 }
 func (s *fakeStore) DeviceCredential(context.Context, uuid.UUID) (snmp.Credential, error) {
+	if s.credErr != nil {
+		return snmp.Credential{}, s.credErr
+	}
 	return snmp.Credential{Version: "2c", Community: "public"}, nil
 }
 func (s *fakeStore) SiteName(context.Context, uuid.UUID) (string, error) { return "Warehouse", nil }
 func (s *fakeStore) SaveReachability(_ context.Context, _ uuid.UUID, u ReachabilityUpdate) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.saveReachabilityErr != nil {
+		return s.saveReachabilityErr
+	}
 	s.saved = append(s.saved, u)
 	return nil
 }
@@ -82,14 +100,29 @@ func (s *fakeStore) SaveInventoryError(_ context.Context, _ uuid.UUID, detail st
 	return nil
 }
 
-type fakeDeviceIncidents struct{ opened, closed int }
+type fakeDeviceIncidents struct {
+	opened, closed int
+	// openOpened controls what OpenDeviceIncident reports it did: true (the
+	// default, via newFakeDeviceIncidents) means it just opened a new one —
+	// matching the real IncidentService's idempotent behaviour where a
+	// repeat call while one is already open reports opened=false instead.
+	openOpened bool
+	// closeNil, when set, makes CloseDeviceIncident return (nil, nil), as
+	// the real service does when nothing is open to close.
+	closeNil bool
+}
+
+func newFakeDeviceIncidents() *fakeDeviceIncidents { return &fakeDeviceIncidents{openOpened: true} }
 
 func (f *fakeDeviceIncidents) OpenDeviceIncident(_ context.Context, id uuid.UUID, start time.Time, _ string) (*models.Incident, bool, error) {
 	f.opened++
-	return &models.Incident{ID: uuid.New(), DeviceID: &id, StartTime: start}, true, nil
+	return &models.Incident{ID: uuid.New(), DeviceID: &id, StartTime: start}, f.openOpened, nil
 }
 func (f *fakeDeviceIncidents) CloseDeviceIncident(_ context.Context, id uuid.UUID, end time.Time, _ string) (*models.Incident, error) {
 	f.closed++
+	if f.closeNil {
+		return nil, nil
+	}
 	return &models.Incident{ID: uuid.New(), DeviceID: &id, StartTime: end.Add(-12 * time.Minute), EndTime: &end, DurationSeconds: 720}, nil
 }
 
@@ -103,7 +136,7 @@ func (f *fakeNotifier) SendNotification(_ context.Context, m *notifications.Noti
 }
 
 func newTestPoller(client *fakeSNMP) (*DevicePoller, *fakeStore, *fakeDeviceIncidents, *fakeNotifier) {
-	store, inc, notif := &fakeStore{}, &fakeDeviceIncidents{}, &fakeNotifier{}
+	store, inc, notif := &fakeStore{}, newFakeDeviceIncidents(), &fakeNotifier{}
 	p := NewDevicePoller(store, client, inc, notif, 2)
 	p.resolve = func(context.Context, string) (net.IP, error) { return net.ParseIP("10.20.0.2"), nil }
 	p.blocked = func(net.IP) bool { return false }
@@ -236,5 +269,105 @@ func TestDispatchSkipsDevicesInFlight(t *testing.T) {
 	}
 	if n := p.Dispatch(context.Background(), jobs); n != 0 {
 		t.Errorf("second dispatch queued %d again", n)
+	}
+}
+
+// A device that stays down keeps asking the incident service to open one:
+// OpenDeviceIncident is idempotent, so this only matters — and only sends a
+// notification — the moment the earlier open (from the poll that first
+// crossed the threshold) never actually landed.
+func TestPollerRetriesFailedIncidentOpenWhileDown(t *testing.T) {
+	t.Run("earlier open had failed", func(t *testing.T) {
+		p, store, inc, notif := newTestPoller(&fakeSNMP{getErr: errors.New("still timing out")})
+		inc.openOpened = true // reports it just opened one: nothing was open before
+		p.PollOnce(context.Background(), device(models.DeviceStatusDown, 6))
+		if len(store.saved) != 1 || store.saved[0].Status != models.DeviceStatusDown || store.saved[0].Failures != 7 {
+			t.Fatalf("saved %+v", store.saved)
+		}
+		if inc.opened != 1 {
+			t.Fatalf("open attempted %d times, want 1", inc.opened)
+		}
+		if len(notif.sent) != 1 || notif.sent[0].Status != "down" {
+			t.Fatalf("sent %+v, want exactly one down notification", notif.sent)
+		}
+	})
+	t.Run("incident was already open", func(t *testing.T) {
+		p, store, inc, notif := newTestPoller(&fakeSNMP{getErr: errors.New("still timing out")})
+		inc.openOpened = false // reports one was already open: nothing new happened
+		p.PollOnce(context.Background(), device(models.DeviceStatusDown, 6))
+		if len(store.saved) != 1 || store.saved[0].Status != models.DeviceStatusDown {
+			t.Fatalf("saved %+v", store.saved)
+		}
+		if inc.opened != 1 {
+			t.Fatalf("open not attempted: %d", inc.opened)
+		}
+		if len(notif.sent) != 0 {
+			t.Fatalf("sent %d, want no duplicate notification", len(notif.sent))
+		}
+	})
+}
+
+// When CloseDeviceIncident has nothing to close (returns nil, nil), the
+// recovery notice falls back to the device's own LastSeenAt for how long it
+// was down, instead of silently reporting "less than a minute".
+func TestPollerRecoveryWithoutIncidentUsesLastSeen(t *testing.T) {
+	p, store, inc, notif := newTestPoller(&fakeSNMP{})
+	inc.closeNil = true
+	d := device(models.DeviceStatusDown, 5)
+	seen := p.now().Add(-40 * time.Minute)
+	d.LastSeenAt = &seen
+	p.PollOnce(context.Background(), d)
+	if store.saved[0].Status != models.DeviceStatusUp {
+		t.Fatalf("saved %+v", store.saved)
+	}
+	if len(notif.sent) != 1 || notif.sent[0].Message != "core-sw-1 at Warehouse is answering again after 40 minutes." {
+		t.Fatalf("sent %+v", notif.sent)
+	}
+}
+
+// A poll that finishes after the device was disabled must not open an
+// incident or send a notification: the state it computed no longer applies.
+func TestPollerIgnoresPollsForDisabledDevices(t *testing.T) {
+	p, store, inc, notif := newTestPoller(&fakeSNMP{getErr: errors.New("timeout")})
+	store.saveReachabilityErr = ErrDeviceNotEnabled
+	p.PollOnce(context.Background(), device(models.DeviceStatusUp, 2))
+	if len(store.saved) != 0 {
+		t.Fatalf("saved %+v, want nothing saved", store.saved)
+	}
+	if inc.opened != 0 || len(notif.sent) != 0 {
+		t.Fatalf("opened %d incidents, sent %d notifications; want none", inc.opened, len(notif.sent))
+	}
+}
+
+// A credential that is missing or fails to decrypt is a configuration
+// problem, not an outage: the poll is blocked.
+func TestPollerCredentialUnusableIsBlocked(t *testing.T) {
+	p, store, inc, notif := newTestPoller(&fakeSNMP{})
+	store.credErr = fmt.Errorf("decrypting community: %w", ErrCredentialUnusable)
+	p.PollOnce(context.Background(), device(models.DeviceStatusUp, 0))
+	if len(store.saved) != 1 || store.saved[0].Status != models.DeviceStatusError {
+		t.Fatalf("saved %+v", store.saved)
+	}
+	if inc.opened != 0 || len(notif.sent) != 0 {
+		t.Fatalf("opened %d, sent %d; want none", inc.opened, len(notif.sent))
+	}
+}
+
+// Any other error from the credential lookup (a database hiccup, a
+// cancelled context) says nothing about the device: the poll is skipped
+// entirely rather than recorded as blocked.
+func TestPollerCredentialLookupErrorSkipsThePoll(t *testing.T) {
+	client := &fakeSNMP{}
+	p, store, inc, notif := newTestPoller(client)
+	store.credErr = context.DeadlineExceeded
+	p.PollOnce(context.Background(), device(models.DeviceStatusUp, 0))
+	if len(store.saved) != 0 {
+		t.Fatalf("saved %+v, want nothing saved", store.saved)
+	}
+	if client.gets != 0 {
+		t.Fatalf("gets %d, want 0", client.gets)
+	}
+	if inc.opened != 0 || len(notif.sent) != 0 {
+		t.Fatalf("opened %d, sent %d; want none", inc.opened, len(notif.sent))
 	}
 }
