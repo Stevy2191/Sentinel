@@ -526,9 +526,29 @@ func (s *IncidentService) OpenDeviceIncident(ctx context.Context, deviceID uuid.
 // CloseDeviceIncident closes a device's open incident, appending note to its
 // resolution notes when given. Returns nil, nil when nothing is open.
 func (s *IncidentService) CloseDeviceIncident(ctx context.Context, deviceID uuid.UUID, end time.Time, note string) (*models.Incident, error) {
-	active, err := s.activeDeviceIncident(ctx, deviceID)
-	if err != nil || active == nil {
-		return nil, err
+	return s.closeDeviceIncident(s.db.WithContext(ctx), deviceID, end, note)
+}
+
+// CloseDeviceIncidentTx is CloseDeviceIncident run against an existing
+// transaction handle, so a caller can make the close commit or roll back
+// atomically with another write — e.g. DeviceService.Update pausing a
+// device and closing its incident together: if the device's own update
+// fails, the incident must not end up closed anyway.
+func (s *IncidentService) CloseDeviceIncidentTx(tx *gorm.DB, deviceID uuid.UUID, end time.Time, note string) (*models.Incident, error) {
+	return s.closeDeviceIncident(tx, deviceID, end, note)
+}
+
+// closeDeviceIncident is CloseDeviceIncident's body, run against whatever
+// *gorm.DB it is given (the service's own db, already WithContext'd, or a
+// caller's transaction).
+func (s *IncidentService) closeDeviceIncident(db *gorm.DB, deviceID uuid.UUID, end time.Time, note string) (*models.Incident, error) {
+	var active models.Incident
+	err := db.First(&active, "device_id = ? AND end_time IS NULL", deviceID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying active incident for device %s: %w", deviceID, err)
 	}
 	if end.Before(active.StartTime) {
 		end = active.StartTime
@@ -545,11 +565,11 @@ func (s *IncidentService) CloseDeviceIncident(ctx context.Context, deviceID uuid
 		}
 		updates["resolution_notes"] = notes
 	}
-	if err := s.db.WithContext(ctx).Model(&models.Incident{}).Where("id = ?", active.ID).Updates(updates).Error; err != nil {
+	if err := db.Model(&models.Incident{}).Where("id = ?", active.ID).Updates(updates).Error; err != nil {
 		return nil, fmt.Errorf("closing incident %s: %w", active.ID, err)
 	}
 	var closed models.Incident
-	if err := s.db.WithContext(ctx).First(&closed, "id = ?", active.ID).Error; err != nil {
+	if err := db.First(&closed, "id = ?", active.ID).Error; err != nil {
 		return nil, fmt.Errorf("reloading incident %s: %w", active.ID, err)
 	}
 	s.logger.Printf("[incident] closed id=%s device=%s duration=%ds", closed.ID, deviceID, closed.DurationSeconds)
