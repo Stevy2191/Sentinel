@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMonitors } from '@/hooks/useMonitors'
 import { useAgentSummary } from '@/hooks/useAgents'
+import { useSiteSummary } from '@/hooks/useSites'
 import { useSystemResources } from '@/hooks/useSystemResources'
 import { useSSLSummary } from '@/hooks/useSSLCertificates'
 import { useSummaryReport } from '@/hooks/useReports'
@@ -59,6 +60,7 @@ export default function Overview() {
   const { monitors, refetch } = useMonitors()
   const agentSummary = useAgentSummary()
   const sslSummary = useSSLSummary()
+  const siteSummary = useSiteSummary()
   const { pages: statusPages } = useStatusPages()
   const { reports: savedReports, listReports } = useSavedReports()
   const { resources: host } = useSystemResources()
@@ -100,6 +102,7 @@ export default function Overview() {
     'uptime',
     'ssl',
     'agents',
+    'network',
     'statusPages',
     'incidents',
     'reports',
@@ -169,6 +172,14 @@ export default function Overview() {
         subtitle: agentSummary.subtitle,
       },
       {
+        key: 'network',
+        title: 'Network Monitoring',
+        to: '/network',
+        colorType: 'network' as const,
+        value: siteSummary.value,
+        subtitle: siteSummary.subtitle,
+      },
+      {
         key: 'statusPages',
         title: 'Status Pages',
         to: '/status-pages',
@@ -193,7 +204,7 @@ export default function Overview() {
         subtitle: savedReports.length === 0 ? 'none saved' : 'saved',
       },
     ],
-    [counts, sslSummary, agentSummary, statusPages, summary, periodHeading, savedReports],
+    [counts, sslSummary, agentSummary, siteSummary, statusPages, summary, periodHeading, savedReports],
   )
 
   const lastUpdated = useMemo(
@@ -335,7 +346,7 @@ export default function Overview() {
               per-type breakdown that used to sit below answered a question the
               uptime page answers better, and gave no card at all to the sections
               that have no types. */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7">
             {sectionCards.map((card) => (
               <ShimmerStatCard
                 key={card.key}
