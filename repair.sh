@@ -268,9 +268,11 @@ backup_database() {
   ts="$(date +%s)"
   file="$SCRIPT_DIR/backup-${ts}.sql"
   bold "Backing up database..."
-  # public only: Sentinel's configuration. Collected network metrics live in
-  # the metrics schema and would make this safety dump grow without bound.
-  if $DC exec -T postgres pg_dump -U sentinel --schema=public sentinel > "$file" 2>>"$LOG"; then
+  # Tables in public only: Sentinel's configuration. Collected network metrics
+  # live in the metrics schema and would make this safety dump grow without
+  # bound. --table rather than --schema, for the reason in
+  # BackupService.dumpArgs: a schema-selected dump cannot be restored.
+  if $DC exec -T postgres pg_dump -U sentinel --table='public.*' sentinel > "$file" 2>>"$LOG"; then
     if [ -s "$file" ]; then
       ok "Backup saved to $(basename "$file")"
       log_line "BACKUP: $file"

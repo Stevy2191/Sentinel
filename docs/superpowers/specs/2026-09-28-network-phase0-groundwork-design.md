@@ -113,7 +113,7 @@ itself.
 
 ### 2. Backups: configuration only
 
-**Dump scope.** `BackupService.Create` adds `--schema=public` to its
+**Dump scope.** `BackupService.Create` adds `--table=public.*` to its
 `pg_dump` arguments. Sentinel's own tables all live in `public`, so the dump
 still contains every monitor, site, credential, report, incident and
 setting. It no longer contains:
@@ -121,7 +121,7 @@ setting. It no longer contains:
 - the `metrics` schema: collected metrics are not backed up (roadmap
   decision; they are protected at the volume level, see below);
 - TimescaleDB's internal `_timescaledb_*` schemas;
-- extensions. With `--schema`, `pg_dump` does not emit `CREATE EXTENSION` or,
+- extensions. With `--table`, `pg_dump` does not emit `CREATE EXTENSION` or,
   under `--clean`, `DROP EXTENSION`, so a restore can never drop
   `timescaledb` and cascade into the hypertables.
 
@@ -149,12 +149,24 @@ run by the host).
 
 **`repair.sh`** takes its own safety dump before a full repair
 (`repair.sh:271`), a plain full `pg_dump` that the script never restores. It
-gets the same `--schema=public`, so it stays small once metrics exist.
+gets the same `--table='public.*'`, so it stays small once metrics exist.
 
-**To confirm on the sandbox, not assumed** (listed again in Testing):
-how `pg_dump --schema=public --clean` treats the `public` schema object
-itself on restore, and that no `pgcrypto` object Sentinel relies on is lost
-by excluding extensions.
+**Why `--table`, not `--schema` (settled on the sandbox, 2026-09-29).** The
+first version used `--schema=public`. Selecting the schema makes
+`pg_dump --clean` emit `DROP SCHEMA IF EXISTS public`, which fails because the
+`pgcrypto` and `timescaledb` extensions live in `public`. It fails only after
+every table has been dropped, so `ON_ERROR_STOP` left an empty database;
+reproduced twice on a scratch database. `--table=public.*` emits no schema or
+extension statements, and restored cleanly into an empty and a populated
+database with a hypertable in `metrics` surviving both. `pgcrypto` needs
+nothing from the dump: no migration uses its functions.
+
+**Rule: Sentinel keeps only tables (and their sequences) in `public`.**
+`--table` dumps nothing else, so a function, view or custom type added to
+`public` would silently be missing after a restore. At startup the backend
+logs a warning naming any such object (`database.WarnNonTableObjects`);
+extension-owned objects are excluded. A later phase that needs one must also
+change the backup.
 
 ### 3. Sites
 
@@ -311,7 +323,8 @@ container) is deferred to phase 2, where the metrics code needs it.
   calling each admin route gets 403 **and the handler body does not run**;
   an inaccessible site is 404; a duplicate name is 409.
 - The TimescaleDB preflight message.
-- `BackupService` dump arguments include `--schema=public`.
+- `BackupService` dump arguments include `--table=public.*` and never select a
+  schema; the non-table-objects warning names what it finds.
 
 **Sandbox checklist** (`/srv/docker/sentinel-dev`, `IMAGE_TAG=dev`):
 
