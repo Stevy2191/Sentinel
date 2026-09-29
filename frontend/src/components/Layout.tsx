@@ -26,6 +26,8 @@ const nav = [
 // adminOnly entries are hidden from members, as Users is.
 const networkNav: { to: string; label: string; end?: boolean; adminOnly?: boolean }[] = [
   { to: '/network/sites', label: 'Sites' },
+  { to: '/network/devices', label: 'Devices' },
+  { to: '/network/credentials', label: 'Credentials', adminOnly: true },
 ]
 
 /** Whether a path belongs to the Network Monitoring section. */

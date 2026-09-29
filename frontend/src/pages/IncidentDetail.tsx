@@ -113,7 +113,7 @@ export default function IncidentDetail() {
   // Where "back" goes. A caller can say where it came from; otherwise the
   // monitor is the sensible parent, since that is what the incident belongs to.
   const from = (location.state as { from?: string } | null)?.from
-  const backTo = from ?? (inc ? `/monitors/${inc.monitor_id}` : '/incidents')
+  const backTo = from ?? (inc ? `/monitors/${inc.monitor_id ?? ''}` : '/incidents')
   const backLabel = from === '/incidents' ? 'Back to Incidents' : 'Back to Monitor'
 
   if (loading && !detail) {
@@ -153,7 +153,7 @@ export default function IncidentDetail() {
             <ArrowLeft className="h-4 w-4" /> {backLabel}
           </Link>
           <nav aria-label="Breadcrumb" className="mt-1 text-xs text-slate-600">
-            <Link to={`/monitors/${inc.monitor_id}`} className="transition hover:text-slate-400">
+            <Link to={`/monitors/${inc.monitor_id ?? ''}`} className="transition hover:text-slate-400">
               {inc.monitor_name}
             </Link>
             <span className="px-1">›</span>
@@ -161,7 +161,7 @@ export default function IncidentDetail() {
           </nav>
         </div>
         <Link
-          to={`/monitors/${inc.monitor_id}`}
+          to={`/monitors/${inc.monitor_id ?? ''}`}
           className="inline-flex items-center gap-1.5 text-sm text-emerald-400 underline-offset-2 hover:underline"
         >
           View monitor <ExternalLink className="h-3.5 w-3.5" />

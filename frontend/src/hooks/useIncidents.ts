@@ -7,7 +7,14 @@ export type IncidentType = 'down' | 'timeout' | 'error'
 
 export interface Incident {
   id: string
-  monitor_id: string
+  /** Set for monitor incidents; null for network device incidents. */
+  monitor_id: string | null
+  device_id: string | null
+  subject_type: 'monitor' | 'device'
+  subject_name: string
+  subject_target: string
+  site_id: string | null
+  site_name: string
   monitor_name: string
   monitor_url: string
   monitor_type: string
@@ -32,6 +39,8 @@ export interface IncidentFilters {
   sort: 'started' | 'duration'
   order: 'asc' | 'desc'
   monitorId?: string
+  subject?: 'monitor' | 'device'
+  deviceId?: string
 }
 
 export const DEFAULT_FILTERS: IncidentFilters = {
@@ -68,7 +77,7 @@ export function useIncidents(filters: IncidentFilters) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const { page, limit, status, search, sort, order, monitorId } = filters
+  const { page, limit, status, search, sort, order, monitorId, subject, deviceId } = filters
 
   const refetch = useCallback(async () => {
     setLoading(true)
@@ -83,6 +92,8 @@ export function useIncidents(filters: IncidentFilters) {
           order,
           ...(search.trim() ? { search: search.trim() } : {}),
           ...(monitorId ? { monitor_id: monitorId } : {}),
+          ...(subject ? { subject } : {}),
+          ...(deviceId ? { device_id: deviceId } : {}),
         },
       })
       setIncidents(res.data.data.incidents ?? [])
@@ -94,7 +105,7 @@ export function useIncidents(filters: IncidentFilters) {
     } finally {
       setLoading(false)
     }
-  }, [page, limit, status, search, sort, order, monitorId])
+  }, [page, limit, status, search, sort, order, monitorId, subject, deviceId])
 
   useEffect(() => {
     void refetch()
