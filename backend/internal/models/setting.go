@@ -61,6 +61,10 @@ const (
 	// SettingDefaultSLATarget is the uptime percentage a monitor is held to
 	// when it carries no override of its own.
 	SettingDefaultSLATarget = "default_sla_target"
+
+	// SettingSNMPPollWorkers sizes the SNMP poller's worker pool (default 16).
+	// Read at startup; a change takes effect on restart.
+	SettingSNMPPollWorkers = "snmp_poll_workers"
 )
 
 // Bounds and defaults for the system settings above.

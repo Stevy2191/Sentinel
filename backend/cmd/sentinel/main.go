@@ -28,6 +28,7 @@ import (
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
 	"github.com/Stevy2191/Sentinel/backend/internal/notifications"
 	"github.com/Stevy2191/Sentinel/backend/internal/services"
+	"github.com/Stevy2191/Sentinel/backend/internal/snmp"
 )
 
 const shutdownTimeout = 30 * time.Second
@@ -133,6 +134,11 @@ func run() error {
 	reportAggregator := services.NewReportAggregatorService(db, settingsService)
 	auditService := services.NewAuditService(db)
 	siteService := services.NewSiteService(db)
+	snmpCredentialService := services.NewSNMPCredentialService(db)
+	deviceService := services.NewDeviceService(db, snmpCredentialService, incidentService)
+	snmpClient := snmp.GoSNMPClient{}
+	prober := services.NewProber(snmpCredentialService, snmpClient)
+	scanManager := services.NewScanManager(prober)
 	pdfRenderer, err := services.NewPDFRendererService(cfg.ReportsDir)
 	if err != nil {
 		return fmt.Errorf("initializing report renderer: %w", err)
@@ -321,6 +327,9 @@ func run() error {
 	api.RegisterAgentRoutes(v1, agentService, settingsService, authService)
 	api.RegisterBackupRoutes(v1, backupService, auditService, authService)
 	api.RegisterSiteRoutes(v1, siteService, auditService, authService)
+	api.RegisterSNMPCredentialRoutes(v1, snmpCredentialService, siteService, auditService, authService)
+	api.RegisterDeviceRoutes(v1, deviceService, prober, siteService, auditService)
+	api.RegisterScanRoutes(v1, scanManager, snmpCredentialService, deviceService, siteService, auditService)
 	api.RegisterSystemRoutes(v1, hostSampler, version)
 	// Per-user theme (not admin-gated): only AuthMiddleware applies.
 	// Self password change (any authenticated user).
@@ -361,6 +370,9 @@ func run() error {
 	})
 	go agentService.StartOfflineSweep(loopCtx)
 	go hostSampler.Start(loopCtx)
+	pollWorkers := settingsService.GetInt(context.Background(), models.SettingSNMPPollWorkers, 16)
+	devicePoller := services.NewDevicePoller(deviceService, snmpClient, incidentService, notificationManager, pollWorkers)
+	go devicePoller.Start(loopCtx)
 
 	// 9. HTTP server.
 	server := &http.Server{
