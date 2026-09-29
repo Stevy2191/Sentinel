@@ -132,6 +132,7 @@ func run() error {
 	discoveryService := services.NewDiscoveryService()
 	reportAggregator := services.NewReportAggregatorService(db, settingsService)
 	auditService := services.NewAuditService(db)
+	siteService := services.NewSiteService(db)
 	pdfRenderer, err := services.NewPDFRendererService(cfg.ReportsDir)
 	if err != nil {
 		return fmt.Errorf("initializing report renderer: %w", err)
@@ -319,6 +320,7 @@ func run() error {
 	api.RegisterSSLCertificateRoutes(v1, sslChecker, authService)
 	api.RegisterAgentRoutes(v1, agentService, settingsService, authService)
 	api.RegisterBackupRoutes(v1, backupService, auditService, authService)
+	api.RegisterSiteRoutes(v1, siteService, auditService, authService)
 	api.RegisterSystemRoutes(v1, hostSampler, version)
 	// Per-user theme (not admin-gated): only AuthMiddleware applies.
 	// Self password change (any authenticated user).
