@@ -103,6 +103,8 @@ func run() error {
 	if err := runMigrations(db, cfg.MigrationsDir); err != nil {
 		return fmt.Errorf("running migrations: %w", err)
 	}
+	// Backups dump only tables; say so if anything else has appeared in public.
+	database.WarnNonTableObjects(db)
 
 	// 3. Services.
 	monitorService := services.NewMonitorService(db)

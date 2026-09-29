@@ -146,18 +146,26 @@ func (s *BackupService) pathFor(id string) (string, error) {
 // --no-owner and --no-privileges keep the dump portable, so it can be
 // restored into an install whose database role has a different name.
 //
-// --schema=public makes backups configuration only. Sentinel's own tables all
-// live in public; collected network metrics live in the metrics schema and
-// are deliberately left out (they are protected at the volume level). It also
-// keeps extensions out of the dump: with --clean, including timescaledb would
-// make a restore start with DROP EXTENSION, cascading to every hypertable.
+// --table=public.* makes backups configuration only: every table (and its
+// sequences) in public, where all of Sentinel's own data lives. Collected
+// network metrics live in the metrics schema and are deliberately left out
+// (they are protected at the volume level). Extensions are left out too: with
+// --clean, including timescaledb would make a restore start with DROP
+// EXTENSION, cascading to every hypertable.
+//
+// Not --schema=public: selecting the schema makes --clean emit DROP SCHEMA
+// public, which fails because pgcrypto and timescaledb live there, and fails
+// only after every table has been dropped, leaving an empty database. The
+// cost of --table is that only tables and sequences are dumped, so Sentinel
+// keeps nothing else in public (checked at startup by
+// database.WarnNonTableObjects).
 func (s *BackupService) dumpArgs() []string {
 	return []string{
 		"--host", s.db.Host,
 		"--port", s.db.Port,
 		"--username", s.db.User,
 		"--dbname", s.db.Name,
-		"--schema=public",
+		"--table=public.*",
 		"--clean", "--if-exists",
 		"--no-owner", "--no-privileges",
 	}
