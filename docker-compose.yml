@@ -1,6 +1,20 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    # TimescaleDB is Postgres 16 plus the extension, on the same Alpine base as
+    # postgres:16-alpine, so an existing data directory opens unchanged.
+    # Pinned: a pull must never change the database engine underneath an
+    # install. Upgrading is a deliberate edit plus ALTER EXTENSION ... UPDATE.
+    image: timescale/timescaledb:2.30.1-pg16
+    # The image only writes shared_preload_libraries into postgresql.conf when
+    # it initialises a NEW data directory. Every upgraded install already has
+    # one, so it is passed here or CREATE EXTENSION fails. Telemetry is off:
+    # Sentinel does not phone home, and neither should its database.
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=timescaledb
+      - -c
+      - timescaledb.telemetry_level=off
     container_name: sentinel-postgres
     environment:
       POSTGRES_DB: sentinel
