@@ -24,6 +24,13 @@ const (
 	ActionSiteDeleted      = "site_deleted"
 	ActionSiteShared       = "site_shared"
 	ActionSiteUnshared     = "site_unshared"
+
+	ActionCredentialCreated = "snmp_credential_created"
+	ActionCredentialUpdated = "snmp_credential_updated"
+	ActionCredentialDeleted = "snmp_credential_deleted"
+	ActionDeviceCreated     = "device_created"
+	ActionDeviceUpdated     = "device_updated"
+	ActionDeviceDeleted     = "device_deleted"
 )
 
 // Audited resource types.
@@ -32,6 +39,9 @@ const (
 	ResourceSchedule  = "schedule"
 	ResourceShareLink = "share_link"
 	ResourceSite      = "site"
+
+	ResourceSNMPCredential = "snmp_credential"
+	ResourceDevice         = "device"
 )
 
 // AuditChanges is the JSONB detail on an audit entry. For an update it carries
