@@ -1,4 +1,4 @@
-# Network monitoring roadmap: SNMP, custom metrics, dashboards, live maps
+# Network monitoring roadmap: SNMP, custom metrics, dashboards, reports, live maps
 
 This is a roadmap, not a design. Each phase below gets its own design spec,
 implementation plan and sandbox verification before it merges. What this
@@ -29,6 +29,8 @@ ports, a mix of Ubiquiti EdgeSwitches, UniFi, and Cisco/Meraki hardware.
 - A **live topology map** per site: devices as nodes, links bound to chosen
   ports, bandwidth shown flowing along them in near real time.
 - **Long-term full-resolution history** for bandwidth and other metrics.
+- **Reports over any device and any metric**: every collected metric can be
+  put in a scheduled, emailed PDF report, just as uptime is today.
 - **Port changes are logged, not all alerted.** Every up/down is recorded;
   alerts fire only for ports marked important.
 
@@ -72,10 +74,11 @@ ports, a mix of Ubiquiti EdgeSwitches, UniFi, and Cisco/Meraki hardware.
 5. **One generic metrics model.** Every collected value, whether built-in
    port stats, a custom OID from an uploaded MIB, or UniFi controller data,
    lands in the same shape: *device × metric × instance × time → value*
-   (instance is e.g. an ifIndex, a radio, a client MAC). Dashboards and maps
-   query that one model and never need to know where a value came from. This
-   is the decision that makes user-built dashboards possible, so phase 2 must
-   get it right before anything builds on it.
+   (instance is e.g. an ifIndex, a radio, a client MAC). Dashboards, reports
+   and maps query that one model and never need to know where a value came
+   from. This is the decision that makes user-built dashboards and
+   any-metric reports possible, so phase 2 must get it right before anything
+   builds on it.
 
 6. **Log everything, alert on the chosen.** Every port status change is an
    event, with rapid up/down cycles grouped into a single flap event. Alerts
@@ -163,7 +166,29 @@ Depends on: 2.
 
 Depends on: 2. Most useful once 3 exists.
 
-### Phase 5 — Live site maps
+### Phase 5 — Metric reports
+
+- A third fixed report type, **Metrics**, next to Uptime and Incident. It
+  keeps the 2026-09-23 reporting overhaul's rule of fixed report types with
+  no section picker: what the user picks is data (scope, metrics, period),
+  not which sections to render.
+- **Scope** extends the existing picker with sites, devices, device
+  profiles and individual ports, alongside the monitor scopes.
+- **Metrics**: any metric in the generic model, built-in or custom, so
+  custom MIB metrics (phase 3) and UniFi data (phase 7) become reportable
+  with no extra work.
+- **Content**: a summary table per device/port (min, average, max, 95th
+  percentile, and total volume for counters) and one chart per metric, with
+  the 95th-percentile line. The chart generalises the `fpdf` uptime chart
+  from the overhaul rather than adding a charting dependency.
+- Aggregation reads the TimescaleDB continuous aggregates, so a year-long
+  report over thousands of ports does not scan raw rows.
+- Period picker, scheduling, email delivery and sharing carry over
+  unchanged.
+
+Depends on: 2. Covers custom metrics once 3 exists.
+
+### Phase 6 — Live site maps
 
 - **LLDP neighbor collection** to suggest links automatically.
 - **Map editor**: devices as draggable nodes, links bound to a port at one or
@@ -177,7 +202,7 @@ Depends on: 2. Most useful once 3 exists.
 
 Depends on: 2 and 4.
 
-### Phase 6 — UniFi controller source
+### Phase 7 — UniFi controller source
 
 - Optional per-site data source for the self-hosted UniFi Network controller
   API.
@@ -190,14 +215,14 @@ Depends on: 2.
 
 ### Later
 
-Bandwidth in PDF reports, 95th-percentile figures, a geographic multi-site
-view. None are designed yet.
+Running a dashboard as a report (its widgets rendered into the PDF), and a
+geographic multi-site view. Neither is designed yet.
 
 ## Order and milestones
 
 Phases 0 → 1 → 2 are strictly sequential; after phase 2 Sentinel is a usable
-switch monitor on its own. Phases 3, 4 and 6 depend only on 2 and can be
-reordered by priority; 5 needs 4. Each phase ships to the sandbox first and
+switch monitor on its own. Phases 3, 4, 5 and 7 depend only on 2 and can be
+reordered by priority; 6 needs 4. Each phase ships to the sandbox first and
 merges to `dev` when verified there.
 
 ## Risks
@@ -212,5 +237,9 @@ merges to `dev` when verified there.
   must degrade gracefully and report what it could not resolve rather than
   reject the whole file.
 - **Getting the metrics model wrong (phase 2).** Everything after builds on
-  it. Its phase-2 design must be checked against dashboard, map and UniFi
-  needs before it is built.
+  it. Its phase-2 design must be checked against dashboard, report, map and
+  UniFi needs before it is built.
+- **Report query cost (phase 5).** Percentiles and totals over long periods
+  and many ports are expensive on raw data. The continuous aggregates
+  designed in phase 2 must include what reports need (e.g. per-bucket max and
+  a percentile-friendly form), or phase 5 will have to rebuild them.
