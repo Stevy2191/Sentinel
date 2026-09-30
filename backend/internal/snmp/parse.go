@@ -31,7 +31,7 @@ const (
 // traffic counters in the same tables (phase 2) are not fetched here.
 var (
 	ifTableColumns  = []int{1, 2, 3, 5, 6, 7, 8, 9} // index, descr, type, speed, physAddress, admin, oper, lastChange
-	ifXTableColumns = []int{1, 15, 18}              // name, highSpeed, alias
+	ifXTableColumns = []int{1, 15, 17, 18}          // name, highSpeed, connectorPresent, alias
 	entityColumns   = []int{5, 11, 13}              // class, serialNum, modelName
 )
 
@@ -58,6 +58,10 @@ type Interface struct {
 	AdminStatus       string
 	OperStatus        string
 	LastChangeSeconds int64
+	// HasIfX: the ifXTable answered for this interface in this walk.
+	HasIfX bool
+	// ConnectorPresent is ifConnectorPresent; nil when not reported.
+	ConnectorPresent *bool
 }
 
 // Inventory is everything a refresh learns about a device.
@@ -173,12 +177,18 @@ func ParseInterfaces(pdus []PDU) []Interface {
 		}
 		if col, idx, ok := splitColumn(p.OID, oidIfXEntry); ok {
 			it := get(idx)
+			it.HasIfX = true
 			switch col {
 			case 1:
 				it.Name = Clean(p.Text())
 			case 15:
 				if n, ok := p.Number(); ok {
 					highSpeed[idx] = n
+				}
+			case 17:
+				if n, ok := p.Number(); ok {
+					present := n == 1
+					it.ConnectorPresent = &present
 				}
 			case 18:
 				it.Alias = Clean(p.Text())
