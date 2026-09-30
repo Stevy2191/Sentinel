@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, X, ArrowUpDown, Eye, Loader2 } from 'lucide-react'
+import { Search, X, ArrowUpDown, Eye, Loader2, Router } from 'lucide-react'
 import { useMonitors } from '@/hooks/useMonitors'
 import {
   useIncidents,
@@ -84,7 +84,7 @@ export default function Incidents() {
     <div className="space-y-6">
       <div>
         <h1 className="text-4xl font-light text-white">Incidents</h1>
-        <p className="mt-2 text-sm text-slate-400">View all service incidents</p>
+        <p className="mt-2 text-sm text-slate-400">Outages of monitors and network devices you can see</p>
       </div>
 
       <div className="flex flex-wrap items-center gap-2.5">
@@ -93,8 +93,8 @@ export default function Incidents() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by monitor name"
-            aria-label="Search by monitor name"
+            placeholder="Search by name"
+            aria-label="Search by name"
             className="w-full rounded-lg border border-white/10 bg-slate-900/60 py-2 pl-9 pr-8 text-sm text-white placeholder-slate-500"
           />
           {search && (
@@ -120,6 +120,17 @@ export default function Incidents() {
               {m.name}
             </option>
           ))}
+        </select>
+
+        <select
+          className="rd-select"
+          value={filters.subject ?? ''}
+          onChange={(e) => set('subject', (e.target.value || undefined) as IncidentFilters['subject'])}
+          aria-label="Filter by kind"
+        >
+          <option value="">Monitors and devices</option>
+          <option value="monitor">Monitors</option>
+          <option value="device">Network devices</option>
         </select>
 
         <select
@@ -163,13 +174,13 @@ export default function Incidents() {
       ) : incidents.length === 0 ? (
         <div className="rounded-lg border border-white/10 bg-slate-800/40 p-12 text-center backdrop-blur-sm">
           <p className="text-sm text-slate-300">
-            {filters.search || filters.status !== 'all' || filters.monitorId
+            {filters.search || filters.status !== 'all' || filters.monitorId || filters.subject
               ? 'No incidents match these filters.'
               : 'No incidents recorded.'}
           </p>
-          {!filters.search && filters.status === 'all' && !filters.monitorId && (
+          {!filters.search && filters.status === 'all' && !filters.monitorId && !filters.subject && (
             <p className="mt-1 text-xs text-slate-500">
-              An incident is opened when a monitor goes down and closed when it recovers.
+              An incident is opened when a monitor or network device goes down and closed when it recovers.
             </p>
           )}
         </div>
@@ -187,7 +198,7 @@ export default function Incidents() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-white/10 bg-slate-800/20">
-                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-400">Monitor</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-400">Subject</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-400">Status</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-400">Type</th>
                     <th className="px-4 py-3 text-left">{header('started', 'Started')}</th>
@@ -204,8 +215,13 @@ export default function Incidents() {
                       onClick={() => navigate(`/incidents/${inc.id}`, { state: { from: '/incidents' } })}
                     >
                       <td className="px-4 py-3">
-                        <div className="font-medium text-slate-200">{inc.monitor_name}</div>
-                        <div className="truncate text-xs text-slate-500">{inc.monitor_url}</div>
+                        <div className="flex items-center gap-1.5 font-medium text-slate-200">
+                          {inc.subject_type === 'device' && <Router className="h-3.5 w-3.5 shrink-0 text-indigo-400" aria-label="Network device" />}
+                          {inc.subject_name || inc.monitor_name}
+                        </div>
+                        <div className="truncate text-xs text-slate-500">
+                          {inc.subject_type === 'device' ? `${inc.site_name} · ${inc.subject_target}` : inc.monitor_url}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <span

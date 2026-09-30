@@ -104,7 +104,7 @@ export default function IncidentDetail() {
       const e = err as { status?: number; message?: string }
       setSaveError(
         e.status === 403
-          ? 'You do not have permission to edit this monitor'
+          ? 'You do not have permission to edit this incident'
           : (e.message ?? 'Could not save the notes'),
       )
     }
@@ -113,8 +113,11 @@ export default function IncidentDetail() {
   // Where "back" goes. A caller can say where it came from; otherwise the
   // monitor is the sensible parent, since that is what the incident belongs to.
   const from = (location.state as { from?: string } | null)?.from
-  const backTo = from ?? (inc ? `/monitors/${inc.monitor_id ?? ''}` : '/incidents')
-  const backLabel = from === '/incidents' ? 'Back to Incidents' : 'Back to Monitor'
+  const isDevice = inc?.subject_type === 'device'
+  // The subject's own page: the monitor, or the network device.
+  const subjectLink = inc ? (isDevice ? `/network/devices/${inc.device_id}` : `/monitors/${inc.monitor_id}`) : '/incidents'
+  const backTo = from ?? subjectLink
+  const backLabel = from === '/incidents' ? 'Back to Incidents' : isDevice ? 'Back to Device' : 'Back to Monitor'
 
   if (loading && !detail) {
     return (
@@ -153,7 +156,7 @@ export default function IncidentDetail() {
             <ArrowLeft className="h-4 w-4" /> {backLabel}
           </Link>
           <nav aria-label="Breadcrumb" className="mt-1 text-xs text-slate-600">
-            <Link to={`/monitors/${inc.monitor_id ?? ''}`} className="transition hover:text-slate-400">
+            <Link to={subjectLink} className="transition hover:text-slate-400">
               {inc.monitor_name}
             </Link>
             <span className="px-1">›</span>
@@ -161,10 +164,10 @@ export default function IncidentDetail() {
           </nav>
         </div>
         <Link
-          to={`/monitors/${inc.monitor_id ?? ''}`}
+          to={subjectLink}
           className="inline-flex items-center gap-1.5 text-sm text-emerald-400 underline-offset-2 hover:underline"
         >
-          View monitor <ExternalLink className="h-3.5 w-3.5" />
+          {isDevice ? 'View device' : 'View monitor'} <ExternalLink className="h-3.5 w-3.5" />
         </Link>
       </div>
 
@@ -172,8 +175,11 @@ export default function IncidentDetail() {
         <div className="min-w-0 space-y-6">
           <div>
             <h1 className="truncate text-2xl font-light text-white">{inc.monitor_name}</h1>
-            <p className="truncate text-sm text-slate-500" title={inc.monitor_url}>
-              {inc.monitor_url}
+            <p
+              className="truncate text-sm text-slate-500"
+              title={isDevice ? `${inc.site_name} · ${inc.subject_target}` : inc.monitor_url}
+            >
+              {isDevice ? `${inc.site_name} · ${inc.subject_target}` : inc.monitor_url}
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <span
@@ -214,17 +220,25 @@ export default function IncidentDetail() {
                 {inc.status === 'ongoing' && ' and counting'}
               </dd>
             </div>
-            <div>
-              <dt className="text-xs uppercase tracking-widest text-slate-500">
-                Checks during the incident
-              </dt>
-              <dd className="mt-0.5 text-sm text-slate-200">
-                {detail.total_checks}
-                {detail.total_checks > 0 && (
-                  <span className="text-slate-500"> · {failed} failed</span>
-                )}
-              </dd>
-            </div>
+            {!isDevice && (
+              <div>
+                <dt className="text-xs uppercase tracking-widest text-slate-500">
+                  Checks during the incident
+                </dt>
+                <dd className="mt-0.5 text-sm text-slate-200">
+                  {detail.total_checks}
+                  {detail.total_checks > 0 && (
+                    <span className="text-slate-500"> · {failed} failed</span>
+                  )}
+                </dd>
+              </div>
+            )}
+            {isDevice && (
+              <div>
+                <dt className="text-xs uppercase tracking-widest text-slate-500">Detected by</dt>
+                <dd className="mt-0.5 text-sm text-slate-200">3 consecutive SNMP polls without an answer</dd>
+              </div>
+            )}
           </dl>
 
           {inc.root_cause && (
@@ -275,53 +289,55 @@ export default function IncidentDetail() {
             )}
           </section>
 
-          <section>
-            <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-300">
-              Check timeline
-            </h2>
-            {detail.checks.length === 0 ? (
-              <p className="text-sm text-slate-500">
-                No checks were recorded while this incident was open.
-              </p>
-            ) : (
-              <div className="rounded-lg border border-white/10 bg-slate-800/40 p-4">
-                <div className="mb-3 flex flex-wrap gap-px">
-                  {detail.checks.map((c) => (
-                    <div
-                      key={c.id}
-                      className={`h-4 w-1.5 rounded-sm ${CHECK_TONE[c.status] ?? 'bg-slate-600'}`}
-                      title={`${new Date(c.timestamp).toLocaleString()} · ${c.status}${
-                        c.error_message ? ` · ${c.error_message}` : ''
-                      }`}
-                    />
-                  ))}
-                </div>
-                {/* The page has room for more of the sequence than the dialog
-                    did, without becoming a log viewer. */}
-                <ul className="space-y-1 text-xs">
-                  {detail.checks.slice(-15).map((c) => (
-                    <li key={c.id} className="flex items-center gap-2 text-slate-400">
-                      <span
-                        className={`h-1.5 w-1.5 shrink-0 rounded-full ${CHECK_TONE[c.status] ?? 'bg-slate-600'}`}
+          {!isDevice && (
+            <section>
+              <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-300">
+                Check timeline
+              </h2>
+              {detail.checks.length === 0 ? (
+                <p className="text-sm text-slate-500">
+                  No checks were recorded while this incident was open.
+                </p>
+              ) : (
+                <div className="rounded-lg border border-white/10 bg-slate-800/40 p-4">
+                  <div className="mb-3 flex flex-wrap gap-px">
+                    {detail.checks.map((c) => (
+                      <div
+                        key={c.id}
+                        className={`h-4 w-1.5 rounded-sm ${CHECK_TONE[c.status] ?? 'bg-slate-600'}`}
+                        title={`${new Date(c.timestamp).toLocaleString()} · ${c.status}${
+                          c.error_message ? ` · ${c.error_message}` : ''
+                        }`}
                       />
-                      <span className="shrink-0 tabular-nums">
-                        {new Date(c.timestamp).toLocaleTimeString()}
-                      </span>
-                      <span className="truncate">
-                        {c.error_message ||
-                          `${c.status}${c.response_time_ms ? ` · ${c.response_time_ms}ms` : ''}`}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-                {detail.checks.length > 15 && (
-                  <p className="mt-2 text-xs text-slate-600">
-                    Showing the last 15 of {detail.checks.length}.
-                  </p>
-                )}
-              </div>
-            )}
-          </section>
+                    ))}
+                  </div>
+                  {/* The page has room for more of the sequence than the dialog
+                      did, without becoming a log viewer. */}
+                  <ul className="space-y-1 text-xs">
+                    {detail.checks.slice(-15).map((c) => (
+                      <li key={c.id} className="flex items-center gap-2 text-slate-400">
+                        <span
+                          className={`h-1.5 w-1.5 shrink-0 rounded-full ${CHECK_TONE[c.status] ?? 'bg-slate-600'}`}
+                        />
+                        <span className="shrink-0 tabular-nums">
+                          {new Date(c.timestamp).toLocaleTimeString()}
+                        </span>
+                        <span className="truncate">
+                          {c.error_message ||
+                            `${c.status}${c.response_time_ms ? ` · ${c.response_time_ms}ms` : ''}`}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  {detail.checks.length > 15 && (
+                    <p className="mt-2 text-xs text-slate-600">
+                      Showing the last 15 of {detail.checks.length}.
+                    </p>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
 
           <IncidentThread
             incidentId={inc.id}
