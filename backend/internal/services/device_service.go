@@ -448,8 +448,20 @@ func (s *DeviceService) SaveInventory(ctx context.Context, id uuid.UUID, inv snm
 		if len(seen) > 0 {
 			q = q.Where("if_index NOT IN ?", seen)
 		}
-		if err := q.Updates(map[string]any{"present": false, "updated_at": at}).Error; err != nil {
-			return fmt.Errorf("marking absent interfaces: %w", err)
+		var absentIDs []uuid.UUID
+		if err := q.Pluck("id", &absentIDs).Error; err != nil {
+			return fmt.Errorf("finding absent interfaces: %w", err)
+		}
+		if len(absentIDs) > 0 {
+			if err := tx.Model(&models.DeviceInterface{}).Where("id IN ?", absentIDs).
+				Updates(map[string]any{"present": false, "updated_at": at}).Error; err != nil {
+				return fmt.Errorf("marking absent interfaces: %w", err)
+			}
+			for _, ifaceID := range absentIDs {
+				if _, err := s.incidents.ClosePortIncidentsTx(tx, ifaceID, at, "The port is no longer reported by the device."); err != nil {
+					return fmt.Errorf("closing incidents for absent interface %s: %w", ifaceID, err)
+				}
+			}
 		}
 		return nil
 	})

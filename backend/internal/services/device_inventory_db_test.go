@@ -61,6 +61,48 @@ func TestDBSaveInventoryKeepsIfXValuesAndClassifies(t *testing.T) {
 	}
 }
 
+// Once a port stops being reported, any open incident on it must be closed
+// too — not just marked absent. Review finding: Important 2.
+func TestDBSaveInventoryClosesIncidentsOfPortsThatDisappear(t *testing.T) {
+	db := testdb.Open(t)
+	s := seedDevice(t, db, "HQ", "10.0.0.2")
+	incidents := NewIncidentService(db)
+	svc := NewDeviceService(db, NewSNMPCredentialService(db), incidents)
+	ctx := context.Background()
+
+	testdb.Must(t, svc.SaveInventory(ctx, s.DeviceID, switchInventory(true), time.Now()))
+	var port3 models.DeviceInterface
+	testdb.Must(t, db.First(&port3, "device_id = ? AND if_index = 3", s.DeviceID).Error)
+
+	start := time.Now().UTC().Add(-time.Hour)
+	inc, opened, err := incidents.OpenPortIncident(ctx, s.DeviceID, port3.ID, "link_down", start, "down")
+	if err != nil || !opened {
+		t.Fatalf("open incident: opened %v err %v", opened, err)
+	}
+
+	without3 := switchInventory(true)
+	for i, it := range without3.Interfaces {
+		if it.Index == 3 {
+			without3.Interfaces = append(without3.Interfaces[:i], without3.Interfaces[i+1:]...)
+			break
+		}
+	}
+	testdb.Must(t, svc.SaveInventory(ctx, s.DeviceID, without3, time.Now()))
+
+	testdb.Must(t, db.First(&port3, "id = ?", port3.ID).Error)
+	if port3.Present {
+		t.Fatal("port 3 should be marked absent")
+	}
+	var closed models.Incident
+	testdb.Must(t, db.First(&closed, "id = ?", inc.ID).Error)
+	if closed.EndTime == nil {
+		t.Fatal("incident not closed")
+	}
+	if closed.ResolutionNotes != "The port is no longer reported by the device." {
+		t.Errorf("resolution notes: %q", closed.ResolutionNotes)
+	}
+}
+
 // Overrides are never written by inventory.
 func TestDBSaveInventoryLeavesOverrides(t *testing.T) {
 	db := testdb.Open(t)
