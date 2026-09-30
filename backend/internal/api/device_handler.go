@@ -256,6 +256,7 @@ func testDeviceHandler(prober deviceProber, sites siteAccessChecker) gin.Handler
 			respondSuccess(c, http.StatusOK, gin.H{"ok": false, "error": err.Error()})
 			return
 		}
-		respondSuccess(c, http.StatusOK, gin.H{"ok": true, "system": sys, "vendor": snmp.VendorFor(sys.ObjectID)})
+		vendor, _ := snmp.Identity(sys.ObjectID, sys.Descr, "")
+		respondSuccess(c, http.StatusOK, gin.H{"ok": true, "system": sys, "vendor": vendor})
 	}
 }
