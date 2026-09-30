@@ -167,9 +167,10 @@ func (m *ScanManager) probe(ctx context.Context, host string, creds []ScanCreden
 		if err != nil {
 			continue
 		}
+		vendor, _ := snmp.Identity(sys.ObjectID, sys.Descr, "")
 		return ScanResult{
 			Host: host, Port: 161, Name: sys.Name, Descr: sys.Descr, ObjectID: sys.ObjectID,
-			Vendor: snmp.VendorFor(sys.ObjectID), CredentialID: c.ID, CredentialName: c.Name,
+			Vendor: vendor, CredentialID: c.ID, CredentialName: c.Name,
 			AlreadyAdded: existing[fmt.Sprintf("%s:%d", host, 161)],
 		}, true
 	}

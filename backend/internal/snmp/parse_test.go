@@ -85,6 +85,7 @@ func TestVendorFor(t *testing.T) {
 		"1.3.6.1.4.1.29671.2.103": "Cisco Meraki",
 		"1.3.6.1.4.1.17713.21":    "Cambium Networks",
 		".1.3.6.1.4.1.14988.1":    "MikroTik",
+		"1.3.6.1.4.1.8072.3.2.10": "Net-SNMP (Linux)",
 		"1.3.6.1.4.1.99999.1":     "Unknown (enterprise 99999)",
 		"":                        "",
 		"1.3.6.1.2.1.1":           "",
@@ -92,6 +93,99 @@ func TestVendorFor(t *testing.T) {
 		if got := VendorFor(oid); got != want {
 			t.Errorf("VendorFor(%q) = %q, want %q", oid, got, want)
 		}
+	}
+}
+
+// TestIdentity checks vendor/model refinement against real devices from the
+// user's network (UDM-SE, UNVR, a USW-Pro-48-PoE switch, U7-Pro/U7-IW APs)
+// plus the snmpsim EdgeSwitch, and the cases that must NOT be touched: an
+// unknown enterprise and a non-Ubiquiti 8072 (stock Net-SNMP) host.
+func TestIdentity(t *testing.T) {
+	tests := []struct {
+		name                  string
+		sysObjectID, sysDescr string
+		entityModel           string
+		wantVendor, wantModel string
+	}{
+		{
+			name:        "UDM-SE, no ENTITY-MIB",
+			sysObjectID: "1.3.6.1.4.1.8072.3.2.10",
+			sysDescr:    "Ubiquiti UniFi UDM-SE 5.1.33 Linux 4.19.152 al324",
+			entityModel: "",
+			wantVendor:  "Ubiquiti", wantModel: "UDM-SE",
+		},
+		{
+			name:        "UNVR, no ENTITY-MIB",
+			sysObjectID: "1.3.6.1.4.1.8072.3.2.10",
+			sysDescr:    "Ubiquiti UniFi UNVR4 5.1.33 Linux 4.19.152 al324",
+			entityModel: "",
+			wantVendor:  "Ubiquiti", wantModel: "UNVR4",
+		},
+		{
+			name:        "switch, ENTITY-MIB model always wins",
+			sysObjectID: "1.3.6.1.4.1.4413",
+			sysDescr:    "USW-Pro-48-PoE, 7.5.15.17146, Linux 3.6.5",
+			entityModel: "UBNT-US48PRO-POE",
+			wantVendor:  "Ubiquiti (EdgeSwitch)", wantModel: "UBNT-US48PRO-POE",
+		},
+		{
+			name:        "switch, no ENTITY-MIB falls back to sysDescr",
+			sysObjectID: "1.3.6.1.4.1.4413",
+			sysDescr:    "USW-Pro-48-PoE, 7.5.15.17146, Linux 3.6.5",
+			entityModel: "",
+			wantVendor:  "Ubiquiti (EdgeSwitch)", wantModel: "USW-Pro-48-PoE",
+		},
+		{
+			name:        "AP U7-Pro, no ENTITY-MIB",
+			sysObjectID: "1.3.6.1.4.1.41112",
+			sysDescr:    "U7-Pro 8.7.11.19419",
+			entityModel: "",
+			wantVendor:  "Ubiquiti", wantModel: "U7-Pro",
+		},
+		{
+			name:        "AP U7-IW, no ENTITY-MIB",
+			sysObjectID: "1.3.6.1.4.1.41112",
+			sysDescr:    "U7-IW 8.7.11.19419",
+			entityModel: "",
+			wantVendor:  "Ubiquiti", wantModel: "U7-IW",
+		},
+		{
+			name:        "simulator EdgeSwitch, ENTITY-MIB model always wins",
+			sysObjectID: "1.3.6.1.4.1.4413",
+			sysDescr:    "EdgeSwitch 48-Port 500W, 1.9.3.5372984",
+			entityModel: "ES-48-500W",
+			wantVendor:  "Ubiquiti (EdgeSwitch)", wantModel: "ES-48-500W",
+		},
+		{
+			name:        "simulator EdgeSwitch, no ENTITY-MIB: 'EdgeSwitch' isn't a model code",
+			sysObjectID: "1.3.6.1.4.1.4413",
+			sysDescr:    "EdgeSwitch 48-Port 500W, 1.9.3.5372984",
+			entityModel: "",
+			wantVendor:  "Ubiquiti (EdgeSwitch)", wantModel: "",
+		},
+		{
+			name:        "unknown enterprise, unrelated descr: unchanged",
+			sysObjectID: "1.3.6.1.4.1.99999.1",
+			sysDescr:    "Some Random Server v1.0",
+			entityModel: "",
+			wantVendor:  "Unknown (enterprise 99999)", wantModel: "",
+		},
+		{
+			name:        "8072 non-Ubiquiti Linux host: named but no model guessed",
+			sysObjectID: "1.3.6.1.4.1.8072.3.2.10",
+			sysDescr:    "Linux fileserver 6.1.0",
+			entityModel: "",
+			wantVendor:  "Net-SNMP (Linux)", wantModel: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vendor, model := Identity(tt.sysObjectID, tt.sysDescr, tt.entityModel)
+			if vendor != tt.wantVendor || model != tt.wantModel {
+				t.Errorf("Identity(%q, %q, %q) = (%q, %q), want (%q, %q)",
+					tt.sysObjectID, tt.sysDescr, tt.entityModel, vendor, model, tt.wantVendor, tt.wantModel)
+			}
+		})
 	}
 }
 

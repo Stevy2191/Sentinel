@@ -250,6 +250,7 @@ var vendors = map[int]string{
 	4526: "Netgear", 6486: "Alcatel-Lucent", 11863: "TP-Link", 12356: "Fortinet",
 	14823: "Aruba", 14988: "MikroTik", 17713: "Cambium Networks", 25053: "Ruckus",
 	25461: "Palo Alto Networks", 29671: "Cisco Meraki", 41112: "Ubiquiti",
+	8072: "Net-SNMP (Linux)",
 }
 
 // VendorFor names the manufacturer behind a sysObjectID, or
@@ -270,6 +271,60 @@ func VendorFor(sysObjectID string) string {
 	return fmt.Sprintf("Unknown (enterprise %d)", n)
 }
 
+// uniFiPrefix is how UniFi OS (the UDM/UNVR family) opens sysDescr; those
+// consoles run stock Net-SNMP under enterprise 8072 and have no ENTITY-MIB,
+// so VendorFor alone can't tell them apart from any other Linux box.
+const uniFiPrefix = "Ubiquiti UniFi "
+
+// Identity refines VendorFor's vendor with sysDescr, and fills in a model
+// when ENTITY-MIB (entityModel) gave none. An ENTITY-MIB model always wins.
+func Identity(sysObjectID, sysDescr, entityModel string) (vendor, model string) {
+	vendor = VendorFor(sysObjectID)
+	model = entityModel
+	descr := strings.TrimSpace(sysDescr)
+	switch {
+	case strings.HasPrefix(descr, uniFiPrefix):
+		// UniFi OS console: "Ubiquiti UniFi UDM-SE 5.1.33 Linux ...".
+		vendor = "Ubiquiti"
+		if model == "" {
+			rest := strings.TrimPrefix(descr, uniFiPrefix)
+			model, _, _ = strings.Cut(rest, " ")
+		}
+	case (vendor == "Ubiquiti" || vendor == "Ubiquiti (EdgeSwitch)") && model == "":
+		// EdgeOS/UniFi device firmware: "USW-Pro-48-PoE, 7.5.15.17146, ..."
+		// or "U7-Pro 8.7.11.19419" — the model code leads sysDescr.
+		token := descr
+		if i := strings.IndexAny(descr, ", \t"); i >= 0 {
+			token = descr[:i]
+		}
+		if looksLikeModelCode(token) {
+			model = token
+		}
+	}
+	return vendor, model
+}
+
+// looksLikeModelCode reports whether s reads like a hardware model ("U7-Pro",
+// "USW-Pro-48-PoE") rather than a product family name ("EdgeSwitch"): it has
+// no spaces, is a plausible length, and mixes letters with digits or a dash.
+func looksLikeModelCode(s string) bool {
+	if len(s) < 2 || len(s) > 40 {
+		return false
+	}
+	var hasLetter, hasDigitOrDash bool
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z':
+			hasLetter = true
+		case r >= '0' && r <= '9' || r == '-':
+			hasDigitOrDash = true
+		case r == ' ' || r == '\t':
+			return false
+		}
+	}
+	return hasLetter && hasDigitOrDash
+}
+
 // Identify reads a device's system group.
 func Identify(ctx context.Context, c Client, t Target) (System, error) {
 	pdus, err := c.Get(ctx, t, SystemOIDs)
@@ -287,7 +342,7 @@ func ReadInventory(ctx context.Context, c Client, t Target) (Inventory, error) {
 	if err != nil {
 		return Inventory{}, fmt.Errorf("reading system group: %w", err)
 	}
-	inv := Inventory{System: sys, Vendor: VendorFor(sys.ObjectID)}
+	inv := Inventory{System: sys}
 
 	var ifPDUs []PDU
 	for _, col := range ifTableColumns {
@@ -310,6 +365,8 @@ func ReadInventory(ctx context.Context, c Client, t Target) (Inventory, error) {
 			entPDUs = append(entPDUs, p...)
 		}
 	}
-	inv.Model, inv.Serial = ParseEntity(entPDUs)
+	entityModel, serial := ParseEntity(entPDUs)
+	inv.Serial = serial
+	inv.Vendor, inv.Model = Identity(sys.ObjectID, sys.Descr, entityModel)
 	return inv, nil
 }
