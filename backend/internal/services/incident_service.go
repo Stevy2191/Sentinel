@@ -542,14 +542,15 @@ func (s *IncidentService) CloseDeviceIncidentTx(tx *gorm.DB, deviceID uuid.UUID,
 // *gorm.DB it is given (the service's own db, already WithContext'd, or a
 // caller's transaction).
 func (s *IncidentService) closeDeviceIncident(db *gorm.DB, deviceID uuid.UUID, end time.Time, note string) (*models.Incident, error) {
-	var active models.Incident
-	err := db.First(&active, "device_id = ? AND end_time IS NULL", deviceID).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
+	var rows []models.Incident
+	err := db.Where("device_id = ? AND end_time IS NULL", deviceID).Order("start_time DESC").Limit(1).Find(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("querying active incident for device %s: %w", deviceID, err)
 	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	active := rows[0]
 	if end.Before(active.StartTime) {
 		end = active.StartTime
 	}
@@ -577,15 +578,19 @@ func (s *IncidentService) closeDeviceIncident(db *gorm.DB, deviceID uuid.UUID, e
 }
 
 func (s *IncidentService) activeDeviceIncident(ctx context.Context, deviceID uuid.UUID) (*models.Incident, error) {
-	var incident models.Incident
-	err := s.db.WithContext(ctx).First(&incident, "device_id = ? AND end_time IS NULL", deviceID).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
+	var rows []models.Incident
+	err := s.db.WithContext(ctx).
+		Where("device_id = ? AND end_time IS NULL", deviceID).
+		Order("start_time DESC").
+		Limit(1).
+		Find(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("querying active incident for device %s: %w", deviceID, err)
 	}
-	return &incident, nil
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return &rows[0], nil
 }
 
 // ListComments returns an incident's thread, oldest first — the order it was

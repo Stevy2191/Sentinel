@@ -1,12 +1,17 @@
 package services
 
 import (
+	"bytes"
 	"context"
+	"log"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/testdb"
 )
@@ -133,6 +138,35 @@ func TestDBOpenCloseDeviceIncident(t *testing.T) {
 	testdb.Must(t, err)
 	if none != nil {
 		t.Errorf("closing with nothing open returned %+v", none)
+	}
+}
+
+// The "is one already open?" lookup behind OpenDeviceIncident must not use a
+// query that logs GORM's default "record not found" error when the answer
+// is legitimately no — that's the normal case every time a device first
+// goes down, not damage. A second *gorm.DB, sharing the same connection but
+// with a real (non-discarding) logger writing to a buffer, catches it.
+func TestDBOpenDeviceIncidentDoesNotLogRecordNotFound(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	dev := seedDevice(t, db, "HQ", "10.0.0.2")
+
+	sqlDB, err := db.DB()
+	testdb.Must(t, err)
+	var buf bytes.Buffer
+	verbose, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{
+		Logger: logger.New(log.New(&buf, "", 0), logger.Config{LogLevel: logger.Warn}),
+	})
+	testdb.Must(t, err)
+
+	svc := NewIncidentService(verbose)
+	_, opened, err := svc.OpenDeviceIncident(ctx, dev.DeviceID, time.Now().UTC(), "no SNMP response")
+	testdb.Must(t, err)
+	if !opened {
+		t.Fatal("expected the first open (nothing open yet) to succeed")
+	}
+	if strings.Contains(buf.String(), "record not found") {
+		t.Errorf("opening the first device incident logged GORM noise:\n%s", buf.String())
 	}
 }
 
