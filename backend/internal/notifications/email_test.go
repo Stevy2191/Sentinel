@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
 )
 
@@ -610,5 +612,37 @@ func TestBuildSubjectWarning(t *testing.T) {
 	want := "[WARNING] web-01"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// A device alert's HTML and text bodies must link to its device page, not
+// /monitors/00000000-... (MonitorID's zero value), and must not offer a
+// report link - devices have no report page.
+func TestBuildBodyDeviceLinksToDevicePage(t *testing.T) {
+	deviceID := uuid.New()
+	p := &EmailPlugin{}
+	msg := &NotificationMessage{MonitorName: "core-sw-1", Status: "down", DeviceID: &deviceID}
+	wantPath := "network/devices/" + deviceID.String()
+
+	html := p.buildHTMLBody(msg)
+	if !strings.Contains(html, wantPath) {
+		t.Errorf("html body missing %q: %s", wantPath, html)
+	}
+	if strings.Contains(html, "/monitors/") {
+		t.Errorf("html body must not link to /monitors/: %s", html)
+	}
+	if strings.Contains(html, "View Report") {
+		t.Errorf("html body must not offer a report link: %s", html)
+	}
+
+	text := p.buildTextBody(msg)
+	if !strings.Contains(text, wantPath) {
+		t.Errorf("text body missing %q: %s", wantPath, text)
+	}
+	if strings.Contains(text, "/monitors/") {
+		t.Errorf("text body must not link to /monitors/: %s", text)
+	}
+	if strings.Contains(text, "View Report") {
+		t.Errorf("text body must not offer a report link: %s", text)
 	}
 }

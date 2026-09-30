@@ -276,11 +276,21 @@ func displayName(d models.Device) string {
 func (p *DevicePoller) apply(ctx context.Context, d models.Device, tr DeviceTransition, detail string, now time.Time) {
 	actions := tr.Actions
 	var incident *models.Incident
+	// Whether this poll's own ActionOpenIncident (if any) actually opened the
+	// incident. The threshold-crossing transition pairs ActionOpenIncident
+	// with ActionNotifyDown in the same actions slice; gating the notify on
+	// this the same way the retry path below gates its own (opened == true
+	// and err == nil) stops a down alert from going out for an open that
+	// never landed - the retry path would otherwise send its own down alert
+	// for the same crossing once the open actually succeeds, doubling it up.
+	openedHere := true
 	for _, a := range actions {
 		var err error
 		switch a {
 		case ActionOpenIncident:
-			incident, _, err = p.incidents.OpenDeviceIncident(ctx, d.ID, now, detail)
+			var opened bool
+			incident, opened, err = p.incidents.OpenDeviceIncident(ctx, d.ID, now, detail)
+			openedHere = opened && err == nil
 		case ActionCloseIncident:
 			note := ""
 			if len(actions) == 1 { // closed because blocked or paused, not recovered
@@ -291,6 +301,9 @@ func (p *DevicePoller) apply(ctx context.Context, d models.Device, tr DeviceTran
 			}
 			incident, err = p.incidents.CloseDeviceIncident(ctx, d.ID, now, note)
 		case ActionNotifyDown, ActionNotifyRecovered:
+			if a == ActionNotifyDown && !openedHere {
+				continue
+			}
 			p.notify(ctx, d, a, incident, now)
 		}
 		if err != nil {

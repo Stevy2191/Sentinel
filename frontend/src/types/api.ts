@@ -335,7 +335,10 @@ export type NotificationStatus = 'pending' | 'sent' | 'failed'
 
 export interface NotificationHistoryItem {
   id: string
-  monitor_id: string
+  /** Exactly one of monitor_id, agent_id and device_id is set. */
+  monitor_id: string | null
+  agent_id?: string | null
+  device_id?: string | null
   monitor_name?: string
   channel: string
   status: NotificationStatus

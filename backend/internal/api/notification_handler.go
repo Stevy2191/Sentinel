@@ -121,6 +121,20 @@ func GetNotificationHistoryHandler(
 				agentNames[a.ID] = a.Name
 			}
 		}
+		// Same idea for devices: a device alert's name lookup falls back to
+		// its host, the way the poller's own displayName does, rather than
+		// showing an empty name.
+		deviceNames := map[uuid.UUID]string{}
+		var deviceRows []models.Device
+		if err := db.WithContext(ctx).Select("id", "name", "host").Find(&deviceRows).Error; err == nil {
+			for _, d := range deviceRows {
+				name := d.Name
+				if name == "" {
+					name = d.Host
+				}
+				deviceNames[d.ID] = name
+			}
+		}
 
 		items := make([]gin.H, 0, len(records))
 		for _, r := range records {
@@ -132,19 +146,23 @@ func GetNotificationHistoryHandler(
 			if r.SentAt != nil {
 				sentAt = r.SentAt.UTC().Format(time.RFC3339)
 			}
-			// A record belongs to a monitor or to a server agent. The name
-			// lookup only covers monitors, so an agent alert falls back to
-			// its id rather than showing an empty name.
+			// A record belongs to a monitor, a server agent, or a network
+			// device. The name lookup is per-subject, so whichever one is set
+			// gets its real name instead of an empty string.
 			subject := ""
-			if r.MonitorID != nil {
+			switch {
+			case r.MonitorID != nil:
 				subject = names[*r.MonitorID]
-			} else if r.AgentID != nil {
+			case r.AgentID != nil:
 				subject = agentNames[*r.AgentID]
+			case r.DeviceID != nil:
+				subject = deviceNames[*r.DeviceID]
 			}
 			items = append(items, gin.H{
 				"id":            r.ID,
 				"monitor_id":    r.MonitorID,
 				"agent_id":      r.AgentID,
+				"device_id":     r.DeviceID,
 				"monitor_name":  subject,
 				"channel":       r.Channel,
 				"status":        r.Status,
@@ -214,6 +232,8 @@ func RetryFailedNotificationHandler(manager *notifications.NotificationManager) 
 			case errors.Is(err, gorm.ErrRecordNotFound):
 				respondError(c, http.StatusNotFound, err.Error())
 			case errors.Is(err, notifications.ErrNotificationNotFailed):
+				respondError(c, http.StatusBadRequest, err.Error())
+			case errors.Is(err, notifications.ErrNotificationNotRetryable):
 				respondError(c, http.StatusBadRequest, err.Error())
 			default:
 				respondInternal(c, "RetryFailedNotificationHandler", err)

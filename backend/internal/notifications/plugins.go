@@ -82,6 +82,24 @@ func (m *NotificationMessage) deliversTo(inst *ChannelInstance) bool {
 	return false
 }
 
+// ViewPath returns the frontend path this message's subject is viewed at, so
+// every plugin links to the same place: a network device page for a device
+// alert, otherwise the monitor page it has always been (including for a
+// server agent alert - agents have no page of their own yet, so that stays
+// the existing, if imperfect, behaviour).
+func (m *NotificationMessage) ViewPath() string {
+	if m.DeviceID != nil {
+		return fmt.Sprintf("/network/devices/%s", *m.DeviceID)
+	}
+	return fmt.Sprintf("/monitors/%s", m.MonitorID)
+}
+
+// HasReport reports whether this message's subject has a report page to link
+// to. Devices and server agents don't - reports are a monitor concept.
+func (m *NotificationMessage) HasReport() bool {
+	return m.DeviceID == nil && m.AgentID == nil
+}
+
 // NotificationPlugin is implemented by each delivery channel (email, Slack,
 // Discord, ...). Implementations must respect the provided context's deadline.
 type NotificationPlugin interface {
@@ -548,11 +566,19 @@ func (m *NotificationManager) ListNotifications(ctx context.Context, opts ListNo
 // in the failed state.
 var ErrNotificationNotFailed = errors.New("notification not in failed state")
 
+// ErrNotificationNotRetryable is returned when retrying a device or server
+// agent alert: there is no monitor to rebuild a message from (the rebuild
+// below assumes record.MonitorID names one), and neither has a "retry"
+// concept - a device or agent alert fires again on its own the next time its
+// state changes.
+var ErrNotificationNotRetryable = errors.New("device and server alerts cannot be retried")
+
 // RetryNotification re-sends a previously failed notification through its
 // original channel and updates the stored record with the new outcome. It
 // returns a wrapped gorm.ErrRecordNotFound if the notification does not exist,
-// ErrNotificationNotFailed if it is not in the failed state, or the send error
-// if the retry itself fails.
+// ErrNotificationNotFailed if it is not in the failed state,
+// ErrNotificationNotRetryable if it is a device or server alert, or the send
+// error if the retry itself fails.
 func (m *NotificationManager) RetryNotification(ctx context.Context, notificationID uuid.UUID) error {
 	var record models.Notification
 	if err := m.db.WithContext(ctx).First(&record, "id = ?", notificationID).Error; err != nil {
@@ -563,6 +589,9 @@ func (m *NotificationManager) RetryNotification(ctx context.Context, notificatio
 	}
 	if record.Status != statusFailed {
 		return ErrNotificationNotFailed
+	}
+	if record.MonitorID == nil {
+		return ErrNotificationNotRetryable
 	}
 
 	// Reconstruct a message from the stored record and current monitor state.

@@ -107,7 +107,7 @@ func (p *NtfyPlugin) Send(ctx context.Context, message *NotificationMessage) err
 		priority = "high"
 	}
 	tags := p.buildTags(message)
-	click := fmt.Sprintf("%s/monitors/%s", baseURL(), message.MonitorID)
+	click := fmt.Sprintf("%s%s", baseURL(), message.ViewPath())
 
 	start := time.Now()
 	if err := p.sendWithRetry(ctx, body, message.MonitorName, priority, tags, click); err != nil {
