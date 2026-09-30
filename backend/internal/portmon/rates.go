@@ -12,11 +12,11 @@ type Reading struct {
 	// UptimeSeconds is the device's sysUpTime when read; < 0 when unknown.
 	UptimeSeconds int64
 	// HC: the octet counters are the 64-bit ifHC* ones.
-	HC                              bool
-	InOctets, OutOctets             uint64
-	InErrors, OutErrors             uint64
-	InDiscards, OutDiscards         uint64
-	SpeedBps                        int64
+	HC                      bool
+	InOctets, OutOctets     uint64
+	InErrors, OutErrors     uint64
+	InDiscards, OutDiscards uint64
+	SpeedBps                int64
 }
 
 // Rates are derived from two consecutive readings.
