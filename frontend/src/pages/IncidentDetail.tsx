@@ -143,7 +143,10 @@ export default function IncidentDetail() {
     )
   }
 
-  const failed = detail.checks.filter((c) => c.status !== 'success').length
+  // Device incidents (and any failed lookup) come back with checks: [] from
+  // the API, but guard the read anyway rather than trust it always will.
+  const checks = detail.checks ?? []
+  const failed = checks.filter((c) => c.status !== 'success').length
 
   return (
     <div className="space-y-6">
@@ -294,14 +297,14 @@ export default function IncidentDetail() {
               <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-300">
                 Check timeline
               </h2>
-              {detail.checks.length === 0 ? (
+              {checks.length === 0 ? (
                 <p className="text-sm text-slate-500">
                   No checks were recorded while this incident was open.
                 </p>
               ) : (
                 <div className="rounded-lg border border-white/10 bg-slate-800/40 p-4">
                   <div className="mb-3 flex flex-wrap gap-px">
-                    {detail.checks.map((c) => (
+                    {checks.map((c) => (
                       <div
                         key={c.id}
                         className={`h-4 w-1.5 rounded-sm ${CHECK_TONE[c.status] ?? 'bg-slate-600'}`}
@@ -314,7 +317,7 @@ export default function IncidentDetail() {
                   {/* The page has room for more of the sequence than the dialog
                       did, without becoming a log viewer. */}
                   <ul className="space-y-1 text-xs">
-                    {detail.checks.slice(-15).map((c) => (
+                    {checks.slice(-15).map((c) => (
                       <li key={c.id} className="flex items-center gap-2 text-slate-400">
                         <span
                           className={`h-1.5 w-1.5 shrink-0 rounded-full ${CHECK_TONE[c.status] ?? 'bg-slate-600'}`}
@@ -329,9 +332,9 @@ export default function IncidentDetail() {
                       </li>
                     ))}
                   </ul>
-                  {detail.checks.length > 15 && (
+                  {checks.length > 15 && (
                     <p className="mt-2 text-xs text-slate-600">
-                      Showing the last 15 of {detail.checks.length}.
+                      Showing the last 15 of {checks.length}.
                     </p>
                   )}
                 </div>

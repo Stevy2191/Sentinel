@@ -36,9 +36,20 @@ type updateIncidentRequest struct {
 	Status *string `json:"status"`
 }
 
+// incidentGetter is what UpdateIncidentHandler needs to load the incident it
+// is about to change - the same shape GetIncidentHandler already tests
+// against fakes (incidentDetailReader satisfies it too, so the same fake
+// works for both handlers).
+type incidentGetter interface {
+	GetIncidentByID(ctx context.Context, id uuid.UUID) (*services.IncidentWithMonitor, error)
+}
+
 // UpdateIncidentHandler handles PATCH /api/v1/incidents/:id, letting an operator
 // annotate an incident with root cause and resolution notes for reporting.
-func UpdateIncidentHandler(incidentService *services.IncidentService, monitorService *services.MonitorService, sites siteAccessChecker, db *gorm.DB) gin.HandlerFunc {
+// Status is not among them for a device incident: those open and close on
+// their own, from the poller's own up/down transitions, and a manual PATCH
+// changing status here would only fight that (see R1 in the phase 1 review).
+func UpdateIncidentHandler(incidentService incidentGetter, monitors monitorAccessChecker, sites siteAccessChecker, db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		incidentID, err := uuid.Parse(c.Param("id"))
 		if err != nil {
@@ -64,10 +75,15 @@ func UpdateIncidentHandler(incidentService *services.IncidentService, monitorSer
 		}
 		// An incident inherits its subject's permissions: editing needs edit
 		// rights on the monitor, or editable access to the device's site.
-		if !authorizeIncident(c, monitorService, sites, row, "edit") {
+		if !authorizeIncident(c, monitors, sites, row, "edit") {
 			return
 		}
 		incident := row.Incident
+
+		if req.Status != nil && incident.DeviceID != nil {
+			respondError(c, http.StatusBadRequest, "device incidents open and close automatically; pause the device to close one")
+			return
+		}
 
 		if req.Severity != nil && !validSeverities[*req.Severity] {
 			respondError(c, http.StatusBadRequest, "severity must be one of: low, medium, high, critical")
@@ -347,12 +363,21 @@ func GetIncidentHandler(incidentService incidentDetailReader, monitors monitorAc
 			// timeline; failing the whole request would be worse.
 			checks = nil
 		}
+		if checks == nil {
+			// A device incident has no checks (they belong to monitors), and a
+			// failed lookup falls back here too. Either way this must be `[]`,
+			// not `null`: the frontend runs .filter/.map on it unconditionally.
+			checks = []models.Check{}
+		}
 
 		// Both are supporting detail: an incident is still worth returning
 		// without them rather than failing the whole request.
 		sent, err := incidentService.NotificationsForIncident(c.Request.Context(), id)
 		if err != nil {
 			sent = nil
+		}
+		if sent == nil {
+			sent = []models.Notification{}
 		}
 		comments, err := incidentService.ListComments(c.Request.Context(), id)
 		if err != nil {

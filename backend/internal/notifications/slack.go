@@ -242,12 +242,15 @@ func (p *SlackPlugin) buildPayload(m *NotificationMessage) slackPayload {
 			Text: &slackText{Type: "mrkdwn", Text: detailText},
 		})
 	}
+	elements := []slackElement{
+		{Type: "button", Text: &slackText{Type: "plain_text", Text: "View in Sentinel"}, URL: fmt.Sprintf("%s%s", base, m.ViewPath())},
+	}
+	if m.HasReport() {
+		elements = append(elements, slackElement{Type: "button", Text: &slackText{Type: "plain_text", Text: "View Report"}, URL: fmt.Sprintf("%s/reports?monitor_id=%s", base, m.MonitorID)})
+	}
 	blocks = append(blocks, slackBlock{
-		Type: "actions",
-		Elements: []slackElement{
-			{Type: "button", Text: &slackText{Type: "plain_text", Text: "View in Sentinel"}, URL: fmt.Sprintf("%s/monitors/%s", base, m.MonitorID)},
-			{Type: "button", Text: &slackText{Type: "plain_text", Text: "View Report"}, URL: fmt.Sprintf("%s/reports?monitor_id=%s", base, m.MonitorID)},
-		},
+		Type:     "actions",
+		Elements: elements,
 	})
 
 	return slackPayload{

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -152,6 +153,73 @@ func TestGetDeviceIncidentFollowsSiteAccess(t *testing.T) {
 	inc = &fakeIncidents{row: row}
 	if w := get(incidentRouter(inc, fakeMonitorViews{}, fakeSiteAccess{services.SiteAccessReadonly}, uuid.New(), false), path); w.Code != http.StatusOK {
 		t.Errorf("readonly site: status %d, want 200", w.Code)
+	}
+}
+
+// A device incident has no checks (they belong to monitors, not devices), and
+// ChecksDuringIncident/NotificationsForIncident/ListComments all return nil
+// slices from the fake, exactly like a real failed lookup would. The response
+// must still carry "checks": [] and "notifications": [], never null - the
+// frontend runs .filter/.map on both unconditionally and null crashes it.
+func TestGetDeviceIncidentChecksAndNotificationsAreNeverNull(t *testing.T) {
+	row := &services.IncidentWithMonitor{
+		Incident:    models.Incident{ID: uuid.New(), DeviceID: ptr(uuid.New())},
+		SubjectType: "device", SiteID: ptr(uuid.New()),
+	}
+	path := "/incidents/" + row.Incident.ID.String()
+
+	inc := &fakeIncidents{row: row}
+	w := get(incidentRouter(inc, fakeMonitorViews{}, fakeSiteAccess{services.SiteAccessReadonly}, uuid.New(), false), path)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+
+	var body struct {
+		Data struct {
+			Checks        json.RawMessage `json:"checks"`
+			Notifications json.RawMessage `json:"notifications"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v (body: %s)", err, w.Body.String())
+	}
+	if string(body.Data.Checks) != "[]" {
+		t.Errorf(`checks = %s, want []`, body.Data.Checks)
+	}
+	if string(body.Data.Notifications) != "[]" {
+		t.Errorf(`notifications = %s, want []`, body.Data.Notifications)
+	}
+}
+
+// Device incidents open and close automatically from the poller's own
+// up/down transitions (R1). A PATCH that tries to set status on one is
+// rejected before anything is written - checked here with fakes and a nil db,
+// since the handler must never reach the database on this path.
+func TestUpdateDeviceIncidentRejectsStatusChange(t *testing.T) {
+	row := &services.IncidentWithMonitor{
+		Incident:    models.Incident{ID: uuid.New(), DeviceID: ptr(uuid.New())},
+		SubjectType: "device", SiteID: ptr(uuid.New()),
+	}
+	inc := &fakeIncidents{row: row}
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set("user_id", uuid.New())
+		c.Set("username", "admin")
+		c.Set("is_admin", true) // admin: sees/edits everything, no site lookup needed
+		c.Next()
+	})
+	r.PATCH("/incidents/:id", UpdateIncidentHandler(inc, fakeMonitorViews{}, fakeSiteAccess{}, nil))
+
+	w := httptest.NewRecorder()
+	body := strings.NewReader(`{"status":"resolved"}`)
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPatch, "/incidents/"+row.Incident.ID.String(), body))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "device incidents open and close automatically") {
+		t.Errorf("body = %s, want the controller-ruling message", w.Body.String())
 	}
 }
 

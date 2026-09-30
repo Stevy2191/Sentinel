@@ -110,12 +110,21 @@ type fakeDeviceIncidents struct {
 	// closeNil, when set, makes CloseDeviceIncident return (nil, nil), as
 	// the real service does when nothing is open to close.
 	closeNil bool
+	// openErrOnCall, when non-zero, makes the Nth call (1-indexed) to
+	// OpenDeviceIncident return openErr instead of succeeding - simulating the
+	// save itself failing, as distinct from openOpened=false (nothing failed,
+	// one was simply already open).
+	openErrOnCall int
+	openErr       error
 }
 
 func newFakeDeviceIncidents() *fakeDeviceIncidents { return &fakeDeviceIncidents{openOpened: true} }
 
 func (f *fakeDeviceIncidents) OpenDeviceIncident(_ context.Context, id uuid.UUID, start time.Time, _ string) (*models.Incident, bool, error) {
 	f.opened++
+	if f.openErrOnCall != 0 && f.opened == f.openErrOnCall {
+		return nil, false, f.openErr
+	}
 	return &models.Incident{ID: uuid.New(), DeviceID: &id, StartTime: start}, f.openOpened, nil
 }
 func (f *fakeDeviceIncidents) CloseDeviceIncident(_ context.Context, id uuid.UUID, end time.Time, _ string) (*models.Incident, error) {
@@ -305,6 +314,39 @@ func TestPollerRetriesFailedIncidentOpenWhileDown(t *testing.T) {
 			t.Fatalf("sent %d, want no duplicate notification", len(notif.sent))
 		}
 	})
+}
+
+// The threshold-crossing poll pairs opening the incident with sending the
+// down notification in the same transition. If the open itself fails to
+// save, the notification must not fire either - only the next failing poll's
+// retry path, once it actually opens the incident, sends it. Otherwise both
+// the crossing poll and the retry poll would notify for the same outage.
+func TestPollerSkipsNotifyWhenThresholdCrossingIncidentOpenFails(t *testing.T) {
+	p, store, inc, notif := newTestPoller(&fakeSNMP{getErr: errors.New("still timing out")})
+	inc.openErrOnCall = 1
+	inc.openErr = errors.New("db unavailable")
+
+	p.PollOnce(context.Background(), device(models.DeviceStatusUp, 2)) // crosses the threshold
+	if len(store.saved) != 1 || store.saved[0].Status != models.DeviceStatusDown || store.saved[0].Failures != 3 {
+		t.Fatalf("saved %+v", store.saved)
+	}
+	if inc.opened != 1 {
+		t.Fatalf("open attempted %d times, want 1", inc.opened)
+	}
+	if len(notif.sent) != 0 {
+		t.Fatalf("sent %+v on the poll whose incident open failed, want none", notif.sent)
+	}
+
+	// Next failing poll: the retry path opens the incident (this time it
+	// succeeds) and sends the single down notification for the crossing.
+	inc.openOpened = true
+	p.PollOnce(context.Background(), device(models.DeviceStatusDown, 3))
+	if inc.opened != 2 {
+		t.Fatalf("open attempted %d times, want 2", inc.opened)
+	}
+	if len(notif.sent) != 1 || notif.sent[0].Status != "down" {
+		t.Fatalf("sent %+v, want exactly one down notification in total", notif.sent)
+	}
 }
 
 // When CloseDeviceIncident has nothing to close (returns nil, nil), the

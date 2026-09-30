@@ -596,9 +596,16 @@ func baseURL() string {
 func (p *EmailPlugin) buildHTMLBody(m *NotificationMessage) string {
 	color, label := statusStyle(m.Status)
 	base := baseURL()
-	detailURL := fmt.Sprintf("%s/monitors/%s", base, m.MonitorID)
-	reportURL := fmt.Sprintf("%s/monitors/%s/report", base, m.MonitorID)
+	detailURL := fmt.Sprintf("%s%s", base, m.ViewPath())
 	timestamp := m.Timestamp.Format("Mon, 02 Jan 2006 15:04:05 MST")
+
+	// Devices and agents have no report page, so that button is left off
+	// rather than linking a monitor_id (zero for either) that means nothing.
+	buttons := fmt.Sprintf(`<td style="padding-right:12px;"><a href="%s" style="display:inline-block;background:%s;color:#ffffff;padding:11px 22px;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;">View in Sentinel</a></td>`, detailURL, colorSuccess)
+	if m.HasReport() {
+		reportURL := fmt.Sprintf("%s/monitors/%s/report", base, m.MonitorID)
+		buttons += fmt.Sprintf(`<td><a href="%s" style="display:inline-block;background:#ffffff;color:%s;border:1px solid %s;padding:10px 21px;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;">View Report</a></td>`, reportURL, colorSuccess, colorSuccess)
+	}
 
 	var extra strings.Builder
 	if m.PreviousStatus != "" {
@@ -635,10 +642,7 @@ func (p *EmailPlugin) buildHTMLBody(m *NotificationMessage) string {
             %s
           </table>
           <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:28px;">
-            <tr>
-              <td style="padding-right:12px;"><a href="%s" style="display:inline-block;background:%s;color:#ffffff;padding:11px 22px;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;">View in Sentinel</a></td>
-              <td><a href="%s" style="display:inline-block;background:#ffffff;color:%s;border:1px solid %s;padding:10px 21px;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;">View Report</a></td>
-            </tr>
+            <tr>%s</tr>
           </table>
         </td></tr>
         <tr><td style="padding:20px 32px;border-top:1px solid #e2e8f0;">
@@ -656,8 +660,7 @@ func (p *EmailPlugin) buildHTMLBody(m *NotificationMessage) string {
 		colorMuted, htmlEscape(m.MonitorURL), colorSuccess, htmlEscape(m.MonitorURL),
 		colorMuted, colorText, timestamp,
 		extra.String(),
-		detailURL, colorSuccess,
-		reportURL, colorSuccess, colorSuccess,
+		buttons,
 		colorMuted,
 	)
 }
@@ -684,8 +687,10 @@ func (p *EmailPlugin) buildTextBody(m *NotificationMessage) string {
 	if m.Message != "" {
 		fmt.Fprintf(&b, "\n%s\n", m.Message)
 	}
-	fmt.Fprintf(&b, "\nView in Sentinel: %s/monitors/%s\n", base, m.MonitorID)
-	fmt.Fprintf(&b, "View Report: %s/monitors/%s/report\n", base, m.MonitorID)
+	fmt.Fprintf(&b, "\nView in Sentinel: %s%s\n", base, m.ViewPath())
+	if m.HasReport() {
+		fmt.Fprintf(&b, "View Report: %s/monitors/%s/report\n", base, m.MonitorID)
+	}
 	fmt.Fprintf(&b, "\n(c) 2026 Sentinel Monitoring\n")
 	return b.String()
 }

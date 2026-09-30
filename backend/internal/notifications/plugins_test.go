@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -57,6 +58,37 @@ func TestSendToChannelConvertsTimestampToConfiguredLocation(t *testing.T) {
 	// The instant itself must be unchanged - only how it is displayed differs.
 	if !spy.lastMessage.Timestamp.Equal(sentAt) {
 		t.Errorf("conversion changed the instant: got %v, want %v", spy.lastMessage.Timestamp, sentAt)
+	}
+}
+
+// ViewPath and HasReport are the shared choke point every plugin links
+// through, so a device alert lands on its device page with no report link,
+// while a plain monitor alert (and, for now, a server agent one - agents have
+// no page of their own yet) keeps the existing monitor page and report link.
+func TestViewPathAndHasReport(t *testing.T) {
+	monitorID := uuid.New()
+	deviceID := uuid.New()
+	agentID := uuid.New()
+
+	cases := []struct {
+		name       string
+		msg        NotificationMessage
+		wantPath   string
+		wantReport bool
+	}{
+		{"monitor", NotificationMessage{MonitorID: monitorID}, fmt.Sprintf("/monitors/%s", monitorID), true},
+		{"device", NotificationMessage{MonitorID: monitorID, DeviceID: &deviceID}, fmt.Sprintf("/network/devices/%s", deviceID), false},
+		{"agent", NotificationMessage{MonitorID: monitorID, AgentID: &agentID}, fmt.Sprintf("/monitors/%s", monitorID), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.msg.ViewPath(); got != c.wantPath {
+				t.Errorf("ViewPath() = %q, want %q", got, c.wantPath)
+			}
+			if got := c.msg.HasReport(); got != c.wantReport {
+				t.Errorf("HasReport() = %v, want %v", got, c.wantReport)
+			}
+		})
 	}
 }
 

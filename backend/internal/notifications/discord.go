@@ -225,13 +225,15 @@ func (p *DiscordPlugin) buildPayload(m *NotificationMessage) discordPayload {
 		fmt.Fprintf(&desc, "[%s](%s)\n", m.MonitorURL, m.MonitorURL)
 	}
 	// Discord webhook embeds cannot render interactive buttons; use markdown links.
-	fmt.Fprintf(&desc, "\n[View in Sentinel](%s/monitors/%s) • [View Report](%s/reports?monitor_id=%s)",
-		base, m.MonitorID, base, m.MonitorID)
+	fmt.Fprintf(&desc, "\n[View in Sentinel](%s%s)", base, m.ViewPath())
+	if m.HasReport() {
+		fmt.Fprintf(&desc, " • [View Report](%s/reports?monitor_id=%s)", base, m.MonitorID)
+	}
 
 	embed := discordEmbed{
 		Title:       m.MonitorName,
 		Description: desc.String(),
-		URL:         fmt.Sprintf("%s/monitors/%s", base, m.MonitorID),
+		URL:         fmt.Sprintf("%s%s", base, m.ViewPath()),
 		Color:       color,
 		Fields:      fields,
 		Footer:      &discordEmbedFooter{Text: "Sentinel Monitoring"},

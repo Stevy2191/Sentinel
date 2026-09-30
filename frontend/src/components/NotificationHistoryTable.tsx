@@ -12,6 +12,16 @@ const statusBadge: Record<NotificationStatus, string> = {
   pending: 'bg-amber-500/20 text-amber-400',
 }
 
+// A row belongs to a monitor, a server agent or a network device - only a
+// device has its own detail page today, so that is the only case rerouted;
+// the rest keep the historical (possibly null, for an agent row) monitor
+// link. Never assumes any of the three ids is present.
+const subjectPath = (n: NotificationHistoryItem) =>
+  n.device_id ? `/network/devices/${n.device_id}` : `/monitors/${n.monitor_id ?? ''}`
+
+const subjectLabel = (n: NotificationHistoryItem) =>
+  n.monitor_name || (n.monitor_id ?? n.device_id ?? n.agent_id ?? '').slice(0, 8)
+
 interface Props {
   items: NotificationHistoryItem[]
   loading: boolean
@@ -106,8 +116,8 @@ export default function NotificationHistoryTable({
               sorted.map((n, i) => (
                 <tr key={n.id} className={i % 2 ? 'bg-white/5' : ''}>
                   <td className="px-4 py-3">
-                    <Link to={`/monitors/${n.monitor_id}`} className="text-primary-400 hover:underline">
-                      {n.monitor_name || n.monitor_id.slice(0, 8)}
+                    <Link to={subjectPath(n)} className="text-primary-400 hover:underline">
+                      {subjectLabel(n)}
                     </Link>
                   </td>
                   <td className="px-4 py-3 capitalize text-slate-300">
@@ -133,7 +143,10 @@ export default function NotificationHistoryTable({
                       >
                         <Info className="h-4 w-4" />
                       </button>
-                      {n.status === 'failed' && onRetry && (
+                      {/* Device and server alerts have no monitor to rebuild
+                          a retry message from - the API refuses them (400),
+                          so the button is not offered in the first place. */}
+                      {n.status === 'failed' && onRetry && n.monitor_id && (
                         <button
                           className="btn !px-2 !py-1 border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 disabled:opacity-50"
                           title="Retry"
@@ -166,7 +179,7 @@ export default function NotificationHistoryTable({
             <dl className="mt-4 space-y-2 text-sm">
               <div className="flex justify-between gap-4">
                 <dt className="text-slate-500">Monitor</dt>
-                <dd className="font-medium">{details.monitor_name || details.monitor_id}</dd>
+                <dd className="font-medium">{subjectLabel(details)}</dd>
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="text-slate-500">Channel</dt>
