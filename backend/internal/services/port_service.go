@@ -81,7 +81,13 @@ func (s *PortService) SavePortState(ctx context.Context, interfaceID uuid.UUID, 
 }
 
 // RecordPortEvents inserts new events (span events with no end) and ends
-// open span events, in one transaction.
+// open span events, in one transaction. The tracker uses the same detail
+// keys at start and end (e.g. "per_minute", "util_pct", "speed_bps"), so
+// ending an event nests its end detail under an "end" key instead of merging
+// it in at the top level: the start figures stay readable, and the clearing
+// figures live at detail.end.*. When there is no end detail (e.g. the link
+// went down while a traffic condition was active) the merge is skipped
+// entirely — ended_at is still set, but no "end": {} is written.
 func (s *PortService) RecordPortEvents(ctx context.Context, starts []models.PortEvent, ends []PortEventEnd) error {
 	if len(starts) == 0 && len(ends) == 0 {
 		return nil
@@ -93,11 +99,19 @@ func (s *PortService) RecordPortEvents(ctx context.Context, starts []models.Port
 			}
 		}
 		for _, e := range ends {
-			detail, err := json.Marshal(e.Detail)
-			if err != nil || e.Detail == nil {
-				detail = []byte("{}")
+			if len(e.Detail) == 0 {
+				if err := tx.Exec(`UPDATE port_events SET ended_at = ?
+					WHERE interface_id = ? AND kind = ? AND ended_at IS NULL`,
+					e.At, e.InterfaceID, e.Kind).Error; err != nil {
+					return fmt.Errorf("ending %s event: %w", e.Kind, err)
+				}
+				continue
 			}
-			if err := tx.Exec(`UPDATE port_events SET ended_at = ?, detail = detail || ?::jsonb
+			detail, err := json.Marshal(e.Detail)
+			if err != nil {
+				return fmt.Errorf("marshalling end detail for %s event: %w", e.Kind, err)
+			}
+			if err := tx.Exec(`UPDATE port_events SET ended_at = ?, detail = detail || jsonb_build_object('end', ?::jsonb)
 				WHERE interface_id = ? AND kind = ? AND ended_at IS NULL`,
 				e.At, string(detail), e.InterfaceID, e.Kind).Error; err != nil {
 				return fmt.Errorf("ending %s event: %w", e.Kind, err)

@@ -657,14 +657,32 @@ func (s *IncidentService) ClosePortIncident(ctx context.Context, interfaceID uui
 }
 
 // ClosePortIncidents closes every open incident on a port (it stopped being
-// important) and returns how many it closed.
+// important, or stopped being reported at all) and returns how many it
+// closed.
 func (s *IncidentService) ClosePortIncidents(ctx context.Context, interfaceID uuid.UUID, end time.Time, note string) (int, error) {
-	open, err := s.OpenPortIncidents(ctx, interfaceID)
-	if err != nil {
-		return 0, err
+	return s.closePortIncidents(s.db.WithContext(ctx), interfaceID, end, note)
+}
+
+// ClosePortIncidentsTx is ClosePortIncidents run against an existing
+// transaction handle, so a caller can close a port's incidents atomically
+// with another write — e.g. DeviceService.SaveInventory marking a port
+// absent and closing its incidents together: if the rest of the inventory
+// save fails, the incidents must not end up closed anyway.
+func (s *IncidentService) ClosePortIncidentsTx(tx *gorm.DB, interfaceID uuid.UUID, end time.Time, note string) (int, error) {
+	return s.closePortIncidents(tx, interfaceID, end, note)
+}
+
+// closePortIncidents is ClosePortIncidents' body, run against whatever
+// *gorm.DB it is given (the service's own db, already WithContext'd, or a
+// caller's transaction).
+func (s *IncidentService) closePortIncidents(db *gorm.DB, interfaceID uuid.UUID, end time.Time, note string) (int, error) {
+	var open []models.Incident
+	if err := db.Where("interface_id = ? AND end_time IS NULL", interfaceID).
+		Order("start_time DESC").Find(&open).Error; err != nil {
+		return 0, fmt.Errorf("listing open incidents for port %s: %w", interfaceID, err)
 	}
 	for _, inc := range open {
-		if _, err := s.closeIncidentRow(s.db.WithContext(ctx), inc, end, note); err != nil {
+		if _, err := s.closeIncidentRow(db, inc, end, note); err != nil {
 			return 0, err
 		}
 	}
