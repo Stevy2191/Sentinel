@@ -1,19 +1,26 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { MapPin, Pencil, Trash2 } from 'lucide-react'
+import { MapPin, Pencil, Plus, Radar, Trash2 } from 'lucide-react'
 import { useSite, useSiteActions } from '@/hooks/useSites'
+import { useDevices } from '@/hooks/useDevices'
 import SiteFormModal from '@/components/SiteFormModal'
 import SiteSharingPanel from '@/components/SiteSharingPanel'
+import DeviceTable from '@/components/network/DeviceTable'
+import DeviceFormModal from '@/components/network/DeviceFormModal'
+import ScanModal from '@/components/network/ScanModal'
 import type { ApiError } from '@/services/api'
 
 export default function SiteDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { site, loading, notFound, refetch } = useSite(id)
+  const { devices, refetch: refetchDevices } = useDevices({ siteId: id })
   const { remove, busy } = useSiteActions()
   const [editing, setEditing] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [addingDevice, setAddingDevice] = useState(false)
+  const [scanning, setScanning] = useState(false)
 
   if (loading) return <p className="text-sm text-slate-400">Loading…</p>
 
@@ -30,6 +37,7 @@ export default function SiteDetail() {
   }
 
   const isAdmin = site.access === 'admin'
+  const canEdit = isAdmin || site.access === 'editable'
 
   const handleDelete = async () => {
     setError(null)
@@ -82,10 +90,29 @@ export default function SiteDetail() {
 
       {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">{error}</div>}
 
-      <div className="card p-8 text-center">
-        <p className="text-slate-300">No devices yet.</p>
-        <p className="mt-1 text-sm text-slate-500">SNMP devices arrive in a later update.</p>
-      </div>
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-light text-white">Devices ({devices.length})</h2>
+          {canEdit && (
+            <div className="flex gap-2">
+              <button className="btn-secondary flex items-center gap-2" onClick={() => setScanning(true)}>
+                <Radar className="h-4 w-4" /> Scan subnet
+              </button>
+              <button className="btn-primary flex items-center gap-2" onClick={() => setAddingDevice(true)}>
+                <Plus className="h-4 w-4" /> Add device
+              </button>
+            </div>
+          )}
+        </div>
+        {devices.length === 0 ? (
+          <div className="card p-8 text-center">
+            <p className="text-slate-300">No devices yet.</p>
+            {canEdit && <p className="mt-1 text-sm text-slate-500">Add a device by address, or scan a subnet to find them.</p>}
+          </div>
+        ) : (
+          <DeviceTable devices={devices} showSite={false} />
+        )}
+      </section>
 
       {isAdmin && <SiteSharingPanel siteId={site.id} />}
 
@@ -99,6 +126,10 @@ export default function SiteDetail() {
           }}
         />
       )}
+      {addingDevice && (
+        <DeviceFormModal siteId={site.id} onClose={() => setAddingDevice(false)} onSaved={() => { setAddingDevice(false); void refetchDevices() }} />
+      )}
+      {scanning && <ScanModal siteId={site.id} onClose={() => setScanning(false)} onAdded={() => void refetchDevices()} />}
     </div>
   )
 }
