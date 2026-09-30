@@ -120,10 +120,3 @@ func split(ps []FacePort, rows int, sfp bool) FaceBlock {
 	}
 	return b
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
