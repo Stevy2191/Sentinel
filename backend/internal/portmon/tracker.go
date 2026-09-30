@@ -95,24 +95,38 @@ type Tracker struct {
 	operChangedAt   time.Time
 	transitions     []time.Time
 	flapCount       int
-	errWindow       []float64
-	errBelow        int
-	utilWindow      []float64
-	active          map[Condition]time.Time
+	// flapRestored: Flapping was active in the Snapshot this tracker was
+	// restored from, so its transition history (and true total count) is
+	// unknown. It stays true until the flap actually ends.
+	flapRestored bool
+	// flapSeeded: the first Observe since such a restore has planted a
+	// quiet-window anchor in transitions (see Observe); only happens once.
+	flapSeeded bool
+	errWindow  []float64
+	errBelow   int
+	utilWindow []float64
+	active     map[Condition]time.Time
 }
 
 // NewTracker restores a tracker. Active conditions carry over with their
 // start times; the rolling windows start empty, and since a condition only
 // ends on evidence (5 quiet polls, a quiet flap window), a restart never ends
-// or re-opens one.
+// or re-opens one. Flapping is the exception that proves the rule: with no
+// transition history to judge quiet time from, a restored flap measures its
+// 10-minute quiet window from the first Observe call after the restore
+// (rather than ending on it for lack of any transitions), and when it does
+// end that way its Change detail omits "transitions" since the true count
+// predates the restore.
 func NewTracker(s Snapshot) *Tracker {
 	active := make(map[Condition]time.Time, len(s.Active))
 	for c, at := range s.Active {
 		active[c] = at
 	}
+	_, flapRestored := s.Active[Flapping]
 	return &Tracker{
 		operUp: s.OperUp, adminUp: s.AdminUp, speed: s.SpeedBps,
 		lastChange: s.LastChangeSeconds, operChangedAt: s.OperChangedAt, active: active,
+		flapRestored: flapRestored,
 	}
 }
 
@@ -211,9 +225,24 @@ func (t *Tracker) Observe(o Observation, th Thresholds, usualSpeed int64) Result
 	case !flapping && len(t.transitions) >= FlapThreshold:
 		t.flapCount = len(t.transitions)
 		start(Flapping, map[string]any{"transitions": t.flapCount})
+	case flapping && len(t.transitions) == 0 && t.flapRestored && !t.flapSeeded:
+		// First Observe since a restore with Flapping active: there is no
+		// transition history to prune against, so plant this poll as the
+		// start of the quiet window instead of ending the flap for lack of
+		// one. A real transition on this same poll would have already left
+		// transitions non-empty above, skipping this case as intended.
+		t.transitions = append(t.transitions, o.At)
+		t.flapSeeded = true
 	case flapping && len(t.transitions) == 0:
-		end(Flapping, map[string]any{"transitions": t.flapCount})
+		detail := map[string]any{"transitions": t.flapCount}
+		if t.flapRestored {
+			// The count predates the restore; we never knew the real total.
+			detail = nil
+		}
+		end(Flapping, detail)
 		t.flapCount = 0
+		t.flapRestored = false
+		t.flapSeeded = false
 	}
 
 	if o.OperUp && t.operUp && transitions == 0 && o.SpeedBps > 0 && t.speed > 0 && o.SpeedBps != t.speed {
