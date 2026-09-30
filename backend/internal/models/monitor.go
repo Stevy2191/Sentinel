@@ -416,7 +416,11 @@ type Incident struct {
 	// Exactly one of MonitorID and DeviceID is set (incidents_subject_check).
 	MonitorID *uuid.UUID `json:"monitor_id" gorm:"column:monitor_id;type:uuid"`
 	DeviceID  *uuid.UUID `json:"device_id" gorm:"column:device_id;type:uuid"`
-	StartTime time.Time  `json:"start_time" gorm:"column:start_time;not null"`
+	// InterfaceID and Condition are set together on a port incident (a device
+	// incident about one of the device's ports); incidents_port_check.
+	InterfaceID *uuid.UUID `json:"interface_id" gorm:"column:interface_id;type:uuid"`
+	Condition   *string    `json:"condition" gorm:"column:condition"`
+	StartTime   time.Time  `json:"start_time" gorm:"column:start_time;not null"`
 	// IncidentType is how the check failed when the incident opened.
 	IncidentType    string     `json:"incident_type" gorm:"column:incident_type;default:down"`
 	EndTime         *time.Time `json:"end_time" gorm:"column:end_time"`
@@ -452,11 +456,13 @@ func (i *Incident) Status() string {
 type Notification struct {
 	ID uuid.UUID `json:"id" gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
 	// Exactly one of MonitorID, AgentID and DeviceID is set.
-	MonitorID  *uuid.UUID `json:"monitor_id" gorm:"column:monitor_id;type:uuid"`
-	AgentID    *uuid.UUID `json:"agent_id" gorm:"column:agent_id;type:uuid"`
-	DeviceID   *uuid.UUID `json:"device_id" gorm:"column:device_id;type:uuid"`
-	IncidentID *uuid.UUID `json:"incident_id" gorm:"column:incident_id;type:uuid"`
-	Channel    string     `json:"channel" gorm:"column:channel;not null"`
+	MonitorID *uuid.UUID `json:"monitor_id" gorm:"column:monitor_id;type:uuid"`
+	AgentID   *uuid.UUID `json:"agent_id" gorm:"column:agent_id;type:uuid"`
+	DeviceID  *uuid.UUID `json:"device_id" gorm:"column:device_id;type:uuid"`
+	// InterfaceID is set on a device notification about one port.
+	InterfaceID *uuid.UUID `json:"interface_id" gorm:"column:interface_id;type:uuid"`
+	IncidentID  *uuid.UUID `json:"incident_id" gorm:"column:incident_id;type:uuid"`
+	Channel     string     `json:"channel" gorm:"column:channel;not null"`
 	// ChannelID names which configured channel sent this, since several may
 	// share a type. Null for history whose channel has since been deleted.
 	ChannelID    *uuid.UUID `json:"channel_id" gorm:"column:channel_id;type:uuid"`

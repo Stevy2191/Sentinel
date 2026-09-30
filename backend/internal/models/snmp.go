@@ -172,6 +172,20 @@ const (
 	DeviceStatusError   = "error"
 )
 
+// Device types. device_type is the user's override; device_type_detected is
+// what inventory concluded (portmon.DetectDeviceType).
+const (
+	DeviceTypeSwitch      = "switch"
+	DeviceTypeRouter      = "router"
+	DeviceTypeAccessPoint = "access_point"
+	DeviceTypeNVR         = "nvr"
+	DeviceTypeOther       = "other"
+)
+
+var ValidDeviceTypes = map[string]bool{
+	DeviceTypeSwitch: true, DeviceTypeRouter: true, DeviceTypeAccessPoint: true, DeviceTypeNVR: true, DeviceTypeOther: true,
+}
+
 // Device is an SNMP-polled device. It belongs to exactly one site.
 type Device struct {
 	ID                  uuid.UUID   `json:"id" gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
@@ -200,9 +214,22 @@ type Device struct {
 	Vendor              string      `json:"vendor" gorm:"column:vendor"`
 	Model               string      `json:"model" gorm:"column:model"`
 	Serial              string      `json:"serial" gorm:"column:serial"`
-	CreatedBy           *uuid.UUID  `json:"created_by" gorm:"column:created_by;type:uuid"`
-	CreatedAt           time.Time   `json:"created_at" gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt           time.Time   `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
+	// Overrides: when set, the UI shows these instead of what SNMP reported,
+	// and inventory never writes them.
+	VendorOverride   *string `json:"vendor_override" gorm:"column:vendor_override"`
+	ModelOverride    *string `json:"model_override" gorm:"column:model_override"`
+	LocationOverride *string `json:"location_override" gorm:"column:location_override"`
+	// DeviceType is the user's override; DeviceTypeDetected is inventory's.
+	DeviceType         *string `json:"device_type" gorm:"column:device_type"`
+	DeviceTypeDetected string  `json:"device_type_detected" gorm:"column:device_type_detected;not null;default:other"`
+	// Faceplate layout overrides (nil = automatic).
+	FaceplateRows       *int       `json:"faceplate_rows" gorm:"column:faceplate_rows"`
+	FaceplateSFPPorts   IntSlice   `json:"faceplate_sfp_ports" gorm:"column:faceplate_sfp_ports;type:jsonb"`
+	LastStatsAt         *time.Time `json:"last_stats_at" gorm:"column:last_stats_at"`
+	LastStatsDurationMs *int       `json:"last_stats_duration_ms" gorm:"column:last_stats_duration_ms"`
+	CreatedBy           *uuid.UUID `json:"created_by" gorm:"column:created_by;type:uuid"`
+	CreatedAt           time.Time  `json:"created_at" gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt           time.Time  `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
 }
 
 func (Device) TableName() string { return "devices" }
@@ -280,7 +307,69 @@ type DeviceInterface struct {
 	OperStatus        string    `json:"oper_status" gorm:"column:oper_status"`
 	LastChangeSeconds int64     `json:"last_change_seconds" gorm:"column:last_change_seconds"`
 	Present           bool      `json:"present" gorm:"column:present;not null"`
-	UpdatedAt         time.Time `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
+	ConnectorPresent  *bool     `json:"connector_present" gorm:"column:connector_present"`
+	// HasIfX: the ifXTable has answered for this interface at least once, so
+	// its name, alias and high speed are not overwritten by an inventory whose
+	// ifXTable walk failed.
+	HasIfX bool `json:"-" gorm:"column:has_ifx;not null"`
+	// Collect is the user's choice (nil = CollectDefault, the classifier's).
+	Collect              *bool        `json:"collect" gorm:"column:collect"`
+	CollectDefault       bool         `json:"collect_default" gorm:"column:collect_default;not null"`
+	Important            bool         `json:"important" gorm:"column:important;not null"`
+	UtilThresholdPct     *int         `json:"util_threshold_pct" gorm:"column:util_threshold_pct"`
+	ErrorThresholdPerMin *int         `json:"error_threshold_per_min" gorm:"column:error_threshold_per_min"`
+	DownGraceSeconds     *int         `json:"down_grace_seconds" gorm:"column:down_grace_seconds"`
+	UsualSpeedBps        *int64       `json:"usual_speed_bps" gorm:"column:usual_speed_bps"`
+	Conditions           ConditionSet `json:"conditions" gorm:"column:conditions;type:jsonb;not null"`
+	ConditionsSince      TimeMap      `json:"conditions_since" gorm:"column:conditions_since;type:jsonb;not null"`
+	OperChangedAt        *time.Time   `json:"oper_changed_at" gorm:"column:oper_changed_at"`
+	UpdatedAt            time.Time    `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
 }
 
 func (DeviceInterface) TableName() string { return "device_interfaces" }
+
+// CollectEffective is whether the stats poll reads this interface.
+func (i DeviceInterface) CollectEffective() bool {
+	if i.Collect != nil {
+		return *i.Collect
+	}
+	return i.CollectDefault
+}
+
+// Port conditions (portmon.Condition values), as stored in
+// device_interfaces.conditions and incidents.condition.
+const (
+	PortConditionLinkDown  = "link_down"
+	PortConditionErrors    = "errors"
+	PortConditionFlapping  = "flapping"
+	PortConditionSlowLink  = "slow_link"
+	PortConditionSaturated = "saturated"
+)
+
+// Port event kinds.
+const (
+	PortEventLinkUp      = "link_up"
+	PortEventLinkDown    = "link_down"
+	PortEventFlapping    = "flapping"
+	PortEventSpeedChange = "speed_change"
+	PortEventErrors      = "errors"
+	PortEventSaturated   = "saturated"
+	PortEventSlowLink    = "slow_link"
+	PortEventAdminUp     = "admin_up"
+	PortEventAdminDown   = "admin_down"
+)
+
+// PortEvent is one row of the port event log. Span events (flapping, errors,
+// saturated, slow_link) get EndedAt when they end.
+type PortEvent struct {
+	ID          int64      `json:"id" gorm:"column:id;primaryKey;autoIncrement"`
+	DeviceID    uuid.UUID  `json:"device_id" gorm:"column:device_id;type:uuid;not null"`
+	InterfaceID uuid.UUID  `json:"interface_id" gorm:"column:interface_id;type:uuid;not null"`
+	IfIndex     int        `json:"if_index" gorm:"column:if_index;not null"`
+	Kind        string     `json:"kind" gorm:"column:kind;not null"`
+	StartedAt   time.Time  `json:"started_at" gorm:"column:started_at;not null"`
+	EndedAt     *time.Time `json:"ended_at" gorm:"column:ended_at"`
+	Detail      JSONMap    `json:"detail" gorm:"column:detail;type:jsonb;not null"`
+}
+
+func (PortEvent) TableName() string { return "port_events" }

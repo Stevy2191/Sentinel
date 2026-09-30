@@ -26,12 +26,21 @@ var errTimescaleNotPreloaded = errors.New(
 		"shared_preload_libraries=timescaledb (copy the whole postgres service from the " +
 		"current release), then run `docker compose up -d`. See GETTING_STARTED.md.")
 
+// errTimescaleApacheOnly: the -oss image (Apache licence) lacks compression
+// and continuous aggregates, which the metrics store needs.
+var errTimescaleApacheOnly = errors.New(
+	"Sentinel's database runs the Apache-only build of TimescaleDB, which lacks compression " +
+		"and continuous aggregates. Use the timescale/timescaledb image from the current " +
+		"docker-compose.yml (not an -oss tag) and run `docker compose up -d`. See GETTING_STARTED.md.")
+
 // TimescaleStatus is what the preflight learns from the server.
 type TimescaleStatus struct {
 	// Available: the server has the extension installed (the image is right).
 	Available bool
 	// Preloaded: the server loads it at startup (the compose command is right).
 	Preloaded bool
+	// License is timescaledb.license ("timescale" or "apache"); "" if unknown.
+	License string
 }
 
 // TimescaleMissingError returns nil when TimescaleDB is usable, and otherwise
@@ -43,6 +52,8 @@ func TimescaleMissingError(st TimescaleStatus) error {
 		return errTimescaleMissing
 	case !st.Preloaded:
 		return errTimescaleNotPreloaded
+	case st.License != "" && st.License != "timescale":
+		return errTimescaleApacheOnly
 	default:
 		return nil
 	}
@@ -63,5 +74,10 @@ func RequireTimescale(db *gorm.DB) error {
 		return fmt.Errorf("checking shared_preload_libraries: %w", err)
 	}
 	st.Preloaded = strings.Contains(preload, "timescaledb")
+	if st.Preloaded {
+		if err := db.Raw("SELECT COALESCE(current_setting('timescaledb.license', true), '')").Scan(&st.License).Error; err != nil {
+			return fmt.Errorf("checking the TimescaleDB licence: %w", err)
+		}
+	}
 	return TimescaleMissingError(st)
 }
