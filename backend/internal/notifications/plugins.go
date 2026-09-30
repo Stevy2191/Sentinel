@@ -40,7 +40,11 @@ type NotificationMessage struct {
 	// DeviceID is set instead of MonitorID for a network device alert.
 	// MonitorName/MonitorURL carry the device's name and host, and SiteName
 	// its site, so plugins render it without knowing the difference.
-	DeviceID         *uuid.UUID    `json:"device_id,omitempty"`
+	DeviceID *uuid.UUID `json:"device_id,omitempty"`
+	// InterfaceID and PortIfIndex are set on a device alert about one port;
+	// the link goes to the port's page.
+	InterfaceID      *uuid.UUID    `json:"interface_id,omitempty"`
+	PortIfIndex      *int          `json:"port_if_index,omitempty"`
 	SiteName         string        `json:"site_name,omitempty"`
 	MonitorName      string        `json:"monitor_name"`
 	MonitorURL       string        `json:"monitor_url"`
@@ -89,6 +93,9 @@ func (m *NotificationMessage) deliversTo(inst *ChannelInstance) bool {
 // the existing, if imperfect, behaviour).
 func (m *NotificationMessage) ViewPath() string {
 	if m.DeviceID != nil {
+		if m.PortIfIndex != nil {
+			return fmt.Sprintf("/network/devices/%s/ports/%d", *m.DeviceID, *m.PortIfIndex)
+		}
 		return fmt.Sprintf("/network/devices/%s", *m.DeviceID)
 	}
 	return fmt.Sprintf("/monitors/%s", m.MonitorID)
@@ -263,6 +270,7 @@ func (m *NotificationManager) StoreNotificationRecord(ctx context.Context, messa
 		record.AgentID = message.AgentID
 	case message.DeviceID != nil:
 		record.DeviceID = message.DeviceID
+		record.InterfaceID = message.InterfaceID
 	default:
 		monitorID := message.MonitorID
 		record.MonitorID = &monitorID

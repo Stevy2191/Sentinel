@@ -80,6 +80,10 @@ func UpdateIncidentHandler(incidentService incidentGetter, monitors monitorAcces
 		}
 		incident := row.Incident
 
+		if req.Status != nil && incident.InterfaceID != nil {
+			respondError(c, http.StatusBadRequest, "port incidents close when the problem clears, or when the port is no longer marked important")
+			return
+		}
 		if req.Status != nil && incident.DeviceID != nil {
 			respondError(c, http.StatusBadRequest, "device incidents open and close automatically; pause the device to close one")
 			return

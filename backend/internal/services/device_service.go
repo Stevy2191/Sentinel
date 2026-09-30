@@ -64,7 +64,7 @@ const availabilitySQL = `(
 	END
 	FROM (SELECT GREATEST(d.created_at, now() - interval '30 days') AS since,
 	             EXTRACT(EPOCH FROM (now() - GREATEST(d.created_at, now() - interval '30 days'))) AS secs) win
-	LEFT JOIN incidents i ON i.device_id = d.id
+	LEFT JOIN incidents i ON i.device_id = d.id AND i.interface_id IS NULL
 		AND COALESCE(i.end_time, now()) > win.since
 	GROUP BY win.secs
 ) AS availability_30d`
