@@ -86,24 +86,76 @@ func TestDBUpdatePortClosesIncidentsWhenUnmarked(t *testing.T) {
 	}
 }
 
+// Turning collection off must not just close incidents: the port is no
+// longer polled, so nothing else will ever clear its stale conditions or end
+// its open event spans. UpdatePort must do that itself, in the same
+// transaction as the column change and the incident close.
 func TestDBUpdatePortClosesIncidentsWhenCollectionStops(t *testing.T) {
 	ports, _, d, _ := portsFixture(t)
 	ctx := context.Background()
 	yes, no := true, false
+
 	if _, _, err := ports.UpdatePort(ctx, d.ID, 3, models.PortPatch{Collect: models.Opt[bool]{Set: true, Value: &yes}}); err != nil {
 		t.Fatal(err)
 	}
 	var before models.DeviceInterface
 	testdb.Must(t, ports.db.First(&before, "device_id = ? AND if_index = ?", d.ID, 3).Error)
-	if _, _, err := ports.incidents.OpenPortIncident(ctx, d.ID, before.ID, "link_down", time.Now().UTC(), "down"); err != nil {
+	testdb.Exec(t, ports.db, `UPDATE device_interfaces SET conditions = '["errors"]',
+		conditions_since = '{"errors": "2020-01-01T00:00:00Z"}' WHERE id = ?`, before.ID)
+	testdb.Must(t, ports.RecordPortEvents(ctx, []models.PortEvent{
+		{DeviceID: d.ID, InterfaceID: before.ID, IfIndex: 3, Kind: "errors", StartedAt: time.Now().Add(-time.Hour)},
+	}, nil))
+	if _, _, err := ports.incidents.OpenPortIncident(ctx, d.ID, before.ID, "errors", time.Now().UTC(), "errors"); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, _, err := ports.UpdatePort(ctx, d.ID, 3, models.PortPatch{Collect: models.Opt[bool]{Set: true, Value: &no}}); err != nil {
 		t.Fatal(err)
 	}
-	open, _ := ports.incidents.OpenPortIncidents(ctx, before.ID)
+
+	var after models.DeviceInterface
+	testdb.Must(t, ports.db.First(&after, "id = ?", before.ID).Error)
+	if len(after.Conditions) != 0 {
+		t.Errorf("conditions not cleared: %v", after.Conditions)
+	}
+	if len(after.ConditionsSince) != 0 {
+		t.Errorf("conditions_since not cleared: %v", after.ConditionsSince)
+	}
+	var ev models.PortEvent
+	testdb.Must(t, ports.db.First(&ev, "interface_id = ? AND kind = 'errors'", before.ID).Error)
+	if ev.EndedAt == nil {
+		t.Error("open event span left running")
+	}
+	open, err := ports.incidents.OpenPortIncidents(ctx, before.ID)
+	testdb.Must(t, err)
 	if len(open) != 0 {
 		t.Fatalf("turning off collection left %d incidents open", len(open))
+	}
+	var closed models.Incident
+	testdb.Must(t, ports.db.Where("interface_id = ?", before.ID).Order("start_time DESC").First(&closed).Error)
+	if closed.ResolutionNotes != "Statistics are no longer collected for this port." {
+		t.Errorf("resolution notes = %q", closed.ResolutionNotes)
+	}
+
+	// collect: null reverts to the classifier's default. The CPU interface
+	// (ifIndex 65) defaults to not collected, so setting collect=true and
+	// then clearing it back to null also stops collection, and gets the
+	// same cleanup.
+	if _, _, err := ports.UpdatePort(ctx, d.ID, 65, models.PortPatch{Collect: models.Opt[bool]{Set: true, Value: &yes}}); err != nil {
+		t.Fatal(err)
+	}
+	var cpu models.DeviceInterface
+	testdb.Must(t, ports.db.First(&cpu, "device_id = ? AND if_index = ?", d.ID, 65).Error)
+	if _, _, err := ports.incidents.OpenPortIncident(ctx, d.ID, cpu.ID, "link_down", time.Now().UTC(), "down"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ports.UpdatePort(ctx, d.ID, 65, models.PortPatch{Collect: models.Opt[bool]{Set: true}}); err != nil {
+		t.Fatal(err)
+	}
+	openCPU, err := ports.incidents.OpenPortIncidents(ctx, cpu.ID)
+	testdb.Must(t, err)
+	if len(openCPU) != 0 {
+		t.Fatalf("collect:null left %d incidents open", len(openCPU))
 	}
 }
 

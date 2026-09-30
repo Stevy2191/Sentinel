@@ -264,9 +264,15 @@ func (s *PortService) Port(ctx context.Context, d *DeviceView, ifIndex int) (*Po
 	return &PortDetailView{PortView: toPortView(rows[0], latest[d.ID]), Defaults: s.defaults(ctx), OpenIncidents: open}, nil
 }
 
-// UpdatePort applies a port patch. Un-marking a port as important, or
-// turning off statistics collection for a port that was being collected,
-// closes its open port incidents.
+// UpdatePort applies a port patch, in one transaction: if closing an
+// incident (or clearing stale state) fails, the column change is rolled back
+// with it rather than left committed on its own.
+//
+// Un-marking a port as important closes its open port incidents. Turning off
+// statistics collection for a port that was being collected does the same,
+// and also clears its conditions (and conditions_since) and ends any open
+// event spans: the port is no longer polled, so nothing else will ever
+// notice those conditions clear or those spans end.
 func (s *PortService) UpdatePort(ctx context.Context, deviceID uuid.UUID, ifIndex int, p models.PortPatch) (*models.DeviceInterface, *models.DeviceInterface, error) {
 	if err := p.Validate(); err != nil {
 		return nil, nil, err
@@ -279,22 +285,46 @@ func (s *PortService) UpdatePort(ctx context.Context, deviceID uuid.UUID, ifInde
 	if err != nil {
 		return nil, nil, fmt.Errorf("loading port: %w", err)
 	}
-	if err := s.db.WithContext(ctx).Model(&models.DeviceInterface{}).Where("id = ?", before.ID).Updates(p.Updates()).Error; err != nil {
-		return nil, nil, fmt.Errorf("saving port: %w", err)
+
+	// Derived from the patch, not a reload: Collect is the only column this
+	// patch can change that CollectEffective depends on.
+	afterCollect := before
+	if p.Collect.Set {
+		afterCollect.Collect = p.Collect.Value
 	}
-	if before.Important && p.Important.Value != nil && !*p.Important.Value {
-		if _, err := s.incidents.ClosePortIncidents(ctx, before.ID, time.Now().UTC(), "The port is no longer marked important."); err != nil {
-			return nil, nil, err
-		}
-	}
+	collectionStopped := before.CollectEffective() && !afterCollect.CollectEffective()
+	now := time.Now().UTC()
+
 	var after models.DeviceInterface
-	if err := s.db.WithContext(ctx).First(&after, "id = ?", before.ID).Error; err != nil {
-		return nil, nil, fmt.Errorf("reloading port: %w", err)
-	}
-	if before.CollectEffective() && !after.CollectEffective() {
-		if _, err := s.incidents.ClosePortIncidents(ctx, before.ID, time.Now().UTC(), "Statistics are no longer collected for this port."); err != nil {
-			return nil, nil, err
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.DeviceInterface{}).Where("id = ?", before.ID).Updates(p.Updates()).Error; err != nil {
+			return fmt.Errorf("saving port: %w", err)
 		}
+		if before.Important && p.Important.Value != nil && !*p.Important.Value {
+			if _, err := s.incidents.ClosePortIncidentsTx(tx, before.ID, now, "The port is no longer marked important."); err != nil {
+				return err
+			}
+		}
+		if collectionStopped {
+			if err := tx.Model(&models.DeviceInterface{}).Where("id = ?", before.ID).
+				Updates(map[string]any{"conditions": models.ConditionSet{}, "conditions_since": models.TimeMap{}}).Error; err != nil {
+				return fmt.Errorf("clearing port conditions: %w", err)
+			}
+			if err := tx.Exec(`UPDATE port_events SET ended_at = ? WHERE interface_id = ? AND ended_at IS NULL`,
+				now, before.ID).Error; err != nil {
+				return fmt.Errorf("ending open port events: %w", err)
+			}
+			if _, err := s.incidents.ClosePortIncidentsTx(tx, before.ID, now, "Statistics are no longer collected for this port."); err != nil {
+				return err
+			}
+		}
+		if err := tx.First(&after, "id = ?", before.ID).Error; err != nil {
+			return fmt.Errorf("reloading port: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
 	}
 	return &before, &after, nil
 }

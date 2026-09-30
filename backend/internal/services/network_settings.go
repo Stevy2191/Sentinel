@@ -23,12 +23,22 @@ type NetworkSettingsPatch struct {
 	PortDownGraceSeconds     *int `json:"port_down_grace_seconds"`
 }
 
-type NetworkSettingsService struct {
-	settings *SettingsService
-	metrics  *MetricsStore
+// networkRetentionStore is the slice of MetricsStore that
+// NetworkSettingsService needs for the retention policy: taken as an
+// interface so Update's ordering (apply the policy before saving the
+// setting that records it) can be tested with a fake that fails on command.
+// *MetricsStore satisfies it.
+type networkRetentionStore interface {
+	RetentionDays(ctx context.Context) (int, error)
+	ApplyRetention(ctx context.Context, days int) error
 }
 
-func NewNetworkSettingsService(settings *SettingsService, metrics *MetricsStore) *NetworkSettingsService {
+type NetworkSettingsService struct {
+	settings *SettingsService
+	metrics  networkRetentionStore
+}
+
+func NewNetworkSettingsService(settings *SettingsService, metrics networkRetentionStore) *NetworkSettingsService {
 	return &NetworkSettingsService{settings: settings, metrics: metrics}
 }
 
@@ -42,8 +52,12 @@ func (s *NetworkSettingsService) Get(ctx context.Context) NetworkSettings {
 	}
 }
 
-// Update validates and saves the patch. A new retention replaces the
-// TimescaleDB policy at once.
+// Update validates and saves the patch. A new retention is applied to the
+// TimescaleDB policy before the setting that records it is saved: if
+// ApplyRetention fails, nothing here is saved, and a retry with the same
+// value tries again (the comparison is against the live policy, not the
+// stored setting, so a partially-applied change is never mistaken for a
+// no-op).
 func (s *NetworkSettingsService) Update(ctx context.Context, p NetworkSettingsPatch) (NetworkSettings, error) {
 	fields := []struct {
 		v          *int
@@ -64,17 +78,22 @@ func (s *NetworkSettingsService) Update(ctx context.Context, p NetworkSettingsPa
 			return NetworkSettings{}, fmt.Errorf("%s must be between %d and %d", f.label, f.min, f.max)
 		}
 	}
-	before := s.settings.MetricsRawRetentionDays(ctx)
+	if p.MetricsRawRetentionDays != nil {
+		have, err := s.metrics.RetentionDays(ctx)
+		if err != nil {
+			return NetworkSettings{}, err
+		}
+		if have != *p.MetricsRawRetentionDays {
+			if err := s.metrics.ApplyRetention(ctx, *p.MetricsRawRetentionDays); err != nil {
+				return NetworkSettings{}, err
+			}
+		}
+	}
 	for _, f := range fields {
 		if f.v != nil {
 			if err := s.settings.SetInt(ctx, f.key, *f.v); err != nil {
 				return NetworkSettings{}, fmt.Errorf("saving %s: %w", f.key, err)
 			}
-		}
-	}
-	if p.MetricsRawRetentionDays != nil && *p.MetricsRawRetentionDays != before {
-		if err := s.metrics.ApplyRetention(ctx, *p.MetricsRawRetentionDays); err != nil {
-			return NetworkSettings{}, err
 		}
 	}
 	return s.Get(ctx), nil
