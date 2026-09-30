@@ -34,4 +34,7 @@ done
 
 port="$(docker port "$name" 5432/tcp | head -1 | awk -F: '{print $NF}')"
 export SENTINEL_TEST_DATABASE_URL="postgres://sentinel:test@127.0.0.1:${port}/sentinel?sslmode=disable"
+# Lets TestDBRestoreWithMetrics run pg_dump/psql inside the container (the
+# host has no postgres client tools).
+export SENTINEL_TEST_DB_CONTAINER="$name"
 go test "$@" ./...

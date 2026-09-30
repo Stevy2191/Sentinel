@@ -39,3 +39,21 @@ func TestTimescaleNotPreloaded(t *testing.T) {
 		}
 	}
 }
+
+// Compression and continuous aggregates exist only in the Timescale-licensed
+// build; the Apache-only image starts fine and then fails migration 048 with
+// a bare "functionality not supported" error.
+func TestTimescaleApacheOnly(t *testing.T) {
+	err := TimescaleMissingError(TimescaleStatus{Available: true, Preloaded: true, License: "apache"})
+	if err == nil {
+		t.Fatal("apache-only build: got nil, want an error")
+	}
+	for _, want := range []string{"timescale/timescaledb", "docker-compose.yml"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message %q does not mention %q", err.Error(), want)
+		}
+	}
+	if err := TimescaleMissingError(TimescaleStatus{Available: true, Preloaded: true, License: "timescale"}); err != nil {
+		t.Errorf("timescale licence: %v", err)
+	}
+}
