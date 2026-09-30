@@ -354,23 +354,32 @@ type IncidentWithMonitor struct {
 	SubjectTarget string     `json:"subject_target" gorm:"column:subject_target"`
 	SiteID        *uuid.UUID `json:"site_id" gorm:"column:site_id"`
 	SiteName      string     `json:"site_name" gorm:"column:site_name"`
+	// PortIfIndex is set for a port incident, for linking to the port page.
+	PortIfIndex *int `json:"port_if_index" gorm:"column:port_if_index"`
 }
 
 // incidentSubjectJoins and incidentSubjectSelect are shared by the list and
 // the detail so the two can never disagree about a row.
 const incidentSubjectJoins = `LEFT JOIN monitors AS m ON m.id = i.monitor_id
 	LEFT JOIN devices AS d ON d.id = i.device_id
-	LEFT JOIN sites AS st ON st.id = d.site_id`
+	LEFT JOIN sites AS st ON st.id = d.site_id
+	LEFT JOIN device_interfaces AS di ON di.id = i.interface_id`
 
+// A port incident keeps subject_type 'device' (it inherits the device's
+// access and pages) and reads "Device · 0/51 (Alias)" as its subject.
 const incidentSubjectSelect = `i.*,
 	COALESCE(m.name, d.name) AS monitor_name,
 	COALESCE(m.url, d.host) AS monitor_url,
 	COALESCE(m.type, 'snmp') AS monitor_type,
 	CASE WHEN i.device_id IS NOT NULL THEN 'device' ELSE 'monitor' END AS subject_type,
-	COALESCE(m.name, d.name) AS subject_name,
+	CASE WHEN di.id IS NOT NULL THEN
+		d.name || ' · ' || COALESCE(NULLIF(di.name, ''), di.if_index::text)
+		|| CASE WHEN COALESCE(di.alias, '') <> '' THEN ' (' || di.alias || ')' ELSE '' END
+	ELSE COALESCE(m.name, d.name) END AS subject_name,
 	COALESCE(m.url, d.host) AS subject_target,
 	d.site_id AS site_id,
-	COALESCE(st.name, '') AS site_name`
+	COALESCE(st.name, '') AS site_name,
+	di.if_index AS port_if_index`
 
 // ListIncidents returns a page of incidents across all monitors, newest first
 // by default, with the total matching count for pagination.
@@ -543,7 +552,7 @@ func (s *IncidentService) CloseDeviceIncidentTx(tx *gorm.DB, deviceID uuid.UUID,
 // caller's transaction).
 func (s *IncidentService) closeDeviceIncident(db *gorm.DB, deviceID uuid.UUID, end time.Time, note string) (*models.Incident, error) {
 	var rows []models.Incident
-	err := db.Where("device_id = ? AND end_time IS NULL", deviceID).Order("start_time DESC").Limit(1).Find(&rows).Error
+	err := db.Where("device_id = ? AND interface_id IS NULL AND end_time IS NULL", deviceID).Order("start_time DESC").Limit(1).Find(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("querying active incident for device %s: %w", deviceID, err)
 	}
@@ -551,6 +560,17 @@ func (s *IncidentService) closeDeviceIncident(db *gorm.DB, deviceID uuid.UUID, e
 		return nil, nil
 	}
 	active := rows[0]
+	closed, err := s.closeIncidentRow(db, active, end, note)
+	if err != nil {
+		return nil, err
+	}
+	s.logger.Printf("[incident] closed id=%s device=%s duration=%ds", closed.ID, deviceID, closed.DurationSeconds)
+	return closed, nil
+}
+
+// closeIncidentRow ends one open incident, appending note to its resolution
+// notes when given, and returns it reloaded.
+func (s *IncidentService) closeIncidentRow(db *gorm.DB, active models.Incident, end time.Time, note string) (*models.Incident, error) {
 	if end.Before(active.StartTime) {
 		end = active.StartTime
 	}
@@ -573,19 +593,102 @@ func (s *IncidentService) closeDeviceIncident(db *gorm.DB, deviceID uuid.UUID, e
 	if err := db.First(&closed, "id = ?", active.ID).Error; err != nil {
 		return nil, fmt.Errorf("reloading incident %s: %w", active.ID, err)
 	}
-	s.logger.Printf("[incident] closed id=%s device=%s duration=%ds", closed.ID, deviceID, closed.DurationSeconds)
 	return &closed, nil
 }
 
 func (s *IncidentService) activeDeviceIncident(ctx context.Context, deviceID uuid.UUID) (*models.Incident, error) {
 	var rows []models.Incident
 	err := s.db.WithContext(ctx).
-		Where("device_id = ? AND end_time IS NULL", deviceID).
+		Where("device_id = ? AND interface_id IS NULL AND end_time IS NULL", deviceID).
 		Order("start_time DESC").
 		Limit(1).
 		Find(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("querying active incident for device %s: %w", deviceID, err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return &rows[0], nil
+}
+
+// portIncidentType maps a port condition to the incident_type column.
+func portIncidentType(condition string) string {
+	if condition == models.PortConditionLinkDown {
+		return models.IncidentTypeDown
+	}
+	return models.IncidentTypeError
+}
+
+// OpenPortIncident opens an incident for one condition on one port, unless one
+// is already open for that port and condition, in which case that one is
+// returned with opened=false. A concurrent open losing the race on the
+// partial unique index is reported the same way.
+func (s *IncidentService) OpenPortIncident(ctx context.Context, deviceID, interfaceID uuid.UUID, condition string, start time.Time, reason string) (*models.Incident, bool, error) {
+	if active, err := s.activePortIncident(ctx, interfaceID, condition); err != nil || active != nil {
+		return active, false, err
+	}
+	now := time.Now()
+	cond := condition
+	incident := &models.Incident{
+		ID: uuid.New(), DeviceID: &deviceID, InterfaceID: &interfaceID, Condition: &cond,
+		StartTime: start, Severity: defaultIncidentSeverity, IncidentType: portIncidentType(condition),
+		RootCause: reason, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.db.WithContext(ctx).Create(incident).Error; err != nil {
+		if isDuplicateKey(err) {
+			active, err := s.activePortIncident(ctx, interfaceID, condition)
+			return active, false, err
+		}
+		return nil, false, fmt.Errorf("creating %s incident for port %s: %w", condition, interfaceID, err)
+	}
+	s.logger.Printf("[incident] opened id=%s device=%s port=%s condition=%s", incident.ID, deviceID, interfaceID, condition)
+	return incident, true, nil
+}
+
+// ClosePortIncident closes the open incident for one port and condition.
+// Returns nil, nil when none is open.
+func (s *IncidentService) ClosePortIncident(ctx context.Context, interfaceID uuid.UUID, condition string, end time.Time, note string) (*models.Incident, error) {
+	active, err := s.activePortIncident(ctx, interfaceID, condition)
+	if err != nil || active == nil {
+		return nil, err
+	}
+	return s.closeIncidentRow(s.db.WithContext(ctx), *active, end, note)
+}
+
+// ClosePortIncidents closes every open incident on a port (it stopped being
+// important) and returns how many it closed.
+func (s *IncidentService) ClosePortIncidents(ctx context.Context, interfaceID uuid.UUID, end time.Time, note string) (int, error) {
+	open, err := s.OpenPortIncidents(ctx, interfaceID)
+	if err != nil {
+		return 0, err
+	}
+	for _, inc := range open {
+		if _, err := s.closeIncidentRow(s.db.WithContext(ctx), inc, end, note); err != nil {
+			return 0, err
+		}
+	}
+	return len(open), nil
+}
+
+// OpenPortIncidents lists a port's open incidents, newest first.
+func (s *IncidentService) OpenPortIncidents(ctx context.Context, interfaceID uuid.UUID) ([]models.Incident, error) {
+	var rows []models.Incident
+	err := s.db.WithContext(ctx).Where("interface_id = ? AND end_time IS NULL", interfaceID).
+		Order("start_time DESC").Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("listing open incidents for port %s: %w", interfaceID, err)
+	}
+	return rows, nil
+}
+
+func (s *IncidentService) activePortIncident(ctx context.Context, interfaceID uuid.UUID, condition string) (*models.Incident, error) {
+	var rows []models.Incident
+	err := s.db.WithContext(ctx).
+		Where("interface_id = ? AND condition = ? AND end_time IS NULL", interfaceID, condition).
+		Limit(1).Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("querying open %s incident for port %s: %w", condition, interfaceID, err)
 	}
 	if len(rows) == 0 {
 		return nil, nil

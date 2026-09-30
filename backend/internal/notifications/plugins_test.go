@@ -78,6 +78,7 @@ func TestViewPathAndHasReport(t *testing.T) {
 	}{
 		{"monitor", NotificationMessage{MonitorID: monitorID}, fmt.Sprintf("/monitors/%s", monitorID), true},
 		{"device", NotificationMessage{MonitorID: monitorID, DeviceID: &deviceID}, fmt.Sprintf("/network/devices/%s", deviceID), false},
+		{"port", NotificationMessage{MonitorID: monitorID, DeviceID: &deviceID, PortIfIndex: intPtr(51)}, fmt.Sprintf("/network/devices/%s/ports/51", deviceID), false},
 		{"agent", NotificationMessage{MonitorID: monitorID, AgentID: &agentID}, fmt.Sprintf("/monitors/%s", monitorID), false},
 	}
 	for _, c := range cases {
@@ -104,3 +105,5 @@ func TestResolveLocationDefaultsToUTC(t *testing.T) {
 		t.Errorf("expected UTC when the resolver itself returns nil, got %v", got)
 	}
 }
+
+func intPtr(v int) *int { return &v }
