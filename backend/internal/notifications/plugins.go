@@ -551,9 +551,18 @@ func (m *NotificationManager) ListNotifications(ctx context.Context, opts ListNo
 
 	apply := func(q *gorm.DB) *gorm.DB {
 		if !opts.Viewer.IsAdmin {
+			// Monitor rows by monitor ownership or sharing; device rows by
+			// site sharing (the same rule device incidents use). Each half
+			// only ever matches its own subject column - a row with neither
+			// set (a server-agent alert) matches neither and stays
+			// admin-only.
 			q = q.Where(
-				"monitor_id IN (SELECT id FROM monitors WHERE owner_id = ? UNION SELECT monitor_id FROM monitor_sharing WHERE shared_with_user_id = ?)",
-				opts.Viewer.UserID, opts.Viewer.UserID,
+				`(monitor_id IS NOT NULL AND monitor_id IN
+					(SELECT id FROM monitors WHERE owner_id = ? UNION SELECT monitor_id FROM monitor_sharing WHERE shared_with_user_id = ?))
+				 OR (device_id IS NOT NULL AND device_id IN
+					(SELECT d.id FROM devices d WHERE d.site_id IN
+						(SELECT site_id FROM site_sharing WHERE shared_with_user_id = ?)))`,
+				opts.Viewer.UserID, opts.Viewer.UserID, opts.Viewer.UserID,
 			)
 		}
 		if opts.Status != "" {
