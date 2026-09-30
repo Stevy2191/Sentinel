@@ -266,8 +266,16 @@ func (s *DeviceService) Delete(ctx context.Context, id uuid.UUID) (*models.Devic
 	if err != nil {
 		return nil, err
 	}
-	if err := s.db.WithContext(ctx).Delete(&models.Device{}, "id = ?", id).Error; err != nil {
-		return nil, fmt.Errorf("deleting device: %w", err)
+	// The device's metric series go in the same transaction (metrics has no
+	// FKs to cascade them); their samples are removed by the nightly cleanup.
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Delete(&models.Device{}, "id = ?", id).Error; err != nil {
+			return fmt.Errorf("deleting device: %w", err)
+		}
+		return deleteDeviceSeries(tx, id)
+	})
+	if err != nil {
+		return nil, err
 	}
 	return d, nil
 }

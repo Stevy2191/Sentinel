@@ -1,0 +1,174 @@
+package services
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+
+	"github.com/Stevy2191/Sentinel/backend/internal/testdb"
+)
+
+func refreshRollups(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	testdb.Exec(t, db, `CALL refresh_continuous_aggregate('metrics.samples_5m', NULL, NULL)`)
+	testdb.Exec(t, db, `CALL refresh_continuous_aggregate('metrics.samples_1h', NULL, NULL)`)
+}
+
+func TestDBMetricsWriteAndQueryRaw(t *testing.T) {
+	db := testdb.Open(t)
+	s := seedDevice(t, db, "HQ", "10.0.0.2")
+	m := NewMetricsStore(db)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Minute)
+	for i := 0; i < 3; i++ {
+		at := now.Add(time.Duration(i-3) * time.Minute)
+		testdb.Must(t, m.Write(ctx, s.DeviceID, at, []SamplePoint{
+			{Metric: MetricIfInBps, Instance: "1", Value: float64(100 * (i + 1))},
+			{Metric: MetricIfInBps, Instance: "2", Value: 10},
+		}))
+	}
+	res, err := m.Query(ctx, MetricsQuery{DeviceIDs: []uuid.UUID{s.DeviceID}, Metrics: []string{MetricIfInBps},
+		From: now.Add(-time.Hour), To: now})
+	if err != nil || res.Resolution != "raw" || len(res.Series) != 2 {
+		t.Fatalf("query: %+v %v", res, err)
+	}
+	p := res.Series[0].Points
+	if res.Series[0].Instance != "1" || len(p) != 3 || p[2].Avg != 300 {
+		t.Errorf("instance 1 points: %+v", res.Series[0])
+	}
+
+	sum, err := m.Query(ctx, MetricsQuery{DeviceIDs: []uuid.UUID{s.DeviceID}, Metrics: []string{MetricIfInBps},
+		From: now.Add(-time.Hour), To: now, Sum: true})
+	if err != nil || len(sum.Series) != 1 || sum.Series[0].Points[2].Avg != 310 {
+		t.Errorf("sum: %+v %v", sum, err)
+	}
+
+	if err := m.Write(ctx, s.DeviceID, now, []SamplePoint{{Metric: "bogus", Instance: "1", Value: 1}}); err == nil {
+		t.Error("unknown metric accepted")
+	}
+}
+
+// Rollups keep min/max/sum/count, and the hourly average is weighted, not an
+// average of averages.
+func TestDBMetricsRollups(t *testing.T) {
+	db := testdb.Open(t)
+	s := seedDevice(t, db, "HQ", "10.0.0.2")
+	m := NewMetricsStore(db)
+	ctx := context.Background()
+	base := time.Now().UTC().Add(-3 * time.Hour).Truncate(time.Hour)
+	// Bucket A (5 samples of 10) and bucket B (1 sample of 70).
+	for i := 0; i < 5; i++ {
+		testdb.Must(t, m.Write(ctx, s.DeviceID, base.Add(time.Duration(i)*time.Minute),
+			[]SamplePoint{{Metric: MetricIfInUtilPct, Instance: "1", Value: 10}}))
+	}
+	testdb.Must(t, m.Write(ctx, s.DeviceID, base.Add(5*time.Minute), []SamplePoint{{Metric: MetricIfInUtilPct, Instance: "1", Value: 70}}))
+	refreshRollups(t, db)
+
+	var hour struct {
+		Vmin, Vmax, Vsum float64
+		N                int
+	}
+	testdb.Must(t, db.Raw(`SELECT vmin, vmax, vsum, n FROM metrics.samples_1h WHERE bucket = ?`, base).Scan(&hour).Error)
+	if hour.Vmin != 10 || hour.Vmax != 70 || hour.Vsum != 120 || hour.N != 6 {
+		t.Fatalf("hourly rollup %+v", hour)
+	}
+
+	res, err := m.Query(ctx, MetricsQuery{DeviceIDs: []uuid.UUID{s.DeviceID}, Metrics: []string{MetricIfInUtilPct},
+		From: base.Add(-24 * time.Hour), To: base.Add(24 * time.Hour)})
+	if err != nil || res.Resolution != "5m" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if len(res.Series) != 1 || len(res.Series[0].Points) == 0 {
+		t.Fatalf("no points from the 5-minute rollup: %+v", res)
+	}
+	// A 48 h range steps by 10 minutes: one step holds all six samples, so
+	// avg = 120/6 = 20.
+	if res.Series[0].Points[0].Avg != 20 {
+		t.Errorf("weighted avg %v, want 20 (not (10+70)/2 = 40)", res.Series[0].Points[0].Avg)
+	}
+}
+
+func TestDBMetricsRetentionSetting(t *testing.T) {
+	db := testdb.Open(t)
+	m := NewMetricsStore(db)
+	ctx := context.Background()
+	testdb.Must(t, m.ApplyRetention(ctx, 30))
+	days, err := m.RetentionDays(ctx)
+	if err != nil || days != 30 {
+		t.Fatalf("retention %d %v", days, err)
+	}
+}
+
+// Deleting a device removes its series at once and its samples at the next
+// cleanup; the cleanup also catches series whose device vanished another way.
+func TestDBDeviceDeleteAndCleanup(t *testing.T) {
+	db := testdb.Open(t)
+	s := seedDevice(t, db, "HQ", "10.0.0.2")
+	m := NewMetricsStore(db)
+	ctx := context.Background()
+	testdb.Must(t, m.Write(ctx, s.DeviceID, time.Now().UTC(), []SamplePoint{{Metric: MetricIfInBps, Instance: "1", Value: 1}}))
+	orphan := uuid.New()
+	testdb.Must(t, m.Write(ctx, orphan, time.Now().UTC(), []SamplePoint{{Metric: MetricIfInBps, Instance: "1", Value: 1}}))
+
+	devices := NewDeviceService(db, NewSNMPCredentialService(db), NewIncidentService(db))
+	if _, err := devices.Delete(ctx, s.DeviceID); err != nil {
+		t.Fatal(err)
+	}
+	var series, queued, samples int64
+	testdb.Must(t, db.Raw(`SELECT count(*) FROM metrics.series WHERE device_id = ?`, s.DeviceID).Scan(&series).Error)
+	testdb.Must(t, db.Raw(`SELECT count(*) FROM metrics.deleted_series`).Scan(&queued).Error)
+	if series != 0 || queued != 1 {
+		t.Fatalf("after delete: %d series, %d queued", series, queued)
+	}
+
+	res, err := m.Cleanup(ctx, 365)
+	if err != nil || res.SeriesRemoved != 1 || res.SamplesRemoved != 2 {
+		t.Fatalf("cleanup %+v %v", res, err)
+	}
+	testdb.Must(t, db.Raw(`SELECT count(*) FROM metrics.samples`).Scan(&samples).Error)
+	testdb.Must(t, db.Raw(`SELECT count(*) FROM metrics.deleted_series`).Scan(&queued).Error)
+	if samples != 0 || queued != 0 {
+		t.Errorf("after cleanup: %d samples, %d queued", samples, queued)
+	}
+}
+
+func TestDBUpdateUsualSpeeds(t *testing.T) {
+	db := testdb.Open(t)
+	s := seedDevice(t, db, "HQ", "10.0.0.2")
+	long := seedPort(t, db, s.DeviceID, 1, "0/1", "")
+	short := seedPort(t, db, s.DeviceID, 2, "0/2", "")
+	m := NewMetricsStore(db)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(5 * time.Minute)
+
+	// Port 1: 30 hours at 1 Gb/s with an hour at 100 Mb/s. Port 2: 2 hours.
+	for at := now.Add(-30 * time.Hour); at.Before(now); at = at.Add(5 * time.Minute) {
+		speed := 1e9
+		if at.After(now.Add(-2*time.Hour)) && at.Before(now.Add(-time.Hour)) {
+			speed = 1e8
+		}
+		points := []SamplePoint{{Metric: MetricIfSpeedBps, Instance: "1", InterfaceID: &long, Value: speed}}
+		if at.After(now.Add(-2 * time.Hour)) {
+			points = append(points, SamplePoint{Metric: MetricIfSpeedBps, Instance: "2", InterfaceID: &short, Value: 1e9})
+		}
+		testdb.Must(t, m.Write(ctx, s.DeviceID, at, points))
+	}
+	refreshRollups(t, db)
+	if _, err := m.UpdateUsualSpeeds(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	var usual []struct {
+		IfIndex       int
+		UsualSpeedBps *int64
+	}
+	testdb.Must(t, db.Raw(`SELECT if_index, usual_speed_bps FROM device_interfaces WHERE device_id = ? ORDER BY if_index`, s.DeviceID).Scan(&usual).Error)
+	if usual[0].UsualSpeedBps == nil || *usual[0].UsualSpeedBps != 1_000_000_000 {
+		t.Errorf("port 1 usual %v", usual[0].UsualSpeedBps)
+	}
+	if usual[1].UsualSpeedBps != nil {
+		t.Errorf("port 2 has 2 h of history, must stay unset: %v", *usual[1].UsualSpeedBps)
+	}
+}

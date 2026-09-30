@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
+	"github.com/Stevy2191/Sentinel/backend/internal/portmon"
 )
 
 // BaseURLFunc resolves the instance's externally reachable base URL. It is
@@ -282,4 +283,32 @@ func (s *SettingsService) SetRegistrationEnabled(ctx context.Context, enabled bo
 	}
 	s.logger.Printf("[settings] registration_enabled set to %t", enabled)
 	return nil
+}
+
+// intSetting reads an int setting, falling back to def when it is unset or
+// outside [min, max].
+func (s *SettingsService) intSetting(ctx context.Context, key string, def, min, max int) int {
+	v := s.GetInt(ctx, key, def)
+	if v < min || v > max {
+		return def
+	}
+	return v
+}
+
+// MetricsRawRetentionDays is how many days of 1-minute network samples to keep.
+func (s *SettingsService) MetricsRawRetentionDays(ctx context.Context) int {
+	return s.intSetting(ctx, models.SettingMetricsRawRetentionDays, models.DefaultMetricsRawRetentionDays,
+		models.MinMetricsRawRetentionDays, models.MaxMetricsRawRetentionDays)
+}
+
+// PortThresholds are the instance-wide port thresholds.
+func (s *SettingsService) PortThresholds(ctx context.Context) portmon.Thresholds {
+	return portmon.Thresholds{
+		ErrorsPerMin: float64(s.intSetting(ctx, models.SettingPortErrorThresholdPerMin, models.DefaultPortErrorThresholdPerMin,
+			models.MinPortErrorThresholdPerMin, models.MaxPortErrorThresholdPerMin)),
+		UtilPct: float64(s.intSetting(ctx, models.SettingPortUtilThresholdPct, models.DefaultPortUtilThresholdPct,
+			models.MinPortUtilThresholdPct, models.MaxPortUtilThresholdPct)),
+		DownGrace: time.Duration(s.intSetting(ctx, models.SettingPortDownGraceSeconds, models.DefaultPortDownGraceSeconds,
+			models.MinPortDownGraceSeconds, models.MaxPortDownGraceSeconds)) * time.Second,
+	}
 }
