@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"github.com/Stevy2191/Sentinel/backend/internal/models"
 	"github.com/Stevy2191/Sentinel/backend/internal/portmon"
 )
 
@@ -39,6 +40,13 @@ type MetricsStore struct {
 	db  *gorm.DB
 	mu  sync.Mutex
 	ids map[seriesKey]int64
+
+	// retMu guards retentionDays, a cache of the raw-samples retention policy
+	// (in days) so Query does not read timescaledb_information.jobs on every
+	// call. 0 means "not yet known". ApplyRetention keeps it current; Query
+	// lazily loads it via RetentionDays otherwise.
+	retMu         sync.Mutex
+	retentionDays int
 }
 
 func NewMetricsStore(db *gorm.DB) *MetricsStore {
@@ -148,12 +156,22 @@ const maxQueryPoints = 500
 // PickResolution chooses the source (raw up to 6 h, 5-minute rollup up to 7
 // days, hourly beyond) and a step that is a multiple of the source's bucket
 // and keeps a series to about 500 points.
-func PickResolution(from, to time.Time) (string, time.Duration) {
+//
+// rawSince is the oldest instant the raw table can still answer for (now
+// minus the current raw retention). A window of 6 h or less that starts
+// before rawSince reads the 5-minute rollup instead of raw: the rollups are
+// kept forever, but old raw chunks are not, and retention can be as low as
+// 7 days, far shorter than a 6 h window's default range would assume.
+func PickResolution(from, to, rawSince time.Time) (string, time.Duration) {
 	span := to.Sub(from)
 	source, base := "1h", time.Hour
 	switch {
 	case span <= 6*time.Hour:
-		source, base = "raw", time.Minute
+		if from.Before(rawSince) {
+			source, base = "5m", 5*time.Minute
+		} else {
+			source, base = "raw", time.Minute
+		}
 	case span <= 7*24*time.Hour:
 		source, base = "5m", 5*time.Minute
 	}
@@ -164,9 +182,32 @@ func PickResolution(from, to time.Time) (string, time.Duration) {
 	return source, step
 }
 
+// rawRetentionDays returns the cached raw-sample retention (days), reading it
+// from the database once if not yet known; ApplyRetention keeps the cache
+// current afterwards. Falls back to the default when the policy cannot be
+// read, so a query never mistakes "we don't know" for "keep nothing" (which
+// would make every query, however recent, skip the raw table).
+func (m *MetricsStore) rawRetentionDays(ctx context.Context) int {
+	m.retMu.Lock()
+	days := m.retentionDays
+	m.retMu.Unlock()
+	if days > 0 {
+		return days
+	}
+	read, err := m.RetentionDays(ctx)
+	if err != nil || read <= 0 {
+		return models.DefaultMetricsRawRetentionDays
+	}
+	m.retMu.Lock()
+	m.retentionDays = read
+	m.retMu.Unlock()
+	return read
+}
+
 // Query returns the selected series at the resolution PickResolution picks.
 func (m *MetricsStore) Query(ctx context.Context, q MetricsQuery) (*MetricsResult, error) {
-	source, step := PickResolution(q.From, q.To)
+	rawSince := time.Now().UTC().Add(-time.Duration(m.rawRetentionDays(ctx)) * 24 * time.Hour)
+	source, step := PickResolution(q.From, q.To, rawSince)
 	res := &MetricsResult{Resolution: source, StepSeconds: int(step.Seconds()), Series: []MetricSeries{}}
 	if len(q.DeviceIDs) == 0 || len(q.Metrics) == 0 {
 		return res, nil
@@ -272,9 +313,17 @@ func (m *MetricsStore) LatestMany(ctx context.Context, deviceIDs []uuid.UUID, me
 
 // ---- Retention and maintenance ---------------------------------------------
 
-// ApplyRetention replaces the raw-samples retention policy.
+// ApplyRetention replaces the raw-samples retention policy. days must be
+// within [models.MinMetricsRawRetentionDays, models.MaxMetricsRawRetentionDays]:
+// unlike the rest of this file's settings-backed knobs, a bad value here does
+// not just get clamped for one caller — it becomes the policy every future
+// read and query relies on, so it is rejected outright instead.
 func (m *MetricsStore) ApplyRetention(ctx context.Context, days int) error {
-	return m.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	if days < models.MinMetricsRawRetentionDays || days > models.MaxMetricsRawRetentionDays {
+		return fmt.Errorf("retention days %d out of range [%d, %d]",
+			days, models.MinMetricsRawRetentionDays, models.MaxMetricsRawRetentionDays)
+	}
+	err := m.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec(`SELECT remove_retention_policy('metrics.samples', if_exists => true)`).Error; err != nil {
 			return fmt.Errorf("removing retention policy: %w", err)
 		}
@@ -283,6 +332,13 @@ func (m *MetricsStore) ApplyRetention(ctx context.Context, days int) error {
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	m.retMu.Lock()
+	m.retentionDays = days
+	m.retMu.Unlock()
+	return nil
 }
 
 // RetentionDays reads the current raw-samples retention policy.
@@ -305,6 +361,13 @@ type CleanupResult struct {
 	EventsRemoved  int64
 }
 
+// cleanupBatchSize bounds how many series ids go in one "IN (...)" list.
+// Postgres rejects a statement with more than 65535 bind parameters; a
+// single large deletion (about 150 48-port devices, each with several
+// metrics per port) can queue far more series than that, so the queue is
+// drained in batches well under the limit instead of in one shot.
+const cleanupBatchSize = 1000
+
 // Cleanup removes series whose device is gone, the samples of every queued
 // series, and point events (and ended span events) older than
 // eventRetentionDays.
@@ -316,28 +379,41 @@ func (m *MetricsStore) Cleanup(ctx context.Context, eventRetentionDays int) (Cle
 		ON CONFLICT DO NOTHING`).Error; err != nil {
 		return res, fmt.Errorf("queueing orphan series: %w", err)
 	}
-	var queued []int64
-	if err := db.Raw(`SELECT series_id FROM metrics.deleted_series ORDER BY series_id`).Scan(&queued).Error; err != nil {
-		return res, fmt.Errorf("reading the deleted-series queue: %w", err)
-	}
-	if len(queued) > 0 {
-		r := db.Exec(`DELETE FROM metrics.series WHERE id IN ?`, queued)
+
+	removedAny := false
+	for {
+		var batch []int64
+		if err := db.Raw(`SELECT series_id FROM metrics.deleted_series ORDER BY series_id LIMIT ?`,
+			cleanupBatchSize).Scan(&batch).Error; err != nil {
+			return res, fmt.Errorf("reading the deleted-series queue: %w", err)
+		}
+		if len(batch) == 0 {
+			break
+		}
+		r := db.Exec(`DELETE FROM metrics.series WHERE id IN ?`, batch)
 		if r.Error != nil {
 			return res, fmt.Errorf("deleting orphan series: %w", r.Error)
 		}
-		res.SeriesRemoved = r.RowsAffected
-		r = db.Exec(`DELETE FROM metrics.samples WHERE series_id IN ?`, queued)
+		res.SeriesRemoved += r.RowsAffected
+		r = db.Exec(`DELETE FROM metrics.samples WHERE series_id IN ?`, batch)
 		if r.Error != nil {
 			return res, fmt.Errorf("deleting samples of removed series: %w", r.Error)
 		}
-		res.SamplesRemoved = r.RowsAffected
-		if err := db.Exec(`DELETE FROM metrics.deleted_series WHERE series_id IN ?`, queued).Error; err != nil {
+		res.SamplesRemoved += r.RowsAffected
+		if err := db.Exec(`DELETE FROM metrics.deleted_series WHERE series_id IN ?`, batch).Error; err != nil {
 			return res, fmt.Errorf("clearing the deleted-series queue: %w", err)
 		}
+		removedAny = true
+		if len(batch) < cleanupBatchSize {
+			break
+		}
+	}
+	if removedAny {
 		m.mu.Lock()
 		m.ids = map[seriesKey]int64{}
 		m.mu.Unlock()
 	}
+
 	r := db.Exec(`DELETE FROM port_events WHERE started_at < now() - make_interval(days => ?)
 		AND (ended_at IS NOT NULL OR kind IN ('link_up', 'link_down', 'speed_change', 'admin_up', 'admin_down'))`,
 		eventRetentionDays)

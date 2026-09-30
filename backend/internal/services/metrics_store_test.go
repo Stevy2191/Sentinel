@@ -7,23 +7,31 @@ import (
 
 func TestPickResolution(t *testing.T) {
 	end := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	farPast := end.Add(-3650 * 24 * time.Hour)
 	cases := []struct {
-		span   time.Duration
-		source string
-		step   time.Duration
+		span     time.Duration
+		rawSince time.Time
+		source   string
+		step     time.Duration
 	}{
-		{time.Hour, "raw", time.Minute},
-		{6 * time.Hour, "raw", time.Minute},
-		{24 * time.Hour, "5m", 5 * time.Minute},
-		{7 * 24 * time.Hour, "5m", 25 * time.Minute},
-		{30 * 24 * time.Hour, "1h", 2 * time.Hour},
-		{90 * 24 * time.Hour, "1h", 5 * time.Hour},
-		{365 * 24 * time.Hour, "1h", 18 * time.Hour},
+		{time.Hour, farPast, "raw", time.Minute},
+		{6 * time.Hour, farPast, "raw", time.Minute},
+		{24 * time.Hour, farPast, "5m", 5 * time.Minute},
+		{7 * 24 * time.Hour, farPast, "5m", 25 * time.Minute},
+		{30 * 24 * time.Hour, farPast, "1h", 2 * time.Hour},
+		{90 * 24 * time.Hour, farPast, "1h", 5 * time.Hour},
+		{365 * 24 * time.Hour, farPast, "1h", 18 * time.Hour},
+		// A 1h window entirely after rawSince still reads raw.
+		{time.Hour, end.Add(-2 * time.Hour), "raw", time.Minute},
+		// A 1h window starting before rawSince (raw retention has already
+		// dropped the start of the window) must fall back to the 5m rollup.
+		{time.Hour, end.Add(-30 * time.Minute), "5m", 5 * time.Minute},
 	}
 	for _, c := range cases {
-		source, step := PickResolution(end.Add(-c.span), end)
+		from := end.Add(-c.span)
+		source, step := PickResolution(from, end, c.rawSince)
 		if source != c.source || step != c.step {
-			t.Errorf("%v: %s/%v, want %s/%v", c.span, source, step, c.source, c.step)
+			t.Errorf("span %v rawSince %v: %s/%v, want %s/%v", c.span, c.rawSince, source, step, c.source, c.step)
 		}
 		if points := int(c.span / step); points > maxQueryPoints {
 			t.Errorf("%v: %d points", c.span, points)
