@@ -27,6 +27,12 @@ type DeviceView struct {
 	SiteName        string   `json:"site_name" gorm:"column:site_name"`
 	CredentialName  string   `json:"credential_name" gorm:"column:credential_name"`
 	Availability30d *float64 `json:"availability_30d" gorm:"column:availability_30d"`
+	// Effective* are what the pages show: the user's override when set,
+	// otherwise what SNMP reported (device type: what inventory detected).
+	EffectiveVendor   string `json:"effective_vendor" gorm:"column:effective_vendor"`
+	EffectiveModel    string `json:"effective_model" gorm:"column:effective_model"`
+	EffectiveLocation string `json:"effective_location" gorm:"column:effective_location"`
+	EffectiveType     string `json:"effective_type" gorm:"column:effective_type"`
 }
 
 // DeviceFilter narrows the device list.
@@ -71,7 +77,11 @@ const availabilitySQL = `(
 
 func (s *DeviceService) viewQuery(ctx context.Context) *gorm.DB {
 	return s.db.WithContext(ctx).Table("devices AS d").
-		Select("d.*, st.name AS site_name, c.name AS credential_name, " + availabilitySQL).
+		Select("d.*, st.name AS site_name, c.name AS credential_name, " +
+			"COALESCE(NULLIF(d.vendor_override, ''), d.vendor, '') AS effective_vendor, " +
+			"COALESCE(NULLIF(d.model_override, ''), d.model, '') AS effective_model, " +
+			"COALESCE(NULLIF(d.location_override, ''), d.sys_location, '') AS effective_location, " +
+			"COALESCE(d.device_type, d.device_type_detected) AS effective_type, " + availabilitySQL).
 		Joins("JOIN sites st ON st.id = d.site_id").
 		Joins("JOIN snmp_credentials c ON c.id = d.credential_id")
 }
@@ -477,4 +487,23 @@ func (s *DeviceService) SaveInventoryError(ctx context.Context, id uuid.UUID, de
 	return s.db.WithContext(ctx).Exec(
 		`UPDATE devices SET status_detail = ?, last_inventory_at = ?, updated_at = now() WHERE id = ?`,
 		detail, at, id).Error
+}
+
+// UpdateDetails applies the user's overrides (vendor, model, location, device
+// type, faceplate layout). Only fields present in the patch change.
+func (s *DeviceService) UpdateDetails(ctx context.Context, id uuid.UUID, p models.DeviceDetailsPatch) (*models.Device, *models.Device, error) {
+	before, err := s.getRaw(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	updates, err := p.Updates()
+	if err != nil {
+		return nil, nil, err
+	}
+	updates["updated_at"] = gorm.Expr("now()")
+	if err := s.db.WithContext(ctx).Model(&models.Device{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+		return nil, nil, fmt.Errorf("saving device details: %w", err)
+	}
+	after, err := s.getRaw(ctx, id)
+	return before, after, err
 }

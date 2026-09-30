@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -104,6 +105,56 @@ func TestNormalizeDeviceInput(t *testing.T) {
 	} {
 		if _, err := NormalizeDeviceInput(in); err == nil {
 			t.Errorf("%s: want error, got nil", name)
+		}
+	}
+}
+
+func TestPortPatch(t *testing.T) {
+	var p PortPatch
+	if err := json.Unmarshal([]byte(`{"important": true, "util_threshold_pct": null}`), &p); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	u := p.Updates()
+	if u["important"] != true || u["util_threshold_pct"] != nil || len(u) != 3 { // + updated_at
+		t.Errorf("updates %v", u)
+	}
+	if _, ok := u["collect"]; ok {
+		t.Error("absent field included")
+	}
+	for _, body := range []string{`{"util_threshold_pct": 5}`, `{"error_threshold_per_min": 0}`,
+		`{"down_grace_seconds": 90000}`, `{"important": null}`, `{}`} {
+		var bad PortPatch
+		_ = json.Unmarshal([]byte(body), &bad)
+		if bad.Validate() == nil {
+			t.Errorf("%s accepted", body)
+		}
+	}
+}
+
+func TestDeviceDetailsPatch(t *testing.T) {
+	var p DeviceDetailsPatch
+	if err := json.Unmarshal([]byte(`{"model_override": "  UNVR (4-bay) ", "vendor_override": "", "device_type": "nvr",
+		"faceplate_sfp_ports": [52, 49, 49], "faceplate_rows": null}`), &p); err != nil {
+		t.Fatal(err)
+	}
+	u, err := p.Updates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u["model_override"] != "UNVR (4-bay)" || u["vendor_override"] != nil || u["device_type"] != "nvr" || u["faceplate_rows"] != nil {
+		t.Errorf("updates %v", u)
+	}
+	if sfp, ok := u["faceplate_sfp_ports"].(IntSlice); !ok || len(sfp) != 2 || sfp[0] != 49 || sfp[1] != 52 {
+		t.Errorf("sfp %v", u["faceplate_sfp_ports"])
+	}
+	for _, body := range []string{`{"device_type": "toaster"}`, `{"faceplate_rows": 3}`, `{"faceplate_sfp_ports": [0]}`, `{}`} {
+		var bad DeviceDetailsPatch
+		_ = json.Unmarshal([]byte(body), &bad)
+		if _, err := bad.Updates(); err == nil {
+			t.Errorf("%s accepted", body)
 		}
 	}
 }

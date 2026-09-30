@@ -3,6 +3,7 @@ package models
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -373,3 +374,148 @@ type PortEvent struct {
 }
 
 func (PortEvent) TableName() string { return "port_events" }
+
+// PortPatch is PATCH /devices/:id/ports/:ifIndex. Absent fields are left
+// alone; null clears an override back to the default (collect: back to the
+// classifier's choice; thresholds: back to the instance defaults).
+type PortPatch struct {
+	Important            Opt[bool] `json:"important"`
+	Collect              Opt[bool] `json:"collect"`
+	UtilThresholdPct     Opt[int]  `json:"util_threshold_pct"`
+	ErrorThresholdPerMin Opt[int]  `json:"error_threshold_per_min"`
+	DownGraceSeconds     Opt[int]  `json:"down_grace_seconds"`
+}
+
+// Validate checks ranges (the same as the schema's CHECKs).
+func (p PortPatch) Validate() error {
+	if !p.Important.Set && !p.Collect.Set && !p.UtilThresholdPct.Set && !p.ErrorThresholdPerMin.Set && !p.DownGraceSeconds.Set {
+		return errors.New("nothing to change")
+	}
+	if p.Important.Set && p.Important.Value == nil {
+		return errors.New("important must be true or false")
+	}
+	inRange := func(o Opt[int], name string, min, max int) error {
+		if o.Value != nil && (*o.Value < min || *o.Value > max) {
+			return fmt.Errorf("%s must be between %d and %d", name, min, max)
+		}
+		return nil
+	}
+	if err := inRange(p.UtilThresholdPct, "the busy threshold", MinPortUtilThresholdPct, MaxPortUtilThresholdPct); err != nil {
+		return err
+	}
+	if err := inRange(p.ErrorThresholdPerMin, "the error threshold", MinPortErrorThresholdPerMin, MaxPortErrorThresholdPerMin); err != nil {
+		return err
+	}
+	return inRange(p.DownGraceSeconds, "the down grace period", MinPortDownGraceSeconds, MaxPortDownGraceSeconds)
+}
+
+// Updates is the column map for a validated patch.
+func (p PortPatch) Updates() map[string]any {
+	u := map[string]any{"updated_at": time.Now()}
+	if p.Important.Set {
+		u["important"] = *p.Important.Value
+	}
+	if p.Collect.Set {
+		u["collect"] = optValue(p.Collect)
+	}
+	if p.UtilThresholdPct.Set {
+		u["util_threshold_pct"] = optValue(p.UtilThresholdPct)
+	}
+	if p.ErrorThresholdPerMin.Set {
+		u["error_threshold_per_min"] = optValue(p.ErrorThresholdPerMin)
+	}
+	if p.DownGraceSeconds.Set {
+		u["down_grace_seconds"] = optValue(p.DownGraceSeconds)
+	}
+	return u
+}
+
+// optValue is the value to store for a set Opt: nil (SQL NULL) or the value.
+func optValue[T any](o Opt[T]) any {
+	if o.Value == nil {
+		return nil
+	}
+	return *o.Value
+}
+
+// DeviceDetailsPatch is PATCH /devices/:id/details: the user's overrides. An
+// empty string or null clears an override, so the SNMP value shows again.
+type DeviceDetailsPatch struct {
+	VendorOverride    Opt[string] `json:"vendor_override"`
+	ModelOverride     Opt[string] `json:"model_override"`
+	LocationOverride  Opt[string] `json:"location_override"`
+	DeviceType        Opt[string] `json:"device_type"`
+	FaceplateRows     Opt[int]    `json:"faceplate_rows"`
+	FaceplateSFPPorts Opt[[]int]  `json:"faceplate_sfp_ports"`
+}
+
+// Updates validates the patch and returns its column map.
+func (p DeviceDetailsPatch) Updates() (map[string]any, error) {
+	u := map[string]any{}
+	text := func(o Opt[string], col, label string) error {
+		if !o.Set {
+			return nil
+		}
+		if o.Value == nil || strings.TrimSpace(*o.Value) == "" {
+			u[col] = nil
+			return nil
+		}
+		v := strings.TrimSpace(*o.Value)
+		if utf8.RuneCountInString(v) > 255 {
+			return fmt.Errorf("%s must be 255 characters or fewer", label)
+		}
+		u[col] = v
+		return nil
+	}
+	for _, f := range []struct {
+		o          Opt[string]
+		col, label string
+	}{{p.VendorOverride, "vendor_override", "vendor"}, {p.ModelOverride, "model_override", "model"},
+		{p.LocationOverride, "location_override", "location"}} {
+		if err := text(f.o, f.col, f.label); err != nil {
+			return nil, err
+		}
+	}
+	if p.DeviceType.Set {
+		switch {
+		case p.DeviceType.Value == nil || *p.DeviceType.Value == "":
+			u["device_type"] = nil
+		case ValidDeviceTypes[*p.DeviceType.Value]:
+			u["device_type"] = *p.DeviceType.Value
+		default:
+			return nil, fmt.Errorf("device type must be switch, router, access_point, nvr or other")
+		}
+	}
+	if p.FaceplateRows.Set {
+		if v := p.FaceplateRows.Value; v != nil && *v != 1 && *v != 2 {
+			return nil, errors.New("faceplate rows must be 1 or 2")
+		}
+		u["faceplate_rows"] = optValue(p.FaceplateRows)
+	}
+	if p.FaceplateSFPPorts.Set {
+		if p.FaceplateSFPPorts.Value == nil || len(*p.FaceplateSFPPorts.Value) == 0 {
+			u["faceplate_sfp_ports"] = nil
+		} else {
+			seen := map[int]bool{}
+			var ports IntSlice
+			for _, n := range *p.FaceplateSFPPorts.Value {
+				if n < 1 || n > 9999 {
+					return nil, errors.New("SFP port numbers must be between 1 and 9999")
+				}
+				if !seen[n] {
+					seen[n] = true
+					ports = append(ports, n)
+				}
+			}
+			if len(ports) > 64 {
+				return nil, errors.New("at most 64 SFP ports")
+			}
+			sort.Ints(ports)
+			u["faceplate_sfp_ports"] = ports
+		}
+	}
+	if len(u) == 0 {
+		return nil, errors.New("nothing to change")
+	}
+	return u, nil
+}
