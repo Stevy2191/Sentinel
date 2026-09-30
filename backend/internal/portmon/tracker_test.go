@@ -227,3 +227,29 @@ func TestTrackerRestoredDoesNotRestartOrEnd(t *testing.T) {
 		t.Errorf("since = %v, want %v", got, since)
 	}
 }
+
+// Restored with Flapping active: there is no transition history to prune
+// against, so the flap needs its own quiet window measured from the first
+// poll after the restore, not an immediate end for lack of transitions
+// (Review Focus 5).
+func TestTrackerRestoredFlappingNeedsQuietWindow(t *testing.T) {
+	tr := NewTracker(Snapshot{OperUp: true, AdminUp: true, SpeedBps: 1e9, LastChangeSeconds: 500,
+		Active: map[Condition]time.Time{Flapping: t0.Add(-5 * time.Minute)}})
+	if r := tr.Observe(upObs(t0), th, 0); len(r.Changes) != 0 {
+		t.Fatalf("restored flap changed state on its first poll: %+v", r.Changes)
+	}
+	if r := tr.Observe(upObs(t0.Add(9*time.Minute)), th, 0); len(r.Changes) != 0 {
+		t.Fatalf("restored flap ended before its own quiet window passed: %+v", r.Changes)
+	}
+	r := tr.Observe(upObs(t0.Add(10*time.Minute+time.Second)), th, 0)
+	if changes(r, Flapping, false) != 1 {
+		t.Fatal("restored flap did not end once its own quiet window passed")
+	}
+	for _, c := range r.Changes {
+		if c.Condition == Flapping {
+			if _, ok := c.Detail["transitions"]; ok {
+				t.Errorf("restored flap end reported a transitions count it never had: %v", c.Detail)
+			}
+		}
+	}
+}
