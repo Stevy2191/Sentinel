@@ -22,6 +22,7 @@ type deviceStore interface {
 	Delete(ctx context.Context, id uuid.UUID) (*models.Device, error)
 	Interfaces(ctx context.Context, id uuid.UUID, includeAbsent bool) ([]models.DeviceInterface, error)
 	RequestRefresh(ctx context.Context, id uuid.UUID) error
+	UpdateDetails(ctx context.Context, id uuid.UUID, p models.DeviceDetailsPatch) (*models.Device, *models.Device, error)
 }
 
 type deviceProber interface {
@@ -42,6 +43,7 @@ func RegisterDeviceRoutes(rg *gin.RouterGroup, devices deviceStore, prober devic
 	g.DELETE("/:id", deleteDeviceHandler(devices, sites, audit))
 	g.GET("/:id/interfaces", deviceInterfacesHandler(devices, sites))
 	g.POST("/:id/refresh", refreshDeviceHandler(devices, sites))
+	g.PATCH("/:id/details", updateDeviceDetailsHandler(devices, sites, audit))
 }
 
 func respondDeviceError(c *gin.Context, op string, err error) {
@@ -214,6 +216,36 @@ func refreshDeviceHandler(devices deviceStore, sites siteAccessChecker) gin.Hand
 			return
 		}
 		respondSuccess(c, http.StatusAccepted, gin.H{"queued": true})
+	}
+}
+
+func deviceDetailsAudit(d *models.Device) map[string]any {
+	return map[string]any{"vendor_override": d.VendorOverride, "model_override": d.ModelOverride,
+		"location_override": d.LocationOverride, "device_type": d.DeviceType,
+		"faceplate_rows": d.FaceplateRows, "faceplate_sfp_ports": d.FaceplateSFPPorts}
+}
+
+// updateDeviceDetailsHandler handles PATCH /devices/:id/details: the user's
+// overrides of what SNMP reported, which inventory never overwrites.
+func updateDeviceDetailsHandler(devices deviceStore, sites siteAccessChecker, audit auditRecorder) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		d, ok := loadDevice(c, devices, sites, services.SiteAccessEditable)
+		if !ok {
+			return
+		}
+		var p models.DeviceDetailsPatch
+		if err := c.ShouldBindJSON(&p); err != nil {
+			respondError(c, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		before, after, err := devices.UpdateDetails(c.Request.Context(), d.ID, p)
+		if err != nil {
+			respondDeviceError(c, "updateDeviceDetails", err)
+			return
+		}
+		audit.Record(c.Request.Context(), actorFrom(c), models.ActionDeviceUpdated, models.ResourceDevice, &d.ID,
+			models.AuditChanges{Before: deviceDetailsAudit(before), After: deviceDetailsAudit(after)})
+		respondSuccess(c, http.StatusOK, after)
 	}
 }
 

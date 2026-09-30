@@ -43,6 +43,14 @@ func (f *fakeDevices) Interfaces(context.Context, uuid.UUID, bool) ([]models.Dev
 }
 func (f *fakeDevices) RequestRefresh(context.Context, uuid.UUID) error { f.mutations++; return nil }
 
+func (f *fakeDevices) UpdateDetails(_ context.Context, id uuid.UUID, p models.DeviceDetailsPatch) (*models.Device, *models.Device, error) {
+	if _, err := p.Updates(); err != nil {
+		return nil, nil, err
+	}
+	f.mutations++
+	return &models.Device{ID: id}, &models.Device{ID: id}, nil
+}
+
 type fakeProber struct {
 	calls    int
 	unusable bool
