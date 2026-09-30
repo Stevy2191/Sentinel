@@ -213,6 +213,20 @@ func (t *Tracker) Observe(o Observation, th Thresholds, usualSpeed int64) Result
 	if flapping {
 		t.flapCount += transitions
 	}
+	if flapping && t.flapRestored && !t.flapSeeded {
+		// First Observe since a restore with Flapping active. This is a
+		// one-shot regardless of what this particular poll contains: mark it
+		// seeded either way, so a later poll (once this one's transitions,
+		// if any, have aged out of the window) falls through to the ordinary
+		// end rule instead of re-arming this branch and replanting the
+		// anchor. Only plant an anchor here when the poll itself carried no
+		// real transition; if it did, that transition (already appended
+		// above) already anchors the window.
+		t.flapSeeded = true
+		if transitions == 0 {
+			t.transitions = append(t.transitions, o.At)
+		}
+	}
 	cutoff := o.At.Add(-FlapWindow)
 	kept := t.transitions[:0]
 	for _, at := range t.transitions {
@@ -225,14 +239,6 @@ func (t *Tracker) Observe(o Observation, th Thresholds, usualSpeed int64) Result
 	case !flapping && len(t.transitions) >= FlapThreshold:
 		t.flapCount = len(t.transitions)
 		start(Flapping, map[string]any{"transitions": t.flapCount})
-	case flapping && len(t.transitions) == 0 && t.flapRestored && !t.flapSeeded:
-		// First Observe since a restore with Flapping active: there is no
-		// transition history to prune against, so plant this poll as the
-		// start of the quiet window instead of ending the flap for lack of
-		// one. A real transition on this same poll would have already left
-		// transitions non-empty above, skipping this case as intended.
-		t.transitions = append(t.transitions, o.At)
-		t.flapSeeded = true
 	case flapping && len(t.transitions) == 0:
 		detail := map[string]any{"transitions": t.flapCount}
 		if t.flapRestored {
