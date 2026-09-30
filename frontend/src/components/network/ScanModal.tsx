@@ -15,13 +15,17 @@ export default function ScanModal({ siteId, onClose, onAdded }: { siteId: string
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [message, setMessage] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
+  // Devices we've just added ourselves: the scan job doesn't refresh (polling
+  // stops once it finishes), so already_added on its results stays stale.
+  const [added, setAdded] = useState<Set<string>>(new Set())
 
   // Every profile available to the site is tried by default.
   useEffect(() => setChosen(options.map((o) => o.id)), [options])
 
-  const results = useMemo(() => job?.results ?? [], [job])
-  const addable = useMemo(() => results.filter((r) => !r.already_added), [results])
   const key = (r: ScanResult) => `${r.host}:${r.port}`
+  const isAdded = (r: ScanResult) => r.already_added || added.has(key(r))
+  const results = useMemo(() => job?.results ?? [], [job])
+  const addable = useMemo(() => results.filter((r) => !(r.already_added || added.has(key(r)))), [results, added])
 
   const add = async () => {
     setAdding(true)
@@ -30,7 +34,17 @@ export default function ScanModal({ siteId, onClose, onAdded }: { siteId: string
       const rows = addable.filter((r) => picked.has(key(r)))
       const res = await addDevices(rows)
       setMessage(`Added ${res.added.length}${res.failed.length ? `; ${res.failed.length} failed: ${res.failed.map((f) => `${f.host} (${f.error})`).join(', ')}` : ''}.`)
-      if (res.failed.length === 0) onAdded()
+      const failedHosts = new Set(res.failed.map((f) => f.host))
+      const succeededKeys = rows.filter((r) => !failedHosts.has(r.host)).map(key)
+      if (succeededKeys.length > 0) {
+        setAdded((a) => new Set([...a, ...succeededKeys]))
+        setPicked((p) => {
+          const n = new Set(p)
+          succeededKeys.forEach((k) => n.delete(k))
+          return n
+        })
+      }
+      if (res.added.length > 0) onAdded()
     } catch (err) {
       setMessage((err as ApiError).message || 'Could not add the devices')
     } finally {
@@ -109,13 +123,13 @@ export default function ScanModal({ siteId, onClose, onAdded }: { siteId: string
                 </thead>
                 <tbody className="divide-y divide-white/5">
                   {[...results].sort((a, b) => a.host.localeCompare(b.host, undefined, { numeric: true })).map((r) => (
-                    <tr key={key(r)} className={r.already_added ? 'opacity-50' : ''}>
+                    <tr key={key(r)} className={isAdded(r) ? 'opacity-50' : ''}>
                       <td className="px-3 py-2">
-                        <input type="checkbox" disabled={r.already_added} checked={picked.has(key(r))}
+                        <input type="checkbox" disabled={isAdded(r)} checked={picked.has(key(r))}
                           onChange={(e) => setPicked((p) => { const n = new Set(p); if (e.target.checked) n.add(key(r)); else n.delete(key(r)); return n })} />
                       </td>
                       <td className="px-3 py-2 font-mono text-xs text-slate-300">{r.host}</td>
-                      <td className="px-3 py-2 text-slate-200" title={r.descr}>{r.name || '—'}{r.already_added && <span className="ml-2 text-xs text-slate-500">already added</span>}</td>
+                      <td className="px-3 py-2 text-slate-200" title={r.descr}>{r.name || '—'}{isAdded(r) && <span className="ml-2 text-xs text-slate-500">already added</span>}</td>
                       <td className="px-3 py-2 text-slate-400">{r.vendor || '—'}</td>
                       <td className="px-3 py-2 text-slate-400">{r.credential_name}</td>
                     </tr>
