@@ -85,6 +85,11 @@ type Notifier interface {
 	SendNotification(ctx context.Context, m *notifications.NotificationMessage) error
 }
 
+// PortStatsPoller runs a device's stats poll (PortMonitor).
+type PortStatsPoller interface {
+	PollStats(ctx context.Context, d models.Device, t snmp.Target, uptimeSeconds int64)
+}
+
 // DevicePoller polls every enabled device for reachability on a bounded
 // worker pool, and refreshes inventory when it is due.
 type DevicePoller struct {
@@ -93,6 +98,7 @@ type DevicePoller struct {
 	incidents DeviceIncidents
 	notifier  Notifier
 	workers   int
+	stats     PortStatsPoller
 
 	// Replaceable in tests.
 	resolve func(ctx context.Context, host string) (net.IP, error)
@@ -142,6 +148,10 @@ func resolveDeviceHost(ctx context.Context, host string) (net.IP, error) {
 	}
 	return nil, fmt.Errorf("%s has no addresses", host)
 }
+
+// SetPortStats makes every successful poll of an up device run its stats
+// poll too.
+func (p *DevicePoller) SetPortStats(s PortStatsPoller) { p.stats = s }
 
 // TargetFor builds the SNMP target for a device at a resolved address.
 func TargetFor(d models.Device, host string, cred snmp.Credential) snmp.Target {
@@ -253,6 +263,14 @@ func (p *DevicePoller) PollOnce(ctx context.Context, d models.Device) {
 		return
 	}
 	p.apply(ctx, d, tr, detail, now)
+
+	if result == PollOK && tr.Status == models.DeviceStatusUp && p.stats != nil {
+		up := int64(-1)
+		if uptime != nil {
+			up = *uptime
+		}
+		p.stats.PollStats(ctx, d, target, up)
+	}
 
 	if result == PollOK && (d.LastInventoryAt == nil || now.Sub(*d.LastInventoryAt) >= inventoryInterval) {
 		inv, err := snmp.ReadInventory(ctx, p.client, target)
