@@ -83,6 +83,13 @@ type notificationDeviceNamer interface {
 	List(ctx context.Context, userID uuid.UUID, isAdmin bool, f services.DeviceFilter) ([]services.DeviceView, error)
 }
 
+// notificationDeviceSiteLookup resolves a single device, so the retry handler
+// can find which site a device notification record belongs to and check the
+// caller's access to it.
+type notificationDeviceSiteLookup interface {
+	Get(ctx context.Context, id uuid.UUID) (*services.DeviceView, error)
+}
+
 // GetNotificationHistoryHandler handles GET /api/v1/notifications/history.
 // Members see only records for monitors they own or have been shared; admins
 // see everything, including server-agent alerts.
@@ -278,10 +285,12 @@ type notificationRetryStore interface {
 
 // RetryFailedNotificationHandler handles POST
 // /api/v1/notifications/retry/:notification_id. A member may retry a record
-// only for a monitor they can edit; a record they cannot even view - or a
-// server-agent record, which is admin-only - answers 404 like one that does
-// not exist, before any retry is attempted.
-func RetryFailedNotificationHandler(store notificationRetryStore, monitors monitorAccessChecker) gin.HandlerFunc {
+// only for a monitor they can edit; a device record instead follows the
+// device's site (readonly access or better, via site sharing, same as device
+// incidents); a record they cannot even view - or a server-agent record,
+// which is admin-only - answers 404 like one that does not exist, before any
+// retry is attempted.
+func RetryFailedNotificationHandler(store notificationRetryStore, monitors monitorAccessChecker, devices notificationDeviceSiteLookup, sites siteAccessChecker) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := uuid.Parse(c.Param("notification_id"))
 		if err != nil {
@@ -308,28 +317,57 @@ func RetryFailedNotificationHandler(store notificationRetryStore, monitors monit
 		// Checked before any retry happens, so nothing about a notification
 		// the caller cannot see is acted on, let alone reported back.
 		if !isAdmin {
-			if record.MonitorID == nil {
-				// Server-agent records (and anything without a monitor) are
-				// admin-only, because agents are admin-only.
+			switch {
+			case record.MonitorID != nil:
+				canView, err := monitors.CanUserViewMonitor(c.Request.Context(), userID, *record.MonitorID)
+				if err != nil {
+					respondError(c, classifyServiceError(err), err.Error())
+					return
+				}
+				if !canView {
+					respondError(c, http.StatusNotFound, "notification not found")
+					return
+				}
+				canEdit, err := monitors.CanUserEditMonitor(c.Request.Context(), userID, *record.MonitorID)
+				if err != nil {
+					respondError(c, classifyServiceError(err), err.Error())
+					return
+				}
+				if !canEdit {
+					respondError(c, http.StatusForbidden, "you do not have permission to retry this notification")
+					return
+				}
+			case record.DeviceID != nil:
+				// A device record has no editable/viewable notion of its own;
+				// visibility follows the device's site, the same rule device
+				// incidents use. Retrying it still 400s (ErrNotificationNotRetryable)
+				// below - this only decides whether the caller may be told that.
+				device, err := devices.Get(c.Request.Context(), *record.DeviceID)
+				if err != nil {
+					if errors.Is(err, services.ErrDeviceNotFound) {
+						respondError(c, http.StatusNotFound, "notification not found")
+						return
+					}
+					respondInternal(c, "RetryFailedNotificationHandler", err)
+					return
+				}
+				level, err := sites.SiteAccess(c.Request.Context(), userID, false, device.SiteID)
+				if err != nil {
+					if errors.Is(err, services.ErrSiteNotFound) {
+						respondError(c, http.StatusNotFound, "notification not found")
+						return
+					}
+					respondError(c, classifyServiceError(err), err.Error())
+					return
+				}
+				if level < services.SiteAccessReadonly {
+					respondError(c, http.StatusNotFound, "notification not found")
+					return
+				}
+			default:
+				// Server-agent records (and anything without a monitor or
+				// device) are admin-only, because agents are admin-only.
 				respondError(c, http.StatusNotFound, "notification not found")
-				return
-			}
-			canView, err := monitors.CanUserViewMonitor(c.Request.Context(), userID, *record.MonitorID)
-			if err != nil {
-				respondError(c, classifyServiceError(err), err.Error())
-				return
-			}
-			if !canView {
-				respondError(c, http.StatusNotFound, "notification not found")
-				return
-			}
-			canEdit, err := monitors.CanUserEditMonitor(c.Request.Context(), userID, *record.MonitorID)
-			if err != nil {
-				respondError(c, classifyServiceError(err), err.Error())
-				return
-			}
-			if !canEdit {
-				respondError(c, http.StatusForbidden, "you do not have permission to retry this notification")
 				return
 			}
 		}
@@ -362,12 +400,13 @@ func RegisterNotificationRoutes(
 	monitorService *services.MonitorService,
 	agentService *services.AgentService,
 	deviceService *services.DeviceService,
+	sites siteAccessChecker,
 	users adminChecker,
 ) {
 	group := rg.Group("/notifications")
 	group.GET("/channels", GetNotificationChannelsHandler(manager))
 	group.GET("/history", GetNotificationHistoryHandler(manager, monitorService, agentService, deviceService))
-	group.POST("/retry/:notification_id", RetryFailedNotificationHandler(manager, monitorService))
+	group.POST("/retry/:notification_id", RetryFailedNotificationHandler(manager, monitorService, deviceService, sites))
 
 	admin := group.Group("", RequireAdmin(users))
 	admin.POST("/test/:channel", SendTestNotificationHandler(manager))

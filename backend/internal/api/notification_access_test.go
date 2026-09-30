@@ -143,7 +143,22 @@ func (f fakeMonitorAccess) CanUserEditMonitor(context.Context, uuid.UUID, uuid.U
 	return f.canEdit, nil
 }
 
-func retryRouter(store notificationRetryStore, monitors monitorAccessChecker, userID uuid.UUID, isAdmin bool) *gin.Engine {
+// fakeDeviceSite stands in for DeviceService: it always returns the same
+// device, so tests only need to say which site it is in.
+type fakeDeviceSite struct {
+	view services.DeviceView
+	err  error
+}
+
+func (f fakeDeviceSite) Get(context.Context, uuid.UUID) (*services.DeviceView, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	v := f.view
+	return &v, nil
+}
+
+func retryRouter(store notificationRetryStore, monitors monitorAccessChecker, devices notificationDeviceSiteLookup, sites siteAccessChecker, userID uuid.UUID, isAdmin bool) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(func(c *gin.Context) {
@@ -152,7 +167,7 @@ func retryRouter(store notificationRetryStore, monitors monitorAccessChecker, us
 		c.Set("is_admin", isAdmin)
 		c.Next()
 	})
-	r.POST("/notifications/retry/:notification_id", RetryFailedNotificationHandler(store, monitors))
+	r.POST("/notifications/retry/:notification_id", RetryFailedNotificationHandler(store, monitors, devices, sites))
 	return r
 }
 
@@ -218,7 +233,64 @@ func TestRetryFailedNotificationAccess(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &fakeNotificationRetryStore{record: tc.record}
-			w := post(retryRouter(store, tc.access, uuid.New(), tc.isAdmin), path(tc.record))
+			// These records never carry a device_id, so the device/site fakes
+			// are never consulted; zero values are fine.
+			w := post(retryRouter(store, tc.access, fakeDeviceSite{}, fakeSiteAccess{}, uuid.New(), tc.isAdmin), path(tc.record))
+			if w.Code != tc.wantCode {
+				t.Errorf("status %d, want %d (body %s)", w.Code, tc.wantCode, w.Body.String())
+			}
+			if store.retryCalled != tc.wantRetried {
+				t.Errorf("retryCalled = %v, want %v", store.retryCalled, tc.wantRetried)
+			}
+		})
+	}
+}
+
+// A device notification record has no monitor to check; visibility instead
+// follows the device's site, the same rule device incidents use. A member who
+// can see the site (readonly or better, via site sharing) gets the same 400
+// ErrNotificationNotRetryable an admin gets - devices cannot be retried,
+// device or not. A member who cannot see the site gets 404, not 400: nothing
+// about the record is confirmed to a caller who cannot see it.
+func TestRetryFailedNotificationDeviceAccess(t *testing.T) {
+	deviceID := uuid.New()
+	siteID := uuid.New()
+	deviceRecord := &models.Notification{ID: uuid.New(), DeviceID: &deviceID, Status: "failed"}
+	device := fakeDeviceSite{view: services.DeviceView{Device: models.Device{ID: deviceID, SiteID: siteID}}}
+
+	cases := []struct {
+		name        string
+		isAdmin     bool
+		level       services.SiteAccessLevel
+		wantCode    int
+		wantRetried bool
+	}{
+		{
+			name:        "member, device in a shared site",
+			level:       services.SiteAccessReadonly,
+			wantCode:    http.StatusBadRequest,
+			wantRetried: true,
+		},
+		{
+			name:        "member, device in an unshared site",
+			level:       services.SiteAccessNone,
+			wantCode:    http.StatusNotFound,
+			wantRetried: false,
+		},
+		{
+			name:        "admin",
+			isAdmin:     true,
+			level:       services.SiteAccessNone, // must not even be consulted for an admin
+			wantCode:    http.StatusBadRequest,
+			wantRetried: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeNotificationRetryStore{record: deviceRecord, retryErr: notifications.ErrNotificationNotRetryable}
+			r := retryRouter(store, fakeMonitorAccess{}, device, fakeSiteAccess{level: tc.level}, uuid.New(), tc.isAdmin)
+			w := post(r, "/notifications/retry/"+deviceRecord.ID.String())
 			if w.Code != tc.wantCode {
 				t.Errorf("status %d, want %d (body %s)", w.Code, tc.wantCode, w.Body.String())
 			}
