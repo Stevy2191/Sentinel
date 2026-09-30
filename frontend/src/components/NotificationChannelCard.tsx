@@ -6,9 +6,17 @@ interface Props {
   testing: boolean
   onTest: (name: string) => void
   onConfigure: () => void
+  /** Sending a test notification is admin-only on the backend; members don't get the button. */
+  canTest: boolean
 }
 
-export default function NotificationChannelCard({ channel, testing, onTest, onConfigure }: Props) {
+export default function NotificationChannelCard({
+  channel,
+  testing,
+  onTest,
+  onConfigure,
+  canTest,
+}: Props) {
   return (
     <div className="card p-5 transition duration-150 hover:scale-[1.02] hover:shadow-card-hover">
       <div className="flex items-start justify-between">
@@ -45,14 +53,16 @@ export default function NotificationChannelCard({ channel, testing, onTest, onCo
       </div>
 
       <div className="mt-4 flex gap-2">
-        <button
-          className="btn-primary !py-1.5"
-          disabled={!channel.enabled || testing}
-          onClick={() => onTest(channel.name)}
-        >
-          <Send className={`h-4 w-4 ${testing ? 'animate-pulse' : ''}`} />
-          {testing ? 'Sending…' : 'Test'}
-        </button>
+        {canTest && (
+          <button
+            className="btn-primary !py-1.5"
+            disabled={!channel.enabled || testing}
+            onClick={() => onTest(channel.name)}
+          >
+            <Send className={`h-4 w-4 ${testing ? 'animate-pulse' : ''}`} />
+            {testing ? 'Sending…' : 'Test'}
+          </button>
+        )}
         <button className="btn-secondary !py-1.5" onClick={onConfigure}>
           <Settings className="h-4 w-4" /> Configure
         </button>
