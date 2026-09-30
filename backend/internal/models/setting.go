@@ -65,6 +65,14 @@ const (
 	// SettingSNMPPollWorkers sizes the SNMP poller's worker pool (default 16).
 	// Read at startup; a change takes effect on restart.
 	SettingSNMPPollWorkers = "snmp_poll_workers"
+
+	// SettingMetricsRawRetentionDays is how long 1-minute network samples are
+	// kept; the 5-minute and hourly rollups are kept forever.
+	SettingMetricsRawRetentionDays = "metrics_raw_retention_days"
+	// Default port thresholds; each port may override them.
+	SettingPortErrorThresholdPerMin = "port_error_threshold_per_min"
+	SettingPortUtilThresholdPct     = "port_util_threshold_pct"
+	SettingPortDownGraceSeconds     = "port_down_grace_seconds"
 )
 
 // Bounds and defaults for the system settings above.
@@ -104,6 +112,20 @@ const (
 	DefaultSLATargetPercent = 99.9
 	MinSLATargetPercent     = 0.0
 	MaxSLATargetPercent     = 100.0
+
+	DefaultMetricsRawRetentionDays = 365
+	MinMetricsRawRetentionDays     = 7
+	MaxMetricsRawRetentionDays     = 3650
+
+	DefaultPortErrorThresholdPerMin = 10
+	MinPortErrorThresholdPerMin     = 1
+	MaxPortErrorThresholdPerMin     = 1_000_000
+	DefaultPortUtilThresholdPct     = 80
+	MinPortUtilThresholdPct         = 10
+	MaxPortUtilThresholdPct         = 100
+	DefaultPortDownGraceSeconds     = 120
+	MinPortDownGraceSeconds         = 0
+	MaxPortDownGraceSeconds         = 86400
 )
 
 // DefaultReportTimezone is used until an administrator sets one. UTC rather
