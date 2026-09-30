@@ -253,3 +253,34 @@ func TestTrackerRestoredFlappingNeedsQuietWindow(t *testing.T) {
 		}
 	}
 }
+
+// Restored with Flapping active, and the very first post-restore poll itself
+// carries a real transition (a hidden bounce via LastChangeSeconds, here).
+// The one-shot anchor must still be planted on that first poll, not
+// re-armed once that transition ages out of the window: the flap should end
+// at the first poll 10 minutes after the first poll's transition, not
+// ~10 minutes later than that.
+func TestTrackerRestoredFlappingWithBounceOnFirstPoll(t *testing.T) {
+	tr := NewTracker(Snapshot{OperUp: true, AdminUp: true, SpeedBps: 1e9, LastChangeSeconds: 500,
+		Active: map[Condition]time.Time{Flapping: t0.Add(-5 * time.Minute)}})
+	// LastChangeSeconds moves from the snapshot's 500 to 560 on the first
+	// poll (the hidden bounce), then holds steady at 560: quiet from there.
+	quiet := func(at time.Time) Observation { o := upObs(at); o.LastChangeSeconds = 560; return o }
+	if r := tr.Observe(quiet(t0), th, 0); len(r.Changes) != 0 {
+		t.Fatalf("restored flap changed state on its first (bouncing) poll: %+v", r.Changes)
+	}
+	if r := tr.Observe(quiet(t0.Add(9*time.Minute+59*time.Second)), th, 0); len(r.Changes) != 0 {
+		t.Fatalf("restored flap ended before 10 minutes past its first poll's transition: %+v", r.Changes)
+	}
+	r := tr.Observe(quiet(t0.Add(10*time.Minute+time.Second)), th, 0)
+	if changes(r, Flapping, false) != 1 {
+		t.Fatal("restored flap did not end 10 minutes after its first poll's transition (anchor was re-armed instead)")
+	}
+	for _, c := range r.Changes {
+		if c.Condition == Flapping {
+			if _, ok := c.Detail["transitions"]; ok {
+				t.Errorf("restored flap end reported a transitions count it never had: %v", c.Detail)
+			}
+		}
+	}
+}
