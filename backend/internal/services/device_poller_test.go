@@ -413,3 +413,37 @@ func TestPollerCredentialLookupErrorSkipsThePoll(t *testing.T) {
 		t.Fatalf("opened %d, sent %d; want none", inc.opened, len(notif.sent))
 	}
 }
+
+type fakeStats struct {
+	calls  int
+	uptime int64
+}
+
+func (f *fakeStats) PollStats(_ context.Context, _ models.Device, _ snmp.Target, uptime int64) {
+	f.calls++
+	f.uptime = uptime
+}
+
+// The stats poll runs after a poll that leaves the device up, never after a
+// failure, and gets this poll's sysUpTime.
+func TestPollerRunsStatsOnlyWhenUp(t *testing.T) {
+	p, _, _, _ := newTestPoller(&fakeSNMP{})
+	stats := &fakeStats{}
+	p.SetPortStats(stats)
+	p.PollOnce(context.Background(), device(models.DeviceStatusUp, 0))
+	if stats.calls != 1 || stats.uptime != 3600 {
+		t.Fatalf("up: calls %d uptime %d", stats.calls, stats.uptime)
+	}
+	p.PollOnce(context.Background(), device(models.DeviceStatusPending, 0))
+	if stats.calls != 2 {
+		t.Fatalf("pending -> up should run stats: %d", stats.calls)
+	}
+
+	p, _, _, _ = newTestPoller(&fakeSNMP{getErr: errors.New("timeout")})
+	stats = &fakeStats{}
+	p.SetPortStats(stats)
+	p.PollOnce(context.Background(), device(models.DeviceStatusUp, 0))
+	if stats.calls != 0 {
+		t.Fatal("stats ran after a failed poll")
+	}
+}
