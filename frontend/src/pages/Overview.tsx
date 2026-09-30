@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useMonitors } from '@/hooks/useMonitors'
 import { useAgentSummary } from '@/hooks/useAgents'
 import { useSiteSummary } from '@/hooks/useSites'
+import { useDeviceSummary } from '@/hooks/useDevices'
 import { useSystemResources } from '@/hooks/useSystemResources'
 import { useSSLSummary } from '@/hooks/useSSLCertificates'
 import { useSummaryReport } from '@/hooks/useReports'
@@ -61,6 +62,7 @@ export default function Overview() {
   const agentSummary = useAgentSummary()
   const sslSummary = useSSLSummary()
   const siteSummary = useSiteSummary()
+  const deviceSummary = useDeviceSummary()
   const { pages: statusPages } = useStatusPages()
   const { reports: savedReports, listReports } = useSavedReports()
   const { resources: host } = useSystemResources()
@@ -176,8 +178,10 @@ export default function Overview() {
         title: 'Network Monitoring',
         to: '/network',
         colorType: 'network' as const,
-        value: siteSummary.value,
-        subtitle: siteSummary.subtitle,
+        value: deviceSummary.hasDevices ? deviceSummary.value : siteSummary.value,
+        subtitle: deviceSummary.hasDevices
+          ? `${deviceSummary.subtitle} · ${siteSummary.value} site${siteSummary.value === '1' ? '' : 's'}`
+          : siteSummary.subtitle,
       },
       {
         key: 'statusPages',
@@ -204,7 +208,17 @@ export default function Overview() {
         subtitle: savedReports.length === 0 ? 'none saved' : 'saved',
       },
     ],
-    [counts, sslSummary, agentSummary, siteSummary, statusPages, summary, periodHeading, savedReports],
+    [
+      counts,
+      sslSummary,
+      agentSummary,
+      siteSummary,
+      deviceSummary,
+      statusPages,
+      summary,
+      periodHeading,
+      savedReports,
+    ],
   )
 
   const lastUpdated = useMemo(
