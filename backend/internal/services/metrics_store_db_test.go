@@ -100,6 +100,46 @@ func TestDBMetricsRetentionSetting(t *testing.T) {
 	if err != nil || days != 30 {
 		t.Fatalf("retention %d %v", days, err)
 	}
+
+	// A retention of 0 (or anything outside the settings bounds) would drop
+	// every raw chunk; it must be rejected, leaving the policy unchanged.
+	if err := m.ApplyRetention(ctx, 0); err == nil {
+		t.Error("ApplyRetention(0) should be rejected")
+	}
+	days, err = m.RetentionDays(ctx)
+	if err != nil || days != 30 {
+		t.Fatalf("retention after a rejected update: %d %v, want unchanged 30", days, err)
+	}
+}
+
+// A short window entirely older than the raw retention must still read the
+// 5-minute rollup (kept forever), not the raw table (whose old chunks the
+// retention policy has already dropped, or soon will).
+func TestDBMetricsQueryOldShortRangeUsesRollups(t *testing.T) {
+	db := testdb.Open(t)
+	s := seedDevice(t, db, "HQ", "10.0.0.2")
+	m := NewMetricsStore(db)
+	ctx := context.Background()
+	testdb.Must(t, m.ApplyRetention(ctx, 7))
+
+	old := time.Now().UTC().Add(-10 * 24 * time.Hour).Truncate(time.Minute)
+	for i := 0; i < 3; i++ {
+		testdb.Must(t, m.Write(ctx, s.DeviceID, old.Add(time.Duration(i)*time.Minute),
+			[]SamplePoint{{Metric: MetricIfInBps, Instance: "1", Value: float64(100 * (i + 1))}}))
+	}
+	refreshRollups(t, db)
+
+	res, err := m.Query(ctx, MetricsQuery{DeviceIDs: []uuid.UUID{s.DeviceID}, Metrics: []string{MetricIfInBps},
+		From: old.Add(-30 * time.Minute), To: old.Add(30 * time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Resolution != "5m" {
+		t.Fatalf("resolution %q, want 5m", res.Resolution)
+	}
+	if len(res.Series) == 0 || len(res.Series[0].Points) == 0 {
+		t.Fatalf("no points from the rollup for an old short range: %+v", res)
+	}
 }
 
 // Deleting a device removes its series at once and its samples at the next
@@ -132,6 +172,38 @@ func TestDBDeviceDeleteAndCleanup(t *testing.T) {
 	testdb.Must(t, db.Raw(`SELECT count(*) FROM metrics.deleted_series`).Scan(&queued).Error)
 	if samples != 0 || queued != 0 {
 		t.Errorf("after cleanup: %d samples, %d queued", samples, queued)
+	}
+}
+
+// The deleted-series queue is processed in batches: Postgres rejects more
+// than 65535 bind parameters in one "IN (...)" list, so a queue larger than
+// one batch must still be fully drained in one Cleanup call.
+func TestDBMetricsCleanupBatchesLargeQueue(t *testing.T) {
+	db := testdb.Open(t)
+	m := NewMetricsStore(db)
+	ctx := context.Background()
+	device := uuid.New()
+
+	// 1,500 series (more than one 1,000-row batch), one sample apiece, all
+	// queued for deletion up front via bulk SQL.
+	testdb.Exec(t, db, `INSERT INTO metrics.series (id, device_id, metric, instance)
+		SELECT 5000000 + g, ?, 'if_in_bps', g::text FROM generate_series(1, 1500) g`, device)
+	testdb.Exec(t, db, `INSERT INTO metrics.samples (time, series_id, value)
+		SELECT now(), 5000000 + g, 1 FROM generate_series(1, 1500) g`)
+	testdb.Exec(t, db, `INSERT INTO metrics.deleted_series (series_id)
+		SELECT 5000000 + g FROM generate_series(1, 1500) g`)
+
+	res, err := m.Cleanup(ctx, 365)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.SeriesRemoved != 1500 || res.SamplesRemoved != 1500 {
+		t.Fatalf("cleanup %+v", res)
+	}
+	var queued int64
+	testdb.Must(t, db.Raw(`SELECT count(*) FROM metrics.deleted_series`).Scan(&queued).Error)
+	if queued != 0 {
+		t.Errorf("%d series left queued after cleanup", queued)
 	}
 }
 
