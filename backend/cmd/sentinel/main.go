@@ -317,7 +317,7 @@ func run() error {
 	api.RegisterMonitorGroupRoutes(v1, monitorService, incidentService)
 	api.RegisterMonitorSharingRoutes(v1, monitorService, authService)
 	api.RegisterStatusPageRoutes(v1, statusPageService, incidentService)
-	api.RegisterNotificationRoutes(v1, notificationManager, monitorService, db)
+	api.RegisterNotificationRoutes(v1, notificationManager, monitorService, agentService, authService)
 	api.RegisterSettingsRoutes(v1, settingsService, models.DefaultMonitorCheckInterval, authService, reportScheduler)
 	api.RegisterSSLCertificateRoutes(v1, sslChecker, authService)
 	api.RegisterAgentRoutes(v1, agentService, settingsService, authService)
