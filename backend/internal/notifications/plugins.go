@@ -511,8 +511,25 @@ func (m *NotificationManager) SendToChannelType(ctx context.Context, channelType
 	return fmt.Errorf("no loaded notification channel of type %q", channelType)
 }
 
+// ErrNotificationViewerRequired is returned by ListNotifications when no
+// viewer is given. Listing without one used to return every notification
+// record - every monitor's and every server agent's - to whoever asked.
+var ErrNotificationViewerRequired = errors.New("listing notifications requires a viewer")
+
+// NotificationViewer is who is asking for notification history. Admins see
+// every record, including server-agent alerts (agents are admin-only);
+// anyone else sees only records for monitors they own or have been shared,
+// the same rule the monitor list and incident list use.
+type NotificationViewer struct {
+	UserID  uuid.UUID
+	IsAdmin bool
+}
+
 // ListNotificationsOptions filters and paginates a notification history query.
 type ListNotificationsOptions struct {
+	// Viewer is required; see ErrNotificationViewerRequired.
+	Viewer *NotificationViewer
+
 	Limit  int
 	Offset int
 	Status string // optional: pending | sent | failed
@@ -520,10 +537,25 @@ type ListNotificationsOptions struct {
 	End    *time.Time
 }
 
-// ListNotifications returns notification records across all monitors, filtered
-// and paginated, newest first, along with the total matching count.
+// ListNotifications returns notification records, filtered and paginated,
+// newest first, along with the total matching count. Admins see every record;
+// anyone else sees only records for monitors they own or have been shared -
+// server-agent records have no monitor_id at all, so they never match and are
+// effectively admin-only.
 func (m *NotificationManager) ListNotifications(ctx context.Context, opts ListNotificationsOptions) ([]models.Notification, int64, error) {
+	// Fails closed: a caller that forgets to say who is asking gets an error,
+	// not every notification in the database.
+	if opts.Viewer == nil {
+		return nil, 0, ErrNotificationViewerRequired
+	}
+
 	apply := func(q *gorm.DB) *gorm.DB {
+		if !opts.Viewer.IsAdmin {
+			q = q.Where(
+				"monitor_id IN (SELECT id FROM monitors WHERE owner_id = ? UNION SELECT monitor_id FROM monitor_sharing WHERE shared_with_user_id = ?)",
+				opts.Viewer.UserID, opts.Viewer.UserID,
+			)
+		}
 		if opts.Status != "" {
 			q = q.Where("status = ?", opts.Status)
 		}
@@ -560,6 +592,21 @@ func (m *NotificationManager) ListNotifications(ctx context.Context, opts ListNo
 		return nil, 0, fmt.Errorf("querying notifications: %w", err)
 	}
 	return records, total, nil
+}
+
+// GetNotificationByID returns a single notification record by id, or a
+// wrapped gorm.ErrRecordNotFound if it does not exist. Callers use this to
+// decide access (which monitor, if any, the record belongs to) before acting
+// on it - the record itself carries no notion of who may see it.
+func (m *NotificationManager) GetNotificationByID(ctx context.Context, id uuid.UUID) (*models.Notification, error) {
+	var record models.Notification
+	if err := m.db.WithContext(ctx).First(&record, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("notification %s not found: %w", id, err)
+		}
+		return nil, fmt.Errorf("fetching notification %s: %w", id, err)
+	}
+	return &record, nil
 }
 
 // ErrNotificationNotFailed is returned when retrying a notification that is not

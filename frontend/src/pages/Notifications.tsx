@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Bell, CheckCircle2, XCircle } from 'lucide-react'
 import api, { type ApiError } from '@/services/api'
+import { useAuthContext } from '@/context/AuthContext'
 import {
   useNotificationChannels,
   useNotificationHistory,
@@ -27,12 +28,17 @@ function isoDaysAgo(days: number): string {
 export default function Notifications() {
   const navigate = useNavigate()
   const { toasts, push } = useToasts()
+  const { currentUser } = useAuthContext()
+  // Sending a test notification is admin-only on the backend (it fires into
+  // whatever channel is actually configured), so members don't get the button.
+  const canTest = currentUser?.is_admin ?? false
 
   // ---- Channels ----
   const { channels, loading: chLoading, error: chError } = useNotificationChannels()
   const [testing, setTesting] = useState<string | null>(null)
 
   const handleTest = async (name: string) => {
+    if (!canTest) return
     setTesting(name)
     try {
       await api.post(`/notifications/test/${name}`)
@@ -118,6 +124,7 @@ export default function Notifications() {
                 testing={testing === ch.name}
                 onTest={handleTest}
                 onConfigure={() => navigate('/settings#notifications')}
+                canTest={canTest}
               />
             ))}
           </div>

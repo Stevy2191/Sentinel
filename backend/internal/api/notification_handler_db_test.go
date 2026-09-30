@@ -35,10 +35,20 @@ func TestDBNotificationHistoryIncludesDeviceRow(t *testing.T) {
 
 	manager := notifications.NewNotificationManager(db)
 	monitorService := services.NewMonitorService(db)
+	agentService := services.NewAgentService(db)
+	credService := services.NewSNMPCredentialService(db)
+	incidentService := services.NewIncidentService(db)
+	deviceService := services.NewDeviceService(db, credService, incidentService)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.GET("/history", GetNotificationHistoryHandler(manager, monitorService, db))
+	r.Use(func(c *gin.Context) {
+		c.Set("user_id", uuid.New())
+		c.Set("username", "admin")
+		c.Set("is_admin", true)
+		c.Next()
+	})
+	r.GET("/history", GetNotificationHistoryHandler(manager, monitorService, agentService, deviceService))
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/history", nil))

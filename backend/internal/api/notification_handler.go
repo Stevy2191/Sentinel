@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -55,14 +56,50 @@ func GetNotificationChannelsHandler(manager *notifications.NotificationManager) 
 	}
 }
 
+// notificationLister lists notification history; an interface so the handler
+// is tested without a database.
+type notificationLister interface {
+	ListNotifications(ctx context.Context, opts notifications.ListNotificationsOptions) ([]models.Notification, int64, error)
+}
+
+// notificationMonitorNamer resolves the monitors a viewer may use to label
+// notification history rows - the same accessible-monitor rule the monitor
+// list and incident list use.
+type notificationMonitorNamer interface {
+	ListAccessibleMonitors(ctx context.Context, userID uuid.UUID, isAdmin bool, filters map[string]interface{}) ([]models.Monitor, error)
+}
+
+// notificationAgentNamer resolves server-agent names. Agents are admin-only,
+// so the handler only calls this for admins.
+type notificationAgentNamer interface {
+	List(ctx context.Context) ([]models.Agent, error)
+}
+
+// notificationDeviceNamer resolves the network devices a viewer may see, to
+// label device notification rows. DeviceService.List already scopes this by
+// site sharing (admins: every device; members: devices in sites shared with
+// them), the same rule device incidents use.
+type notificationDeviceNamer interface {
+	List(ctx context.Context, userID uuid.UUID, isAdmin bool, f services.DeviceFilter) ([]services.DeviceView, error)
+}
+
 // GetNotificationHistoryHandler handles GET /api/v1/notifications/history.
+// Members see only records for monitors they own or have been shared; admins
+// see everything, including server-agent alerts.
 func GetNotificationHistoryHandler(
-	manager *notifications.NotificationManager,
-	monitorService *services.MonitorService,
-	db *gorm.DB,
+	manager notificationLister,
+	monitorService notificationMonitorNamer,
+	agentService notificationAgentNamer,
+	deviceService notificationDeviceNamer,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
+
+		userID, _, isAdmin, ok := GetUserFromContext(c)
+		if !ok {
+			respondAuthError(c, http.StatusUnauthorized, "authentication required")
+			return
+		}
 
 		limit := queryInt(c, "limit", 50)
 		if limit < 1 {
@@ -76,7 +113,11 @@ func GetNotificationHistoryHandler(
 			offset = 0
 		}
 
-		opts := notifications.ListNotificationsOptions{Limit: limit, Offset: offset}
+		opts := notifications.ListNotificationsOptions{
+			Viewer: &notifications.NotificationViewer{UserID: userID, IsAdmin: isAdmin},
+			Limit:  limit,
+			Offset: offset,
+		}
 		if status := c.Query("status"); status != "" {
 			if status != "pending" && status != "sent" && status != "failed" {
 				respondError(c, http.StatusBadRequest, "invalid 'status': must be pending, sent, or failed")
@@ -107,26 +148,29 @@ func GetNotificationHistoryHandler(
 			return
 		}
 
-		// Enrich with names via a single lookup each.
+		// Names are resolved only for what the caller may see: their own
+		// accessible monitors (the same set ListNotifications just filtered
+		// to), and - for admins only - agents, which are admin-only entities.
 		names := map[uuid.UUID]string{}
-		if monitors, err := monitorService.ListMonitors(ctx, nil); err == nil {
+		if monitors, err := monitorService.ListAccessibleMonitors(ctx, userID, isAdmin, nil); err == nil {
 			for _, m := range monitors {
 				names[m.ID] = m.Name
 			}
 		}
 		agentNames := map[uuid.UUID]string{}
-		var agentRows []models.Agent
-		if err := db.WithContext(ctx).Select("id", "name").Find(&agentRows).Error; err == nil {
-			for _, a := range agentRows {
-				agentNames[a.ID] = a.Name
+		if isAdmin {
+			if agentRows, err := agentService.List(ctx); err == nil {
+				for _, a := range agentRows {
+					agentNames[a.ID] = a.Name
+				}
 			}
 		}
 		// Same idea for devices: a device alert's name lookup falls back to
 		// its host, the way the poller's own displayName does, rather than
-		// showing an empty name.
+		// showing an empty name. Scoped to what the caller may see, the same
+		// as the monitor names above.
 		deviceNames := map[uuid.UUID]string{}
-		var deviceRows []models.Device
-		if err := db.WithContext(ctx).Select("id", "name", "host").Find(&deviceRows).Error; err == nil {
+		if deviceRows, err := deviceService.List(ctx, userID, isAdmin, services.DeviceFilter{}); err == nil {
 			for _, d := range deviceRows {
 				name := d.Name
 				if name == "" {
@@ -184,6 +228,9 @@ func GetNotificationHistoryHandler(
 }
 
 // SendTestNotificationHandler handles POST /api/v1/notifications/test/:channel.
+// It sends into whatever channel is actually configured, so
+// RegisterNotificationRoutes mounts it behind RequireAdmin: any signed-in user
+// able to trigger it could otherwise spam a real Slack/Discord/webhook/etc.
 func SendTestNotificationHandler(manager *notifications.NotificationManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		channel := strings.ToLower(c.Param("channel"))
@@ -217,9 +264,24 @@ func SendTestNotificationHandler(manager *notifications.NotificationManager) gin
 	}
 }
 
+// notificationRetryStore loads a single notification record and re-sends it;
+// an interface so the handler is tested without a database.
+type notificationRetryStore interface {
+	GetNotificationByID(ctx context.Context, id uuid.UUID) (*models.Notification, error)
+	RetryNotification(ctx context.Context, id uuid.UUID) error
+}
+
+// monitorAccessChecker is declared in incident_handler.go and reused here: it
+// answers view and edit permission questions about a monitor, so the retry
+// handler can 404 what the caller cannot see and 403 what they can see but
+// not edit.
+
 // RetryFailedNotificationHandler handles POST
-// /api/v1/notifications/retry/:notification_id.
-func RetryFailedNotificationHandler(manager *notifications.NotificationManager) gin.HandlerFunc {
+// /api/v1/notifications/retry/:notification_id. A member may retry a record
+// only for a monitor they can edit; a record they cannot even view - or a
+// server-agent record, which is admin-only - answers 404 like one that does
+// not exist, before any retry is attempted.
+func RetryFailedNotificationHandler(store notificationRetryStore, monitors monitorAccessChecker) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := uuid.Parse(c.Param("notification_id"))
 		if err != nil {
@@ -227,7 +289,52 @@ func RetryFailedNotificationHandler(manager *notifications.NotificationManager) 
 			return
 		}
 
-		if err := manager.RetryNotification(c.Request.Context(), id); err != nil {
+		userID, _, isAdmin, ok := GetUserFromContext(c)
+		if !ok {
+			respondAuthError(c, http.StatusUnauthorized, "authentication required")
+			return
+		}
+
+		record, err := store.GetNotificationByID(c.Request.Context(), id)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				respondError(c, http.StatusNotFound, "notification not found")
+				return
+			}
+			respondInternal(c, "RetryFailedNotificationHandler", err)
+			return
+		}
+
+		// Checked before any retry happens, so nothing about a notification
+		// the caller cannot see is acted on, let alone reported back.
+		if !isAdmin {
+			if record.MonitorID == nil {
+				// Server-agent records (and anything without a monitor) are
+				// admin-only, because agents are admin-only.
+				respondError(c, http.StatusNotFound, "notification not found")
+				return
+			}
+			canView, err := monitors.CanUserViewMonitor(c.Request.Context(), userID, *record.MonitorID)
+			if err != nil {
+				respondError(c, classifyServiceError(err), err.Error())
+				return
+			}
+			if !canView {
+				respondError(c, http.StatusNotFound, "notification not found")
+				return
+			}
+			canEdit, err := monitors.CanUserEditMonitor(c.Request.Context(), userID, *record.MonitorID)
+			if err != nil {
+				respondError(c, classifyServiceError(err), err.Error())
+				return
+			}
+			if !canEdit {
+				respondError(c, http.StatusForbidden, "you do not have permission to retry this notification")
+				return
+			}
+		}
+
+		if err := store.RetryNotification(c.Request.Context(), id); err != nil {
 			switch {
 			case errors.Is(err, gorm.ErrRecordNotFound):
 				respondError(c, http.StatusNotFound, err.Error())
@@ -246,16 +353,22 @@ func RetryFailedNotificationHandler(manager *notifications.NotificationManager) 
 }
 
 // RegisterNotificationRoutes mounts the notification endpoints under the given
-// group's /notifications path.
+// group's /notifications path. Sending a test notification is admin-only
+// (RequireAdmin, matching the other admin-gated routes); history and retry are
+// open to any signed-in user but scoped to what they may see and edit.
 func RegisterNotificationRoutes(
 	rg *gin.RouterGroup,
 	manager *notifications.NotificationManager,
 	monitorService *services.MonitorService,
-	db *gorm.DB,
+	agentService *services.AgentService,
+	deviceService *services.DeviceService,
+	users adminChecker,
 ) {
 	group := rg.Group("/notifications")
 	group.GET("/channels", GetNotificationChannelsHandler(manager))
-	group.GET("/history", GetNotificationHistoryHandler(manager, monitorService, db))
-	group.POST("/test/:channel", SendTestNotificationHandler(manager))
-	group.POST("/retry/:notification_id", RetryFailedNotificationHandler(manager))
+	group.GET("/history", GetNotificationHistoryHandler(manager, monitorService, agentService, deviceService))
+	group.POST("/retry/:notification_id", RetryFailedNotificationHandler(manager, monitorService))
+
+	admin := group.Group("", RequireAdmin(users))
+	admin.POST("/test/:channel", SendTestNotificationHandler(manager))
 }
