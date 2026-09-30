@@ -21,9 +21,9 @@ export default function Devices() {
     return devices.filter((d) => [d.name, d.host, d.vendor, d.model, d.site_name].some((v) => v?.toLowerCase().includes(q)))
   }, [devices, search])
 
-  // Admins can add anywhere; others need an editable site, which the form
-  // enforces through the API. Offer the button to anyone who can see a site.
-  const canAdd = !!currentUser?.is_admin || sites.length > 0
+  // Admins can add devices to any site from here. Everyone else adds them
+  // from a site's page, which knows their access to that site.
+  const canAdd = !!currentUser?.is_admin
 
   return (
     <div className="space-y-6">
@@ -75,7 +75,11 @@ export default function Devices() {
         <div className="card p-8 text-center">
           <Router className="mx-auto h-8 w-8 text-slate-500" />
           <p className="mt-2 text-slate-300">{devices.length === 0 ? 'No devices yet.' : 'No devices match these filters.'}</p>
-          {devices.length === 0 && <p className="mt-1 text-sm text-slate-500">Add one, or scan a subnet from a site's page.</p>}
+          {devices.length === 0 && (
+            <p className="mt-1 text-sm text-slate-500">
+              {canAdd ? "Add one, or scan a subnet from a site's page." : "Add devices from a site's page."}
+            </p>
+          )}
         </div>
       ) : (
         <DeviceTable devices={shown} showSite />
