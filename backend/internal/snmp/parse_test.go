@@ -47,10 +47,10 @@ func TestParseInterfaces(t *testing.T) {
 	})
 	want := []Interface{
 		{Index: 1, Name: "0/1", Descr: "Slot: 0 Port: 1 Gigabit - Level", Alias: "Uplink to MDF", Type: 6,
-			SpeedBps: 1_000_000_000, MAC: "78:8a:20:01:02:03", AdminStatus: "up", OperStatus: "up", LastChangeSeconds: 45},
+			SpeedBps: 1_000_000_000, MAC: "78:8a:20:01:02:03", AdminStatus: "up", OperStatus: "up", LastChangeSeconds: 45, HasIfX: true},
 		{Index: 3, Name: "eth0", Descr: "eth0", SpeedBps: 100_000_000, AdminStatus: "up", OperStatus: "down"},
 		{Index: 49, Name: "Slot: 0 Port: 49 10G - Level", Descr: "Slot: 0 Port: 49 10G - Level",
-			SpeedBps: 10_000_000_000, AdminStatus: "down", OperStatus: "lowerLayerDown"},
+			SpeedBps: 10_000_000_000, AdminStatus: "down", OperStatus: "lowerLayerDown", HasIfX: true},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got  %+v\nwant %+v", got, want)
@@ -200,5 +200,27 @@ func TestClean(t *testing.T) {
 		if got := Clean(in); got != want {
 			t.Errorf("Clean(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// HasIfX marks interfaces the ifXTable answered for, and ifConnectorPresent
+// (TruthValue: 1 true, 2 false) is carried when reported.
+func TestParseInterfacesIfXPresence(t *testing.T) {
+	e, x := "1.3.6.1.2.1.2.2.1", "1.3.6.1.2.1.31.1.1.1"
+	got := ParseInterfaces([]PDU{
+		{OID: e + ".2.1", Value: []byte("eth0")}, {OID: e + ".3.1", Value: int64(6)},
+		{OID: x + ".1.1", Value: []byte("eth0")}, {OID: x + ".17.1", Value: int64(1)},
+		{OID: e + ".2.2", Value: []byte("br0")}, {OID: e + ".3.2", Value: int64(6)},
+		{OID: x + ".17.2", Value: int64(2)},
+		{OID: e + ".2.3", Value: []byte("radio")}, {OID: e + ".3.3", Value: int64(6)},
+	})
+	if !got[0].HasIfX || got[0].ConnectorPresent == nil || !*got[0].ConnectorPresent {
+		t.Errorf("if 1: %+v", got[0])
+	}
+	if !got[1].HasIfX || got[1].ConnectorPresent == nil || *got[1].ConnectorPresent {
+		t.Errorf("if 2: %+v", got[1])
+	}
+	if got[2].HasIfX || got[2].ConnectorPresent != nil {
+		t.Errorf("if 3 (no ifX): %+v", got[2])
 	}
 }

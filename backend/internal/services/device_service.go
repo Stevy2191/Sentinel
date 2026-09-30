@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
+	"github.com/Stevy2191/Sentinel/backend/internal/portmon"
 	"github.com/Stevy2191/Sentinel/backend/internal/snmp"
 )
 
@@ -374,21 +375,50 @@ func (s *DeviceService) SaveReachability(ctx context.Context, id uuid.UUID, u Re
 }
 
 // SaveInventory stores identity and interfaces in one transaction.
-// Interfaces are upserted by index; any not in this walk become absent.
+// Interfaces are upserted by index; any not in this walk become absent. When
+// this walk's ifXTable did not answer for an interface that it answered
+// before, the stored name, alias and speed (which came from ifXTable) are
+// kept rather than replaced by ifTable's fallbacks. Overrides (vendor_override
+// and friends, device_type) are never written here.
 func (s *DeviceService) SaveInventory(ctx context.Context, id uuid.UUID, inv snmp.Inventory, at time.Time) error {
+	physical := 0
+	for _, it := range inv.Interfaces {
+		if portmon.IsPhysical(ifInfo(it)) {
+			physical++
+		}
+	}
+	detected := portmon.DetectDeviceType(inv.Model, physical)
+
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		sys := inv.System
 		if err := tx.Exec(`UPDATE devices SET
 			sys_name = ?, sys_descr = ?, sys_object_id = ?, sys_location = ?, sys_contact = ?,
-			vendor = ?, model = ?, serial = ?, last_inventory_at = ?,
+			vendor = ?, model = ?, serial = ?, device_type_detected = ?, last_inventory_at = ?,
 			name = CASE WHEN name = host AND ? <> '' THEN ? ELSE name END,
 			status_detail = CASE WHEN status_detail LIKE 'inventory:%' THEN '' ELSE status_detail END,
 			updated_at = now()
 			WHERE id = ?`,
 			sys.Name, sys.Descr, sys.ObjectID, sys.Location, sys.Contact,
-			inv.Vendor, inv.Model, inv.Serial, at, sys.Name, sys.Name, id).Error; err != nil {
+			inv.Vendor, inv.Model, inv.Serial, detected, at, sys.Name, sys.Name, id).Error; err != nil {
 			return fmt.Errorf("saving device identity: %w", err)
 		}
+
+		// ifX-sourced columns keep their stored value when this walk has no
+		// ifX for the interface but an earlier one did.
+		keepIfX := func(col string) clause.Assignment {
+			return clause.Assignment{Column: clause.Column{Name: col}, Value: gorm.Expr(
+				"CASE WHEN device_interfaces.has_ifx AND NOT EXCLUDED.has_ifx THEN device_interfaces." + col +
+					" ELSE EXCLUDED." + col + " END")}
+		}
+		set := clause.AssignmentColumns([]string{"descr", "if_type", "mac", "admin_status", "oper_status",
+			"last_change_seconds", "present", "updated_at", "collect_default"})
+		set = append(set,
+			keepIfX("name"), keepIfX("alias"), keepIfX("speed_bps"),
+			clause.Assignment{Column: clause.Column{Name: "has_ifx"}, Value: gorm.Expr("device_interfaces.has_ifx OR EXCLUDED.has_ifx")},
+			clause.Assignment{Column: clause.Column{Name: "connector_present"},
+				Value: gorm.Expr("COALESCE(EXCLUDED.connector_present, device_interfaces.connector_present)")},
+		)
+
 		seen := make([]int, 0, len(inv.Interfaces))
 		for _, it := range inv.Interfaces {
 			seen = append(seen, it.Index)
@@ -396,11 +426,12 @@ func (s *DeviceService) SaveInventory(ctx context.Context, id uuid.UUID, inv snm
 				DeviceID: id, IfIndex: it.Index, Name: it.Name, Descr: it.Descr, Alias: it.Alias, IfType: it.Type,
 				SpeedBps: it.SpeedBps, MAC: it.MAC, AdminStatus: it.AdminStatus, OperStatus: it.OperStatus,
 				LastChangeSeconds: it.LastChangeSeconds, Present: true, UpdatedAt: at,
+				ConnectorPresent: it.ConnectorPresent, HasIfX: it.HasIfX,
+				CollectDefault: portmon.DefaultCollect(ifInfo(it)),
 			}
 			if err := tx.Clauses(clause.OnConflict{
-				Columns: []clause.Column{{Name: "device_id"}, {Name: "if_index"}},
-				DoUpdates: clause.AssignmentColumns([]string{"name", "descr", "alias", "if_type", "speed_bps", "mac",
-					"admin_status", "oper_status", "last_change_seconds", "present", "updated_at"}),
+				Columns:   []clause.Column{{Name: "device_id"}, {Name: "if_index"}},
+				DoUpdates: set,
 			}).Create(&row).Error; err != nil {
 				return fmt.Errorf("saving interface %d: %w", it.Index, err)
 			}
@@ -414,6 +445,10 @@ func (s *DeviceService) SaveInventory(ctx context.Context, id uuid.UUID, inv snm
 		}
 		return nil
 	})
+}
+
+func ifInfo(it snmp.Interface) portmon.IfInfo {
+	return portmon.IfInfo{Name: it.Name, Descr: it.Descr, Type: it.Type, ConnectorPresent: it.ConnectorPresent}
 }
 
 // SaveInventoryError records a failed inventory and stamps the attempt, so it
