@@ -134,6 +134,28 @@ func TestPortPatch(t *testing.T) {
 	}
 }
 
+func TestPortPatchRole(t *testing.T) {
+	var p PortPatch
+	if err := json.Unmarshal([]byte(`{"role":"wan"}`), &p); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	u := p.Updates()
+	if u["role"] != "wan" {
+		t.Errorf("updates %v", u)
+	}
+
+	for _, body := range []string{`{"role":"toaster"}`, `{"role":null}`} {
+		var bad PortPatch
+		_ = json.Unmarshal([]byte(body), &bad)
+		if bad.Validate() == nil {
+			t.Errorf("%s accepted", body)
+		}
+	}
+}
+
 func TestDeviceDetailsPatch(t *testing.T) {
 	var p DeviceDetailsPatch
 	if err := json.Unmarshal([]byte(`{"model_override": "  UNVR (4-bay) ", "vendor_override": "", "device_type": "nvr",

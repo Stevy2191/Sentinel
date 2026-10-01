@@ -187,6 +187,16 @@ var ValidDeviceTypes = map[string]bool{
 	DeviceTypeSwitch: true, DeviceTypeRouter: true, DeviceTypeAccessPoint: true, DeviceTypeNVR: true, DeviceTypeOther: true,
 }
 
+// Port roles: what each port connects to. Set by the user (PortPatch.Role);
+// inventory never writes it (SaveInventory's upsert omits the column).
+const (
+	PortRoleAccess = "access" // a device is plugged in (camera, PC, AP).
+	PortRoleUplink = "uplink" // a link between the user's own network devices.
+	PortRoleWAN    = "wan"    // the internet side.
+)
+
+var ValidPortRoles = map[string]bool{PortRoleAccess: true, PortRoleUplink: true, PortRoleWAN: true}
+
 // Device is an SNMP-polled device. It belongs to exactly one site.
 type Device struct {
 	ID                  uuid.UUID   `json:"id" gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
@@ -309,6 +319,9 @@ type DeviceInterface struct {
 	LastChangeSeconds int64     `json:"last_change_seconds" gorm:"column:last_change_seconds"`
 	Present           bool      `json:"present" gorm:"column:present;not null"`
 	ConnectorPresent  *bool     `json:"connector_present" gorm:"column:connector_present"`
+	// Role is what this port connects to (access/uplink/wan); never written by
+	// inventory, only by PortPatch.
+	Role string `json:"role" gorm:"column:role;not null;default:access"`
 	// HasIfX: the ifXTable has answered for this interface at least once, so
 	// its name, alias and high speed are not overwritten by an inventory whose
 	// ifXTable walk failed.
@@ -379,20 +392,24 @@ func (PortEvent) TableName() string { return "port_events" }
 // alone; null clears an override back to the default (collect: back to the
 // classifier's choice; thresholds: back to the instance defaults).
 type PortPatch struct {
-	Important            Opt[bool] `json:"important"`
-	Collect              Opt[bool] `json:"collect"`
-	UtilThresholdPct     Opt[int]  `json:"util_threshold_pct"`
-	ErrorThresholdPerMin Opt[int]  `json:"error_threshold_per_min"`
-	DownGraceSeconds     Opt[int]  `json:"down_grace_seconds"`
+	Important            Opt[bool]   `json:"important"`
+	Collect              Opt[bool]   `json:"collect"`
+	UtilThresholdPct     Opt[int]    `json:"util_threshold_pct"`
+	ErrorThresholdPerMin Opt[int]    `json:"error_threshold_per_min"`
+	DownGraceSeconds     Opt[int]    `json:"down_grace_seconds"`
+	Role                 Opt[string] `json:"role"`
 }
 
 // Validate checks ranges (the same as the schema's CHECKs).
 func (p PortPatch) Validate() error {
-	if !p.Important.Set && !p.Collect.Set && !p.UtilThresholdPct.Set && !p.ErrorThresholdPerMin.Set && !p.DownGraceSeconds.Set {
+	if !p.Important.Set && !p.Collect.Set && !p.UtilThresholdPct.Set && !p.ErrorThresholdPerMin.Set && !p.DownGraceSeconds.Set && !p.Role.Set {
 		return errors.New("nothing to change")
 	}
 	if p.Important.Set && p.Important.Value == nil {
 		return errors.New("important must be true or false")
+	}
+	if p.Role.Set && (p.Role.Value == nil || !ValidPortRoles[*p.Role.Value]) {
+		return errors.New("role must be access, uplink or wan")
 	}
 	inRange := func(o Opt[int], name string, min, max int) error {
 		if o.Value != nil && (*o.Value < min || *o.Value > max) {
@@ -426,6 +443,9 @@ func (p PortPatch) Updates() map[string]any {
 	}
 	if p.DownGraceSeconds.Set {
 		u["down_grace_seconds"] = optValue(p.DownGraceSeconds)
+	}
+	if p.Role.Set {
+		u["role"] = *p.Role.Value
 	}
 	return u
 }

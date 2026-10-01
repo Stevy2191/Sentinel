@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -12,7 +13,10 @@ import (
 	"github.com/Stevy2191/Sentinel/backend/internal/services"
 )
 
-type fakePorts struct{ updates int }
+type fakePorts struct {
+	updates                int
+	trafficFrom, trafficTo time.Time
+}
 
 func (f *fakePorts) DevicePorts(context.Context, *services.DeviceView) (*services.DevicePortsView, error) {
 	return &services.DevicePortsView{Ports: []services.PortView{}}, nil
@@ -38,6 +42,10 @@ func (f *fakePorts) SiteSummary(context.Context, uuid.UUID) (*services.SitePortS
 }
 func (f *fakePorts) PhysicalInterfaceIDs(context.Context, []uuid.UUID) ([]uuid.UUID, error) {
 	return []uuid.UUID{uuid.New()}, nil
+}
+func (f *fakePorts) SiteTraffic(_ context.Context, _ uuid.UUID, from, to time.Time) (*services.SiteTraffic, error) {
+	f.trafficFrom, f.trafficTo = from, to
+	return &services.SiteTraffic{NorthSouth: []services.NorthSouthPoint{}, EastWest: []services.EastWestPoint{}}, nil
 }
 
 type fakeMetricsQuery struct{ last *services.MetricsQuery }
@@ -152,6 +160,28 @@ func TestMetricsQueryAccess(t *testing.T) {
 	w := do(rig.r, http.MethodGet, "/api/v1/network/metrics/query?metric=if_in_bps&range=24h&agg=sum&ports=physical&site_id="+site.String(), nil)
 	if w.Code != http.StatusOK || !rig.metrics.last.Sum || len(rig.metrics.last.InterfaceIDs) != 1 {
 		t.Errorf("site total: %d %+v", w.Code, rig.metrics.last)
+	}
+}
+
+func TestSiteTrafficRoute(t *testing.T) {
+	site := uuid.New()
+	dev := services.DeviceView{Device: models.Device{ID: uuid.New(), SiteID: site}}
+	url := "/api/v1/sites/" + site.String() + "/traffic"
+
+	rig := newPortRig(dev, fakeSiteLevels{}, false)
+	if w := do(rig.r, http.MethodGet, url+"?range=24h", nil); w.Code != http.StatusNotFound {
+		t.Errorf("no access: %d, want 404", w.Code)
+	}
+
+	rig = newPortRig(dev, fakeSiteLevels{site: services.SiteAccessReadonly}, false)
+	if w := do(rig.r, http.MethodGet, url+"?range=2h", nil); w.Code != http.StatusBadRequest {
+		t.Errorf("bad range: %d, want 400", w.Code)
+	}
+	if w := do(rig.r, http.MethodGet, url, nil); w.Code != http.StatusBadRequest {
+		t.Errorf("missing range: %d, want 400", w.Code)
+	}
+	if w := do(rig.r, http.MethodGet, url+"?range=24h", nil); w.Code != http.StatusOK {
+		t.Errorf("readonly access: %d, want 200", w.Code)
 	}
 }
 

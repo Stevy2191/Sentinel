@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -20,6 +21,7 @@ type portStore interface {
 	Events(ctx context.Context, f services.PortEventFilter) ([]services.PortEventView, int64, error)
 	SiteSummary(ctx context.Context, siteID uuid.UUID) (*services.SitePortSummary, error)
 	PhysicalInterfaceIDs(ctx context.Context, deviceIDs []uuid.UUID) ([]uuid.UUID, error)
+	SiteTraffic(ctx context.Context, siteID uuid.UUID, from, to time.Time) (*services.SiteTraffic, error)
 }
 
 // RegisterPortRoutes mounts the port, event and site summary routes. Access
@@ -32,6 +34,7 @@ func RegisterPortRoutes(rg *gin.RouterGroup, devices deviceStore, ports portStor
 	rg.GET("/devices/:id/events", deviceEventsHandler(devices, ports, sites))
 	rg.GET("/sites/:id/port-events", siteEventsHandler(ports, sites))
 	rg.GET("/sites/:id/ports/summary", siteSummaryHandler(ports, sites))
+	rg.GET("/sites/:id/traffic", siteTrafficHandler(ports, sites))
 }
 
 func respondPortError(c *gin.Context, op string, err error) {
@@ -97,7 +100,7 @@ func portHandler(devices deviceStore, ports portStore, sites siteAccessChecker) 
 func portAudit(i *models.DeviceInterface) map[string]any {
 	return map[string]any{"if_index": i.IfIndex, "important": i.Important, "collect": i.Collect,
 		"util_threshold_pct": i.UtilThresholdPct, "error_threshold_per_min": i.ErrorThresholdPerMin,
-		"down_grace_seconds": i.DownGraceSeconds}
+		"down_grace_seconds": i.DownGraceSeconds, "role": i.Role}
 }
 
 func updatePortHandler(devices deviceStore, ports portStore, sites siteAccessChecker, audit auditRecorder) gin.HandlerFunc {
@@ -179,5 +182,28 @@ func siteSummaryHandler(ports portStore, sites siteAccessChecker) gin.HandlerFun
 			return
 		}
 		respondSuccess(c, http.StatusOK, s)
+	}
+}
+
+// siteTrafficHandler handles GET /sites/:id/traffic?range=1h|6h|24h|7d|30d|90d|1y
+// (the same ranges as /network/metrics/query).
+func siteTrafficHandler(ports portStore, sites siteAccessChecker) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := parseSiteID(c)
+		if !ok || !requireSiteLevel(c, sites, id, services.SiteAccessReadonly) {
+			return
+		}
+		span, ok := queryRanges[c.Query("range")]
+		if !ok {
+			respondError(c, http.StatusBadRequest, "range must be 1h, 6h, 24h, 7d, 30d, 90d or 1y")
+			return
+		}
+		to := time.Now().UTC()
+		v, err := ports.SiteTraffic(c.Request.Context(), id, to.Add(-span), to)
+		if err != nil {
+			respondInternal(c, "siteTraffic", err)
+			return
+		}
+		respondSuccess(c, http.StatusOK, v)
 	}
 }
