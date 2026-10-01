@@ -366,7 +366,8 @@ const incidentSubjectJoins = `LEFT JOIN monitors AS m ON m.id = i.monitor_id
 	LEFT JOIN device_interfaces AS di ON di.id = i.interface_id`
 
 // A port incident keeps subject_type 'device' (it inherits the device's
-// access and pages) and reads "Device · 0/51 (Alias)" as its subject.
+// access and pages) and reads "Device · 0/51 (Alias)" as its subject; a UPS
+// condition incident reads "Device · On battery".
 const incidentSubjectSelect = `i.*,
 	COALESCE(m.name, d.name) AS monitor_name,
 	COALESCE(m.url, d.host) AS monitor_url,
@@ -375,6 +376,12 @@ const incidentSubjectSelect = `i.*,
 	CASE WHEN di.id IS NOT NULL THEN
 		d.name || ' · ' || COALESCE(NULLIF(di.name, ''), di.if_index::text)
 		|| CASE WHEN COALESCE(di.alias, '') <> '' THEN ' (' || di.alias || ')' ELSE '' END
+	WHEN i.device_id IS NOT NULL AND i.condition IS NOT NULL THEN
+		d.name || ' · ' || CASE i.condition
+			WHEN 'ups_on_battery' THEN 'On battery'
+			WHEN 'ups_low_battery' THEN 'Low battery'
+			WHEN 'ups_high_load' THEN 'High load'
+			ELSE i.condition END
 	ELSE COALESCE(m.name, d.name) END AS subject_name,
 	COALESCE(m.url, d.host) AS subject_target,
 	d.site_id AS site_id,
@@ -552,7 +559,7 @@ func (s *IncidentService) CloseDeviceIncidentTx(tx *gorm.DB, deviceID uuid.UUID,
 // caller's transaction).
 func (s *IncidentService) closeDeviceIncident(db *gorm.DB, deviceID uuid.UUID, end time.Time, note string) (*models.Incident, error) {
 	var rows []models.Incident
-	err := db.Where("device_id = ? AND interface_id IS NULL AND end_time IS NULL", deviceID).Order("start_time DESC").Limit(1).Find(&rows).Error
+	err := db.Where("device_id = ? AND interface_id IS NULL AND condition IS NULL AND end_time IS NULL", deviceID).Order("start_time DESC").Limit(1).Find(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("querying active incident for device %s: %w", deviceID, err)
 	}
@@ -599,7 +606,7 @@ func (s *IncidentService) closeIncidentRow(db *gorm.DB, active models.Incident, 
 func (s *IncidentService) activeDeviceIncident(ctx context.Context, deviceID uuid.UUID) (*models.Incident, error) {
 	var rows []models.Incident
 	err := s.db.WithContext(ctx).
-		Where("device_id = ? AND interface_id IS NULL AND end_time IS NULL", deviceID).
+		Where("device_id = ? AND interface_id IS NULL AND condition IS NULL AND end_time IS NULL", deviceID).
 		Order("start_time DESC").
 		Limit(1).
 		Find(&rows).Error
@@ -720,6 +727,86 @@ func (s *IncidentService) activePortIncident(ctx context.Context, interfaceID uu
 		Limit(1).Find(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("querying open %s incident for port %s: %w", condition, interfaceID, err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return &rows[0], nil
+}
+
+// OpenDeviceConditionIncident opens a device-level condition incident (a
+// UPS condition), unless one is already open for that device and condition,
+// in which case that one is returned with opened=false. A concurrent open
+// losing the race on the partial unique index is reported the same way.
+func (s *IncidentService) OpenDeviceConditionIncident(ctx context.Context, deviceID uuid.UUID, condition string, start time.Time, reason string) (*models.Incident, bool, error) {
+	if active, err := s.activeDeviceConditionIncident(ctx, deviceID, condition); err != nil || active != nil {
+		return active, false, err
+	}
+	now := time.Now()
+	cond := condition
+	incident := &models.Incident{
+		ID: uuid.New(), DeviceID: &deviceID, Condition: &cond,
+		StartTime: start, Severity: defaultIncidentSeverity, IncidentType: models.IncidentTypeError,
+		RootCause: reason, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.db.WithContext(ctx).Create(incident).Error; err != nil {
+		if isDuplicateKey(err) {
+			active, err := s.activeDeviceConditionIncident(ctx, deviceID, condition)
+			return active, false, err
+		}
+		return nil, false, fmt.Errorf("creating %s incident for device %s: %w", condition, deviceID, err)
+	}
+	s.logger.Printf("[incident] opened id=%s device=%s condition=%s", incident.ID, deviceID, condition)
+	return incident, true, nil
+}
+
+// CloseDeviceConditionIncident closes the open incident for one device and
+// condition. Returns nil, nil when none is open.
+func (s *IncidentService) CloseDeviceConditionIncident(ctx context.Context, deviceID uuid.UUID, condition string, end time.Time, note string) (*models.Incident, error) {
+	active, err := s.activeDeviceConditionIncident(ctx, deviceID, condition)
+	if err != nil || active == nil {
+		return nil, err
+	}
+	return s.closeIncidentRow(s.db.WithContext(ctx), *active, end, note)
+}
+
+// OpenDeviceConditionIncidents lists a device's open device-level condition
+// incidents, for UPSMonitor's restart rebuild and reconciliation.
+func (s *IncidentService) OpenDeviceConditionIncidents(ctx context.Context, deviceID uuid.UUID) ([]models.Incident, error) {
+	var rows []models.Incident
+	err := s.db.WithContext(ctx).
+		Where("device_id = ? AND interface_id IS NULL AND condition IS NOT NULL AND end_time IS NULL", deviceID).
+		Order("start_time DESC").Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("listing open condition incidents for device %s: %w", deviceID, err)
+	}
+	return rows, nil
+}
+
+// CloseDeviceConditionIncidentsTx closes every open condition incident on a
+// device inside the caller's transaction (pausing a device: a paused device
+// is not polled, so nothing else would close them). Returns how many.
+func (s *IncidentService) CloseDeviceConditionIncidentsTx(tx *gorm.DB, deviceID uuid.UUID, end time.Time, note string) (int, error) {
+	var open []models.Incident
+	if err := tx.Where("device_id = ? AND interface_id IS NULL AND condition IS NOT NULL AND end_time IS NULL", deviceID).
+		Find(&open).Error; err != nil {
+		return 0, fmt.Errorf("listing open condition incidents for device %s: %w", deviceID, err)
+	}
+	for _, inc := range open {
+		if _, err := s.closeIncidentRow(tx, inc, end, note); err != nil {
+			return 0, err
+		}
+	}
+	return len(open), nil
+}
+
+func (s *IncidentService) activeDeviceConditionIncident(ctx context.Context, deviceID uuid.UUID, condition string) (*models.Incident, error) {
+	var rows []models.Incident
+	err := s.db.WithContext(ctx).
+		Where("device_id = ? AND interface_id IS NULL AND condition = ? AND end_time IS NULL", deviceID, condition).
+		Limit(1).Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("querying open %s incident for device %s: %w", condition, deviceID, err)
 	}
 	if len(rows) == 0 {
 		return nil, nil

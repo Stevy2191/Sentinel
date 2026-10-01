@@ -260,3 +260,24 @@ func TestDeviceDetailsPatchPortStyle(t *testing.T) {
 		t.Error("unknown port style accepted")
 	}
 }
+
+func TestDeviceDetailsPatchUPSThresholds(t *testing.T) {
+	var p DeviceDetailsPatch
+	if err := json.Unmarshal([]byte(`{"ups_low_battery_pct": 30, "ups_high_load_pct": null}`), &p); err != nil {
+		t.Fatal(err)
+	}
+	u, err := p.Updates()
+	if err != nil || u["ups_low_battery_pct"] != 30 || u["ups_high_load_pct"] != nil {
+		t.Fatalf("updates %v %v", u, err)
+	}
+	if _, ok := u["ups_high_load_pct"]; !ok {
+		t.Error("null did not clear the override")
+	}
+	for _, body := range []string{`{"ups_low_battery_pct": 4}`, `{"ups_low_battery_pct": 96}`, `{"ups_high_load_pct": 9}`, `{"ups_high_load_pct": 101}`} {
+		var bad DeviceDetailsPatch
+		_ = json.Unmarshal([]byte(body), &bad)
+		if _, err := bad.Updates(); err == nil {
+			t.Errorf("%s accepted", body)
+		}
+	}
+}

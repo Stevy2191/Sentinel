@@ -238,7 +238,10 @@ type Device struct {
 	FaceplateRows     *int     `json:"faceplate_rows" gorm:"column:faceplate_rows"`
 	FaceplateSFPPorts IntSlice `json:"faceplate_sfp_ports" gorm:"column:faceplate_sfp_ports;type:jsonb"`
 	// FaceplatePortStyle draws every main port as "sfp" or "rj45"; nil is Auto.
-	FaceplatePortStyle  *string    `json:"faceplate_port_style" gorm:"column:faceplate_port_style"`
+	FaceplatePortStyle *string `json:"faceplate_port_style" gorm:"column:faceplate_port_style"`
+	// UPS alert thresholds; nil = the instance setting.
+	UPSLowBatteryPct    *int       `json:"ups_low_battery_pct" gorm:"column:ups_low_battery_pct"`
+	UPSHighLoadPct      *int       `json:"ups_high_load_pct" gorm:"column:ups_high_load_pct"`
 	LastStatsAt         *time.Time `json:"last_stats_at" gorm:"column:last_stats_at"`
 	LastStatsDurationMs *int       `json:"last_stats_duration_ms" gorm:"column:last_stats_duration_ms"`
 	CreatedBy           *uuid.UUID `json:"created_by" gorm:"column:created_by;type:uuid"`
@@ -369,6 +372,13 @@ const (
 	PortConditionFlapping  = "flapping"
 	PortConditionSlowLink  = "slow_link"
 	PortConditionSaturated = "saturated"
+)
+
+// UPS conditions: device-level incidents on a UPS (no interface).
+const (
+	UPSConditionOnBattery  = "ups_on_battery"
+	UPSConditionLowBattery = "ups_low_battery"
+	UPSConditionHighLoad   = "ups_high_load"
 )
 
 // Port event kinds.
@@ -502,6 +512,8 @@ type DeviceDetailsPatch struct {
 	FaceplateRows      Opt[int]    `json:"faceplate_rows"`
 	FaceplateSFPPorts  Opt[[]int]  `json:"faceplate_sfp_ports"`
 	FaceplatePortStyle Opt[string] `json:"faceplate_port_style"`
+	UPSLowBatteryPct   Opt[int]    `json:"ups_low_battery_pct"`
+	UPSHighLoadPct     Opt[int]    `json:"ups_high_load_pct"`
 }
 
 // Updates validates the patch and returns its column map.
@@ -578,6 +590,20 @@ func (p DeviceDetailsPatch) Updates() (map[string]any, error) {
 		default:
 			return nil, errors.New("port style must be sfp, rj45 or empty for automatic")
 		}
+	}
+	for _, f := range []struct {
+		o          Opt[int]
+		col, label string
+		min, max   int
+	}{{p.UPSLowBatteryPct, "ups_low_battery_pct", "the low battery threshold", MinUPSLowBatteryPct, MaxUPSLowBatteryPct},
+		{p.UPSHighLoadPct, "ups_high_load_pct", "the high load threshold", MinUPSHighLoadPct, MaxUPSHighLoadPct}} {
+		if !f.o.Set {
+			continue
+		}
+		if v := f.o.Value; v != nil && (*v < f.min || *v > f.max) {
+			return nil, fmt.Errorf("%s must be between %d and %d", f.label, f.min, f.max)
+		}
+		u[f.col] = optValue(f.o)
 	}
 	if len(u) == 0 {
 		return nil, errors.New("nothing to change")

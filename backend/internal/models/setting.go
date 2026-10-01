@@ -73,6 +73,10 @@ const (
 	SettingPortErrorThresholdPerMin = "port_error_threshold_per_min"
 	SettingPortUtilThresholdPct     = "port_util_threshold_pct"
 	SettingPortDownGraceSeconds     = "port_down_grace_seconds"
+	// SettingUPSLowBatteryPct and SettingUPSHighLoadPct are the UPS alert
+	// thresholds (a device may override either).
+	SettingUPSLowBatteryPct = "ups_low_battery_pct"
+	SettingUPSHighLoadPct   = "ups_high_load_pct"
 )
 
 // Bounds and defaults for the system settings above.
@@ -126,6 +130,12 @@ const (
 	DefaultPortDownGraceSeconds     = 120
 	MinPortDownGraceSeconds         = 0
 	MaxPortDownGraceSeconds         = 86400
+	DefaultUPSLowBatteryPct         = 25
+	MinUPSLowBatteryPct             = 5
+	MaxUPSLowBatteryPct             = 95
+	DefaultUPSHighLoadPct           = 80
+	MinUPSHighLoadPct               = 10
+	MaxUPSHighLoadPct               = 100
 )
 
 // DefaultReportTimezone is used until an administrator sets one. UTC rather
