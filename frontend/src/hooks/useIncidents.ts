@@ -10,6 +10,9 @@ export interface Incident {
   /** Set for monitor incidents; null for network device incidents. */
   monitor_id: string | null
   device_id: string | null
+  /** Set on a port incident: the port's ifIndex, for linking to its page. */
+  port_if_index: number | null
+  condition: string | null
   subject_type: 'monitor' | 'device'
   subject_name: string
   subject_target: string
