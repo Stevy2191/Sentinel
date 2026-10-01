@@ -4,13 +4,14 @@ import type { ApiResponse } from '@/types'
 
 export type DeviceStatus = 'pending' | 'up' | 'down' | 'paused' | 'error'
 
-export type DeviceType = 'switch' | 'router' | 'access_point' | 'nvr' | 'other'
+export type DeviceType = 'switch' | 'router' | 'access_point' | 'nvr' | 'ups' | 'other'
 
 export const DEVICE_TYPE_LABEL: Record<DeviceType, string> = {
   switch: 'Switch',
   router: 'Router',
   access_point: 'Access point',
   nvr: 'NVR',
+  ups: 'UPS',
   other: 'Other',
 }
 

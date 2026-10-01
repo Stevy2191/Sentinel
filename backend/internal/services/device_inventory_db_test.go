@@ -209,3 +209,27 @@ func TestDBSaveInventoryLeavesOverrides(t *testing.T) {
 		t.Errorf("overrides touched: %+v", d)
 	}
 }
+
+// A UPS can be chosen as a device's type, and inventory detects one from its
+// vendor's enterprise number (APC here).
+func TestDBDeviceTypeUPS(t *testing.T) {
+	db := testdb.Open(t)
+	s := seedDevice(t, db, "HQ", "10.0.0.20")
+	svc := NewDeviceService(db, NewSNMPCredentialService(db), NewIncidentService(db))
+	ctx := context.Background()
+
+	inv := snmp.Inventory{System: snmp.System{Name: "ups1", ObjectID: "1.3.6.1.4.1.318.1.3.27"}, Vendor: "APC", Model: "Smart-UPS 1500",
+		Interfaces: []snmp.Interface{{Index: 1, Name: "eth0", Descr: "eth0", Type: 6, OperStatus: "up", AdminStatus: "up"}}}
+	testdb.Must(t, svc.SaveInventory(ctx, s.DeviceID, inv, time.Now()))
+	var d models.Device
+	testdb.Must(t, db.First(&d, "id = ?", s.DeviceID).Error)
+	if d.DeviceTypeDetected != models.DeviceTypeUPS {
+		t.Errorf("device_type_detected = %q, want ups", d.DeviceTypeDetected)
+	}
+
+	other := s.DeviceID
+	ups := "ups"
+	if _, _, err := svc.UpdateDetails(ctx, other, models.DeviceDetailsPatch{DeviceType: models.Opt[string]{Set: true, Value: &ups}}); err != nil {
+		t.Fatalf("setting type ups: %v", err)
+	}
+}

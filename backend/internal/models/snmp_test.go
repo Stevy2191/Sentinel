@@ -226,3 +226,15 @@ func TestDeviceDetailsPatch(t *testing.T) {
 		}
 	}
 }
+
+func TestDeviceDetailsPatchAcceptsUPS(t *testing.T) {
+	ups := "ups"
+	u, err := DeviceDetailsPatch{DeviceType: Opt[string]{Set: true, Value: &ups}}.Updates()
+	if err != nil || u["device_type"] != "ups" {
+		t.Fatalf("ups: %v %v", u, err)
+	}
+	toaster := "toaster"
+	if _, err := (DeviceDetailsPatch{DeviceType: Opt[string]{Set: true, Value: &toaster}}).Updates(); err == nil {
+		t.Error("unknown device type accepted")
+	}
+}
