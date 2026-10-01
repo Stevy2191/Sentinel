@@ -12,13 +12,17 @@ import (
 // Site is a place whose network Sentinel monitors: the unit that devices,
 // maps, dashboards and network reports belong to, and the unit of sharing.
 type Site struct {
-	ID          uuid.UUID  `json:"id" gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
-	Name        string     `json:"name" gorm:"column:name;not null"`
-	Description *string    `json:"description" gorm:"column:description"`
-	Address     *string    `json:"address" gorm:"column:address"`
-	CreatedBy   *uuid.UUID `json:"created_by" gorm:"column:created_by;type:uuid"`
-	CreatedAt   time.Time  `json:"created_at" gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt   time.Time  `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
+	ID          uuid.UUID `json:"id" gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
+	Name        string    `json:"name" gorm:"column:name;not null"`
+	Description *string   `json:"description" gorm:"column:description"`
+	// The address, as a postal address block: street, then city, state, ZIP.
+	Street    *string    `json:"street" gorm:"column:street"`
+	City      *string    `json:"city" gorm:"column:city"`
+	State     *string    `json:"state" gorm:"column:state"`
+	Zip       *string    `json:"zip" gorm:"column:zip"`
+	CreatedBy *uuid.UUID `json:"created_by" gorm:"column:created_by;type:uuid"`
+	CreatedAt time.Time  `json:"created_at" gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt time.Time  `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
 }
 
 // TableName pins the table name.
@@ -43,7 +47,10 @@ func (SiteSharing) TableName() string { return "site_sharing" }
 type SiteInput struct {
 	Name        string  `json:"name"`
 	Description *string `json:"description"`
-	Address     *string `json:"address"`
+	Street      *string `json:"street"`
+	City        *string `json:"city"`
+	State       *string `json:"state"`
+	Zip         *string `json:"zip"`
 }
 
 // maxSiteNameLen matches the VARCHAR(255) column, counted in characters as
@@ -62,7 +69,10 @@ func NormalizeSiteInput(in SiteInput) (SiteInput, error) {
 		return SiteInput{}, errors.New("name must be 255 characters or fewer")
 	}
 	out.Description = trimOptional(in.Description)
-	out.Address = trimOptional(in.Address)
+	out.Street = trimOptional(in.Street)
+	out.City = trimOptional(in.City)
+	out.State = trimOptional(in.State)
+	out.Zip = trimOptional(in.Zip)
 	return out, nil
 }
 

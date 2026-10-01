@@ -96,7 +96,7 @@ func (s *SiteService) SiteAccess(ctx context.Context, userID uuid.UUID, isAdmin 
 
 // Create stores a new site. in must already be normalized.
 func (s *SiteService) Create(ctx context.Context, in models.SiteInput, createdBy uuid.UUID) (*models.Site, error) {
-	site := models.Site{Name: in.Name, Description: in.Description, Address: in.Address, CreatedBy: &createdBy}
+	site := models.Site{Name: in.Name, Description: in.Description, Street: in.Street, City: in.City, State: in.State, Zip: in.Zip, CreatedBy: &createdBy}
 	if err := s.db.WithContext(ctx).Create(&site).Error; err != nil {
 		if isDuplicateKey(err) {
 			return nil, ErrSiteNameTaken
@@ -114,7 +114,8 @@ func (s *SiteService) Update(ctx context.Context, id uuid.UUID, in models.SiteIn
 		return nil, nil, err
 	}
 	err = s.db.WithContext(ctx).Model(&models.Site{}).Where("id = ?", id).
-		Updates(map[string]any{"name": in.Name, "description": in.Description, "address": in.Address, "updated_at": gorm.Expr("now()")}).Error
+		Updates(map[string]any{"name": in.Name, "description": in.Description, "street": in.Street, "city": in.City, "state": in.State, "zip": in.Zip,
+			"updated_at": gorm.Expr("now()")}).Error
 	if err != nil {
 		if isDuplicateKey(err) {
 			return nil, nil, ErrSiteNameTaken

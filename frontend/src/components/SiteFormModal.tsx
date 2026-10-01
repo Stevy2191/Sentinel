@@ -17,7 +17,10 @@ export default function SiteFormModal({ initial, onClose, onSaved }: Props) {
   const { create, update, busy } = useSiteActions()
   const [name, setName] = useState(initial?.name ?? '')
   const [description, setDescription] = useState(initial?.description ?? '')
-  const [address, setAddress] = useState(initial?.address ?? '')
+  const [street, setStreet] = useState(initial?.street ?? '')
+  const [city, setCity] = useState(initial?.city ?? '')
+  const [state, setState] = useState(initial?.state ?? '')
+  const [zip, setZip] = useState(initial?.zip ?? '')
   const [error, setError] = useState<string | null>(null)
 
   const submit = async (e: React.FormEvent) => {
@@ -27,7 +30,10 @@ export default function SiteFormModal({ initial, onClose, onSaved }: Props) {
     const input = {
       name,
       description: description.trim() || null,
-      address: address.trim() || null,
+      street: street.trim() || null,
+      city: city.trim() || null,
+      state: state.trim() || null,
+      zip: zip.trim() || null,
     }
     try {
       const saved = initial ? await update(initial.id, input) : await create(input)
@@ -59,10 +65,29 @@ export default function SiteFormModal({ initial, onClose, onSaved }: Props) {
           <span className="text-sm text-slate-300">Description <span className="text-slate-500">(optional)</span></span>
           <textarea className={inputCls} rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
         </label>
-        <label className="block space-y-1">
-          <span className="text-sm text-slate-300">Address <span className="text-slate-500">(optional)</span></span>
-          <input className={inputCls} value={address} onChange={(e) => setAddress(e.target.value)} />
-        </label>
+        <fieldset className="space-y-2">
+          <legend className="mb-1 text-sm text-slate-300">
+            Address <span className="text-slate-500">(optional)</span>
+          </legend>
+          <label className="block space-y-1">
+            <span className="text-xs text-slate-400">Street</span>
+            <input className={inputCls} value={street} onChange={(e) => setStreet(e.target.value)} autoComplete="street-address" />
+          </label>
+          <div className="grid grid-cols-6 gap-2">
+            <label className="col-span-6 space-y-1 sm:col-span-3">
+              <span className="text-xs text-slate-400">City</span>
+              <input className={inputCls} value={city} onChange={(e) => setCity(e.target.value)} autoComplete="address-level2" />
+            </label>
+            <label className="col-span-2 space-y-1 sm:col-span-1">
+              <span className="text-xs text-slate-400">State</span>
+              <input className={inputCls} value={state} onChange={(e) => setState(e.target.value)} autoComplete="address-level1" />
+            </label>
+            <label className="col-span-4 space-y-1 sm:col-span-2">
+              <span className="text-xs text-slate-400">ZIP</span>
+              <input className={inputCls} value={zip} onChange={(e) => setZip(e.target.value)} autoComplete="postal-code" inputMode="numeric" />
+            </label>
+          </div>
+        </fieldset>
 
         {error && (
           <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">{error}</div>

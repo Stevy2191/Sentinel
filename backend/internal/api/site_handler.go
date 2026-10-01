@@ -82,7 +82,8 @@ func respondSiteError(c *gin.Context, op string, err error) {
 }
 
 func siteSummary(s *models.Site) map[string]any {
-	return map[string]any{"name": s.Name, "description": s.Description, "address": s.Address}
+	return map[string]any{"name": s.Name, "description": s.Description, "street": s.Street, "city": s.City,
+		"state": s.State, "zip": s.Zip}
 }
 
 func listSitesHandler(sites siteStore) gin.HandlerFunc {

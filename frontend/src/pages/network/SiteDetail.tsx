@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { MapPin, Pencil, Plus, Radar, Trash2 } from 'lucide-react'
-import { useSite, useSiteActions } from '@/hooks/useSites'
+import { siteAddressLines, useSite, useSiteActions } from '@/hooks/useSites'
 import { useDevices } from '@/hooks/useDevices'
 import SiteFormModal from '@/components/SiteFormModal'
 import SiteSharingPanel from '@/components/SiteSharingPanel'
@@ -68,6 +68,7 @@ export default function SiteDetail() {
 
   const isAdmin = site.access === 'admin'
   const canEdit = isAdmin || site.access === 'editable'
+  const address = siteAddressLines(site)
 
   const handleDelete = async () => {
     setError(null)
@@ -89,10 +90,17 @@ export default function SiteDetail() {
           </Link>
           <h1 className="mt-2 break-words text-4xl font-light text-white">{site.name}</h1>
           {site.description && <p className="mt-2 text-slate-400">{site.description}</p>}
-          {site.address && (
-            <p className="mt-2 flex items-center gap-1.5 text-sm text-slate-500">
-              <MapPin className="h-4 w-4 shrink-0" /> {site.address}
-            </p>
+          {address.length > 0 && (
+            <address className="mt-2 flex items-start gap-1.5 text-sm not-italic text-slate-500">
+              <MapPin className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                {address.map((line) => (
+                  <span key={line} className="block">
+                    {line}
+                  </span>
+                ))}
+              </span>
+            </address>
           )}
         </div>
         {isAdmin && (

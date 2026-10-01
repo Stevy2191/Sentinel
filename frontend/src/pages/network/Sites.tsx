@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { MapPin, Plus } from 'lucide-react'
 import { useAuthContext } from '@/context/AuthContext'
-import { useSites } from '@/hooks/useSites'
+import { siteAddressLines, useSites } from '@/hooks/useSites'
 import SiteFormModal from '@/components/SiteFormModal'
 
 export default function Sites() {
@@ -51,9 +51,9 @@ export default function Sites() {
                 {s.name}
               </div>
               {s.description && <p className="mt-1 line-clamp-2 text-sm text-slate-400">{s.description}</p>}
-              {s.address && (
+              {siteAddressLines(s).length > 0 && (
                 <p className="mt-3 flex items-center gap-1.5 truncate text-xs text-slate-500">
-                  <MapPin className="h-3.5 w-3.5 shrink-0" /> {s.address}
+                  <MapPin className="h-3.5 w-3.5 shrink-0" /> {siteAddressLines(s).join(', ')}
                 </p>
               )}
             </button>
