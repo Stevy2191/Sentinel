@@ -73,6 +73,7 @@ func (s *DeviceService) SetMetricsStore(m *MetricsStore) { s.metrics = m }
 // minute, where a percentage would mean nothing. The SUM is FILTERed to real
 // incident rows: with none, the LEFT JOIN yields one all-NULL row, and since
 // GREATEST ignores NULLs that row would count as the whole window down.
+// Port and UPS condition incidents (condition set) are not downtime.
 const availabilitySQL = `(
 	SELECT CASE WHEN win.secs < 60 THEN NULL ELSE
 		GREATEST(0, 100 - 100 * COALESCE(SUM(EXTRACT(EPOCH FROM (
@@ -81,7 +82,7 @@ const availabilitySQL = `(
 	END
 	FROM (SELECT GREATEST(d.created_at, now() - interval '30 days') AS since,
 	             EXTRACT(EPOCH FROM (now() - GREATEST(d.created_at, now() - interval '30 days'))) AS secs) win
-	LEFT JOIN incidents i ON i.device_id = d.id AND i.interface_id IS NULL
+	LEFT JOIN incidents i ON i.device_id = d.id AND i.interface_id IS NULL AND i.condition IS NULL
 		AND COALESCE(i.end_time, now()) > win.since
 	GROUP BY win.secs
 ) AS availability_30d`
@@ -282,6 +283,9 @@ func (s *DeviceService) Update(ctx context.Context, id uuid.UUID, raw models.Dev
 			}
 		}
 		if pausing {
+			if _, err := s.incidents.CloseDeviceConditionIncidentsTx(tx, id, time.Now().UTC(), "Monitoring was paused."); err != nil {
+				return err
+			}
 			for _, a := range pauseTransition.Actions {
 				if a == ActionCloseIncident {
 					if _, err := s.incidents.CloseDeviceIncidentTx(tx, id, time.Now().UTC(), "Monitoring was paused."); err != nil {

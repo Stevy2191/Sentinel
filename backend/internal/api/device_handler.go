@@ -223,7 +223,8 @@ func deviceDetailsAudit(d *models.Device) map[string]any {
 	return map[string]any{"vendor_override": d.VendorOverride, "model_override": d.ModelOverride,
 		"location_override": d.LocationOverride, "device_type": d.DeviceType,
 		"faceplate_rows": d.FaceplateRows, "faceplate_sfp_ports": d.FaceplateSFPPorts,
-		"faceplate_port_style": d.FaceplatePortStyle}
+		"faceplate_port_style": d.FaceplatePortStyle,
+		"ups_low_battery_pct":  d.UPSLowBatteryPct, "ups_high_load_pct": d.UPSHighLoadPct}
 }
 
 // updateDeviceDetailsHandler handles PATCH /devices/:id/details: the user's
