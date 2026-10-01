@@ -392,6 +392,7 @@ func run() error {
 	pollWorkers := settingsService.GetInt(context.Background(), models.SettingSNMPPollWorkers, 16)
 	devicePoller := services.NewDevicePoller(deviceService, snmpClient, incidentService, notificationManager, pollWorkers)
 	devicePoller.SetPortStats(services.NewPortMonitor(portService, metricsStore, incidentService, notificationManager, snmpClient, settingsService))
+	devicePoller.SetUPS(services.NewUPSMonitor(metricsStore, incidentService, notificationManager, snmpClient, settingsService, portService))
 	go devicePoller.Start(loopCtx)
 	// A restored config may carry a different retention than the live policy.
 	if err := networkSettings.EnsureRetention(context.Background()); err != nil {

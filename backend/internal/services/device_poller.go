@@ -90,6 +90,13 @@ type PortStatsPoller interface {
 	PollStats(ctx context.Context, d models.Device, t snmp.Target, uptimeSeconds int64)
 }
 
+// UPSPoller runs a UPS's poll (UPSMonitor).
+type UPSPoller interface {
+	PollUPS(ctx context.Context, d models.Device, t snmp.Target)
+	// ReconcileUPS closes UPS incidents left on a device that is no longer a UPS.
+	ReconcileUPS(ctx context.Context, d models.Device)
+}
+
 // DevicePoller polls every enabled device for reachability on a bounded
 // worker pool, and refreshes inventory when it is due.
 type DevicePoller struct {
@@ -99,6 +106,7 @@ type DevicePoller struct {
 	notifier  Notifier
 	workers   int
 	stats     PortStatsPoller
+	ups       UPSPoller
 
 	// Replaceable in tests.
 	resolve func(ctx context.Context, host string) (net.IP, error)
@@ -152,6 +160,10 @@ func resolveDeviceHost(ctx context.Context, host string) (net.IP, error) {
 // SetPortStats makes every successful poll of an up device run its stats
 // poll too.
 func (p *DevicePoller) SetPortStats(s PortStatsPoller) { p.stats = s }
+
+// SetUPS makes every successful poll of an up device run its UPS poll when
+// it is a UPS, and tidy up UPS incidents when it no longer is.
+func (p *DevicePoller) SetUPS(u UPSPoller) { p.ups = u }
 
 // TargetFor builds the SNMP target for a device at a resolved address.
 func TargetFor(d models.Device, host string, cred snmp.Credential) snmp.Target {
@@ -270,6 +282,14 @@ func (p *DevicePoller) PollOnce(ctx context.Context, d models.Device) {
 			up = *uptime
 		}
 		p.stats.PollStats(ctx, d, target, up)
+	}
+
+	if result == PollOK && tr.Status == models.DeviceStatusUp && p.ups != nil {
+		if IsUPS(d) {
+			p.ups.PollUPS(ctx, d, target)
+		} else {
+			p.ups.ReconcileUPS(ctx, d)
+		}
 	}
 
 	if result == PollOK && (d.LastInventoryAt == nil || now.Sub(*d.LastInventoryAt) >= inventoryInterval) {
