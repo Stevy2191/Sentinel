@@ -477,3 +477,19 @@ func TestPollerRunsUPSPollForUPS(t *testing.T) {
 		t.Fatal("UPS poll ran after a failed poll")
 	}
 }
+
+// An agent that answers the uptime poll with an error status (the Tripp Lite
+// card's badValue) is reachable: it stays up and its stats poll runs, with
+// the uptime unknown.
+func TestPollerAgentErrorCountsAsReachable(t *testing.T) {
+	p, store, _, _ := newTestPoller(&fakeSNMP{getErr: &snmp.AgentError{Status: "BadValue", Index: 1}})
+	stats := &fakeStats{}
+	p.SetPortStats(stats)
+	p.PollOnce(context.Background(), device(models.DeviceStatusUp, 0))
+	if stats.calls != 1 || stats.uptime != -1 {
+		t.Fatalf("stats calls %d uptime %d", stats.calls, stats.uptime)
+	}
+	if len(store.saved) == 0 || store.saved[len(store.saved)-1].Status != models.DeviceStatusUp {
+		t.Errorf("saved %+v", store.saved)
+	}
+}

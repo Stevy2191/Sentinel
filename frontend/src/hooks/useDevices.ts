@@ -242,7 +242,7 @@ export function useDeviceActions() {
     [run]
   )
   const test = useCallback(
-    (input: { site_id: string; credential_id: string; host: string; port: number }) =>
+    (input: { site_id: string; credential_id: string; host: string; port: number; timeout_ms?: number; retries?: number }) =>
       run(async () => (await api.post<ApiResponse<TestResult>>('/devices/test', input)).data.data),
     [run]
   )

@@ -397,7 +397,7 @@ func looksLikeModelCode(s string) bool {
 
 // Identify reads a device's system group.
 func Identify(ctx context.Context, c Client, t Target) (System, error) {
-	pdus, err := c.Get(ctx, t, SystemOIDs)
+	pdus, err := GetEach(ctx, c, t, SystemOIDs)
 	if err != nil {
 		return System{}, err
 	}

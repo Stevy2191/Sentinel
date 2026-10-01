@@ -251,9 +251,14 @@ func (p *DevicePoller) PollOnce(ctx context.Context, d models.Device) {
 		} else {
 			target = TargetFor(d, ip.String(), cred)
 			pdus, err := p.client.Get(ctx, target, []string{snmp.OIDSysUpTime})
-			if err != nil {
+			var refused *snmp.AgentError
+			switch {
+			case errors.As(err, &refused):
+				// The agent answered, so the device is reachable; it just
+				// would not give its uptime (a Tripp Lite card's badValue).
+			case err != nil:
 				result, detail = PollFailed, err.Error()
-			} else if len(pdus) == 1 {
+			case len(pdus) == 1:
 				if n, ok := pdus[0].Number(); ok {
 					s := int64(n / 100)
 					uptime = &s

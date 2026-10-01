@@ -2,6 +2,7 @@ package snmp
 
 import (
 	"context"
+	"errors"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/upsmon"
 )
@@ -69,22 +70,18 @@ func ParseUPSReadings(pdus []PDU) upsmon.Readings {
 	return r
 }
 
-// ReadUPS reads a UPS's readings in one GET. SNMPv1 fails a whole GET when
-// any one OID is missing, so on v1 a failed GET is retried one OID at a time
-// and whatever answers is kept.
+// ReadUPS reads a UPS's readings in one GET. An agent that refuses the GET
+// over one value (SNMPv1 does for any missing one; some cards do for a value
+// they cannot encode) is asked one value at a time, and whatever answers is
+// kept.
 func ReadUPS(ctx context.Context, c Client, t Target) (upsmon.Readings, error) {
-	pdus, err := c.Get(ctx, t, UPSReadingOIDs)
-	if err == nil {
-		return ParseUPSReadings(pdus), nil
-	}
-	if t.Credential.Version != "1" { // SNMPv1, as stats.go spells it
+	pdus, err := GetEach(ctx, c, t, UPSReadingOIDs)
+	if err != nil {
+		var refused *AgentError
+		if errors.As(err, &refused) {
+			return upsmon.Readings{}, nil // nothing answered: not a UPS-MIB agent
+		}
 		return upsmon.Readings{}, err
 	}
-	var all []PDU
-	for _, o := range UPSReadingOIDs {
-		if p, err := c.Get(ctx, t, []string{o}); err == nil {
-			all = append(all, p...)
-		}
-	}
-	return ParseUPSReadings(all), nil
+	return ParseUPSReadings(pdus), nil
 }

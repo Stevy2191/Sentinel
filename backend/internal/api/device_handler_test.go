@@ -54,10 +54,13 @@ func (f *fakeDevices) UpdateDetails(_ context.Context, id uuid.UUID, p models.De
 type fakeProber struct {
 	calls    int
 	unusable bool
+	timeout  time.Duration
+	retries  int
 }
 
-func (f *fakeProber) Identify(context.Context, string, int, uuid.UUID, time.Duration, int) (snmp.System, error) {
+func (f *fakeProber) Identify(_ context.Context, _ string, _ int, _ uuid.UUID, timeout time.Duration, retries int) (snmp.System, error) {
 	f.calls++
+	f.timeout, f.retries = timeout, retries
 	return snmp.System{Name: "core-sw-1", ObjectID: "1.3.6.1.4.1.4413"}, nil
 }
 func (f *fakeProber) UsableAt(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
@@ -153,5 +156,26 @@ func TestDeviceTestChecksCredentialScope(t *testing.T) {
 	w := do(r, http.MethodPost, "/api/v1/devices/test", map[string]any{"site_id": site, "credential_id": uuid.New(), "host": "10.0.0.2"})
 	if w.Code != http.StatusBadRequest || prober.calls != 0 {
 		t.Errorf("status %d, probes %d; want 400, 0", w.Code, prober.calls)
+	}
+}
+
+// Test connection uses the form's timeout and retries (slow UPS cards need
+// more than a fixed 3 s with no retry), and the device defaults without them.
+func TestDeviceTestUsesFormTimeoutAndRetries(t *testing.T) {
+	site := uuid.New()
+	prober := &fakeProber{}
+	r := deviceRouter(&fakeDevices{}, prober, fakeSiteLevels{site: services.SiteAccessEditable})
+	body := map[string]any{"site_id": site, "credential_id": uuid.New(), "host": "10.0.0.2", "timeout_ms": 5000, "retries": 2}
+	if w := do(r, http.MethodPost, "/api/v1/devices/test", body); w.Code != http.StatusOK || prober.timeout != 5*time.Second || prober.retries != 2 {
+		t.Fatalf("status %d timeout %v retries %d", w.Code, prober.timeout, prober.retries)
+	}
+	delete(body, "timeout_ms")
+	delete(body, "retries")
+	if w := do(r, http.MethodPost, "/api/v1/devices/test", body); w.Code != http.StatusOK || prober.timeout != 3*time.Second || prober.retries != 1 {
+		t.Fatalf("defaults: status %d timeout %v retries %d", w.Code, prober.timeout, prober.retries)
+	}
+	body["timeout_ms"] = 50
+	if w := do(r, http.MethodPost, "/api/v1/devices/test", body); w.Code != http.StatusBadRequest {
+		t.Errorf("50 ms accepted: %d", w.Code)
 	}
 }

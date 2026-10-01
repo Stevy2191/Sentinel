@@ -41,7 +41,14 @@ export default function DeviceFormModal({ initial, siteId, onClose, onSaved }: P
     setResult(null)
     setError(null)
     try {
-      const r = await test({ site_id: form.site_id, credential_id: form.credential_id, host: form.host, port: form.port })
+      const r = await test({
+        site_id: form.site_id,
+        credential_id: form.credential_id,
+        host: form.host,
+        port: form.port,
+        timeout_ms: form.timeout_ms,
+        retries: form.retries,
+      })
       setResult(r)
       if (r.ok && r.system?.name && !form.name) set('name', r.system.name)
     } catch (err) {

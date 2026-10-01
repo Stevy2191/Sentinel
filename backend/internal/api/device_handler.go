@@ -256,6 +256,9 @@ type testDeviceRequest struct {
 	CredentialID uuid.UUID `json:"credential_id"`
 	Host         string    `json:"host"`
 	Port         int       `json:"port"`
+	// TimeoutMs and Retries are the form's; omitted, the device defaults.
+	TimeoutMs int `json:"timeout_ms"`
+	Retries   int `json:"retries"`
 }
 
 // testDeviceHandler reads a device's identity before it is saved.
@@ -269,7 +272,7 @@ func testDeviceHandler(prober deviceProber, sites siteAccessChecker) gin.Handler
 		if !requireSiteLevel(c, sites, req.SiteID, services.SiteAccessEditable) {
 			return
 		}
-		in, err := models.NormalizeDeviceInput(models.DeviceInput{Host: req.Host, Port: req.Port})
+		in, err := models.NormalizeDeviceInput(models.DeviceInput{Host: req.Host, Port: req.Port, TimeoutMs: req.TimeoutMs, Retries: req.Retries})
 		if err != nil {
 			respondError(c, http.StatusBadRequest, err.Error())
 			return
@@ -283,7 +286,8 @@ func testDeviceHandler(prober deviceProber, sites siteAccessChecker) gin.Handler
 			respondError(c, http.StatusBadRequest, services.ErrCredentialNotUsable.Error())
 			return
 		}
-		sys, err := prober.Identify(c.Request.Context(), in.Host, in.Port, req.CredentialID, 3*time.Second, 0)
+		sys, err := prober.Identify(c.Request.Context(), in.Host, in.Port, req.CredentialID,
+			time.Duration(in.TimeoutMs)*time.Millisecond, in.Retries)
 		if err != nil {
 			// Reported as a result, not a server error: "no answer" is the
 			// answer the user asked for.
