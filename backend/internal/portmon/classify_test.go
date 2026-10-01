@@ -113,7 +113,11 @@ func TestDetectDeviceTypeUPS(t *testing.T) {
 		{"1.3.6.1.4.1.705.1", "ups"},      // Eaton (MGE)
 		{"1.3.6.1.4.1.3808.1.1.1", "ups"}, // CyberPower
 		{"1.3.6.1.4.1.476.1.42", "ups"},   // Vertiv / Liebert
-		{"1.3.6.1.4.1.3180", "other"},     // 318 as a prefix of another number is not APC
+		{"1.3.6.1.4.1.850.1.1.1", "ups"},  // Tripp Lite
+		{"1.3.6.1.2.1.33", "ups"},         // generic card reporting the standard UPS-MIB
+		{".1.3.6.1.2.1.33.1.1", "ups"},
+		{"1.3.6.1.2.1.330", "other"},  // not the UPS-MIB subtree
+		{"1.3.6.1.4.1.3180", "other"}, // 318 as a prefix of another number is not APC
 		{"1.3.6.1.4.1.8072.3.2.10", "other"},
 		{"", "other"},
 	}
