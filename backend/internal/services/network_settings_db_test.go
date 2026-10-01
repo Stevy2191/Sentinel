@@ -65,3 +65,31 @@ func TestDBNetworkSettingsAppliesRetentionBeforeSaving(t *testing.T) {
 		t.Errorf("setting not saved after a successful apply: %d", stored)
 	}
 }
+
+func TestDBNetworkSettingsUPSThresholds(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	settings := NewSettingsService(db)
+	svc := NewNetworkSettingsService(settings, NewMetricsStore(db))
+	got := svc.Get(ctx)
+	if got.UPSLowBatteryPct != 25 || got.UPSHighLoadPct != 80 {
+		t.Fatalf("defaults %+v", got)
+	}
+	low, high := 30, 90
+	got, err := svc.Update(ctx, NetworkSettingsPatch{UPSLowBatteryPct: &low, UPSHighLoadPct: &high})
+	if err != nil || got.UPSLowBatteryPct != 30 || got.UPSHighLoadPct != 90 {
+		t.Fatalf("update %+v %v", got, err)
+	}
+	if th := settings.UPSThresholds(ctx); th.LowBatteryPct != 30 || th.HighLoadPct != 90 {
+		t.Errorf("thresholds %+v", th)
+	}
+	bad := 4
+	if _, err := svc.Update(ctx, NetworkSettingsPatch{UPSLowBatteryPct: &bad}); err == nil {
+		t.Error("4 % accepted")
+	}
+	for _, m := range UPSMetrics {
+		if !KnownMetric(m) {
+			t.Errorf("%s not in the catalogue", m)
+		}
+	}
+}

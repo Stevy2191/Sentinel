@@ -13,6 +13,8 @@ type NetworkSettings struct {
 	PortErrorThresholdPerMin int `json:"port_error_threshold_per_min"`
 	PortUtilThresholdPct     int `json:"port_util_threshold_pct"`
 	PortDownGraceSeconds     int `json:"port_down_grace_seconds"`
+	UPSLowBatteryPct         int `json:"ups_low_battery_pct"`
+	UPSHighLoadPct           int `json:"ups_high_load_pct"`
 }
 
 // NetworkSettingsPatch changes only the fields present.
@@ -21,6 +23,8 @@ type NetworkSettingsPatch struct {
 	PortErrorThresholdPerMin *int `json:"port_error_threshold_per_min"`
 	PortUtilThresholdPct     *int `json:"port_util_threshold_pct"`
 	PortDownGraceSeconds     *int `json:"port_down_grace_seconds"`
+	UPSLowBatteryPct         *int `json:"ups_low_battery_pct"`
+	UPSHighLoadPct           *int `json:"ups_high_load_pct"`
 }
 
 // networkRetentionStore is the slice of MetricsStore that
@@ -44,11 +48,14 @@ func NewNetworkSettingsService(settings *SettingsService, metrics networkRetenti
 
 func (s *NetworkSettingsService) Get(ctx context.Context) NetworkSettings {
 	th := s.settings.PortThresholds(ctx)
+	ups := s.settings.UPSThresholds(ctx)
 	return NetworkSettings{
 		MetricsRawRetentionDays:  s.settings.MetricsRawRetentionDays(ctx),
 		PortErrorThresholdPerMin: int(th.ErrorsPerMin),
 		PortUtilThresholdPct:     int(th.UtilPct),
 		PortDownGraceSeconds:     int(th.DownGrace.Seconds()),
+		UPSLowBatteryPct:         int(ups.LowBatteryPct),
+		UPSHighLoadPct:           int(ups.HighLoadPct),
 	}
 }
 
@@ -72,6 +79,10 @@ func (s *NetworkSettingsService) Update(ctx context.Context, p NetworkSettingsPa
 			models.MinPortUtilThresholdPct, models.MaxPortUtilThresholdPct},
 		{p.PortDownGraceSeconds, models.SettingPortDownGraceSeconds, "The down grace period",
 			models.MinPortDownGraceSeconds, models.MaxPortDownGraceSeconds},
+		{p.UPSLowBatteryPct, models.SettingUPSLowBatteryPct, "The low battery threshold",
+			models.MinUPSLowBatteryPct, models.MaxUPSLowBatteryPct},
+		{p.UPSHighLoadPct, models.SettingUPSHighLoadPct, "The high load threshold",
+			models.MinUPSHighLoadPct, models.MaxUPSHighLoadPct},
 	}
 	for _, f := range fields {
 		if f.v != nil && (*f.v < f.min || *f.v > f.max) {
