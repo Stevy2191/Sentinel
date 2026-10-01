@@ -141,12 +141,15 @@ export default function PortTable({ deviceId, ports, canEdit, onChanged }: Props
                       onClick={() => navigate(`/network/devices/${deviceId}/ports/${p.if_index}`)}
                       className={`cursor-pointer hover:bg-white/5 ${p.collected ? '' : 'opacity-60'}`}
                     >
-                      <td className="px-3 py-2" onClick={stopRowClick}>
+                      <td className="px-3 py-2">
                         {canEdit ? (
                           <button
                             type="button"
                             disabled={busy}
-                            onClick={() => void change(p, { important: !p.important })}
+                            onClick={(e) => {
+                              stopRowClick(e)
+                              void change(p, { important: !p.important })
+                            }}
                             aria-label={p.important ? 'Stop treating as important' : 'Mark as important'}
                             title={p.important ? 'Important: alerts are on' : 'Mark as important to get alerts'}
                           >
@@ -180,11 +183,12 @@ export default function PortTable({ deviceId, ports, canEdit, onChanged }: Props
                       <td className="px-3 py-2 text-right tabular-nums text-slate-300">
                         {p.errors_per_min == null ? '—' : +p.errors_per_min.toFixed(1)}
                       </td>
-                      <td className="max-w-[12rem] px-3 py-2" onClick={stopRowClick}>
+                      <td className="max-w-[12rem] px-3 py-2">
                         {canEdit ? (
                           <select
                             value={p.role}
                             disabled={busy}
+                            onClick={stopRowClick}
                             onChange={(e) => void change(p, { role: e.target.value as PortRole })}
                             aria-label={`Connects to, for port ${p.number}`}
                             className="w-full cursor-pointer truncate rounded-md border border-white/10 bg-slate-900/60 px-2 py-1 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500"
@@ -199,12 +203,13 @@ export default function PortTable({ deviceId, ports, canEdit, onChanged }: Props
                           <span className="text-slate-400">{PORT_ROLE_LABEL[p.role]}</span>
                         )}
                       </td>
-                      <td className="px-3 py-2" onClick={stopRowClick}>
+                      <td className="px-3 py-2">
                         {canEdit ? (
                           <input
                             type="checkbox"
                             checked={p.collected}
                             disabled={busy}
+                            onClick={stopRowClick}
                             onChange={() => void change(p, { collect: !p.collected })}
                             aria-label={`Collect statistics for port ${p.number}`}
                           />

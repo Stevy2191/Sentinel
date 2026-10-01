@@ -28,15 +28,12 @@ function formatValue(v: number, unit: Unit): string {
   return `${+v.toFixed(1)}/min`
 }
 
-const ONE_DAY_MS = 24 * 60 * 60 * 1000
+/** 1h/6h/24h show the time of day; longer ranges show the date. */
+const SHORT: MetricsRange[] = ['1h', '6h', '24h']
 
-/** A short tick shows the time of day, a long one the date. Decided from the
- *  data's own span rather than a selected range, so this reads the same way
- *  whichever caller (a range picker's state, or none at all) produced it. */
-function tick(t: number, data: Record<string, number>[]): string {
-  const span = data.length > 1 ? data[data.length - 1].t - data[0].t : 0
+function tick(t: number, shortTicks: boolean): string {
   const d = new Date(t)
-  return span > 0 && span <= ONE_DAY_MS
+  return shortTicks
     ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : d.toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
@@ -50,11 +47,14 @@ export interface AreaSeriesChartProps {
   threshold?: number
   /** The query's step, for the "Averaged per N minutes" note. */
   step?: number
+  /** Whether the caller's selected range is short (1h/6h/24h): decides the
+   *  x-axis tick format (time of day vs. date). Defaults to false (date). */
+  shortTicks?: boolean
 }
 
 /** The chart body: a gradient-filled area chart plus its legend. Assumes
  *  data.length > 0; callers handle their own loading/error/empty states. */
-export function AreaSeriesChart({ data, lines, unit, threshold, step }: AreaSeriesChartProps) {
+export function AreaSeriesChart({ data, lines, unit, threshold, step, shortTicks = false }: AreaSeriesChartProps) {
   const gid = useId().replace(/:/g, '')
   return (
     <div className="rounded-lg border border-white/10 bg-slate-800/40 p-4">
@@ -70,7 +70,7 @@ export function AreaSeriesChart({ data, lines, unit, threshold, step }: AreaSeri
               ))}
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#16303a" strokeOpacity={0.6} />
-            <XAxis dataKey="t" type="number" scale="time" domain={['dataMin', 'dataMax']} tickFormatter={(t: number) => tick(t, data)}
+            <XAxis dataKey="t" type="number" scale="time" domain={['dataMin', 'dataMax']} tickFormatter={(t: number) => tick(t, shortTicks)}
               tick={{ fontSize: 10, fill: '#7A8A94' }} minTickGap={24} />
             <YAxis tickFormatter={(v: number) => formatValue(v, unit)} tick={{ fontSize: 10, fill: '#7A8A94' }} width={68} />
             <Tooltip
@@ -149,7 +149,7 @@ export default function TrafficChart({ title, query, lines, unit, threshold, def
           No data in this range yet. Figures appear a minute or two after the first stats poll.
         </div>
       ) : (
-        <AreaSeriesChart data={data} lines={lines} unit={unit} threshold={threshold} step={result?.step_seconds} />
+        <AreaSeriesChart data={data} lines={lines} unit={unit} threshold={threshold} step={result?.step_seconds} shortTicks={SHORT.includes(range)} />
       )}
     </section>
   )
