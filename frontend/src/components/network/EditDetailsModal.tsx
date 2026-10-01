@@ -92,6 +92,12 @@ export default function EditDetailsModal({ device, onClose, onSaved }: Props) {
               </option>
             ))}
           </select>
+          {type && type !== device.device_type_detected && (
+            <span className="block text-xs text-amber-400">
+              Sentinel detects this device as {DEVICE_TYPE_LABEL[device.device_type_detected] ?? 'Other'}. Your choice overrides
+              that; pick Automatic to follow detection.
+            </span>
+          )}
           <span className="text-xs text-slate-500">Switches and routers are drawn as a faceplate.</span>
         </label>
 
