@@ -42,10 +42,10 @@ func onMains() map[string]any {
 }
 
 type fakeUPSIncidents struct {
-	open    map[string]*models.Incident
-	opened  []string
-	closed  []string
-	failOps bool
+	open      map[string]*models.Incident
+	opened    []string
+	closed    []string
+	failClose bool
 }
 
 func newFakeUPSIncidents() *fakeUPSIncidents {
@@ -63,6 +63,9 @@ func (f *fakeUPSIncidents) OpenDeviceConditionIncident(_ context.Context, id uui
 	return inc, true, nil
 }
 func (f *fakeUPSIncidents) CloseDeviceConditionIncident(_ context.Context, _ uuid.UUID, c string, end time.Time, _ string) (*models.Incident, error) {
+	if f.failClose {
+		return nil, errors.New("database unavailable")
+	}
 	inc, ok := f.open[c]
 	if !ok {
 		return nil, nil
@@ -250,5 +253,49 @@ func TestIsUPS(t *testing.T) {
 		if got := IsUPS(c.d); got != c.want {
 			t.Errorf("IsUPS(%+v) = %v", c.d, got)
 		}
+	}
+}
+
+// Pausing closes the UPS incidents in the database; unpausing while still on
+// battery must open a new incident starting now (not backdated to the old
+// start) and alert once.
+func TestUPSMonitorReopensAtNowAfterExternalClose(t *testing.T) {
+	r := newUPSRig()
+	r.agent.vals[upsPrefix+".4.1.0"] = int64(5)
+	r.poll()
+	first := r.inc.open[models.UPSConditionOnBattery].StartTime
+	delete(r.inc.open, models.UPSConditionOnBattery) // closed by the pause
+	r.now = r.now.Add(time.Hour)
+	at := r.now
+	r.poll()
+	inc := r.inc.open[models.UPSConditionOnBattery]
+	if inc == nil || !inc.StartTime.Equal(at) || inc.StartTime.Equal(first) {
+		t.Fatalf("reopened incident %+v, want start %v", inc, at)
+	}
+	if len(r.notif.sent) != 2 || !r.notif.sent[1].Timestamp.Equal(at) {
+		t.Errorf("sent %d, last timestamp %v", len(r.notif.sent), r.notif.sent[len(r.notif.sent)-1].Timestamp)
+	}
+}
+
+// A close that failed leaves the incident open; the next poll retries it,
+// and the one recovery notice (never sent, since the close failed) goes out.
+func TestUPSMonitorRetriesFailedClose(t *testing.T) {
+	r := newUPSRig()
+	r.agent.vals[upsPrefix+".4.1.0"] = int64(5)
+	r.poll()
+	r.inc.failClose = true
+	r.agent.vals[upsPrefix+".4.1.0"] = int64(3)
+	r.poll() // close fails: incident stays open, nothing sent
+	if len(r.notif.sent) != 1 {
+		t.Fatalf("failed close notified: %d", len(r.notif.sent))
+	}
+	r.inc.failClose = false
+	r.poll()
+	r.poll()
+	if len(r.inc.open) != 0 {
+		t.Fatalf("incident still open: %v", r.inc.open)
+	}
+	if len(r.notif.sent) != 2 || r.notif.sent[1].Status != "recovered" {
+		t.Errorf("want exactly one recovery, got %d notifications", len(r.notif.sent))
 	}
 }
