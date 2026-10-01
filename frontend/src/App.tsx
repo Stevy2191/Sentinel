@@ -31,6 +31,7 @@ const Sites = lazy(() => import('@/pages/network/Sites'))
 const SiteDetail = lazy(() => import('@/pages/network/SiteDetail'))
 const Devices = lazy(() => import('@/pages/network/Devices'))
 const DeviceDetail = lazy(() => import('@/pages/network/DeviceDetail'))
+const PortDetail = lazy(() => import('@/pages/network/PortDetail'))
 const Credentials = lazy(() => import('@/pages/network/Credentials'))
 const SavedReports = lazy(() => import('@/pages/SavedReports'))
 const SavedReportDetail = lazy(() => import('@/pages/SavedReportDetail'))
@@ -96,6 +97,7 @@ export default function App() {
               <Route path="/network/sites/:id" element={<SiteDetail />} />
               <Route path="/network/devices" element={<Devices />} />
               <Route path="/network/devices/:id" element={<DeviceDetail />} />
+              <Route path="/network/devices/:id/ports/:ifIndex" element={<PortDetail />} />
               <Route path="/network/credentials" element={<Credentials />} />
               <Route path="/monitors/create" element={<MonitorDetail mode="create" />} />
               <Route path="/monitors/new/wizard" element={<MonitorWizard />} />
