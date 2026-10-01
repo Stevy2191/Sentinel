@@ -11,6 +11,8 @@ const FIELDS: { key: keyof Settings; label: string; help: string; min: number; m
   { key: 'port_util_threshold_pct', label: 'Nearly full at', help: 'A port is flagged when either direction averages this over 5 minutes; it clears 10 points lower.', min: 10, max: 100, unit: '%' },
   { key: 'port_error_threshold_per_min', label: 'Errors rising at', help: 'Errors plus discards per minute, sustained for 5 minutes.', min: 1, max: 1000000, unit: 'per minute' },
   { key: 'port_down_grace_seconds', label: 'Alert when an important port is down for', help: 'Long enough that a device rebooting does not alert.', min: 0, max: 86400, unit: 'seconds' },
+  { key: 'ups_low_battery_pct', label: 'UPS low battery below', help: 'Also alerts whenever the UPS itself reports a low or depleted battery.', min: 5, max: 95, unit: '%' },
+  { key: 'ups_high_load_pct', label: 'UPS high load at', help: 'Alerts when load stays at or above this for 5 minutes.', min: 10, max: 100, unit: '%' },
 ]
 
 export default function NetworkSettings() {

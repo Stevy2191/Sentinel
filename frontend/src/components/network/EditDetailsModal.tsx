@@ -11,11 +11,13 @@ interface Props {
   device: Device
   onClose: () => void
   onSaved: () => void
+  /** The instance UPS thresholds, shown as the fields' placeholders. */
+  upsDefaults?: { low: number; high: number }
 }
 
 /** The user's corrections to what SNMP reports. Inventory never overwrites
  *  them; clearing a field shows the SNMP value again. */
-export default function EditDetailsModal({ device, onClose, onSaved }: Props) {
+export default function EditDetailsModal({ device, onClose, onSaved, upsDefaults }: Props) {
   const { updateDetails, busy } = usePortActions()
   const [vendor, setVendor] = useState(device.vendor_override ?? '')
   const [model, setModel] = useState(device.model_override ?? '')
@@ -23,8 +25,12 @@ export default function EditDetailsModal({ device, onClose, onSaved }: Props) {
   const [type, setType] = useState<DeviceType | ''>(device.device_type ?? '')
   const [rows, setRows] = useState(device.faceplate_rows ? String(device.faceplate_rows) : '')
   const [sfp, setSfp] = useState((device.faceplate_sfp_ports ?? []).join(', '))
+  const [lowBattery, setLowBattery] = useState(device.ups_low_battery_pct != null ? String(device.ups_low_battery_pct) : '')
+  const [highLoad, setHighLoad] = useState(device.ups_high_load_pct != null ? String(device.ups_high_load_pct) : '')
   const [portStyle, setPortStyle] = useState<FaceplatePortStyle | ''>(device.faceplate_port_style ?? '')
   const [error, setError] = useState<string | null>(null)
+
+  const isUPS = (type || device.device_type_detected) === 'ups'
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -43,6 +49,8 @@ export default function EditDetailsModal({ device, onClose, onSaved }: Props) {
         faceplate_rows: rows ? Number(rows) : null,
         faceplate_sfp_ports: ports.length ? ports : null,
         faceplate_port_style: portStyle || null,
+        // Only a UPS sends its thresholds, so saving a switch never touches them.
+        ...(isUPS ? { ups_low_battery_pct: lowBattery ? Number(lowBattery) : null, ups_high_load_pct: highLoad ? Number(highLoad) : null } : {}),
       })
       onSaved()
     } catch (err) {
@@ -128,6 +136,23 @@ export default function EditDetailsModal({ device, onClose, onSaved }: Props) {
             <span className="text-xs text-slate-500">Port numbers to draw as SFP, e.g. 49, 50, 51, 52.</span>
           </label>
         </fieldset>
+
+        {isUPS && (
+  <fieldset className="space-y-3 rounded-lg border border-white/10 p-3">
+    <legend className="px-1 text-sm text-slate-300">UPS alerts</legend>
+    <label className="block space-y-1">
+      <span className="text-xs text-slate-400">Low battery below (%)</span>
+      <input className={inputCls} type="number" min={5} max={95} value={lowBattery} onChange={(e) => setLowBattery(e.target.value)}
+        placeholder={upsDefaults ? `Use the default (${upsDefaults.low} %)` : 'Use the default'} />
+    </label>
+    <label className="block space-y-1">
+      <span className="text-xs text-slate-400">High load at (%)</span>
+      <input className={inputCls} type="number" min={10} max={100} value={highLoad} onChange={(e) => setHighLoad(e.target.value)}
+        placeholder={upsDefaults ? `Use the default (${upsDefaults.high} %)` : 'Use the default'} />
+    </label>
+    <span className="block text-xs text-slate-500">Leave blank to use the default from Network settings.</span>
+  </fieldset>
+)}
 
         {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">{error}</div>}
 

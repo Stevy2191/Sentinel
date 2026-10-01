@@ -43,6 +43,9 @@ export const CONDITION_LABEL: Record<string, string> = {
   flapping: 'Flapping',
   slow_link: 'Slower link than usual',
   saturated: 'Nearly full',
+  ups_on_battery: 'On battery',
+  ups_low_battery: 'Low battery',
+  ups_high_load: 'High load',
 }
 
 export const EVENT_LABEL: Record<string, string> = {

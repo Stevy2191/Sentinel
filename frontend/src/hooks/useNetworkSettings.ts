@@ -7,6 +7,8 @@ export interface NetworkSettings {
   port_error_threshold_per_min: number
   port_util_threshold_pct: number
   port_down_grace_seconds: number
+  ups_low_battery_pct: number
+  ups_high_load_pct: number
 }
 
 export function useNetworkSettings() {

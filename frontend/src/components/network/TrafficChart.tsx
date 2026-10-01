@@ -10,7 +10,7 @@ export interface ChartLine {
   colour: string
 }
 
-export type Unit = 'bps' | 'pct' | 'per_min'
+export type Unit = 'bps' | 'pct' | 'per_min' | 'min'
 
 interface Props {
   title: string
@@ -25,6 +25,7 @@ interface Props {
 function formatValue(v: number, unit: Unit): string {
   if (unit === 'bps') return formatBps(v)
   if (unit === 'pct') return `${Math.round(v)}%`
+  if (unit === 'min') return `${Math.round(v)} min`
   return `${+v.toFixed(1)}/min`
 }
 
