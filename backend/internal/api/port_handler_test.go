@@ -48,6 +48,10 @@ func (f *fakePorts) SiteTraffic(_ context.Context, _ uuid.UUID, from, to time.Ti
 	return &services.SiteTraffic{NorthSouth: []services.NorthSouthPoint{}, EastWest: []services.EastWestPoint{}}, nil
 }
 
+func (f *fakePorts) UPSStatus(context.Context, *services.DeviceView) (*services.UPSStatusView, error) {
+	return &services.UPSStatusView{Readings: map[string]float64{}, Conditions: []string{}}, nil
+}
+
 type fakeMetricsQuery struct{ last *services.MetricsQuery }
 
 func (f *fakeMetricsQuery) Query(_ context.Context, q services.MetricsQuery) (*services.MetricsResult, error) {
@@ -95,7 +99,7 @@ func TestPortRoutesAccess(t *testing.T) {
 	base := "/api/v1/devices/" + dev.ID.String()
 
 	rig := newPortRig(dev, fakeSiteLevels{}, false)
-	for _, p := range []string{base + "/ports", base + "/ports/1", base + "/events", "/api/v1/sites/" + site.String() + "/port-events",
+	for _, p := range []string{base + "/ports", base + "/ports/1", base + "/ups", base + "/events", "/api/v1/sites/" + site.String() + "/port-events",
 		"/api/v1/sites/" + site.String() + "/ports/summary"} {
 		if w := do(rig.r, http.MethodGet, p, nil); w.Code != http.StatusNotFound {
 			t.Errorf("no access GET %s: %d, want 404", p, w.Code)
@@ -105,6 +109,9 @@ func TestPortRoutesAccess(t *testing.T) {
 	rig = newPortRig(dev, fakeSiteLevels{site: services.SiteAccessReadonly}, false)
 	if w := do(rig.r, http.MethodGet, base+"/ports", nil); w.Code != http.StatusOK {
 		t.Errorf("readonly ports: %d", w.Code)
+	}
+	if w := do(rig.r, http.MethodGet, base+"/ups", nil); w.Code != http.StatusOK {
+		t.Errorf("readonly ups: %d", w.Code)
 	}
 	if w := do(rig.r, http.MethodGet, base+"/ports/7", nil); w.Code != http.StatusNotFound {
 		t.Errorf("missing port: %d", w.Code)
