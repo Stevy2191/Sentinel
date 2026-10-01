@@ -19,9 +19,9 @@ var ethernetTypes = map[int]bool{6: true, 62: true, 69: true, 117: true}
 // virtualName matches what Linux-based devices (UniFi consoles and APs,
 // EdgeOS) report as ifType 6 even though no cable can be plugged into it:
 // loopback, bridges, VLANs, radios and their VAPs, tunnels, bonding and
-// traffic-shaping devices, WireGuard, the UDM's internal switch0, and CPU
-// interfaces.
-var virtualName = regexp.MustCompile(`(?i)^(lo|br|vlan|wlan|wifi|ath|ra\d|rai\d|veth|docker|tun|tap|imq|ifb|gre|erspan|ip6tnl|ip6gre|ip_vti|ip6_vti|sit|teql|bond|mld-|soc\d|miireg|pd\d|dummy|wg|switch\d|cpu)`)
+// traffic-shaping devices, WireGuard, the UDM's internal switch0, CPU
+// interfaces, and a Cisco stack's StackPort/StackSub interfaces.
+var virtualName = regexp.MustCompile(`(?i)^(lo|br|vlan|wlan|wifi|ath|ra\d|rai\d|veth|docker|tun|tap|imq|ifb|gre|erspan|ip6tnl|ip6gre|ip_vti|ip6_vti|sit|teql|bond|mld-|soc\d|miireg|pd\d|dummy|wg|switch\d|cpu|stackport|stacksub)`)
 
 // subInterface matches VLAN sub-interfaces such as eth0.50.
 var subInterface = regexp.MustCompile(`\.\d+$`)

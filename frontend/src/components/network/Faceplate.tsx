@@ -69,8 +69,15 @@ function Block({
     ) : (
       <span className={`h-5 ${block.sfp ? 'w-8' : 'w-6'}`} />
     )
+  // A network module sits apart from the main ports, its name in the
+  // chassis padding above it so every block's ports stay on one line.
   return (
-    <div className="flex gap-1">
+    <div className={block.label ? 'relative flex gap-1 border-l border-slate-700/70 pl-4' : 'flex gap-1'}>
+      {block.label && (
+        <span className="absolute -top-3 left-4 whitespace-nowrap text-[9.5px] font-semibold uppercase tracking-wide text-slate-500">
+          {block.label}
+        </span>
+      )}
       {Array.from({ length: cols }, (_, c) => (
         <div key={c} className="flex flex-col items-center gap-1">
           <Num fp={block.top[c]} />

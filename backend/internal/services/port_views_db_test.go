@@ -3,12 +3,14 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
+	"github.com/Stevy2191/Sentinel/backend/internal/snmp"
 	"github.com/Stevy2191/Sentinel/backend/internal/testdb"
 )
 
@@ -310,5 +312,74 @@ func TestDBUpdateDetailsAndEffectiveValues(t *testing.T) {
 	v, _ = devices.Get(ctx, d.ID)
 	if v.EffectiveModel != "USW-Pro-48-PoE" {
 		t.Errorf("after clearing: %q", v.EffectiveModel)
+	}
+}
+
+// cisco3850Inventory is a WS-C3850-12S-S: Gi0/0 management, twelve SFP
+// ports, a network module listed as both Gi1/1/N and Te1/1/N, and a stack
+// port.
+func cisco3850Inventory() snmp.Inventory {
+	inv := snmp.Inventory{System: snmp.System{Name: "core"}, Vendor: "Cisco", Model: "WS-C3850-12S-S"}
+	add := func(idx int, name string, speed int64) {
+		inv.Interfaces = append(inv.Interfaces, snmp.Interface{Index: idx, Name: name, Type: 6, HasIfX: true,
+			OperStatus: "down", AdminStatus: "up", SpeedBps: speed})
+	}
+	add(1, "Gi0/0", 1_000_000_000)
+	for i := 1; i <= 12; i++ {
+		add(8+i, fmt.Sprintf("Gi1/0/%d", i), 1_000_000_000)
+	}
+	for i := 1; i <= 4; i++ {
+		add(20+i, fmt.Sprintf("Gi1/1/%d", i), 1_000_000_000)
+		add(24+i, fmt.Sprintf("Te1/1/%d", i), 10_000_000_000)
+	}
+	add(33, "StackPort1", 0)
+	return inv
+}
+
+// The 3850-12S: ports are labelled slot/port, the module is its own block,
+// the stack port is not physical, and the port style setting applies.
+func TestDBDevicePortsViewCisco3850(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	s := seedDevice(t, db, "HQ", "10.0.0.2")
+	incidents := NewIncidentService(db)
+	devices := NewDeviceService(db, NewSNMPCredentialService(db), incidents)
+	testdb.Must(t, devices.SaveInventory(ctx, s.DeviceID, cisco3850Inventory(), time.Now()))
+	ports := NewPortService(db, NewMetricsStore(db), incidents, NewSettingsService(db))
+	d, err := devices.Get(ctx, s.DeviceID)
+	testdb.Must(t, err)
+
+	v, err := ports.DevicePorts(ctx, d)
+	testdb.Must(t, err)
+	byName := map[string]PortView{}
+	for _, p := range v.Ports {
+		byName[p.Name] = p
+	}
+	if p := byName["Te1/1/4"]; p.Label != "1/4" || p.Slot != 1 || p.Number != 4 {
+		t.Errorf("Te1/1/4: label %q slot %d number %d", p.Label, p.Slot, p.Number)
+	}
+	if p := byName["Gi1/0/12"]; p.Label != "0/12" || p.Slot != 0 {
+		t.Errorf("Gi1/0/12: label %q slot %d", p.Label, p.Slot)
+	}
+	if p := byName["StackPort1"]; p.Physical {
+		t.Errorf("StackPort1 counted as physical")
+	}
+	if _, ok := byName["Gi0/0"]; !ok {
+		t.Errorf("management port missing from the table")
+	}
+	if len(v.Faceplates) != 1 || v.Faceplates[0].Rows != 1 || len(v.Faceplates[0].Blocks) != 2 ||
+		!v.Faceplates[0].Blocks[0].SFP || v.Faceplates[0].Blocks[1].Label != "Module 1" {
+		t.Fatalf("faceplates %+v", v.Faceplates)
+	}
+
+	rj45 := "rj45"
+	_, _, err = devices.UpdateDetails(ctx, d.ID, models.DeviceDetailsPatch{FaceplatePortStyle: models.Opt[string]{Set: true, Value: &rj45}})
+	testdb.Must(t, err)
+	d, err = devices.Get(ctx, s.DeviceID)
+	testdb.Must(t, err)
+	v, err = ports.DevicePorts(ctx, d)
+	testdb.Must(t, err)
+	if v.Faceplates[0].Blocks[0].SFP {
+		t.Errorf("rj45 style still drew SFP: %+v", v.Faceplates[0].Blocks[0])
 	}
 }

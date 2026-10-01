@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { X } from 'lucide-react'
 import { DEVICE_TYPE_LABEL, type Device, type DeviceType } from '@/hooks/useDevices'
-import { usePortActions } from '@/hooks/usePorts'
+import { usePortActions, type FaceplatePortStyle } from '@/hooks/usePorts'
 import type { ApiError } from '@/services/api'
 
 const inputCls =
@@ -23,6 +23,7 @@ export default function EditDetailsModal({ device, onClose, onSaved }: Props) {
   const [type, setType] = useState<DeviceType | ''>(device.device_type ?? '')
   const [rows, setRows] = useState(device.faceplate_rows ? String(device.faceplate_rows) : '')
   const [sfp, setSfp] = useState((device.faceplate_sfp_ports ?? []).join(', '))
+  const [portStyle, setPortStyle] = useState<FaceplatePortStyle | ''>(device.faceplate_port_style ?? '')
   const [error, setError] = useState<string | null>(null)
 
   const submit = async (e: React.FormEvent) => {
@@ -41,6 +42,7 @@ export default function EditDetailsModal({ device, onClose, onSaved }: Props) {
         device_type: type || null,
         faceplate_rows: rows ? Number(rows) : null,
         faceplate_sfp_ports: ports.length ? ports : null,
+        faceplate_port_style: portStyle || null,
       })
       onSaved()
     } catch (err) {
@@ -110,6 +112,15 @@ export default function EditDetailsModal({ device, onClose, onSaved }: Props) {
               <option value="1">One row</option>
               <option value="2">Two rows</option>
             </select>
+          </label>
+          <label className="block space-y-1">
+            <span className="text-xs text-slate-400">Port style</span>
+            <select className={inputCls} value={portStyle} onChange={(e) => setPortStyle(e.target.value as FaceplatePortStyle | '')}>
+              <option value="">Automatic</option>
+              <option value="sfp">All SFP</option>
+              <option value="rj45">All RJ45</option>
+            </select>
+            <span className="text-xs text-slate-500">How the main ports are drawn. Module ports are always SFP.</span>
           </label>
           <label className="block space-y-1">
             <span className="text-xs text-slate-400">SFP ports</span>

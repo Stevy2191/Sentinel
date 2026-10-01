@@ -434,4 +434,8 @@ func TestPortLabelIncludesStackUnit(t *testing.T) {
 	if got, want := portLabel(row), "port 5"; got != want {
 		t.Errorf("portLabel (not stacked) = %q, want %q", got, want)
 	}
+	row.Name = "Te1/1/4"
+	if got, want := portLabel(row), "port 1/4"; got != want {
+		t.Errorf("portLabel (module port) = %q, want %q", got, want)
+	}
 }

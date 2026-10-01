@@ -75,8 +75,9 @@ export const PORT_ROLES: PortRole[] = ['access', 'uplink', 'wan']
 
 /** "Port 51 · Uplink To Quantum Gate", or "Switch 2 · Port 12 · alias" for a
  *  stacked port (stack_unit > 0). */
-export function portTitle(p: { number: number; alias?: string; stack_unit?: number }): string {
-  const base = p.stack_unit && p.stack_unit > 0 ? `Switch ${p.stack_unit} · Port ${p.number}` : `Port ${p.number}`
+export function portTitle(p: { number: number; label?: string; alias?: string; stack_unit?: number }): string {
+  const name = p.label || String(p.number)
+  const base = p.stack_unit && p.stack_unit > 0 ? `Switch ${p.stack_unit} · Port ${name}` : `Port ${name}`
   return p.alias ? `${base} · ${p.alias}` : base
 }
 
