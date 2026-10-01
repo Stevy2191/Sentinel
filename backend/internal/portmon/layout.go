@@ -57,6 +57,10 @@ var (
 	// sfpModel is Cisco's naming for an all-SFP switch: WS-C3850-12S-S,
 	// -24S, -48S, -24XS.
 	sfpModel = regexp.MustCompile(`(?i)-(12|24|48)X?S(-|$)`)
+	// fastCisco is a Cisco 10G-and-up interface (Te1/1/1, TenGigabitEthernet,
+	// TwentyFiveGigE, FortyGigabitEthernet, HundredGigE), almost always a
+	// cage; Auto draws it as SFP. ("Tw" alone is TwoGigabitEthernet, copper.)
+	fastCisco = regexp.MustCompile(`(?i)^(Te|Twe|Fo|Hu)\d|^(TenGigabitEthernet|TwentyFiveGigE|FortyGigabitEthernet|HundredGigE)`)
 )
 
 // Port styles a user can set for the faceplate's main ports. Auto (empty)
@@ -121,11 +125,14 @@ type LayoutOptions struct {
 
 // Layout places physical ports. The main ports are ordered by number: copper
 // ones split into blocks of 12, then SFP ones (see LayoutOptions.Style) in
-// blocks of 12 on the right. Eight copper ports or fewer sit in one row, more
-// in two; with no copper at all, twelve SFP ports or fewer sit in one row.
+// blocks of 12 columns on the right. Eight copper ports or fewer sit in one
+// row, more in two; with no copper at all, twelve SFP ports or fewer sit in
+// one row.
 //
-// On a device with switch/slot/port names, each network module (slot 1 and
-// up) is its own SFP block after the main ports, labelled "Module N", and a
+// On a device with switch/slot/port names, the lowest slot holds the main
+// ports (slot 0 on most Catalysts, slot 1 on a 4500-X), each other slot is a
+// network module drawn as its own SFP block after them, labelled "Module N",
+// and a
 // port without such a name (the Gi0/0 management port) is left off. Where
 // two module interfaces share a number (Cisco lists each cage of a 1G/10G
 // module as both Gi1/1/N and Te1/1/N), one cage is drawn, for the interface
@@ -135,11 +142,13 @@ func Layout(ports []LayoutPort, o LayoutOptions) Faceplate {
 	for _, n := range o.SFPPorts {
 		sfpSet[n] = true
 	}
-	slotted := false
+	slotted, mainSlot := false, 0
 	for _, p := range ports {
 		if slotName.MatchString(p.Name) {
+			if slot := SlotNumber(p.Name); !slotted || slot < mainSlot {
+				mainSlot = slot
+			}
 			slotted = true
-			break
 		}
 	}
 	copper, sfp := []FacePort{}, []FacePort{}
@@ -149,7 +158,7 @@ func Layout(ports []LayoutPort, o LayoutOptions) Faceplate {
 			continue
 		}
 		n := PortNumber(p.Name, p.Descr, p.IfIndex)
-		if slot := SlotNumber(p.Name); slot > 0 {
+		if slot := SlotNumber(p.Name); slot != mainSlot {
 			if modules[slot] == nil {
 				modules[slot] = map[int]LayoutPort{}
 			}
@@ -165,7 +174,8 @@ func Layout(ports []LayoutPort, o LayoutOptions) Faceplate {
 			isSFP = true
 		case PortStyleRJ45:
 		default:
-			isSFP = isSFP || sfpWord.MatchString(p.Name+" "+p.Descr) || IsSFPModel(o.Model)
+			isSFP = isSFP || sfpWord.MatchString(p.Name+" "+p.Descr) || IsSFPModel(o.Model) ||
+				fastCisco.MatchString(p.Name) || fastCisco.MatchString(p.Descr)
 		}
 		if isSFP {
 			sfp = append(sfp, fp)
@@ -184,13 +194,16 @@ func Layout(ports []LayoutPort, o LayoutOptions) Faceplate {
 		rows = *o.Rows
 	}
 
+	// Copper ports come in blocks of twelve; SFP cages in blocks of twelve
+	// columns (24 cages over two rows), so a 4500-X's sixteen stay together.
 	blocks := []FaceBlock{}
 	for _, group := range []struct {
-		ps  []FacePort
-		sfp bool
-	}{{copper, false}, {sfp, true}} {
-		for i := 0; i < len(group.ps); i += blockSize {
-			blocks = append(blocks, split(group.ps[i:min(i+blockSize, len(group.ps))], rows, group.sfp))
+		ps   []FacePort
+		size int
+		sfp  bool
+	}{{copper, blockSize, false}, {sfp, blockSize * rows, true}} {
+		for i := 0; i < len(group.ps); i += group.size {
+			blocks = append(blocks, split(group.ps[i:min(i+group.size, len(group.ps))], rows, group.sfp))
 		}
 	}
 	slots := make([]int, 0, len(modules))

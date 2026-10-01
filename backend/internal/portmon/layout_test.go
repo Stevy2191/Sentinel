@@ -292,8 +292,8 @@ func TestLayoutPortStyle(t *testing.T) {
 			t.Fatalf("sfp style left a copper block: %+v", fp)
 		}
 	}
-	if fp.Rows != 2 || len(fp.Blocks) != 5 {
-		t.Errorf("sfp style on 52 ports: rows %d blocks %d", fp.Rows, len(fp.Blocks))
+	if fp.Rows != 2 || len(fp.Blocks) != 3 || len(fp.Blocks[0].Top) != 12 {
+		t.Errorf("sfp style on 52 ports: rows %d blocks %d (want 24, 24, 4)", fp.Rows, len(fp.Blocks))
 	}
 }
 
@@ -305,5 +305,25 @@ func TestIsSFPModel(t *testing.T) {
 		if got := IsSFPModel(model); got != want {
 			t.Errorf("IsSFPModel(%q) = %v, want %v", model, got, want)
 		}
+	}
+}
+
+// The 4500-X has no slot 0: its built-in ports (slot 1) are the main ports,
+// drawn as SFP+ in two rows of eight, and only slot 2 is a module.
+func TestLayoutCisco4500X(t *testing.T) {
+	var ps []LayoutPort
+	for _, f := range cisco4500X() {
+		ps = append(ps, LayoutPort{IfIndex: f.Index, Name: f.Name, Descr: f.Descr})
+	}
+	fp := Layout(ps, LayoutOptions{Model: "WS-C4500X-16"})
+	if fp.Rows != 2 || len(fp.Blocks) != 2 {
+		t.Fatalf("rows %d blocks %+v", fp.Rows, fp.Blocks)
+	}
+	main, mod := fp.Blocks[0], fp.Blocks[1]
+	if main.Label != "" || !main.SFP || len(main.Top) != 8 || len(main.Bottom) != 8 {
+		t.Errorf("main block %+v", main)
+	}
+	if mod.Label != "Module 2" || !mod.SFP || len(mod.Top)+len(mod.Bottom) != 8 {
+		t.Errorf("module block %+v", mod)
 	}
 }

@@ -77,6 +77,32 @@ func TestParseEntity(t *testing.T) {
 	}
 }
 
+// A Catalyst 4500-X leaves the chassis's model name blank and puts the model
+// in its description; its power supplies (listed first) must never be taken
+// for the switch.
+func TestParseEntityCatalyst4500X(t *testing.T) {
+	const e = "1.3.6.1.2.1.47.1.1.1.1"
+	model, serial := ParseEntity([]PDU{
+		pdu(e+".5.1", int64(6)), pdu(e+".13.1", []byte("C4KX-PWR-750AC-F")), pdu(e+".11.1", []byte("PSU1")),
+		pdu(e+".5.2", int64(7)), pdu(e+".13.2", []byte("C4KX-FAN-F")),
+		pdu(e+".5.1000", int64(3)), pdu(e+".13.1000", []byte("")), pdu(e+".11.1000", []byte("JAE1234ABCD")),
+		pdu(e+".2.1000", []byte("Cisco Systems, Inc. WS-C4500X-16 2 slot switch")),
+	})
+	if model != "WS-C4500X-16" || serial != "JAE1234ABCD" {
+		t.Errorf("chassis from description: got %q %q", model, serial)
+	}
+	// No chassis to go on: a power supply, fan or sensor is still not the
+	// device, and neither is an entry of unknown class named like one.
+	model, _ = ParseEntity([]PDU{
+		pdu(e+".5.1", int64(6)), pdu(e+".13.1", []byte("C4KX-PWR-750AC-F")),
+		pdu(e+".13.2", []byte("PWR-C1-350WAC")),
+		pdu(e+".5.3", int64(8)), pdu(e+".13.3", []byte("TEMP-1")),
+	})
+	if model != "" {
+		t.Errorf("parts only: got %q, want none", model)
+	}
+}
+
 func TestVendorFor(t *testing.T) {
 	for oid, want := range map[string]string{
 		"1.3.6.1.4.1.4413":        "Ubiquiti (EdgeSwitch)",
