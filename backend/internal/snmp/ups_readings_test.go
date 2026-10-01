@@ -40,21 +40,25 @@ func TestParseUPSReadingsAbsent(t *testing.T) {
 }
 
 type upsGetFake struct {
-	vals  map[string]any
-	calls int
-	fail  bool // a multi-OID GET fails (v1 noSuchName)
+	vals    map[string]any
+	calls   int
+	fail    bool // the agent refuses a multi-OID GET, or a missing OID (noSuchName)
+	timeout bool // every GET times out
 }
 
 func (f *upsGetFake) Get(_ context.Context, _ Target, oids []string) ([]PDU, error) {
 	f.calls++
+	if f.timeout {
+		return nil, errors.New("request timeout")
+	}
 	if f.fail && len(oids) > 1 {
-		return nil, errors.New("agent returned NoSuchName")
+		return nil, &AgentError{Status: "NoSuchName"}
 	}
 	out := make([]PDU, 0, len(oids))
 	for _, o := range oids {
 		v, ok := f.vals[o]
 		if !ok && f.fail {
-			return nil, errors.New("agent returned NoSuchName")
+			return nil, &AgentError{Status: "NoSuchName"}
 		}
 		out = append(out, PDU{OID: o, Value: v})
 	}
@@ -79,9 +83,20 @@ func TestReadUPSv1FallsBackPerOID(t *testing.T) {
 	}
 }
 
-// v2c/v3: a failed GET is an error (timeout), not retried per OID.
+// Any version: a GET the agent refuses (badValue on one OID) is retried one
+// OID at a time.
+func TestReadUPSv2RefusedFallsBackPerOID(t *testing.T) {
+	f := &upsGetFake{fail: true, vals: map[string]any{"1.3.6.1.2.1.33.1.2.4.0": int64(77)}}
+	r, err := ReadUPS(context.Background(), f, Target{Credential: Credential{Version: "2c"}})
+	if err != nil || r.ChargePct == nil || *r.ChargePct != 77 {
+		t.Fatalf("r %+v err %v calls %d", r, err, f.calls)
+	}
+}
+
+// A timeout is an error, never retried per OID (that would be nine more
+// timeouts).
 func TestReadUPSv2Error(t *testing.T) {
-	f := &upsGetFake{fail: true}
+	f := &upsGetFake{timeout: true}
 	if _, err := ReadUPS(context.Background(), f, Target{Credential: Credential{Version: "2c"}}); err == nil || f.calls != 1 {
 		t.Fatalf("err %v calls %d", err, f.calls)
 	}

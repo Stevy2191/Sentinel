@@ -5,6 +5,7 @@ package snmp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -157,6 +158,45 @@ func toPDU(v gosnmp.SnmpPDU) PDU {
 	return p
 }
 
+// AgentError is an error-status response: the agent answered, but refused
+// the request (noSuchName, badValue, genErr…). Some agents refuse a whole
+// GET over one value they cannot encode — a Tripp Lite PowerAlert card
+// answers badValue for sysUpTime — so callers ask again one value at a time
+// (GetEach). Index is the 1-based position of the value it blamed, 0 if none.
+type AgentError struct {
+	Status string
+	Index  int
+}
+
+func (e *AgentError) Error() string { return "agent returned " + e.Status }
+
+// GetEach is Get, except that when the agent refuses the request it asks for
+// each value on its own and returns whatever was answered. It fails only
+// when nothing was: with the agent's error if every value was refused, or
+// with the first other error (a timeout is never retried per value).
+func GetEach(ctx context.Context, c Client, t Target, oids []string) ([]PDU, error) {
+	pdus, err := c.Get(ctx, t, oids)
+	var refused *AgentError
+	if err == nil || !errors.As(err, &refused) || len(oids) == 1 {
+		return pdus, err
+	}
+	var out []PDU
+	for _, o := range oids {
+		p, err := c.Get(ctx, t, []string{o})
+		if err == nil {
+			out = append(out, p...)
+			continue
+		}
+		if !errors.As(err, &refused) {
+			return nil, err
+		}
+	}
+	if len(out) == 0 {
+		return nil, refused
+	}
+	return out, nil
+}
+
 // GoSNMPClient is the real Client. It opens a UDP socket per call; a poll is
 // one or a handful of requests, so pooling sockets is not worth its state.
 type GoSNMPClient struct{}
@@ -185,7 +225,7 @@ func (c GoSNMPClient) Get(ctx context.Context, t Target, oids []string) ([]PDU, 
 		return nil, err
 	}
 	if pkt.Error != gosnmp.NoError {
-		return nil, fmt.Errorf("agent returned %s", pkt.Error)
+		return nil, &AgentError{Status: pkt.Error.String(), Index: int(pkt.ErrorIndex)}
 	}
 	out := make([]PDU, 0, len(pkt.Variables))
 	for _, v := range pkt.Variables {
