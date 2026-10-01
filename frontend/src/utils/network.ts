@@ -116,10 +116,13 @@ export function busiestUtil(p: Pick<PortView, 'in_util_pct' | 'out_util_pct'>): 
   return Math.max(p.in_util_pct ?? 0, p.out_util_pct ?? 0)
 }
 
-/** "Download 412 Mb/s · Upload 88 Mb/s · Busy % 41%", the plain-text form of
- *  portTraffic for aria-label (the hover box itself renders the rows). */
+/** "Download 412 Mb/s · Upload 88 Mb/s · Busy 41%", the plain-text form of
+ *  portTraffic for aria-label (the hover box itself renders the rows, where
+ *  the "Busy %" label and the "41%" value sit in separate cells — here
+ *  they're joined into one phrase, so the row's own trailing "%" is dropped
+ *  to avoid "Busy % 41%"). */
 export function portTrafficText(p: Pick<PortView, 'role' | 'in_bps' | 'out_bps' | 'in_util_pct' | 'out_util_pct'>): string {
   return portTraffic(p)
-    .map((r) => `${r.label.replace(/^[↓↑▮]\s*/, '')} ${r.value}`)
+    .map((r) => `${r.label.replace(/^[↓↑▮]\s*/, '').replace(/\s*%$/, '')} ${r.value}`)
     .join(' · ')
 }

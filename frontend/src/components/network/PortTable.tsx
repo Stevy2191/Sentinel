@@ -12,6 +12,7 @@ import {
   PORT_ROLES,
   PORT_STATE,
   portState,
+  portTitle,
   WARNING_CONDITIONS,
   type PortState,
 } from '@/utils/network'
@@ -33,7 +34,10 @@ const STATE_ORDER: Record<PortState, number> = { critical: 0, warning: 1, up: 2,
 function sortValue(p: PortView, key: SortKey): number | string {
   switch (key) {
     case 'number':
-      return p.number
+      // (stack_unit, number): ports group by stack member before sorting by
+      // their own number, so a stacked device's table doesn't interleave
+      // "1/12" and "2/5".
+      return p.stack_unit * 1_000_000 + p.number
     case 'alias':
       return (p.alias || p.name).toLowerCase()
     case 'state':
@@ -214,7 +218,8 @@ export default function PortTable({ deviceId, ports, canEdit, onChanged }: Props
                         {p.role === 'uplink' && p.neighbor_device_name && (
                           <p className="mt-0.5 truncate text-xs text-slate-500">
                             → {p.neighbor_device_name}
-                            {p.neighbor_port_label && ` · ${p.neighbor_port_label}`}
+                            {p.neighbor_port_number != null &&
+                              ` · ${portTitle({ number: p.neighbor_port_number, alias: p.neighbor_port_alias, stack_unit: p.neighbor_port_unit })}`}
                           </p>
                         )}
                       </td>

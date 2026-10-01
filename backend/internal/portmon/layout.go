@@ -120,6 +120,14 @@ type UnitFaceplate struct {
 // Layout, ordered by unit. Label is "Switch N" when there is more than one
 // group, else "" — a non-stacked device (every port's Unit is 0) always
 // yields exactly one entry, Unit 0 with an empty Label.
+//
+// On a stacked device, a physical port whose name carries no unit (e.g. a
+// Cisco FastEthernet0 management port) still gets UnitNumber 0 — same as on
+// a non-stacked device, since UnitNumber alone cannot tell the two apart —
+// but drawing it as its own one-port "Switch 0" chassis would be wrong: it
+// is not a stack member, just a port LayoutUnits otherwise has nowhere to
+// put. It is dropped from the faceplate entirely here (it still shows in
+// the port table, which is built independently of this function).
 func LayoutUnits(ports []LayoutPort, rowsOverride *int, sfpOverride []int) []UnitFaceplate {
 	byUnit := map[int][]LayoutPort{}
 	var units []int
@@ -130,10 +138,14 @@ func LayoutUnits(ports []LayoutPort, rowsOverride *int, sfpOverride []int) []Uni
 		byUnit[p.Unit] = append(byUnit[p.Unit], p)
 	}
 	sort.Ints(units)
+	stacked := len(units) > 1
 	out := make([]UnitFaceplate, 0, len(units))
 	for _, u := range units {
+		if stacked && u == 0 {
+			continue
+		}
 		label := ""
-		if len(units) > 1 {
+		if stacked {
 			label = fmt.Sprintf("Switch %d", u)
 		}
 		out = append(out, UnitFaceplate{Unit: u, Label: label, Faceplate: Layout(byUnit[u], rowsOverride, sfpOverride)})

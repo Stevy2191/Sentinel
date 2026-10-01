@@ -116,14 +116,18 @@ export interface TestResult {
 
 const REFRESH_MS = 30_000
 
-/** Devices in the sites the user can see, refreshed every 30 s. */
-export function useDevices(filter: { siteId?: string; status?: DeviceStatus } = {}) {
+/** Devices in the sites the user can see, refreshed every 30 s. skip holds
+ *  off the request entirely (and leaves devices empty) — for a caller that
+ *  means to filter by siteId but doesn't have it yet, rather than briefly
+ *  listing every visible device with no filter while it loads. */
+export function useDevices(filter: { siteId?: string; status?: DeviceStatus; skip?: boolean } = {}) {
   const [devices, setDevices] = useState<Device[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const { siteId, status } = filter
+  const { siteId, status, skip } = filter
 
   const refetch = useCallback(async () => {
+    if (skip) return
     try {
       const { data } = await api.get<ApiResponse<Device[]>>('/devices', {
         params: { ...(siteId ? { site_id: siteId } : {}), ...(status ? { status } : {}) },
@@ -135,13 +139,17 @@ export function useDevices(filter: { siteId?: string; status?: DeviceStatus } = 
     } finally {
       setLoading(false)
     }
-  }, [siteId, status])
+  }, [siteId, status, skip])
 
   useEffect(() => {
+    if (skip) {
+      setLoading(false)
+      return
+    }
     void refetch()
     const t = window.setInterval(() => void refetch(), REFRESH_MS)
     return () => window.clearInterval(t)
-  }, [refetch])
+  }, [refetch, skip])
 
   return { devices, loading, error, refetch }
 }

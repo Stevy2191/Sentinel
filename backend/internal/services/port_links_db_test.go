@@ -179,26 +179,190 @@ func TestDBUpdatePortDoesNotOverwriteAnExistingReverseLink(t *testing.T) {
 }
 
 // Deleting the neighbor device nulls this port's neighbor_device_id (FK ON
-// DELETE SET NULL) without the CHECK constraint rejecting the cascade. The
-// link is by device only (no neighbor_if_index), which is the only shape
-// that survives the cascade: see the migration's comment.
-func TestDBDeletingNeighborDeviceClearsNeighborDeviceID(t *testing.T) {
+// DELETE SET NULL). That FK action only touches neighbor_device_id, leaving
+// neighbor_if_index stale (non-null) with no further write — the link here
+// is by device AND port (neighbor_if_index set), which is exactly the shape
+// that broke the design doc's original CHECK (verified against Postgres 16
+// before narrowing it to "neighbor_device_id IS NULL OR role = 'uplink'");
+// if the DELETE itself failed, this test would fail right here, covering
+// that narrowing as a regression test.
+//
+// Fix round 1, Important 1: the stale neighbor_if_index must not then block
+// an unrelated later patch (it used to hit ErrPortNeighborInvalid), and
+// must self-heal to NULL once anything next touches the port.
+func TestDBDeletingNeighborDeviceLeavesStaleIfIndexThatSelfHeals(t *testing.T) {
 	db := testdb.Open(t)
 	ctx := context.Background()
 	sw := seedDevice(t, db, "HQ", "10.0.0.2")
 	router := seedDeviceInSite(t, db, sw.SiteID, "10.0.0.1")
 	seedPort(t, db, sw.DeviceID, 51, "0/51", "")
+	seedPort(t, db, router, 10, "0/10", "")
 	svc := NewPortService(db, NewMetricsStore(db), NewIncidentService(db), NewSettingsService(db))
 
+	ten := 10
+	_, _, err := svc.UpdatePort(ctx, sw.DeviceID, 51, models.PortPatch{
+		NeighborDeviceID: models.Opt[uuid.UUID]{Set: true, Value: &router},
+		NeighborIfIndex:  models.Opt[int]{Set: true, Value: &ten},
+	})
+	testdb.Must(t, err)
+
+	// Deleting the neighbor device must not fail (the narrowed CHECK).
+	testdb.Exec(t, db, `DELETE FROM devices WHERE id = ?`, router)
+
+	stale := interfaceRow(t, db, sw.DeviceID, 51)
+	if stale.NeighborDeviceID != nil {
+		t.Fatalf("neighbor_device_id survived the neighbor's deletion: %v", stale.NeighborDeviceID)
+	}
+	if stale.NeighborIfIndex == nil || *stale.NeighborIfIndex != 10 {
+		t.Fatalf("expected the stale neighbor_if_index to still be 10 right after deletion: %+v", stale)
+	}
+
+	// An ordinary, unrelated patch must still work (not ErrPortNeighborInvalid)
+	// and must self-heal the stale if_index to NULL.
+	yes := true
+	_, after, err := svc.UpdatePort(ctx, sw.DeviceID, 51, models.PortPatch{Important: models.Opt[bool]{Set: true, Value: &yes}})
+	testdb.Must(t, err)
+	if !after.Important {
+		t.Errorf("important not set: %+v", after)
+	}
+	if after.NeighborIfIndex != nil {
+		t.Errorf("stale neighbor_if_index did not self-heal: %+v", after)
+	}
+}
+
+// Fix round 1, Important 2: clearing a link must find the far port by what
+// it points at, not by trusting this port's own (possibly unknown) stored
+// neighbor_if_index for the far device. Here the switch links to the router
+// by device only (no port chosen); the router separately links its own
+// port 10 back at the switch, which leaves the switch port unchanged
+// because it already has a device. Un-linking the switch port must still
+// find and clear router port 10.
+func TestDBUpdatePortClearingFindsFarPortEvenWithoutAStoredIfIndex(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	sw := seedDevice(t, db, "HQ", "10.0.0.2")
+	router := seedDeviceInSite(t, db, sw.SiteID, "10.0.0.1")
+	seedPort(t, db, sw.DeviceID, 51, "0/51", "")
+	seedPort(t, db, router, 10, "0/10", "")
+	svc := NewPortService(db, NewMetricsStore(db), NewIncidentService(db), NewSettingsService(db))
+
+	// sw/51 -> (router, no port).
 	_, _, err := svc.UpdatePort(ctx, sw.DeviceID, 51, models.PortPatch{
 		NeighborDeviceID: models.Opt[uuid.UUID]{Set: true, Value: &router},
 	})
 	testdb.Must(t, err)
 
-	testdb.Exec(t, db, `DELETE FROM devices WHERE id = ?`, router)
+	// router/10 -> (sw, 51). sw/51 already has a device, so the reverse-link
+	// guard (neighbor_device_id IS NULL) leaves it unchanged.
+	fiftyOne := 51
+	_, _, err = svc.UpdatePort(ctx, router, 10, models.PortPatch{
+		NeighborDeviceID: models.Opt[uuid.UUID]{Set: true, Value: &sw.DeviceID},
+		NeighborIfIndex:  models.Opt[int]{Set: true, Value: &fiftyOne},
+	})
+	testdb.Must(t, err)
+	unchanged := interfaceRow(t, db, sw.DeviceID, 51)
+	if unchanged.NeighborIfIndex != nil {
+		t.Fatalf("sw/51 should still have no stored neighbor port: %+v", unchanged)
+	}
 
-	row := interfaceRow(t, db, sw.DeviceID, 51)
-	if row.NeighborDeviceID != nil {
-		t.Errorf("neighbor_device_id survived the neighbor's deletion: %v", row.NeighborDeviceID)
+	// sw/51 -> access. Even though sw/51 never knew router/10's if_index,
+	// router/10 (which points back here) must be cleared.
+	accessRole := models.PortRoleAccess
+	_, _, err = svc.UpdatePort(ctx, sw.DeviceID, 51, models.PortPatch{Role: models.Opt[string]{Set: true, Value: &accessRole}})
+	testdb.Must(t, err)
+
+	routerPort := interfaceRow(t, db, router, 10)
+	if routerPort.Role != models.PortRoleAccess || routerPort.NeighborDeviceID != nil || routerPort.NeighborIfIndex != nil {
+		t.Errorf("router port 10 should have cleared: %+v", routerPort)
+	}
+}
+
+// Fix round 1, Important 2: changing a link (not just removing it) must
+// clear the old far port and reverse-link the new one.
+func TestDBUpdatePortChangingLinkClearsOldFarPortAndLinksNew(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	sw := seedDevice(t, db, "HQ", "10.0.0.2")
+	router := seedDeviceInSite(t, db, sw.SiteID, "10.0.0.1")
+	seedPort(t, db, sw.DeviceID, 51, "0/51", "")
+	seedPort(t, db, router, 10, "0/10", "")
+	seedPort(t, db, router, 11, "0/11", "")
+	svc := NewPortService(db, NewMetricsStore(db), NewIncidentService(db), NewSettingsService(db))
+
+	ten := 10
+	_, _, err := svc.UpdatePort(ctx, sw.DeviceID, 51, models.PortPatch{
+		NeighborDeviceID: models.Opt[uuid.UUID]{Set: true, Value: &router},
+		NeighborIfIndex:  models.Opt[int]{Set: true, Value: &ten},
+	})
+	testdb.Must(t, err)
+	port10 := interfaceRow(t, db, router, 10)
+	if port10.NeighborDeviceID == nil || *port10.NeighborDeviceID != sw.DeviceID {
+		t.Fatalf("router port 10 should point back at first: %+v", port10)
+	}
+
+	// sw/51 moves from (router,10) to (router,11).
+	eleven := 11
+	_, after, err := svc.UpdatePort(ctx, sw.DeviceID, 51, models.PortPatch{
+		NeighborDeviceID: models.Opt[uuid.UUID]{Set: true, Value: &router},
+		NeighborIfIndex:  models.Opt[int]{Set: true, Value: &eleven},
+	})
+	testdb.Must(t, err)
+	if after.NeighborIfIndex == nil || *after.NeighborIfIndex != 11 {
+		t.Fatalf("switch port 51 should now point at port 11: %+v", after)
+	}
+
+	port10 = interfaceRow(t, db, router, 10)
+	if port10.Role != models.PortRoleAccess || port10.NeighborDeviceID != nil || port10.NeighborIfIndex != nil {
+		t.Errorf("router port 10 should have cleared: %+v", port10)
+	}
+	port11 := interfaceRow(t, db, router, 11)
+	if port11.Role != models.PortRoleUplink || port11.NeighborDeviceID == nil || *port11.NeighborDeviceID != sw.DeviceID ||
+		port11.NeighborIfIndex == nil || *port11.NeighborIfIndex != 51 {
+		t.Errorf("router port 11 should now point back at sw/51: %+v", port11)
+	}
+}
+
+// Fix round 1, Important 3: moving a device to another site must clear its
+// port links in both directions, so two devices in different sites never
+// keep pointing at each other.
+func TestDBUpdateDeviceSiteMoveClearsNeighborLinks(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	sw := seedDevice(t, db, "HQ", "10.0.0.2")
+	router := seedDeviceInSite(t, db, sw.SiteID, "10.0.0.1")
+	seedPort(t, db, sw.DeviceID, 51, "0/51", "")
+	seedPort(t, db, router, 10, "0/10", "")
+	ports := NewPortService(db, NewMetricsStore(db), NewIncidentService(db), NewSettingsService(db))
+
+	ten := 10
+	_, _, err := ports.UpdatePort(ctx, sw.DeviceID, 51, models.PortPatch{
+		NeighborDeviceID: models.Opt[uuid.UUID]{Set: true, Value: &router},
+		NeighborIfIndex:  models.Opt[int]{Set: true, Value: &ten},
+	})
+	testdb.Must(t, err)
+
+	devices := NewDeviceService(db, NewSNMPCredentialService(db), NewIncidentService(db))
+	swDevice, err := devices.Get(ctx, sw.DeviceID)
+	testdb.Must(t, err)
+
+	newSite := uuid.New()
+	testdb.Exec(t, db, `INSERT INTO sites (id, name) VALUES (?, 'Branch')`, newSite)
+	newCred := uuid.New()
+	testdb.Exec(t, db, `INSERT INTO snmp_credentials (id, name, version, community) VALUES (?, 'global-new', '2c', 'x')`, newCred)
+
+	_, _, err = devices.Update(ctx, sw.DeviceID, models.DeviceInput{
+		SiteID: newSite, CredentialID: newCred, Name: swDevice.Name, Host: swDevice.Host, Port: swDevice.Port,
+		Enabled: &swDevice.Enabled, PollInterval: swDevice.PollInterval, TimeoutMs: swDevice.TimeoutMs,
+		Retries: swDevice.Retries, NotifyChannels: swDevice.NotifyChannels,
+	})
+	testdb.Must(t, err)
+
+	swPort := interfaceRow(t, db, sw.DeviceID, 51)
+	if swPort.Role != models.PortRoleAccess || swPort.NeighborDeviceID != nil || swPort.NeighborIfIndex != nil {
+		t.Errorf("the moved device's own port should have cleared: %+v", swPort)
+	}
+	routerPort := interfaceRow(t, db, router, 10)
+	if routerPort.Role != models.PortRoleAccess || routerPort.NeighborDeviceID != nil || routerPort.NeighborIfIndex != nil {
+		t.Errorf("the port pointing at the moved device should have cleared: %+v", routerPort)
 	}
 }

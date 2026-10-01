@@ -243,13 +243,32 @@ func (s *DeviceService) Update(ctx context.Context, id uuid.UUID, raw models.Dev
 		updates["last_polled_at"], updates["last_inventory_at"] = nil, nil
 	}
 
-	// The device's own update and (when pausing) closing its incident must
-	// commit or roll back together: a failed update (e.g. a host+port
-	// collision) must never leave an incident closed for a device that is
-	// still down and still enabled.
+	movingSite := in.SiteID != before.SiteID
+
+	// The device's own update, the port-link cleanup of a site move, and
+	// (when pausing) closing its incident must commit or roll back together:
+	// a failed update (e.g. a host+port collision) must never leave an
+	// incident closed, or a cross-site link cleared, for a device whose
+	// update did not actually go through.
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&models.Device{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 			return mapDeviceWriteError(err)
+		}
+		if movingSite {
+			// A port link only ever makes sense between two devices in the
+			// same site (UpdatePort enforces this when a link is made); a
+			// site move must not leave either side still pointing at a
+			// device that is no longer there.
+			now := time.Now().UTC()
+			clear := map[string]any{"neighbor_device_id": nil, "neighbor_if_index": nil, "role": models.PortRoleAccess, "updated_at": now}
+			if err := tx.Model(&models.DeviceInterface{}).Where("device_id = ? AND neighbor_device_id IS NOT NULL", id).
+				Updates(clear).Error; err != nil {
+				return fmt.Errorf("clearing this device's links after a site move: %w", err)
+			}
+			if err := tx.Model(&models.DeviceInterface{}).Where("neighbor_device_id = ?", id).
+				Updates(clear).Error; err != nil {
+				return fmt.Errorf("clearing links pointing at this device after a site move: %w", err)
+			}
 		}
 		if pausing {
 			for _, a := range pauseTransition.Actions {
