@@ -4,6 +4,16 @@ import type { ApiResponse } from '@/types'
 
 export type DeviceStatus = 'pending' | 'up' | 'down' | 'paused' | 'error'
 
+export type DeviceType = 'switch' | 'router' | 'access_point' | 'nvr' | 'other'
+
+export const DEVICE_TYPE_LABEL: Record<DeviceType, string> = {
+  switch: 'Switch',
+  router: 'Router',
+  access_point: 'Access point',
+  nvr: 'NVR',
+  other: 'Other',
+}
+
 export interface Device {
   id: string
   site_id: string
@@ -31,6 +41,20 @@ export interface Device {
   vendor: string
   model: string
   serial: string
+  vendor_override: string | null
+  model_override: string | null
+  location_override: string | null
+  device_type: DeviceType | null
+  device_type_detected: DeviceType
+  faceplate_rows: number | null
+  faceplate_sfp_ports: number[] | null
+  last_stats_at: string | null
+  last_stats_duration_ms: number | null
+  /** The override when set, else what SNMP reported. */
+  effective_vendor?: string
+  effective_model?: string
+  effective_location?: string
+  effective_type?: DeviceType
   created_at: string
   updated_at: string
   site_name?: string
@@ -64,6 +88,17 @@ export interface DeviceInterface {
   oper_status: string
   last_change_seconds: number
   present: boolean
+  connector_present: boolean | null
+  collect: boolean | null
+  collect_default: boolean
+  important: boolean
+  util_threshold_pct: number | null
+  error_threshold_per_min: number | null
+  down_grace_seconds: number | null
+  usual_speed_bps: number | null
+  conditions: string[]
+  conditions_since: Record<string, string>
+  oper_changed_at: string | null
 }
 
 export interface TestResult {
