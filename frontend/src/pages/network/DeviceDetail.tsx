@@ -12,7 +12,7 @@ import Faceplate, { FaceplateLegend } from '@/components/network/Faceplate'
 import TrafficChart from '@/components/network/TrafficChart'
 import PortTable from '@/components/network/PortTable'
 import PortEventList from '@/components/network/PortEventList'
-import { busiestUtil, CONDITION_LABEL, formatBps, formatPct, PORT_STATE, portState, portTitle, WARNING_CONDITIONS } from '@/utils/network'
+import { CONDITION_LABEL, PORT_STATE, portState, portTitle, portTraffic, WARNING_CONDITIONS } from '@/utils/network'
 import type { ApiError } from '@/services/api'
 
 /** Device types drawn as a faceplate; the rest get the port table only. */
@@ -41,9 +41,7 @@ function PortQuickPanel({ deviceId, port }: { deviceId: string; port: PortView }
   const warns = (port.conditions ?? []).filter((c) => WARNING_CONDITIONS.includes(c))
   const facts: [string, string][] = [
     ['Link', port.oper_status === 'up' ? formatSpeed(port.speed_bps) : '—'],
-    ['In', formatBps(port.in_bps)],
-    ['Out', formatBps(port.out_bps)],
-    ['Busy', formatPct(busiestUtil(port))],
+    ...portTraffic(port).map((r): [string, string] => [r.label, r.value]),
     ['Errors/min', port.errors_per_min == null ? '—' : String(+port.errors_per_min.toFixed(1))],
   ]
   return (
@@ -112,7 +110,7 @@ export default function DeviceDetail() {
   }
   const type = device.effective_type ?? device.device_type_detected ?? 'other'
   const ports = portsView?.ports ?? []
-  const showFaceplate = FACEPLATE_TYPES.has(type) && (portsView?.faceplate.blocks.length ?? 0) > 0
+  const showFaceplate = FACEPLATE_TYPES.has(type) && (portsView?.faceplates.some((f) => f.blocks.length > 0) ?? false)
   const selectedPort = ports.find((p) => p.if_index === selected) ?? null
 
   return (
@@ -200,7 +198,7 @@ export default function DeviceDetail() {
             <FaceplateLegend />
           </div>
           <Faceplate
-            layout={portsView.faceplate}
+            faceplates={portsView.faceplates}
             ports={ports}
             title={device.name}
             subtitle={device.effective_model || device.host}

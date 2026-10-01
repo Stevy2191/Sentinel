@@ -15,6 +15,8 @@ export interface PortView extends DeviceInterface {
   in_util_pct: number | null
   out_util_pct: number | null
   errors_per_min: number | null
+  neighbor_device_name: string
+  neighbor_port_label: string
 }
 
 export interface FacePort {
@@ -30,6 +32,12 @@ export interface Faceplate {
   rows: number
   blocks: FaceBlock[]
 }
+/** One stack member's faceplate; label is "Switch N" when the device has
+ *  more than one member, else ''. */
+export interface UnitFaceplate extends Faceplate {
+  unit: number
+  label: string
+}
 
 export interface PortDefaults {
   error_threshold_per_min: number
@@ -39,7 +47,7 @@ export interface PortDefaults {
 
 export interface DevicePorts {
   ports: PortView[]
-  faceplate: Faceplate
+  faceplates: UnitFaceplate[]
   defaults: PortDefaults
 }
 
@@ -68,6 +76,7 @@ export interface PortEvent {
   port_name: string
   port_alias: string
   port_number: number
+  stack_unit: number
 }
 
 export interface PortRef {
@@ -83,6 +92,7 @@ export interface PortRef {
   in_bps: number | null
   out_bps: number | null
   util_pct: number | null
+  stack_unit: number
 }
 
 export interface SitePortSummary {
@@ -120,6 +130,8 @@ export interface PortPatch {
   error_threshold_per_min?: number | null
   down_grace_seconds?: number | null
   role?: PortRole
+  neighbor_device_id?: string | null
+  neighbor_if_index?: number | null
 }
 
 /** PATCH body: absent = unchanged, null or '' = back to what SNMP reports. */

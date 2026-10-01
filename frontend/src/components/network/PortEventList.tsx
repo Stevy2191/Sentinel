@@ -74,7 +74,7 @@ export default function PortEventList({
             <span className="font-medium text-slate-200">{EVENT_LABEL[e.kind] ?? e.kind}</span>
             <Link to={`/network/devices/${e.device_id}/ports/${e.if_index}`} className="text-slate-300 hover:text-primary-400">
               {showDevice ? `${e.device_name} · ` : ''}
-              {portTitle({ number: e.port_number, alias: e.port_alias })}
+              {portTitle({ number: e.port_number, alias: e.port_alias, stack_unit: e.stack_unit })}
             </Link>
             <span className="text-slate-500">{describe(e)}</span>
             {span && <span className="ml-auto text-xs text-slate-500">{lasted ? `lasted ${lasted}` : 'ongoing'}</span>}

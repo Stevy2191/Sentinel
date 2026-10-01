@@ -1,9 +1,10 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Star } from 'lucide-react'
-import { formatSpeed, useDevice, type PortRole } from '@/hooks/useDevices'
+import { formatSpeed, useDevice, useDevices, type PortRole } from '@/hooks/useDevices'
 import { useSite } from '@/hooks/useSites'
-import { usePort, usePortActions, usePortEvents, type PortDetail as Port, type PortPatch } from '@/hooks/usePorts'
+import { useDevicePorts, usePort, usePortActions, usePortEvents, type PortDetail as Port, type PortPatch } from '@/hooks/usePorts'
 import TrafficChart from '@/components/network/TrafficChart'
 import PortEventList from '@/components/network/PortEventList'
 import {
@@ -11,6 +12,7 @@ import {
   CONDITION_LABEL,
   formatBps,
   formatPct,
+  PORT_ROLE_HINT,
   PORT_ROLE_LABEL,
   PORT_ROLES,
   PORT_STATE,
@@ -22,6 +24,130 @@ import type { ApiError } from '@/services/api'
 
 const inputCls =
   'w-32 rounded-md border border-white/10 bg-slate-900/60 px-3 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary-500'
+const selectCls =
+  'cursor-pointer rounded-md border border-white/10 bg-slate-900/60 px-2 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-primary-500'
+
+/** The neighbor's name, linked to its port page when the far port is known,
+ *  else to the device page; the text view-only users see for a Network link. */
+function connectsToNode(port: Port): ReactNode {
+  if (port.role !== 'uplink' || !port.neighbor_device_id) return PORT_ROLE_LABEL[port.role]
+  const to =
+    port.neighbor_if_index != null
+      ? `/network/devices/${port.neighbor_device_id}/ports/${port.neighbor_if_index}`
+      : `/network/devices/${port.neighbor_device_id}`
+  return (
+    <>
+      {PORT_ROLE_LABEL.uplink} →{' '}
+      <Link to={to} className="text-primary-400 hover:underline">
+        {port.neighbor_device_name || 'that device'}
+        {port.neighbor_port_label && ` · ${port.neighbor_port_label}`}
+      </Link>
+    </>
+  )
+}
+
+/** Role (with hints), the device on the other end of a Network link, and
+ *  optionally its port; saved together on one Save button. */
+function ConnectsToForm({ port, deviceId, siteId, onSaved }: { port: Port; deviceId: string; siteId: string | undefined; onSaved: () => void }) {
+  const { updatePort, busy } = usePortActions()
+  const [role, setRole] = useState<PortRole>(port.role)
+  const [neighborId, setNeighborId] = useState(port.neighbor_device_id ?? '')
+  const [neighborIfIndex, setNeighborIfIndex] = useState(port.neighbor_if_index != null ? String(port.neighbor_if_index) : '')
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const { devices } = useDevices({ siteId })
+  const { data: neighborPorts } = useDevicePorts(role === 'uplink' && neighborId ? neighborId : undefined)
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaved(false)
+    setError(null)
+    try {
+      await updatePort(deviceId, port.if_index, {
+        role,
+        neighbor_device_id: role === 'uplink' && neighborId ? neighborId : null,
+        neighbor_if_index: role === 'uplink' && neighborId && neighborIfIndex ? Number(neighborIfIndex) : null,
+      })
+      setSaved(true)
+      onSaved()
+    } catch (err) {
+      setError((err as ApiError).message || 'Could not save the link')
+    }
+  }
+
+  return (
+    <form onSubmit={(e) => void save(e)} className="flex flex-wrap items-end gap-4">
+      <label className="space-y-1">
+        <span className="block text-xs text-slate-400">Connects to</span>
+        <select
+          value={role}
+          disabled={busy}
+          onChange={(e) => {
+            const r = e.target.value as PortRole
+            setRole(r)
+            if (r !== 'uplink') {
+              setNeighborId('')
+              setNeighborIfIndex('')
+            }
+          }}
+          className={selectCls}
+        >
+          {PORT_ROLES.map((r) => (
+            <option key={r} value={r}>
+              {PORT_ROLE_LABEL[r]}
+            </option>
+          ))}
+        </select>
+        <span className="block max-w-[14rem] text-xs text-slate-500">{PORT_ROLE_HINT[role]}</span>
+      </label>
+      {role === 'uplink' && (
+        <>
+          <label className="space-y-1">
+            <span className="block text-xs text-slate-400">Device</span>
+            <select
+              value={neighborId}
+              disabled={busy}
+              onChange={(e) => {
+                setNeighborId(e.target.value)
+                setNeighborIfIndex('')
+              }}
+              className={selectCls}
+            >
+              <option value="">Not one of my monitored devices</option>
+              {devices
+                .filter((d) => d.id !== deviceId)
+                .map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+            </select>
+          </label>
+          {neighborId && (
+            <label className="space-y-1">
+              <span className="block text-xs text-slate-400">Port</span>
+              <select value={neighborIfIndex} disabled={busy} onChange={(e) => setNeighborIfIndex(e.target.value)} className={selectCls}>
+                <option value="">Not sure</option>
+                {(neighborPorts?.ports ?? [])
+                  .filter((p) => p.present)
+                  .map((p) => (
+                    <option key={p.if_index} value={p.if_index}>
+                      {portTitle(p)}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          )}
+        </>
+      )}
+      <button className="btn-secondary" disabled={busy}>
+        Save
+      </button>
+      {saved && <span className="text-sm text-emerald-400">Saved</span>}
+      {error && <span className="text-sm text-red-400">{error}</span>}
+    </form>
+  )
+}
 
 function ThresholdsForm({ port, deviceId, onSaved }: { port: Port; deviceId: string; onSaved: () => void }) {
   const { updatePort, busy } = usePortActions()
@@ -126,20 +252,22 @@ export default function PortDetail() {
       {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">{error}</div>}
 
       <dl className="card grid gap-x-6 gap-y-3 p-5 sm:grid-cols-2 lg:grid-cols-4">
-        {[
-          ['Interface', port.name || '—'],
-          ['Description', port.descr || '—'],
-          ['Link', port.oper_status === 'up' ? formatSpeed(port.speed_bps) : 'Down'],
-          ['Usual speed', port.usual_speed_bps ? formatSpeed(port.usual_speed_bps) : 'Learning (needs a day of history)'],
-          ['In', formatBps(port.in_bps)],
-          ['Out', formatBps(port.out_bps)],
-          ['Busy', formatPct(busiestUtil(port))],
-          ['Errors/min', port.errors_per_min == null ? '—' : String(+port.errors_per_min.toFixed(1))],
-          ['Link last changed', port.oper_changed_at ? new Date(port.oper_changed_at).toLocaleString() : '—'],
-          ['MAC', port.mac || '—'],
-          ['Statistics', port.collected ? 'Collected every poll' : 'Not collected'],
-          ['Connects to', PORT_ROLE_LABEL[port.role]],
-        ].map(([k, v]) => (
+        {(
+          [
+            ['Interface', port.name || '—'],
+            ['Description', port.descr || '—'],
+            ['Link', port.oper_status === 'up' ? formatSpeed(port.speed_bps) : 'Down'],
+            ['Usual speed', port.usual_speed_bps ? formatSpeed(port.usual_speed_bps) : 'Learning (needs a day of history)'],
+            ['In', formatBps(port.in_bps)],
+            ['Out', formatBps(port.out_bps)],
+            ['Busy', formatPct(busiestUtil(port))],
+            ['Errors/min', port.errors_per_min == null ? '—' : String(+port.errors_per_min.toFixed(1))],
+            ['Link last changed', port.oper_changed_at ? new Date(port.oper_changed_at).toLocaleString() : '—'],
+            ['MAC', port.mac || '—'],
+            ['Statistics', port.collected ? 'Collected every poll' : 'Not collected'],
+            ['Connects to', connectsToNode(port)],
+          ] satisfies [string, ReactNode][]
+        ).map(([k, v]) => (
           <div key={k}>
             <dt className="text-xs uppercase tracking-widest text-slate-500">{k}</dt>
             <dd className="mt-0.5 break-words text-sm text-slate-200">{v}</dd>
@@ -162,22 +290,14 @@ export default function PortDetail() {
                 Back to automatic
               </button>
             )}
-            <label className="flex items-center gap-2 text-sm text-slate-300">
-              Connects to
-              <select
-                value={port.role}
-                disabled={busy}
-                onChange={(e) => void change({ role: e.target.value as PortRole })}
-                className="cursor-pointer rounded-md border border-white/10 bg-slate-900/60 px-2 py-1 text-sm text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-              >
-                {PORT_ROLES.map((r) => (
-                  <option key={r} value={r}>
-                    {PORT_ROLE_LABEL[r]}
-                  </option>
-                ))}
-              </select>
-            </label>
           </div>
+          <ConnectsToForm
+            key={`${port.role}-${port.neighbor_device_id}-${port.neighbor_if_index}`}
+            port={port}
+            deviceId={id}
+            siteId={device?.site_id}
+            onSaved={() => void refetch()}
+          />
           <ThresholdsForm
             key={`${port.util_threshold_pct}-${port.error_threshold_per_min}-${port.down_grace_seconds}`}
             port={port}
