@@ -48,8 +48,9 @@ func TestMetricCatalogue(t *testing.T) {
 			t.Errorf("%s missing from the catalogue", k)
 		}
 	}
-	if KnownMetric("if_in_octets") || len(MetricCatalogue) != 9 {
-		t.Error("catalogue must be exactly the spec's nine metrics")
+	// The phase 2 port metrics plus the UPS poll's eight.
+	if KnownMetric("if_in_octets") || len(MetricCatalogue) != 9+len(UPSMetrics) || len(UPSMetrics) != 8 {
+		t.Error("catalogue must be exactly the nine port metrics and the eight UPS metrics")
 	}
 }
 

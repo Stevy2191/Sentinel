@@ -447,3 +447,33 @@ func TestPollerRunsStatsOnlyWhenUp(t *testing.T) {
 		t.Fatal("stats ran after a failed poll")
 	}
 }
+
+type recordingUPS struct{ polled, reconciled int }
+
+func (r *recordingUPS) PollUPS(context.Context, models.Device, snmp.Target) { r.polled++ }
+func (r *recordingUPS) ReconcileUPS(context.Context, models.Device)         { r.reconciled++ }
+
+// An up UPS gets its UPS poll even with no ports (the Tripp Lite reports
+// none); any other device gets the reconcile instead.
+func TestPollerRunsUPSPollForUPS(t *testing.T) {
+	p, _, _, _ := newTestPoller(&fakeSNMP{})
+	rec := &recordingUPS{}
+	p.SetUPS(rec)
+	ups := device(models.DeviceStatusUp, 0)
+	ups.DeviceTypeDetected = models.DeviceTypeUPS
+	p.PollOnce(context.Background(), ups)
+	sw := device(models.DeviceStatusUp, 0)
+	sw.DeviceTypeDetected = models.DeviceTypeSwitch
+	p.PollOnce(context.Background(), sw)
+	if rec.polled != 1 || rec.reconciled != 1 {
+		t.Fatalf("polled %d reconciled %d", rec.polled, rec.reconciled)
+	}
+
+	p, _, _, _ = newTestPoller(&fakeSNMP{getErr: errors.New("timeout")})
+	rec = &recordingUPS{}
+	p.SetUPS(rec)
+	p.PollOnce(context.Background(), ups)
+	if rec.polled != 0 || rec.reconciled != 0 {
+		t.Fatal("UPS poll ran after a failed poll")
+	}
+}
