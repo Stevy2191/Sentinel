@@ -114,10 +114,18 @@ export default function IncidentDetail() {
   // monitor is the sensible parent, since that is what the incident belongs to.
   const from = (location.state as { from?: string } | null)?.from
   const isDevice = inc?.subject_type === 'device'
-  // The subject's own page: the monitor, or the network device.
-  const subjectLink = inc ? (isDevice ? `/network/devices/${inc.device_id}` : `/monitors/${inc.monitor_id}`) : '/incidents'
+  // The subject's own page: the monitor, or the network device (or its port,
+  // when the incident is about one).
+  const subjectLink = inc
+    ? isDevice
+      ? inc.port_if_index != null
+        ? `/network/devices/${inc.device_id}/ports/${inc.port_if_index}`
+        : `/network/devices/${inc.device_id}`
+      : `/monitors/${inc.monitor_id}`
+    : '/incidents'
   const backTo = from ?? subjectLink
-  const backLabel = from === '/incidents' ? 'Back to Incidents' : isDevice ? 'Back to Device' : 'Back to Monitor'
+  const backLabel =
+    from === '/incidents' ? 'Back to Incidents' : isDevice ? (inc?.port_if_index != null ? 'Back to Port' : 'Back to Device') : 'Back to Monitor'
 
   if (loading && !detail) {
     return (

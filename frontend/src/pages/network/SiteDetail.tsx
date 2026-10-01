@@ -8,7 +8,35 @@ import SiteSharingPanel from '@/components/SiteSharingPanel'
 import DeviceTable from '@/components/network/DeviceTable'
 import DeviceFormModal from '@/components/network/DeviceFormModal'
 import ScanModal from '@/components/network/ScanModal'
+import { useSitePortSummary, usePortEvents, type PortRef } from '@/hooks/usePorts'
+import TrafficChart from '@/components/network/TrafficChart'
+import PortEventList from '@/components/network/PortEventList'
+import { CONDITION_LABEL, formatPct, portTitle } from '@/utils/network'
 import type { ApiError } from '@/services/api'
+
+function PortRefList({ title, refs, empty, detail }: { title: string; refs: PortRef[]; empty: string; detail: (r: PortRef) => string }) {
+  return (
+    <section className="space-y-3">
+      <h2 className="text-lg font-light text-white">{title}</h2>
+      {refs.length === 0 ? (
+        <p className="text-sm text-slate-500">{empty}</p>
+      ) : (
+        <ul className="card divide-y divide-white/10">
+          {refs.map((r) => (
+            <li key={`${r.device_id}-${r.if_index}`}>
+              <Link to={`/network/devices/${r.device_id}/ports/${r.if_index}`} className="flex items-center justify-between gap-3 p-3 text-sm hover:bg-white/5">
+                <span className="min-w-0 truncate text-slate-200">
+                  {r.device_name} · {portTitle(r)}
+                </span>
+                <span className="shrink-0 tabular-nums text-slate-400">{detail(r)}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
 
 export default function SiteDetail() {
   const { id } = useParams<{ id: string }>()
@@ -16,6 +44,8 @@ export default function SiteDetail() {
   const { site, loading, notFound, refetch } = useSite(id)
   const { devices, refetch: refetchDevices } = useDevices({ siteId: id })
   const { remove, busy } = useSiteActions()
+  const { data: summary } = useSitePortSummary(id)
+  const { events } = usePortEvents({ siteId: id }, 15)
   const [editing, setEditing] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -113,6 +143,33 @@ export default function SiteDetail() {
           <DeviceTable devices={devices} showSite={false} />
         )}
       </section>
+
+      {devices.length > 0 && (
+        <>
+          <TrafficChart
+            title="Site traffic"
+            query={{ siteId: site.id, sum: true, physicalOnly: true }}
+            lines={[
+              { metric: 'if_in_bps', label: 'In', colour: '#22d3ee' },
+              { metric: 'if_out_bps', label: 'Out', colour: '#a78bfa' },
+            ]}
+            unit="bps"
+          />
+          <div className="grid gap-6 lg:grid-cols-2">
+            <PortRefList title="Busiest ports" refs={summary?.busiest ?? []} empty="No traffic figures yet." detail={(r) => formatPct(r.util_pct)} />
+            <PortRefList
+              title="Ports with problems"
+              refs={summary?.problems ?? []}
+              empty="Nothing wrong right now."
+              detail={(r) => (r.conditions.length ? r.conditions.map((c) => CONDITION_LABEL[c]).join(', ') : 'Link down')}
+            />
+          </div>
+          <section className="space-y-3">
+            <h2 className="text-lg font-light text-white">Recent port events</h2>
+            <PortEventList events={events} showDevice />
+          </section>
+        </>
+      )}
 
       {isAdmin && <SiteSharingPanel siteId={site.id} />}
 
