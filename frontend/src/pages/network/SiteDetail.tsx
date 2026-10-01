@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { MapPin, Pencil, Plus, Radar, Trash2 } from 'lucide-react'
 import { siteAddressLines, useSite, useSiteActions } from '@/hooks/useSites'
@@ -6,6 +6,8 @@ import { useDevices } from '@/hooks/useDevices'
 import SiteFormModal from '@/components/SiteFormModal'
 import SiteSharingPanel from '@/components/SiteSharingPanel'
 import DeviceTable from '@/components/network/DeviceTable'
+import DeviceFilterBar from '@/components/network/DeviceFilterBar'
+import { filterDevices, NO_DEVICE_FILTERS } from '@/utils/devices'
 import DeviceFormModal from '@/components/network/DeviceFormModal'
 import ScanModal from '@/components/network/ScanModal'
 import { useSitePortSummary, usePortEvents, type PortRef } from '@/hooks/usePorts'
@@ -50,6 +52,8 @@ export default function SiteDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [addingDevice, setAddingDevice] = useState(false)
+  const [deviceFilters, setDeviceFilters] = useState(NO_DEVICE_FILTERS)
+  const shownDevices = useMemo(() => filterDevices(devices, deviceFilters), [devices, deviceFilters])
   const [scanning, setScanning] = useState(false)
 
   if (loading) return <p className="text-sm text-slate-400">Loading…</p>
@@ -130,7 +134,9 @@ export default function SiteDetail() {
 
       <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-lg font-light text-white">Devices ({devices.length})</h2>
+          <h2 className="text-lg font-light text-white">
+            Devices ({shownDevices.length === devices.length ? devices.length : `${shownDevices.length} of ${devices.length}`})
+          </h2>
           {canEdit && (
             <div className="flex gap-2">
               <button className="btn-secondary flex items-center gap-2" onClick={() => setScanning(true)}>
@@ -148,7 +154,19 @@ export default function SiteDetail() {
             {canEdit && <p className="mt-1 text-sm text-slate-500">Add a device by address, or scan a subnet to find them.</p>}
           </div>
         ) : (
-          <DeviceTable devices={devices} showSite={false} />
+          <>
+            <DeviceFilterBar filters={deviceFilters} onChange={setDeviceFilters} />
+            {shownDevices.length === 0 ? (
+              <div className="card p-6 text-center text-sm text-slate-400">
+                No devices match these filters.{' '}
+                <button type="button" className="text-primary-400 hover:underline" onClick={() => setDeviceFilters(NO_DEVICE_FILTERS)}>
+                  Clear filters
+                </button>
+              </div>
+            ) : (
+              <DeviceTable devices={shownDevices} showSite={false} />
+            )}
+          </>
         )}
       </section>
 
