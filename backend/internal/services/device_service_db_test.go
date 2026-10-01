@@ -288,3 +288,20 @@ func TestDBPauseFailureKeepsIncidentOpen(t *testing.T) {
 		t.Errorf("open incidents after failed pause: %d, want 1 (unchanged)", openCount)
 	}
 }
+
+// A device that has never had an incident was up the whole time: 100%, not
+// 0%. (Postgres's GREATEST ignores NULLs, so the LEFT JOIN's empty row used
+// to count as one incident covering the whole window.)
+func TestDBAvailabilityWithoutIncidentsIs100(t *testing.T) {
+	db := testdb.Open(t)
+	s := seedDevice(t, db, "HQ", "10.0.0.30")
+	testdb.Exec(t, db, `UPDATE devices SET created_at = now() - interval '2 days' WHERE id = ?`, s.DeviceID)
+	svc := NewDeviceService(db, NewSNMPCredentialService(db), NewIncidentService(db))
+	v, err := svc.Get(context.Background(), s.DeviceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Availability30d == nil || *v.Availability30d != 100 {
+		t.Fatalf("availability without incidents = %v, want 100", v.Availability30d)
+	}
+}
