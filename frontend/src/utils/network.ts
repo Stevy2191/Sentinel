@@ -1,4 +1,5 @@
 import type { PortView } from '@/hooks/usePorts'
+import type { PortRole } from '@/hooks/useDevices'
 
 /** "940 Mb/s", "1.2 Gb/s", "12 kb/s"; "—" when unknown. */
 export function formatBps(bps: number | null | undefined): string {
@@ -56,6 +57,15 @@ export const EVENT_LABEL: Record<string, string> = {
   admin_down: 'Disabled',
 }
 
+/** What a port's role means, in the "Connects to" select and the port table. */
+export const PORT_ROLE_LABEL: Record<PortRole, string> = {
+  access: 'A device (camera, PC, AP…)',
+  uplink: 'Another of my network devices',
+  wan: 'The internet (WAN)',
+}
+
+export const PORT_ROLES: PortRole[] = ['access', 'uplink', 'wan']
+
 /** "Port 51 · Uplink To Quantum Gate". */
 export function portTitle(p: { number: number; alias?: string }): string {
   return p.alias ? `Port ${p.number} · ${p.alias}` : `Port ${p.number}`
@@ -65,4 +75,15 @@ export function portTitle(p: { number: number; alias?: string }): string {
 export function busiestUtil(p: Pick<PortView, 'in_util_pct' | 'out_util_pct'>): number | null {
   if (p.in_util_pct == null && p.out_util_pct == null) return null
   return Math.max(p.in_util_pct ?? 0, p.out_util_pct ?? 0)
+}
+
+/** "In 412 Mb/s · Out 88 Mb/s · 41% busy", for the faceplate hover; omits
+ *  whatever figure is not known, and is '' when none are. */
+export function portLiveDetail(p: Pick<PortView, 'in_bps' | 'out_bps' | 'in_util_pct' | 'out_util_pct'>): string {
+  const parts: string[] = []
+  if (p.in_bps != null) parts.push(`In ${formatBps(p.in_bps)}`)
+  if (p.out_bps != null) parts.push(`Out ${formatBps(p.out_bps)}`)
+  const busy = busiestUtil(p)
+  if (busy != null) parts.push(`${formatPct(busy)} busy`)
+  return parts.join(' · ')
 }

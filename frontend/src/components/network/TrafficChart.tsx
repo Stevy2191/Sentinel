@@ -10,7 +10,7 @@ export interface ChartLine {
   colour: string
 }
 
-type Unit = 'bps' | 'pct' | 'per_min'
+export type Unit = 'bps' | 'pct' | 'per_min'
 
 interface Props {
   title: string
@@ -28,12 +28,79 @@ function formatValue(v: number, unit: Unit): string {
   return `${+v.toFixed(1)}/min`
 }
 
-const SHORT: MetricsRange[] = ['1h', '6h', '24h']
+const ONE_DAY_MS = 24 * 60 * 60 * 1000
+
+/** A short tick shows the time of day, a long one the date. Decided from the
+ *  data's own span rather than a selected range, so this reads the same way
+ *  whichever caller (a range picker's state, or none at all) produced it. */
+function tick(t: number, data: Record<string, number>[]): string {
+  const span = data.length > 1 ? data[data.length - 1].t - data[0].t : 0
+  const d = new Date(t)
+  return span > 0 && span <= ONE_DAY_MS
+    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+}
+
+export interface AreaSeriesChartProps {
+  /** Each row has `t` (epoch ms) plus one number per line's metric key. */
+  data: Record<string, number>[]
+  lines: ChartLine[]
+  unit: Unit
+  /** Drawn as a dashed line, e.g. the nearly-full threshold. */
+  threshold?: number
+  /** The query's step, for the "Averaged per N minutes" note. */
+  step?: number
+}
+
+/** The chart body: a gradient-filled area chart plus its legend. Assumes
+ *  data.length > 0; callers handle their own loading/error/empty states. */
+export function AreaSeriesChart({ data, lines, unit, threshold, step }: AreaSeriesChartProps) {
+  const gid = useId().replace(/:/g, '')
+  return (
+    <div className="rounded-lg border border-white/10 bg-slate-800/40 p-4">
+      <div className="h-64">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={data} margin={{ top: 5, right: 10, bottom: 0, left: 0 }}>
+            <defs>
+              {lines.map((l) => (
+                <linearGradient key={l.metric} id={`${gid}-${l.metric}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={l.colour} stopOpacity={0.25} />
+                  <stop offset="95%" stopColor={l.colour} stopOpacity={0} />
+                </linearGradient>
+              ))}
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="#16303a" strokeOpacity={0.6} />
+            <XAxis dataKey="t" type="number" scale="time" domain={['dataMin', 'dataMax']} tickFormatter={(t: number) => tick(t, data)}
+              tick={{ fontSize: 10, fill: '#7A8A94' }} minTickGap={24} />
+            <YAxis tickFormatter={(v: number) => formatValue(v, unit)} tick={{ fontSize: 10, fill: '#7A8A94' }} width={68} />
+            <Tooltip
+              labelFormatter={(t: number) => new Date(t).toLocaleString()}
+              formatter={(v: number, name) => [formatValue(v, unit), lines.find((l) => l.metric === String(name))?.label ?? name]}
+              contentStyle={{ background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#e2e8f0' }}
+            />
+            {threshold != null && <ReferenceLine y={threshold} stroke="#eab308" strokeDasharray="4 4" />}
+            {lines.map((l) => (
+              <Area key={l.metric} type="monotone" dataKey={l.metric} stroke={l.colour} strokeWidth={2}
+                fill={`url(#${gid}-${l.metric})`} connectNulls={false} isAnimationActive={false} />
+            ))}
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-4 text-xs text-slate-400">
+        {lines.map((l) => (
+          <span key={l.metric} className="flex items-center gap-1.5">
+            <span className="h-0.5 w-4" style={{ background: l.colour }} aria-hidden /> {l.label}
+          </span>
+        ))}
+        {step != null && step > 60 && <span className="ml-auto text-slate-500">Averaged per {Math.round(step / 60)} minutes</span>}
+      </div>
+    </div>
+  )
+}
 
 /** A metrics chart with its own range picker. Several instances of one
  *  metric in the result (a device's ports) are added together. */
 export default function TrafficChart({ title, query, lines, unit, threshold, defaultRange = '24h' }: Props) {
-  const gid = useId().replace(/:/g, '')
   const [range, setRange] = useState<MetricsRange>(defaultRange)
   const metrics = lines.map((l) => l.metric)
   // Keyed by value: callers pass a fresh object every render.
@@ -53,13 +120,6 @@ export default function TrafficChart({ title, query, lines, unit, threshold, def
     }
     return [...rows.values()].sort((a, b) => a.t - b.t)
   }, [result])
-
-  const tick = (t: number) => {
-    const d = new Date(t)
-    return SHORT.includes(range)
-      ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      : d.toLocaleDateString([], { month: 'short', day: 'numeric' })
-  }
 
   return (
     <section>
@@ -89,46 +149,7 @@ export default function TrafficChart({ title, query, lines, unit, threshold, def
           No data in this range yet. Figures appear a minute or two after the first stats poll.
         </div>
       ) : (
-        <div className="rounded-lg border border-white/10 bg-slate-800/40 p-4">
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={data} margin={{ top: 5, right: 10, bottom: 0, left: 0 }}>
-                <defs>
-                  {lines.map((l) => (
-                    <linearGradient key={l.metric} id={`${gid}-${l.metric}`} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={l.colour} stopOpacity={0.25} />
-                      <stop offset="95%" stopColor={l.colour} stopOpacity={0} />
-                    </linearGradient>
-                  ))}
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#16303a" strokeOpacity={0.6} />
-                <XAxis dataKey="t" type="number" scale="time" domain={['dataMin', 'dataMax']} tickFormatter={tick}
-                  tick={{ fontSize: 10, fill: '#7A8A94' }} minTickGap={24} />
-                <YAxis tickFormatter={(v: number) => formatValue(v, unit)} tick={{ fontSize: 10, fill: '#7A8A94' }} width={68} />
-                <Tooltip
-                  labelFormatter={(t: number) => new Date(t).toLocaleString()}
-                  formatter={(v: number, name) => [formatValue(v, unit), lines.find((l) => l.metric === String(name))?.label ?? name]}
-                  contentStyle={{ background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#e2e8f0' }}
-                />
-                {threshold != null && <ReferenceLine y={threshold} stroke="#eab308" strokeDasharray="4 4" />}
-                {lines.map((l) => (
-                  <Area key={l.metric} type="monotone" dataKey={l.metric} stroke={l.colour} strokeWidth={2}
-                    fill={`url(#${gid}-${l.metric})`} connectNulls={false} isAnimationActive={false} />
-                ))}
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="mt-2 flex flex-wrap gap-4 text-xs text-slate-400">
-            {lines.map((l) => (
-              <span key={l.metric} className="flex items-center gap-1.5">
-                <span className="h-0.5 w-4" style={{ background: l.colour }} aria-hidden /> {l.label}
-              </span>
-            ))}
-            {result && result.step_seconds > 60 && (
-              <span className="ml-auto text-slate-500">Averaged per {Math.round(result.step_seconds / 60)} minutes</span>
-            )}
-          </div>
-        </div>
+        <AreaSeriesChart data={data} lines={lines} unit={unit} threshold={threshold} step={result?.step_seconds} />
       )}
     </section>
   )
