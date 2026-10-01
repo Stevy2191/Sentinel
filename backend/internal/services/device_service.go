@@ -70,11 +70,14 @@ func (s *DeviceService) SetMetricsStore(m *MetricsStore) { s.metrics = m }
 
 // availabilitySQL is the share of the last 30 days (or of the device's life,
 // if shorter) not covered by its incidents. NULL for a device younger than a
-// minute, where a percentage would mean nothing.
+// minute, where a percentage would mean nothing. The SUM is FILTERed to real
+// incident rows: with none, the LEFT JOIN yields one all-NULL row, and since
+// GREATEST ignores NULLs that row would count as the whole window down.
 const availabilitySQL = `(
 	SELECT CASE WHEN win.secs < 60 THEN NULL ELSE
 		GREATEST(0, 100 - 100 * COALESCE(SUM(EXTRACT(EPOCH FROM (
-			LEAST(COALESCE(i.end_time, now()), now()) - GREATEST(i.start_time, win.since)))), 0) / win.secs)
+			LEAST(COALESCE(i.end_time, now()), now()) - GREATEST(i.start_time, win.since))))
+			FILTER (WHERE i.id IS NOT NULL), 0) / win.secs)
 	END
 	FROM (SELECT GREATEST(d.created_at, now() - interval '30 days') AS since,
 	             EXTRACT(EPOCH FROM (now() - GREATEST(d.created_at, now() - interval '30 days'))) AS secs) win
