@@ -1,25 +1,21 @@
 import { useMemo, useState } from 'react'
-import { Plus, Router, Search } from 'lucide-react'
+import { Plus, Router } from 'lucide-react'
 import { useAuthContext } from '@/context/AuthContext'
 import { useSites } from '@/hooks/useSites'
-import { useDevices, type DeviceStatus } from '@/hooks/useDevices'
+import { useDevices } from '@/hooks/useDevices'
 import DeviceTable from '@/components/network/DeviceTable'
 import DeviceFormModal from '@/components/network/DeviceFormModal'
+import DeviceFilterBar from '@/components/network/DeviceFilterBar'
+import { filterDevices, NO_DEVICE_FILTERS } from '@/utils/devices'
 
 export default function Devices() {
   const { currentUser } = useAuthContext()
   const { sites } = useSites()
   const [siteId, setSiteId] = useState('')
-  const [status, setStatus] = useState<DeviceStatus | ''>('')
-  const [search, setSearch] = useState('')
+  const [filters, setFilters] = useState(NO_DEVICE_FILTERS)
   const [adding, setAdding] = useState(false)
-  const { devices, loading, error, refetch } = useDevices({ siteId: siteId || undefined, status: status || undefined })
-
-  const shown = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return devices
-    return devices.filter((d) => [d.name, d.host, d.vendor, d.model, d.site_name].some((v) => v?.toLowerCase().includes(q)))
-  }, [devices, search])
+  const { devices, loading, error, refetch } = useDevices({ siteId: siteId || undefined })
+  const shown = useMemo(() => filterDevices(devices, filters), [devices, filters])
 
   // Admins can add devices to any site from here. Everyone else adds them
   // from a site's page, which knows their access to that site.
@@ -39,16 +35,7 @@ export default function Devices() {
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2.5">
-        <div className="relative min-w-[220px] flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, address, vendor…"
-            className="w-full rounded-lg border border-white/10 bg-slate-900/60 py-2 pl-9 pr-3 text-sm text-white placeholder-slate-500"
-          />
-        </div>
+      <DeviceFilterBar filters={filters} onChange={setFilters}>
         <select className="rd-select" value={siteId} onChange={(e) => setSiteId(e.target.value)} aria-label="Filter by site">
           <option value="">All sites</option>
           {sites.map((s) => (
@@ -57,15 +44,7 @@ export default function Devices() {
             </option>
           ))}
         </select>
-        <select className="rd-select" value={status} onChange={(e) => setStatus(e.target.value as DeviceStatus | '')} aria-label="Filter by status">
-          <option value="">All statuses</option>
-          <option value="down">Down</option>
-          <option value="up">Up</option>
-          <option value="error">Error</option>
-          <option value="pending">Pending</option>
-          <option value="paused">Paused</option>
-        </select>
-      </div>
+      </DeviceFilterBar>
 
       {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">{error}</div>}
 
