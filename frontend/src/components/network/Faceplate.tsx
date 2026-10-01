@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import type { FaceBlock, FacePort, PortView, UnitFaceplate } from '@/hooks/usePorts'
 import { formatSpeed } from '@/hooks/useDevices'
@@ -103,22 +103,30 @@ function PortCell({
   onSelect: (ifIndex: number) => void
 }) {
   const ref = useRef<HTMLButtonElement>(null)
-  const [hover, setHover] = useState(false)
+  // Hover and keyboard focus are tracked separately: a mouse leaving a
+  // popover that was opened by tabbing to the port must not close it — only
+  // blur or Escape should. show is either one.
+  const [hovering, setHovering] = useState(false)
+  const [focused, setFocused] = useState(false)
   const state: PortState = port ? portState(port) : 'down'
   const util = port ? busiestUtil(port) : null
   const detail = port ? portTrafficText(port) : ''
   const label = port ? `${portTitle(port)}: ${PORT_STATE[state].label}${detail ? ` · ${detail}` : ''}` : `Port ${fp.number}`
-  const show = hover && !!port
+  const show = (hovering || focused) && !!port
+  const close = () => {
+    setHovering(false)
+    setFocused(false)
+  }
   return (
     <>
       <button
         ref={ref}
         type="button"
         onClick={() => onSelect(fp.if_index)}
-        onMouseEnter={() => setHover(true)}
-        onMouseLeave={() => setHover(false)}
-        onFocus={() => setHover(true)}
-        onBlur={() => setHover(false)}
+        onMouseEnter={() => setHovering(true)}
+        onMouseLeave={() => setHovering(false)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         aria-label={label}
         aria-pressed={selected}
         className={`relative h-5 ${sfp ? 'w-8' : 'w-6'} overflow-hidden rounded-sm transition hover:brightness-125 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${PORT_STATE[state].fill} ${selected ? 'ring-2 ring-sky-400' : ''}`}
@@ -128,7 +136,7 @@ function PortCell({
           <span className="absolute inset-x-0 bottom-0 bg-white/55" style={{ height: `${Math.min(100, Math.max(8, util))}%` }} />
         )}
       </button>
-      {show && port && <PortPopover anchorRef={ref} port={port} state={state} />}
+      {show && port && <PortPopover anchorRef={ref} port={port} state={state} onClose={close} />}
     </>
   )
 }
@@ -136,25 +144,54 @@ function PortCell({
 /** A themed popover, portalled to document.body and positioned with
  *  position: fixed from the hovered cell's own rect. A portal is required
  *  because the faceplate sits inside overflow-x-auto, which would clip an
- *  absolutely positioned child instead of letting it float above the row. */
-function PortPopover({ anchorRef, port, state }: { anchorRef: RefObject<HTMLButtonElement | null>; port: PortView; state: PortState }) {
+ *  absolutely positioned child instead of letting it float above the row.
+ *  Repositions on scroll (any ancestor, caught via the capture phase — scroll
+ *  does not bubble) and on resize while shown, and closes on Escape. */
+function PortPopover({
+  anchorRef,
+  port,
+  state,
+  onClose,
+}: {
+  anchorRef: RefObject<HTMLButtonElement | null>
+  port: PortView
+  state: PortState
+  onClose: () => void
+}) {
   const ref = useRef<HTMLDivElement>(null)
   const [style, setStyle] = useState<React.CSSProperties>({ position: 'fixed', top: 0, left: 0, visibility: 'hidden' })
 
   useLayoutEffect(() => {
-    const anchor = anchorRef.current
-    const pop = ref.current
-    if (!anchor || !pop) return
-    const a = anchor.getBoundingClientRect()
-    const p = pop.getBoundingClientRect()
-    const margin = 8
-    let top = a.top - p.height - margin
-    if (top < margin) top = a.bottom + margin // flip below near the top of the viewport
-    top = Math.min(top, window.innerHeight - p.height - margin)
-    let left = a.left + a.width / 2 - p.width / 2
-    left = Math.min(Math.max(left, margin), window.innerWidth - p.width - margin)
-    setStyle({ position: 'fixed', top, left, visibility: 'visible' })
+    const reposition = () => {
+      const anchor = anchorRef.current
+      const pop = ref.current
+      if (!anchor || !pop) return
+      const a = anchor.getBoundingClientRect()
+      const p = pop.getBoundingClientRect()
+      const margin = 8
+      let top = a.top - p.height - margin
+      if (top < margin) top = a.bottom + margin // flip below near the top of the viewport
+      top = Math.min(top, window.innerHeight - p.height - margin)
+      let left = a.left + a.width / 2 - p.width / 2
+      left = Math.min(Math.max(left, margin), window.innerWidth - p.width - margin)
+      setStyle({ position: 'fixed', top, left, visibility: 'visible' })
+    }
+    reposition()
+    window.addEventListener('scroll', reposition, true)
+    window.addEventListener('resize', reposition)
+    return () => {
+      window.removeEventListener('scroll', reposition, true)
+      window.removeEventListener('resize', reposition)
+    }
   }, [anchorRef])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
 
   const rows = portTraffic(port)
   const speed = port.oper_status === 'up' ? formatSpeed(port.speed_bps) : null

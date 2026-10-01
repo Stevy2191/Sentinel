@@ -136,6 +136,22 @@ func TestLayoutUnitsStack(t *testing.T) {
 	}
 }
 
+// Fix round 1, plan-mandated 4: a physical port with no unit in its name on
+// an otherwise-stacked device (e.g. a Cisco FastEthernet0 management port)
+// gets UnitNumber 0 same as on a non-stacked device, but must not get its
+// own one-port "Switch 0" faceplate — it still shows in the port table
+// (DevicePorts' Ports list is built independently of LayoutUnits).
+func TestLayoutUnitsStackedDropsUnitZero(t *testing.T) {
+	fixture := append(stackedSwitch(), fixtureIf{1000, "FastEthernet0", "", 6})
+	faces := LayoutUnits(stackLayoutPorts(fixture), nil, nil)
+	if len(faces) != 2 {
+		t.Fatalf("faces %d, want 2 (unit 0 dropped)", len(faces))
+	}
+	if faces[0].Unit != 1 || faces[0].Label != "Switch 1" || faces[1].Unit != 2 || faces[1].Label != "Switch 2" {
+		t.Errorf("faces %+v", faces)
+	}
+}
+
 // The USW-Pro-48 (0/N names, not a stack) yields one faceplate with no label.
 func TestLayoutUnitsNotStacked(t *testing.T) {
 	faces := LayoutUnits(stackLayoutPorts(uswPro48()), nil, nil)

@@ -151,11 +151,18 @@ type PortView struct {
 	InUtilPct    *float64 `json:"in_util_pct"`
 	OutUtilPct   *float64 `json:"out_util_pct"`
 	ErrorsPerMin *float64 `json:"errors_per_min"`
-	// NeighborDeviceName and NeighborPortLabel describe NeighborDeviceID /
-	// NeighborIfIndex (from the embedded DeviceInterface); resolved by
-	// resolveNeighbors, empty when there is no neighbor.
+	// NeighborDeviceName and the NeighborPort* fields describe NeighborDeviceID
+	// / NeighborIfIndex (from the embedded DeviceInterface); resolved by
+	// resolveNeighbors. Structured, not a preformatted string, so the
+	// frontend can format it with the same portTitle it uses everywhere
+	// else (the device/port picker and the saved text then read exactly the
+	// same way). NeighborPortNumber is nil when the far port isn't known
+	// (no neighbor, or its if_index didn't resolve to a present interface);
+	// NeighborPortUnit/Alias are meaningless until it is set.
 	NeighborDeviceName string `json:"neighbor_device_name"`
-	NeighborPortLabel  string `json:"neighbor_port_label"`
+	NeighborPortNumber *int   `json:"neighbor_port_number"`
+	NeighborPortUnit   int    `json:"neighbor_port_unit"`
+	NeighborPortAlias  string `json:"neighbor_port_alias"`
 }
 
 // PortDefaults are the instance thresholds a port uses when it has no
@@ -243,17 +250,22 @@ func (s *PortService) DevicePorts(ctx context.Context, d *DeviceView) (*DevicePo
 			layout = append(layout, portmon.LayoutPort{IfIndex: r.IfIndex, Name: r.Name, Descr: r.Descr, Unit: r.StackUnit})
 		}
 	}
-	if err := s.resolveNeighbors(ctx, out.Ports); err != nil {
+	if err := s.resolveNeighbors(ctx, d.SiteID, out.Ports); err != nil {
 		return nil, err
 	}
 	out.Faceplates = portmon.LayoutUnits(layout, d.FaceplateRows, d.FaceplateSFPPorts)
 	return out, nil
 }
 
-// resolveNeighbors fills in NeighborDeviceName and NeighborPortLabel for
-// every port in views that has a neighbor, with (at most) one query for the
-// neighbor devices and one for their ports — not one per port.
-func (s *PortService) resolveNeighbors(ctx context.Context, views []PortView) error {
+// resolveNeighbors fills in NeighborDeviceName and the NeighborPort* fields
+// for every port in views that has a neighbor, with (at most) one query for
+// the neighbor devices and one for their ports — not one per port. A
+// neighbor outside siteID (the viewed device's own site) gets no name or
+// port fields: a link only ever makes sense within one site (UpdatePort
+// enforces this when a link is made, and a site move clears both sides), so
+// a cross-site neighbor_device_id can only be stale or foreign data, never
+// shown as if it still applied.
+func (s *PortService) resolveNeighbors(ctx context.Context, siteID uuid.UUID, views []PortView) error {
 	deviceIDSet := map[uuid.UUID]bool{}
 	for _, v := range views {
 		if v.NeighborDeviceID != nil {
@@ -268,16 +280,23 @@ func (s *PortService) resolveNeighbors(ctx context.Context, views []PortView) er
 		deviceIDs = append(deviceIDs, id)
 	}
 	var devices []models.Device
-	if err := s.db.WithContext(ctx).Select("id", "name").Where("id IN ?", deviceIDs).Find(&devices).Error; err != nil {
+	// Only devices in the same site as the one being viewed: a cross-site
+	// neighbor_device_id is never shown, so there is nothing to look up for
+	// one, and its ports are not even fetched below.
+	if err := s.db.WithContext(ctx).Select("id", "name").Where("id IN ? AND site_id = ?", deviceIDs, siteID).Find(&devices).Error; err != nil {
 		return fmt.Errorf("loading neighbor devices: %w", err)
 	}
 	nameByID := make(map[uuid.UUID]string, len(devices))
+	sameSiteIDs := make([]uuid.UUID, 0, len(devices))
 	for _, d := range devices {
 		nameByID[d.ID] = d.Name
+		sameSiteIDs = append(sameSiteIDs, d.ID)
 	}
 	var neighborPorts []models.DeviceInterface
-	if err := s.db.WithContext(ctx).Where("device_id IN ?", deviceIDs).Find(&neighborPorts).Error; err != nil {
-		return fmt.Errorf("loading neighbor ports: %w", err)
+	if len(sameSiteIDs) > 0 {
+		if err := s.db.WithContext(ctx).Where("device_id IN ?", sameSiteIDs).Find(&neighborPorts).Error; err != nil {
+			return fmt.Errorf("loading neighbor ports: %w", err)
+		}
 	}
 	type portKey struct {
 		deviceID uuid.UUID
@@ -292,29 +311,21 @@ func (s *PortService) resolveNeighbors(ctx context.Context, views []PortView) er
 		if v.NeighborDeviceID == nil {
 			continue
 		}
-		v.NeighborDeviceName = nameByID[*v.NeighborDeviceID]
+		name, ok := nameByID[*v.NeighborDeviceID]
+		if !ok {
+			continue // a different site (or gone): show no name or label
+		}
+		v.NeighborDeviceName = name
 		if v.NeighborIfIndex != nil {
 			if np, ok := portByKey[portKey{*v.NeighborDeviceID, *v.NeighborIfIndex}]; ok {
-				v.NeighborPortLabel = neighborPortLabel(np)
+				num := portmon.PortNumber(np.Name, np.Descr, np.IfIndex)
+				v.NeighborPortNumber = &num
+				v.NeighborPortUnit = np.StackUnit
+				v.NeighborPortAlias = np.Alias
 			}
 		}
 	}
 	return nil
-}
-
-// neighborPortLabel is the far port's title for the "Connects to" line:
-// "Port 10" or (stacked) "Switch 2 · Port 12", plus " (alias)" when it has
-// one.
-func neighborPortLabel(i models.DeviceInterface) string {
-	num := portmon.PortNumber(i.Name, i.Descr, i.IfIndex)
-	label := fmt.Sprintf("Port %d", num)
-	if i.StackUnit > 0 {
-		label = fmt.Sprintf("Switch %d · Port %d", i.StackUnit, num)
-	}
-	if i.Alias != "" {
-		label += fmt.Sprintf(" (%s)", i.Alias)
-	}
-	return label
 }
 
 // Port is one interface with live figures and its open incidents.
@@ -338,7 +349,7 @@ func (s *PortService) Port(ctx context.Context, d *DeviceView, ifIndex int) (*Po
 		open = []models.Incident{}
 	}
 	views := []PortView{toPortView(rows[0], latest[d.ID])}
-	if err := s.resolveNeighbors(ctx, views); err != nil {
+	if err := s.resolveNeighbors(ctx, d.SiteID, views); err != nil {
 		return nil, err
 	}
 	return &PortDetailView{PortView: views[0], Defaults: s.defaults(ctx), OpenIncidents: open}, nil
@@ -403,22 +414,38 @@ func (s *PortService) UpdatePort(ctx context.Context, deviceID uuid.UUID, ifInde
 	}
 	newNeighborIfIndex := before.NeighborIfIndex
 	switch {
-	case clearingRole:
-		newNeighborDevice, newNeighborIfIndex = nil, nil
 	case p.NeighborIfIndex.Set:
 		newNeighborIfIndex = p.NeighborIfIndex.Value
 	case p.NeighborDeviceID.Set:
 		newNeighborIfIndex = nil
 	}
-	touchedNeighbor := p.NeighborDeviceID.Set || p.NeighborIfIndex.Set || clearingRole
 
-	// A neighbor port never makes sense without a neighbor device: PortPatch
-	// validates this when the patch itself sets neighbor_device_id to null,
-	// but a patch that sets neighbor_if_index alone (no existing neighbor
-	// device stored either) reaches here instead.
-	if newNeighborDevice == nil && newNeighborIfIndex != nil {
+	// A neighbor port never makes sense without a neighbor device. This only
+	// fires when the patch itself gives neighbor_if_index: a stale if_index
+	// left behind by something else entirely (most notably the neighbor
+	// device's own deletion, whose ON DELETE SET NULL only nulls
+	// neighbor_device_id, not neighbor_if_index) must not block an unrelated
+	// later patch — that stale value is cleaned up below instead, not
+	// treated as if this patch tried to set it.
+	if p.NeighborIfIndex.Set && newNeighborDevice == nil && newNeighborIfIndex != nil {
 		return nil, nil, ErrPortNeighborInvalid
 	}
+
+	if clearingRole {
+		newNeighborDevice, newNeighborIfIndex = nil, nil
+	}
+	// A nil neighbor device makes any stored if_index meaningless: force it
+	// to nil too, whatever put it there. Besides keeping the two columns
+	// consistent, this is what self-heals a stale neighbor_if_index (see
+	// above) the next time anything touches the port.
+	if newNeighborDevice == nil {
+		newNeighborIfIndex = nil
+	}
+	// touchedNeighbor also covers that self-heal: a patch that never
+	// mentions role or the neighbor fields still needs its write to include
+	// the cleanup when before.NeighborIfIndex was stale.
+	touchedNeighbor := p.NeighborDeviceID.Set || p.NeighborIfIndex.Set || clearingRole ||
+		(newNeighborDevice == nil && before.NeighborIfIndex != nil)
 
 	if newNeighborDevice != nil {
 		if *newNeighborDevice == deviceID {
@@ -485,12 +512,16 @@ func (s *PortService) UpdatePort(ctx context.Context, deviceID uuid.UUID, ifInde
 				return err
 			}
 		}
-		if linkChanged && oldNeighborDevice != nil && oldNeighborIfIndex != nil {
-			// A far port only clears if it still points back at exactly this
-			// port: it may have been repointed elsewhere since.
+		if linkChanged && oldNeighborDevice != nil {
+			// Clear every port on the OLD neighbor device that points back
+			// at exactly this port — found by what it points at, not by
+			// trusting this port's own (possibly unknown, or since-changed)
+			// stored neighbor_if_index for the far side. A device-only link
+			// (no neighbor_if_index chosen here) still needs this: the far
+			// device may have separately pointed one of its own ports back
+			// here.
 			if err := tx.Model(&models.DeviceInterface{}).
-				Where("device_id = ? AND if_index = ? AND neighbor_device_id = ? AND neighbor_if_index = ?",
-					*oldNeighborDevice, *oldNeighborIfIndex, deviceID, ifIndex).
+				Where("device_id = ? AND neighbor_device_id = ? AND neighbor_if_index = ?", *oldNeighborDevice, deviceID, ifIndex).
 				Updates(map[string]any{"neighbor_device_id": nil, "neighbor_if_index": nil, "role": models.PortRoleAccess, "updated_at": now}).Error; err != nil {
 				return fmt.Errorf("clearing the far port: %w", err)
 			}

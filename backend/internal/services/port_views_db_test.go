@@ -89,14 +89,48 @@ func TestDBDevicePortsViewResolvesNeighbor(t *testing.T) {
 			p49 = p
 		}
 	}
-	if p49.NeighborDeviceName != "Quantum-Gate" || p49.NeighborPortLabel != "Port 10 (Core uplink)" {
-		t.Errorf("port 49 neighbor: name %q label %q", p49.NeighborDeviceName, p49.NeighborPortLabel)
+	if p49.NeighborDeviceName != "Quantum-Gate" || p49.NeighborPortNumber == nil || *p49.NeighborPortNumber != 10 ||
+		p49.NeighborPortUnit != 0 || p49.NeighborPortAlias != "Core uplink" {
+		t.Errorf("port 49 neighbor: %+v", p49)
 	}
 
 	detail, err := ports.Port(ctx, d, 49)
 	testdb.Must(t, err)
-	if detail.NeighborDeviceName != "Quantum-Gate" || detail.NeighborPortLabel != "Port 10 (Core uplink)" {
-		t.Errorf("port detail neighbor: name %q label %q", detail.NeighborDeviceName, detail.NeighborPortLabel)
+	if detail.NeighborDeviceName != "Quantum-Gate" || detail.NeighborPortNumber == nil || *detail.NeighborPortNumber != 10 ||
+		detail.NeighborPortUnit != 0 || detail.NeighborPortAlias != "Core uplink" {
+		t.Errorf("port detail neighbor: %+v", detail)
+	}
+}
+
+// Fix round 1, Important 3: resolveNeighbors must not show a name or label
+// for a neighbor outside this device's site — defense in depth beyond
+// UpdatePort's same-site validation and DeviceService.Update's clearing on a
+// site move, for any row that ends up cross-site regardless (e.g. legacy
+// data, or a direct database edit).
+func TestDBDevicePortsViewHidesCrossSiteNeighbor(t *testing.T) {
+	ports, _, d, _ := portsFixture(t)
+	ctx := context.Background()
+	other := seedDevice(t, ports.db, "Branch", "10.0.0.9")
+	testdb.Exec(t, ports.db, `UPDATE devices SET name = 'Branch-Core' WHERE id = ?`, other.DeviceID)
+	testdb.Exec(t, ports.db, `UPDATE device_interfaces SET role = 'uplink', neighbor_device_id = ? WHERE device_id = ? AND if_index = 1`,
+		other.DeviceID, d.ID)
+
+	v, err := ports.DevicePorts(ctx, d)
+	testdb.Must(t, err)
+	var p1 PortView
+	for _, p := range v.Ports {
+		if p.IfIndex == 1 {
+			p1 = p
+		}
+	}
+	if p1.NeighborDeviceName != "" || p1.NeighborPortNumber != nil {
+		t.Errorf("cross-site neighbor should show no name or port: %+v", p1)
+	}
+
+	detail, err := ports.Port(ctx, d, 1)
+	testdb.Must(t, err)
+	if detail.NeighborDeviceName != "" || detail.NeighborPortNumber != nil {
+		t.Errorf("cross-site neighbor (port detail) should show no name or port: %+v", detail)
 	}
 }
 

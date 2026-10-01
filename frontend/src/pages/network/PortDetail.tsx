@@ -40,7 +40,8 @@ function connectsToNode(port: Port): ReactNode {
       {PORT_ROLE_LABEL.uplink} →{' '}
       <Link to={to} className="text-primary-400 hover:underline">
         {port.neighbor_device_name || 'that device'}
-        {port.neighbor_port_label && ` · ${port.neighbor_port_label}`}
+        {port.neighbor_port_number != null &&
+          ` · ${portTitle({ number: port.neighbor_port_number, alias: port.neighbor_port_alias, stack_unit: port.neighbor_port_unit })}`}
       </Link>
     </>
   )
@@ -55,7 +56,7 @@ function ConnectsToForm({ port, deviceId, siteId, onSaved }: { port: Port; devic
   const [neighborIfIndex, setNeighborIfIndex] = useState(port.neighbor_if_index != null ? String(port.neighbor_if_index) : '')
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const { devices } = useDevices({ siteId })
+  const { devices } = useDevices({ siteId, skip: !siteId })
   const { data: neighborPorts } = useDevicePorts(role === 'uplink' && neighborId ? neighborId : undefined)
 
   const save = async (e: React.FormEvent) => {
@@ -129,7 +130,7 @@ function ConnectsToForm({ port, deviceId, siteId, onSaved }: { port: Port; devic
               <select value={neighborIfIndex} disabled={busy} onChange={(e) => setNeighborIfIndex(e.target.value)} className={selectCls}>
                 <option value="">Not sure</option>
                 {(neighborPorts?.ports ?? [])
-                  .filter((p) => p.present)
+                  .filter((p) => p.present && p.physical)
                   .map((p) => (
                     <option key={p.if_index} value={p.if_index}>
                       {portTitle(p)}

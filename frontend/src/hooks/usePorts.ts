@@ -16,7 +16,13 @@ export interface PortView extends DeviceInterface {
   out_util_pct: number | null
   errors_per_min: number | null
   neighbor_device_name: string
-  neighbor_port_label: string
+  // Structured, not a preformatted string: format with portTitle, the same
+  // helper the device/port picker uses, so the picker and the saved text
+  // read exactly the same way. neighbor_port_number is null when the far
+  // port isn't known (no neighbor, or its if_index didn't resolve).
+  neighbor_port_number: number | null
+  neighbor_port_unit: number
+  neighbor_port_alias: string
 }
 
 export interface FacePort {
