@@ -79,3 +79,24 @@ func TestSimFailures(t *testing.T) {
 		t.Errorf("failures took %s; timeouts not honoured", time.Since(start))
 	}
 }
+
+// Counters read through ReadStats move between two polls, and the profile's
+// down ports (every third) read as down.
+func TestSimStatsCountersIncrease(t *testing.T) {
+	tg := simTarget(t, Credential{Version: "2c", Community: "edgeswitch"})
+	a, err := ReadStats(context.Background(), GoSNMPClient{}, tg, []int{1, 3}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Second)
+	b, err := ReadStats(context.Background(), GoSNMPClient{}, tg, []int{1, 3}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !a[1].HaveOctets || !a[1].OperUp || b[1].InOctets <= a[1].InOctets || a[1].SpeedBps != 1_000_000_000 {
+		t.Errorf("port 1: %+v then %+v", a[1], b[1])
+	}
+	if a[3].OperUp {
+		t.Errorf("port 3 should be down: %+v", a[3])
+	}
+}

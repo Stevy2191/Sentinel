@@ -136,6 +136,9 @@ func run() error {
 	siteService := services.NewSiteService(db)
 	snmpCredentialService := services.NewSNMPCredentialService(db)
 	deviceService := services.NewDeviceService(db, snmpCredentialService, incidentService)
+	metricsStore := services.NewMetricsStore(db)
+	portService := services.NewPortService(db, metricsStore, incidentService, settingsService)
+	networkSettings := services.NewNetworkSettingsService(settingsService, metricsStore)
 	snmpClient := snmp.GoSNMPClient{}
 	prober := services.NewProber(snmpCredentialService, snmpClient)
 	scanManager := services.NewScanManager(prober)
@@ -206,6 +209,16 @@ func run() error {
 	if _, err := settingsService.SeedInt(settingsCtx, models.SettingIncidentRetentionDays,
 		models.DefaultIncidentRetentionDays); err != nil {
 		return fmt.Errorf("seeding incident retention: %w", err)
+	}
+	for key, def := range map[string]int{
+		models.SettingMetricsRawRetentionDays:  models.DefaultMetricsRawRetentionDays,
+		models.SettingPortErrorThresholdPerMin: models.DefaultPortErrorThresholdPerMin,
+		models.SettingPortUtilThresholdPct:     models.DefaultPortUtilThresholdPct,
+		models.SettingPortDownGraceSeconds:     models.DefaultPortDownGraceSeconds,
+	} {
+		if _, err := settingsService.SeedInt(settingsCtx, key, def); err != nil {
+			return fmt.Errorf("seeding %s: %w", key, err)
+		}
 	}
 
 	// Say so when the environment disagrees with what is stored. The stored
@@ -330,6 +343,8 @@ func run() error {
 	api.RegisterSNMPCredentialRoutes(v1, snmpCredentialService, siteService, auditService, authService)
 	api.RegisterDeviceRoutes(v1, deviceService, prober, siteService, auditService)
 	api.RegisterScanRoutes(v1, scanManager, snmpCredentialService, deviceService, siteService, auditService)
+	api.RegisterPortRoutes(v1, deviceService, portService, siteService, auditService)
+	api.RegisterNetworkRoutes(v1, deviceService, portService, metricsStore, networkSettings, siteService, authService)
 	api.RegisterSystemRoutes(v1, hostSampler, version)
 	// Per-user theme (not admin-gated): only AuthMiddleware applies.
 	// Self password change (any authenticated user).
@@ -372,7 +387,13 @@ func run() error {
 	go hostSampler.Start(loopCtx)
 	pollWorkers := settingsService.GetInt(context.Background(), models.SettingSNMPPollWorkers, 16)
 	devicePoller := services.NewDevicePoller(deviceService, snmpClient, incidentService, notificationManager, pollWorkers)
+	devicePoller.SetPortStats(services.NewPortMonitor(portService, metricsStore, incidentService, notificationManager, snmpClient, settingsService))
 	go devicePoller.Start(loopCtx)
+	// A restored config may carry a different retention than the live policy.
+	if err := networkSettings.EnsureRetention(context.Background()); err != nil {
+		log.Printf("warning: could not apply the metrics retention setting: %v", err)
+	}
+	go services.NewNetworkMaintenance(metricsStore, settingsService).Start(loopCtx)
 
 	// 9. HTTP server.
 	server := &http.Server{

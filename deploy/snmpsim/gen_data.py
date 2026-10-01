@@ -24,6 +24,29 @@ def system(descr, objid, name, location, uptime_ticks):
     ]
 
 
+def octets(oid, tag, rate):
+    """An octet counter growing at `rate` bytes/s (numeric variation module);
+    a static 0 for a port with no traffic.
+
+    No `cumulative`: snmpsim's numeric module, in cumulative mode, adds
+    rate * (time since the simulator booted) to the *previous* stored value
+    on every read (variation/numeric.py's variate(), the `cumulative`
+    branch) rather than rate * (time since the previous read) - so the
+    counter compounds and runs away (confirmed: two reads 3s apart moved by
+    tens of thousands, not ~37500, and the gap widened on every further
+    read). Dropping `cumulative` uses the module's plain path instead: each
+    read recomputes value = rate * (time since boot) from scratch with no
+    carried state, which is exactly a counter increasing at a steady
+    `rate` bytes/s - confirmed against a live container to move by
+    `rate * elapsed` between two reads, and to still count up correctly
+    across a 32-bit wrap.
+    """
+    if rate == 0:
+        return [f"{oid}|{tag}|0"]
+    wrap = ",wrap=1,max=4294967295" if tag == 65 else ""
+    return [f"{oid}|{tag}:numeric|rate={rate},initial=0{wrap}"]
+
+
 def ports(n, name_fmt, descr_fmt, speed_bps, xtable=True, mac_base=0x788A20000000):
     rows = []
     for i in range(1, n + 1):
@@ -39,6 +62,11 @@ def ports(n, name_fmt, descr_fmt, speed_bps, xtable=True, mac_base=0x788A2000000
             f"{t}.7.{i}|2|{admin}",
             f"{t}.8.{i}|2|{up if admin == 1 else 2}",
             f"{t}.9.{i}|67|{1000 * i}",
+            # Traffic: up ports move (i * 12.5 kB/s in, a quarter of that out),
+            # via snmpsim's numeric variation module; errors/discards stay 0.
+            *octets(f"{t}.10.{i}", 65, i * 12_500 if up == 1 and admin == 1 else 0),
+            *octets(f"{t}.16.{i}", 65, i * 3_125 if up == 1 and admin == 1 else 0),
+            f"{t}.13.{i}|65|0", f"{t}.14.{i}|65|0", f"{t}.19.{i}|65|0", f"{t}.20.{i}|65|0",
         ]
         if xtable:
             x = "1.3.6.1.2.1.31.1.1.1"
@@ -46,6 +74,9 @@ def ports(n, name_fmt, descr_fmt, speed_bps, xtable=True, mac_base=0x788A2000000
                 f"{x}.1.{i}|4|{name_fmt.format(i=i)}",
                 f"{x}.15.{i}|66|{speed_bps // 1_000_000}",
                 f"{x}.18.{i}|4|{'Uplink to MDF' if i == 1 else ''}",
+                *octets(f"{x}.6.{i}", 70, i * 12_500 if up == 1 and admin == 1 else 0),
+                *octets(f"{x}.10.{i}", 70, i * 3_125 if up == 1 and admin == 1 else 0),
+                f"{x}.17.{i}|2|1",
             ]
     return rows
 
