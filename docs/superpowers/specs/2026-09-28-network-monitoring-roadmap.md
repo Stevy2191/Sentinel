@@ -164,6 +164,12 @@ Depends on: 2.
 - Every widget picks its data from the generic model: any metric, any device
   or site, with a time range.
 
+- **Site power widget** (asked for 2026-10-01, first listed under Later):
+  every UPS in a site at a glance — on mains or on battery, charge, runtime
+  left, load and open UPS alerts — built on UPS monitoring
+  (`2026-10-01-ups-monitoring-design.md`), whose readings and alerts already
+  exist.
+
 Depends on: 2. Most useful once 3 exists.
 
 ### Phase 5 — Metric reports
@@ -219,13 +225,7 @@ Wanted, but not designed yet:
 
 - Running a dashboard as a report (its widgets rendered into the PDF).
 - A geographic multi-site view.
-- **A site Power page** (asked for 2026-10-01). From a site, a Power option
-  lists every UPS in that site at a glance: on mains or on battery, charge,
-  runtime left, load, and any open UPS alerts — one screen to check during
-  an outage instead of opening each UPS. It builds on UPS monitoring
-  (`2026-10-01-ups-monitoring-design.md`, shipped to `dev`): the readings,
-  alerts and Power panel styling exist; what is new is the site page and one
-  request that returns every UPS in the site together.
+
 
 ## Order and milestones
 
