@@ -9,7 +9,7 @@ func strp(s string) *string { return &s }
 
 func TestNormalizeSiteInput(t *testing.T) {
 	t.Run("trims name and optional fields", func(t *testing.T) {
-		got, err := NormalizeSiteInput(SiteInput{Name: "  HQ  ", Description: strp("  main office "), Address: strp("  ")})
+		got, err := NormalizeSiteInput(SiteInput{Name: "  HQ  ", Description: strp("  main office "), Street: strp("  ")})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -21,8 +21,19 @@ func TestNormalizeSiteInput(t *testing.T) {
 		}
 		// A blank optional field is stored as NULL, not as an empty string, so
 		// "no address" has one representation.
-		if got.Address != nil {
-			t.Errorf("address = %q, want nil", *got.Address)
+		if got.Street != nil {
+			t.Errorf("street = %q, want nil", *got.Street)
+		}
+	})
+
+	t.Run("address parts are trimmed, blanks become nil", func(t *testing.T) {
+		got, err := NormalizeSiteInput(SiteInput{Name: "HQ", Street: strp(" 12 Main St "), City: strp(" Springfield"),
+			State: strp("IL "), Zip: strp("  ")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if *got.Street != "12 Main St" || *got.City != "Springfield" || *got.State != "IL" || got.Zip != nil {
+			t.Errorf("got %+v", got)
 		}
 	})
 

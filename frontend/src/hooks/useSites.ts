@@ -9,7 +9,10 @@ export interface Site {
   id: string
   name: string
   description: string | null
-  address: string | null
+  street: string | null
+  city: string | null
+  state: string | null
+  zip: string | null
   created_by: string | null
   created_at: string
   updated_at: string
@@ -24,7 +27,18 @@ export interface SiteDetail extends Site {
 export interface SiteInput {
   name: string
   description: string | null
-  address: string | null
+  street: string | null
+  city: string | null
+  state: string | null
+  zip: string | null
+}
+
+/** A site's address as the lines of a postal address block: the street,
+ *  then "City, ST 12345". Empty when no part is set. */
+export function siteAddressLines(s: Pick<Site, 'street' | 'city' | 'state' | 'zip'>): string[] {
+  const region = [s.state, s.zip].filter(Boolean).join(' ')
+  const locality = [s.city, region].filter(Boolean).join(', ')
+  return [s.street, locality].filter((l): l is string => !!l)
 }
 
 export interface SiteShare {
