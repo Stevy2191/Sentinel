@@ -50,6 +50,8 @@ export interface Device {
   faceplate_rows: number | null
   faceplate_sfp_ports: number[] | null
   faceplate_port_style: 'sfp' | 'rj45' | null
+  ups_low_battery_pct: number | null
+  ups_high_load_pct: number | null
   last_stats_at: string | null
   last_stats_duration_ms: number | null
   /** The override when set, else what SNMP reported. */

@@ -4,13 +4,14 @@ import { AlertTriangle, CheckCircle2, Loader2, Pause, Pencil, Play, RefreshCw, S
 import { useSite } from '@/hooks/useSites'
 import { DEVICE_TYPE_LABEL, formatSpeed, useDevice, useDeviceActions, type Device } from '@/hooks/useDevices'
 import { useIncidents, formatDuration, DEFAULT_FILTERS } from '@/hooks/useIncidents'
-import { useDevicePorts, usePortEvents, type PortView } from '@/hooks/usePorts'
+import { useDevicePorts, usePortEvents, useUPSStatus, type PortView } from '@/hooks/usePorts'
 import { useRefreshWatch } from '@/hooks/useRefreshWatch'
 import DeviceStatusBadge from '@/components/network/DeviceStatusBadge'
 import DeviceFormModal from '@/components/network/DeviceFormModal'
 import EditDetailsModal from '@/components/network/EditDetailsModal'
 import Faceplate, { FaceplateLegend } from '@/components/network/Faceplate'
 import TrafficChart from '@/components/network/TrafficChart'
+import UPSPanel from '@/components/network/UPSPanel'
 import PortTable from '@/components/network/PortTable'
 import PortEventList from '@/components/network/PortEventList'
 import { CONDITION_LABEL, PORT_STATE, portState, portTitle, portTraffic, WARNING_CONDITIONS } from '@/utils/network'
@@ -79,6 +80,8 @@ export default function DeviceDetail() {
   const { site } = useSite(device?.site_id)
   const { data: portsView, refetch: refetchPorts } = useDevicePorts(id)
   const { events } = usePortEvents({ deviceId: id }, 15)
+  const deviceIsUPS = (device?.effective_type ?? device?.device_type_detected) === 'ups'
+  const { data: upsStatus } = useUPSStatus(id, deviceIsUPS)
   const { incidents } = useIncidents({ ...DEFAULT_FILTERS, limit: 10, deviceId: id })
   const { update, remove, refresh, busy } = useDeviceActions()
   const [editing, setEditing] = useState(false)
@@ -253,6 +256,8 @@ export default function DeviceDetail() {
         </section>
       )}
 
+      {deviceIsUPS && <UPSPanel deviceId={device.id} status={upsStatus} />}
+
       <TrafficChart title="Traffic" query={{ deviceIds: [device.id], sum: true, physicalOnly: true }} lines={TRAFFIC_LINES} unit="bps" />
 
       <PortTable deviceId={device.id} ports={ports} canEdit={canEdit} inventoried={!!device.last_inventory_at} onChanged={() => void refetchPorts()} />
@@ -287,7 +292,10 @@ export default function DeviceDetail() {
         <DeviceFormModal initial={device} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); void refetch() }} />
       )}
       {editingDetails && (
-        <EditDetailsModal device={device} onClose={() => setEditingDetails(false)} onSaved={() => { setEditingDetails(false); void refetch(); void refetchPorts() }} />
+        <EditDetailsModal
+          device={device}
+          upsDefaults={upsStatus ? { low: upsStatus.default_low_battery_pct, high: upsStatus.default_high_load_pct } : undefined}
+          onClose={() => setEditingDetails(false)} onSaved={() => { setEditingDetails(false); void refetch(); void refetchPorts() }} />
       )}
     </div>
   )

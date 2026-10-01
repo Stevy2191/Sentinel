@@ -158,6 +158,8 @@ export interface DeviceDetailsPatch {
   faceplate_rows?: number | null
   faceplate_sfp_ports?: number[] | null
   faceplate_port_style?: FaceplatePortStyle | null
+  ups_low_battery_pct?: number | null
+  ups_high_load_pct?: number | null
 }
 
 /** How the faceplate draws the main ports; null on the device is Auto. */
@@ -207,6 +209,31 @@ function useResource<T>(url: string | null, params: Record<string, string | numb
 /** A device's ports, faceplate and default thresholds, every minute. */
 export function useDevicePorts(deviceId: string | undefined) {
   return useResource<DevicePorts>(deviceId ? `/devices/${deviceId}/ports` : null, undefined, LIVE_MS)
+}
+
+/** GET /devices/:id/ups: latest UPS-MIB readings (metric key -> value,
+ *  absent when not reported recently), open UPS conditions, thresholds. */
+export interface UPSStatus {
+  readings: Partial<Record<UPSMetric, number>>
+  conditions: string[]
+  low_battery_pct: number
+  high_load_pct: number
+  default_low_battery_pct: number
+  default_high_load_pct: number
+}
+
+export type UPSMetric =
+  | 'ups_charge_pct'
+  | 'ups_runtime_min'
+  | 'ups_load_pct'
+  | 'ups_input_v'
+  | 'ups_output_v'
+  | 'ups_battery_temp_c'
+  | 'ups_on_battery'
+  | 'ups_battery_status'
+
+export function useUPSStatus(deviceId: string | undefined, enabled: boolean) {
+  return useResource<UPSStatus>(deviceId && enabled ? `/devices/${deviceId}/ups` : null, undefined, LIVE_MS)
 }
 
 export function usePort(deviceId: string | undefined, ifIndex: string | undefined) {
