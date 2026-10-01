@@ -41,7 +41,7 @@ function connectsToNode(port: Port): ReactNode {
       <Link to={to} className="text-primary-400 hover:underline">
         {port.neighbor_device_name || 'that device'}
         {port.neighbor_port_number != null &&
-          ` · ${portTitle({ number: port.neighbor_port_number, alias: port.neighbor_port_alias, stack_unit: port.neighbor_port_unit })}`}
+          ` · ${portTitle({ number: port.neighbor_port_number, label: port.neighbor_port_label, alias: port.neighbor_port_alias, stack_unit: port.neighbor_port_unit })}`}
       </Link>
     </>
   )

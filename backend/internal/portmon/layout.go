@@ -15,6 +15,10 @@ type LayoutPort struct {
 	// Unit is the stack member this port belongs to (0 when the device is
 	// not a stack), as stored in device_interfaces.stack_unit.
 	Unit int
+	// Up and SpeedBps pick which of two interfaces sharing one module cage
+	// is drawn (see Layout).
+	Up       bool
+	SpeedBps int64
 }
 
 // FacePort is one port's place: its ifIndex and the number printed by it.
@@ -26,6 +30,8 @@ type FacePort struct {
 // FaceBlock is a group of ports drawn together. With two rows, Top holds the
 // 1st, 3rd, 5th... port of the block and Bottom the 2nd, 4th...
 type FaceBlock struct {
+	// Label names a module block ("Module 1"); empty for the main ports.
+	Label  string     `json:"label,omitempty"`
 	SFP    bool       `json:"sfp"`
 	Top    []FacePort `json:"top"`
 	Bottom []FacePort `json:"bottom"`
@@ -46,7 +52,46 @@ var (
 	trailingNumber = regexp.MustCompile(`(\d+)\s*$`)
 	portWord       = regexp.MustCompile(`(?i)\bport:?\s*(\d+)`)
 	sfpWord        = regexp.MustCompile(`(?i)sfp|\b(10|25|40|100)g\b`)
+	// slotName is a Cisco-style switch/slot/port name: "Gi1/0/12", "Te1/1/4".
+	slotName = regexp.MustCompile(`(\d+)/(\d+)/(\d+)$`)
+	// sfpModel is Cisco's naming for an all-SFP switch: WS-C3850-12S-S,
+	// -24S, -48S, -24XS.
+	sfpModel = regexp.MustCompile(`(?i)-(12|24|48)X?S(-|$)`)
 )
+
+// Port styles a user can set for the faceplate's main ports. Auto (empty)
+// draws a port as SFP when its description says so or the model is an
+// all-SFP one.
+const (
+	PortStyleAuto = ""
+	PortStyleSFP  = "sfp"
+	PortStyleRJ45 = "rj45"
+)
+
+// IsSFPModel reports a model name that Cisco uses for all-SFP switches.
+func IsSFPModel(model string) bool { return sfpModel.MatchString(model) }
+
+// SlotNumber is the slot of a switch/slot/port name ("Te1/1/4" gives 1):
+// 0 for the switch's own ports, N for network module N. Any other name is 0.
+func SlotNumber(name string) int {
+	if m := slotName.FindStringSubmatch(name); m != nil {
+		n, _ := strconv.Atoi(m[2])
+		return n
+	}
+	return 0
+}
+
+// PortLabel is how a port is named to people: "slot/port" for a
+// switch/slot/port name ("Gi1/0/12" gives "0/12", "Te1/1/4" gives "1/4"),
+// otherwise its PortNumber.
+func PortLabel(name, descr string, ifIndex int) string {
+	if m := slotName.FindStringSubmatch(name); m != nil {
+		slot, _ := strconv.Atoi(m[2])
+		port, _ := strconv.Atoi(m[3])
+		return fmt.Sprintf("%d/%d", slot, port)
+	}
+	return strconv.Itoa(PortNumber(name, descr, ifIndex))
+}
 
 // PortNumber is the number printed next to a port: "Port N" in the name, else
 // the trailing number of the name ("0/12", "Gi1/0/12", "eth12"), else "Port: N"
@@ -62,51 +107,129 @@ func PortNumber(name, descr string, ifIndex int) int {
 	return ifIndex
 }
 
-// Layout places physical ports. Copper ports are ordered by number and split
-// into blocks of 12; SFP ports (by description, or listed in sfpOverride by
-// number) form a last block on the right. Eight copper ports or fewer sit in
-// one row, more in two; rowsOverride (1 or 2) replaces that choice.
-func Layout(ports []LayoutPort, rowsOverride *int, sfpOverride []int) Faceplate {
+// LayoutOptions are the user's faceplate settings and what Auto needs.
+type LayoutOptions struct {
+	// Rows (1 or 2) replaces the automatic choice.
+	Rows *int
+	// SFPPorts lists port numbers to draw as SFP whatever the style.
+	SFPPorts []int
+	// Style is PortStyleAuto, PortStyleSFP or PortStyleRJ45.
+	Style string
+	// Model is the device's model, for Auto's IsSFPModel check.
+	Model string
+}
+
+// Layout places physical ports. The main ports are ordered by number: copper
+// ones split into blocks of 12, then SFP ones (see LayoutOptions.Style) in
+// blocks of 12 on the right. Eight copper ports or fewer sit in one row, more
+// in two; with no copper at all, twelve SFP ports or fewer sit in one row.
+//
+// On a device with switch/slot/port names, each network module (slot 1 and
+// up) is its own SFP block after the main ports, labelled "Module N", and a
+// port without such a name (the Gi0/0 management port) is left off. Where
+// two module interfaces share a number (Cisco lists each cage of a 1G/10G
+// module as both Gi1/1/N and Te1/1/N), one cage is drawn, for the interface
+// that is up, else the faster one.
+func Layout(ports []LayoutPort, o LayoutOptions) Faceplate {
 	sfpSet := map[int]bool{}
-	for _, n := range sfpOverride {
+	for _, n := range o.SFPPorts {
 		sfpSet[n] = true
 	}
-	copper, sfp := []FacePort{}, []FacePort{}
+	slotted := false
 	for _, p := range ports {
-		fp := FacePort{IfIndex: p.IfIndex, Number: PortNumber(p.Name, p.Descr, p.IfIndex)}
-		if sfpSet[fp.Number] || sfpWord.MatchString(p.Name+" "+p.Descr) {
+		if slotName.MatchString(p.Name) {
+			slotted = true
+			break
+		}
+	}
+	copper, sfp := []FacePort{}, []FacePort{}
+	modules := map[int]map[int]LayoutPort{}
+	for _, p := range ports {
+		if slotted && !slotName.MatchString(p.Name) {
+			continue
+		}
+		n := PortNumber(p.Name, p.Descr, p.IfIndex)
+		if slot := SlotNumber(p.Name); slot > 0 {
+			if modules[slot] == nil {
+				modules[slot] = map[int]LayoutPort{}
+			}
+			if cur, ok := modules[slot][n]; !ok || drawnBefore(p, cur) {
+				modules[slot][n] = p
+			}
+			continue
+		}
+		fp := FacePort{IfIndex: p.IfIndex, Number: n}
+		isSFP := sfpSet[n]
+		switch o.Style {
+		case PortStyleSFP:
+			isSFP = true
+		case PortStyleRJ45:
+		default:
+			isSFP = isSFP || sfpWord.MatchString(p.Name+" "+p.Descr) || IsSFPModel(o.Model)
+		}
+		if isSFP {
 			sfp = append(sfp, fp)
 		} else {
 			copper = append(copper, fp)
 		}
 	}
-	byNumber := func(ps []FacePort) {
-		sort.Slice(ps, func(i, j int) bool {
-			if ps[i].Number != ps[j].Number {
-				return ps[i].Number < ps[j].Number
-			}
-			return ps[i].IfIndex < ps[j].IfIndex
-		})
-	}
 	byNumber(copper)
 	byNumber(sfp)
 
 	rows := 1
-	if len(copper) > maxOneRowPorts {
+	if len(copper) > maxOneRowPorts || (len(copper) == 0 && len(sfp) > blockSize) {
 		rows = 2
 	}
-	if rowsOverride != nil && (*rowsOverride == 1 || *rowsOverride == 2) {
-		rows = *rowsOverride
+	if o.Rows != nil && (*o.Rows == 1 || *o.Rows == 2) {
+		rows = *o.Rows
 	}
 
 	blocks := []FaceBlock{}
-	for i := 0; i < len(copper); i += blockSize {
-		blocks = append(blocks, split(copper[i:min(i+blockSize, len(copper))], rows, false))
+	for _, group := range []struct {
+		ps  []FacePort
+		sfp bool
+	}{{copper, false}, {sfp, true}} {
+		for i := 0; i < len(group.ps); i += blockSize {
+			blocks = append(blocks, split(group.ps[i:min(i+blockSize, len(group.ps))], rows, group.sfp))
+		}
 	}
-	if len(sfp) > 0 {
-		blocks = append(blocks, split(sfp, rows, true))
+	slots := make([]int, 0, len(modules))
+	for slot := range modules {
+		slots = append(slots, slot)
+	}
+	sort.Ints(slots)
+	for _, slot := range slots {
+		var ps []FacePort
+		for n, p := range modules[slot] {
+			ps = append(ps, FacePort{IfIndex: p.IfIndex, Number: n})
+		}
+		byNumber(ps)
+		b := split(ps, rows, true)
+		b.Label = fmt.Sprintf("Module %d", slot)
+		blocks = append(blocks, b)
 	}
 	return Faceplate{Rows: rows, Blocks: blocks}
+}
+
+// drawnBefore reports whether a should be drawn instead of b in one cage: an
+// interface that is up, else the faster one, else the lower ifIndex.
+func drawnBefore(a, b LayoutPort) bool {
+	if a.Up != b.Up {
+		return a.Up
+	}
+	if a.SpeedBps != b.SpeedBps {
+		return a.SpeedBps > b.SpeedBps
+	}
+	return a.IfIndex < b.IfIndex
+}
+
+func byNumber(ps []FacePort) {
+	sort.Slice(ps, func(i, j int) bool {
+		if ps[i].Number != ps[j].Number {
+			return ps[i].Number < ps[j].Number
+		}
+		return ps[i].IfIndex < ps[j].IfIndex
+	})
 }
 
 // UnitFaceplate is one stack member's faceplate.
@@ -128,7 +251,7 @@ type UnitFaceplate struct {
 // is not a stack member, just a port LayoutUnits otherwise has nowhere to
 // put. It is dropped from the faceplate entirely here (it still shows in
 // the port table, which is built independently of this function).
-func LayoutUnits(ports []LayoutPort, rowsOverride *int, sfpOverride []int) []UnitFaceplate {
+func LayoutUnits(ports []LayoutPort, o LayoutOptions) []UnitFaceplate {
 	byUnit := map[int][]LayoutPort{}
 	var units []int
 	for _, p := range ports {
@@ -148,7 +271,7 @@ func LayoutUnits(ports []LayoutPort, rowsOverride *int, sfpOverride []int) []Uni
 		if stacked {
 			label = fmt.Sprintf("Switch %d", u)
 		}
-		out = append(out, UnitFaceplate{Unit: u, Label: label, Faceplate: Layout(byUnit[u], rowsOverride, sfpOverride)})
+		out = append(out, UnitFaceplate{Unit: u, Label: label, Faceplate: Layout(byUnit[u], o)})
 	}
 	return out
 }

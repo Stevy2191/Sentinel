@@ -486,13 +486,14 @@ func (m *PortMonitor) alert(ctx context.Context, d models.Device, row models.Dev
 	}
 }
 
-// portLabel names a port for people: "port 51 (Uplink To Quantum Gate)", or
-// "switch 2 port 5 (Uplink)" on a stack member.
+// portLabel names a port for people: "port 51 (Uplink To Quantum Gate)",
+// "port 1/4" for a module port, or "switch 2 port 5 (Uplink)" on a stack
+// member.
 func portLabel(row models.DeviceInterface) string {
-	n := portmon.PortNumber(row.Name, row.Descr, row.IfIndex)
-	label := fmt.Sprintf("port %d", n)
+	n := portmon.PortLabel(row.Name, row.Descr, row.IfIndex)
+	label := "port " + n
 	if row.StackUnit > 0 {
-		label = fmt.Sprintf("switch %d port %d", row.StackUnit, n)
+		label = fmt.Sprintf("switch %d port %s", row.StackUnit, n)
 	}
 	if row.Alias != "" {
 		return fmt.Sprintf("%s (%s)", label, row.Alias)

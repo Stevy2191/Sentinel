@@ -238,3 +238,25 @@ func TestDeviceDetailsPatchAcceptsUPS(t *testing.T) {
 		t.Error("unknown device type accepted")
 	}
 }
+
+func TestDeviceDetailsPatchPortStyle(t *testing.T) {
+	for body, want := range map[string]any{`{"faceplate_port_style": "sfp"}`: "sfp",
+		`{"faceplate_port_style": "rj45"}`: "rj45", `{"faceplate_port_style": ""}`: nil, `{"faceplate_port_style": null}`: nil} {
+		var p DeviceDetailsPatch
+		if err := json.Unmarshal([]byte(body), &p); err != nil {
+			t.Fatal(err)
+		}
+		u, err := p.Updates()
+		if err != nil {
+			t.Fatalf("%s: %v", body, err)
+		}
+		if v, ok := u["faceplate_port_style"]; !ok || v != want {
+			t.Errorf("%s: got %v, want %v", body, v, want)
+		}
+	}
+	var bad DeviceDetailsPatch
+	_ = json.Unmarshal([]byte(`{"faceplate_port_style": "lc"}`), &bad)
+	if _, err := bad.Updates(); err == nil {
+		t.Error("unknown port style accepted")
+	}
+}

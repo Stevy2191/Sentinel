@@ -8,6 +8,10 @@ export type PortCondition = 'link_down' | 'errors' | 'flapping' | 'slow_link' | 
 
 export interface PortView extends DeviceInterface {
   number: number
+  /** How the port is named: "12", or "1/4" (slot/port) on a Cisco-style
+   *  switch/slot/port device. slot is its network module, 0 for the main ports. */
+  label: string
+  slot: number
   collected: boolean
   physical: boolean
   in_bps: number | null
@@ -23,6 +27,7 @@ export interface PortView extends DeviceInterface {
   neighbor_port_number: number | null
   neighbor_port_unit: number
   neighbor_port_alias: string
+  neighbor_port_label: string
 }
 
 export interface FacePort {
@@ -30,6 +35,8 @@ export interface FacePort {
   number: number
 }
 export interface FaceBlock {
+  /** "Module N" for a network module block; absent for the main ports. */
+  label?: string
   sfp: boolean
   top: FacePort[]
   bottom: FacePort[]
@@ -82,6 +89,7 @@ export interface PortEvent {
   port_name: string
   port_alias: string
   port_number: number
+  port_label: string
   stack_unit: number
 }
 
@@ -90,6 +98,7 @@ export interface PortRef {
   device_name: string
   if_index: number
   number: number
+  label: string
   name: string
   alias: string
   oper_status: string
@@ -148,7 +157,11 @@ export interface DeviceDetailsPatch {
   device_type?: DeviceType | null
   faceplate_rows?: number | null
   faceplate_sfp_ports?: number[] | null
+  faceplate_port_style?: FaceplatePortStyle | null
 }
+
+/** How the faceplate draws the main ports; null on the device is Auto. */
+export type FaceplatePortStyle = 'sfp' | 'rj45'
 
 const LIVE_MS = 60_000
 

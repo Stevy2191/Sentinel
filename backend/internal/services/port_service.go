@@ -178,7 +178,11 @@ var ErrPortNotFound = errors.New("port not found")
 // state plus its latest rates (nil when not collected or not fresh).
 type PortView struct {
 	models.DeviceInterface
-	Number       int      `json:"number"`
+	Number int `json:"number"`
+	// Label is how the port is named ("12", or "1/4" for slot/port names);
+	// Slot is its network module (0 for the switch's own ports).
+	Label        string   `json:"label"`
+	Slot         int      `json:"slot"`
 	Collected    bool     `json:"collected"`
 	Physical     bool     `json:"physical"`
 	InBps        *float64 `json:"in_bps"`
@@ -198,6 +202,7 @@ type PortView struct {
 	NeighborPortNumber *int   `json:"neighbor_port_number"`
 	NeighborPortUnit   int    `json:"neighbor_port_unit"`
 	NeighborPortAlias  string `json:"neighbor_port_alias"`
+	NeighborPortLabel  string `json:"neighbor_port_label"`
 }
 
 // PortDefaults are the instance thresholds a port uses when it has no
@@ -242,6 +247,7 @@ func (s *PortService) defaults(ctx context.Context) PortDefaults {
 func toPortView(row models.DeviceInterface, live map[string]map[string]float64) PortView {
 	info := portmon.IfInfo{Name: row.Name, Descr: row.Descr, Type: row.IfType, ConnectorPresent: row.ConnectorPresent}
 	v := PortView{DeviceInterface: row, Number: portmon.PortNumber(row.Name, row.Descr, row.IfIndex),
+		Label: portmon.PortLabel(row.Name, row.Descr, row.IfIndex), Slot: portmon.SlotNumber(row.Name),
 		Collected: row.CollectEffective(), Physical: portmon.IsPhysical(info)}
 	inst := instanceKey(row.IfIndex)
 	get := func(metric string) *float64 {
@@ -282,13 +288,18 @@ func (s *PortService) DevicePorts(ctx context.Context, d *DeviceView) (*DevicePo
 		v := toPortView(r, latest[d.ID])
 		out.Ports = append(out.Ports, v)
 		if v.Physical {
-			layout = append(layout, portmon.LayoutPort{IfIndex: r.IfIndex, Name: r.Name, Descr: r.Descr, Unit: r.StackUnit})
+			layout = append(layout, portmon.LayoutPort{IfIndex: r.IfIndex, Name: r.Name, Descr: r.Descr, Unit: r.StackUnit,
+				Up: r.OperStatus == "up", SpeedBps: r.SpeedBps})
 		}
 	}
 	if err := s.resolveNeighbors(ctx, d.SiteID, out.Ports); err != nil {
 		return nil, err
 	}
-	out.Faceplates = portmon.LayoutUnits(layout, d.FaceplateRows, d.FaceplateSFPPorts)
+	opts := portmon.LayoutOptions{Rows: d.FaceplateRows, SFPPorts: d.FaceplateSFPPorts, Model: d.EffectiveModel}
+	if d.FaceplatePortStyle != nil {
+		opts.Style = *d.FaceplatePortStyle
+	}
+	out.Faceplates = portmon.LayoutUnits(layout, opts)
 	return out, nil
 }
 
@@ -357,6 +368,7 @@ func (s *PortService) resolveNeighbors(ctx context.Context, siteID uuid.UUID, vi
 				v.NeighborPortNumber = &num
 				v.NeighborPortUnit = np.StackUnit
 				v.NeighborPortAlias = np.Alias
+				v.NeighborPortLabel = portmon.PortLabel(np.Name, np.Descr, np.IfIndex)
 			}
 		}
 	}
@@ -616,6 +628,7 @@ type PortEventView struct {
 	PortAlias  string `json:"port_alias" gorm:"column:port_alias"`
 	PortDescr  string `json:"-" gorm:"column:port_descr"`
 	PortNumber int    `json:"port_number" gorm:"-"`
+	PortLabel  string `json:"port_label" gorm:"-"`
 	StackUnit  int    `json:"stack_unit" gorm:"column:stack_unit"`
 }
 
@@ -653,6 +666,7 @@ func (s *PortService) Events(ctx context.Context, f PortEventFilter) ([]PortEven
 	}
 	for i := range rows {
 		rows[i].PortNumber = portmon.PortNumber(rows[i].PortName, rows[i].PortDescr, rows[i].IfIndex)
+		rows[i].PortLabel = portmon.PortLabel(rows[i].PortName, rows[i].PortDescr, rows[i].IfIndex)
 	}
 	if rows == nil {
 		rows = []PortEventView{}
@@ -666,6 +680,7 @@ type PortRef struct {
 	DeviceName string    `json:"device_name"`
 	IfIndex    int       `json:"if_index"`
 	Number     int       `json:"number"`
+	Label      string    `json:"label"`
 	Name       string    `json:"name"`
 	Alias      string    `json:"alias"`
 	OperStatus string    `json:"oper_status"`
@@ -720,7 +735,7 @@ func (s *PortService) SiteSummary(ctx context.Context, siteID uuid.UUID) (*SiteP
 			}
 		}
 		ref := PortRef{DeviceID: r.DeviceID, DeviceName: r.DeviceName, IfIndex: r.IfIndex, Number: v.Number,
-			Name: r.Name, Alias: r.Alias, OperStatus: r.OperStatus, Important: r.Important, Conditions: conds,
+			Label: v.Label, Name: r.Name, Alias: r.Alias, OperStatus: r.OperStatus, Important: r.Important, Conditions: conds,
 			InBps: v.InBps, OutBps: v.OutBps, StackUnit: r.StackUnit}
 		if v.InUtilPct != nil || v.OutUtilPct != nil {
 			u := 0.0

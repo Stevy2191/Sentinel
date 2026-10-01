@@ -97,3 +97,25 @@ func stackedSwitch() []fixtureIf {
 	}
 	return out
 }
+
+// cisco3850 is a Cisco WS-C3850-12S-S: twelve 1G SFP ports Gi1/0/1-12, a
+// network module whose four cages show up twice (Gi1/1/1-4 and
+// Te1/1/1-4), the Gi0/0 management port, the stack interfaces, a VLAN and
+// Null0.
+func cisco3850() []fixtureIf {
+	out := []fixtureIf{{1, "Gi0/0", "GigabitEthernet0/0", 6}}
+	for i := 1; i <= 12; i++ {
+		out = append(out, fixtureIf{8 + i, fmt.Sprintf("Gi1/0/%d", i), fmt.Sprintf("GigabitEthernet1/0/%d", i), 6})
+	}
+	for i := 1; i <= 4; i++ {
+		out = append(out, fixtureIf{20 + i, fmt.Sprintf("Gi1/1/%d", i), fmt.Sprintf("GigabitEthernet1/1/%d", i), 6})
+		out = append(out, fixtureIf{24 + i, fmt.Sprintf("Te1/1/%d", i), fmt.Sprintf("TenGigabitEthernet1/1/%d", i), 6})
+	}
+	return append(out,
+		fixtureIf{33, "StackPort1", "StackPort1", 6},
+		fixtureIf{34, "StackSub-St1-1", "StackSub-St1-1", 6},
+		fixtureIf{35, "StackSub-St1-2", "StackSub-St1-2", 6},
+		fixtureIf{36, "Vl1", "Vlan1", 53},
+		fixtureIf{37, "Nu0", "Null0", 1},
+	)
+}

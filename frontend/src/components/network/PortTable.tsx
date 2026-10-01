@@ -34,10 +34,10 @@ const STATE_ORDER: Record<PortState, number> = { critical: 0, warning: 1, up: 2,
 function sortValue(p: PortView, key: SortKey): number | string {
   switch (key) {
     case 'number':
-      // (stack_unit, number): ports group by stack member before sorting by
-      // their own number, so a stacked device's table doesn't interleave
-      // "1/12" and "2/5".
-      return p.stack_unit * 1_000_000 + p.number
+      // (stack_unit, slot, number): ports group by stack member, then by
+      // network module, before sorting by their own number, so the table
+      // doesn't interleave "1/12" and "2/5", or "0/3" and "1/3".
+      return p.stack_unit * 1_000_000 + p.slot * 10_000 + p.number
     case 'alias':
       return (p.alias || p.name).toLowerCase()
     case 'state':
@@ -179,7 +179,7 @@ export default function PortTable({ deviceId, ports, canEdit, onChanged }: Props
                           className="text-slate-200 hover:text-primary-400"
                           title={p.name}
                         >
-                          {p.stack_unit > 0 ? `${p.stack_unit}/${p.number}` : p.number}
+                          {p.stack_unit > 0 ? `${p.stack_unit}/${p.label}` : p.label}
                         </Link>
                       </td>
                       <td className="max-w-[16rem] truncate px-3 py-2 text-slate-300" title={p.alias || p.name}>
@@ -203,7 +203,7 @@ export default function PortTable({ deviceId, ports, canEdit, onChanged }: Props
                             disabled={busy}
                             onClick={stopRowClick}
                             onChange={(e) => void change(p, { role: e.target.value as PortRole })}
-                            aria-label={`Connects to, for port ${p.number}`}
+                            aria-label={`Connects to, for port ${p.label}`}
                             className="w-full cursor-pointer truncate rounded-md border border-white/10 bg-slate-900/60 px-2 py-1 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500"
                           >
                             {PORT_ROLES.map((r) => (
@@ -219,7 +219,7 @@ export default function PortTable({ deviceId, ports, canEdit, onChanged }: Props
                           <p className="mt-0.5 truncate text-xs text-slate-500">
                             → {p.neighbor_device_name}
                             {p.neighbor_port_number != null &&
-                              ` · ${portTitle({ number: p.neighbor_port_number, alias: p.neighbor_port_alias, stack_unit: p.neighbor_port_unit })}`}
+                              ` · ${portTitle({ number: p.neighbor_port_number, label: p.neighbor_port_label, alias: p.neighbor_port_alias, stack_unit: p.neighbor_port_unit })}`}
                           </p>
                         )}
                       </td>
@@ -231,7 +231,7 @@ export default function PortTable({ deviceId, ports, canEdit, onChanged }: Props
                             disabled={busy}
                             onClick={stopRowClick}
                             onChange={() => void change(p, { collect: !p.collected })}
-                            aria-label={`Collect statistics for port ${p.number}`}
+                            aria-label={`Collect statistics for port ${p.label}`}
                           />
                         ) : (
                           <span className="text-slate-400">{p.collected ? 'Yes' : 'No'}</span>

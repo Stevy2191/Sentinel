@@ -49,6 +49,7 @@ export interface Device {
   device_type_detected: DeviceType
   faceplate_rows: number | null
   faceplate_sfp_ports: number[] | null
+  faceplate_port_style: 'sfp' | 'rj45' | null
   last_stats_at: string | null
   last_stats_duration_ms: number | null
   /** The override when set, else what SNMP reported. */

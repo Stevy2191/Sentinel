@@ -235,8 +235,10 @@ type Device struct {
 	DeviceType         *string `json:"device_type" gorm:"column:device_type"`
 	DeviceTypeDetected string  `json:"device_type_detected" gorm:"column:device_type_detected;not null;default:other"`
 	// Faceplate layout overrides (nil = automatic).
-	FaceplateRows       *int       `json:"faceplate_rows" gorm:"column:faceplate_rows"`
-	FaceplateSFPPorts   IntSlice   `json:"faceplate_sfp_ports" gorm:"column:faceplate_sfp_ports;type:jsonb"`
+	FaceplateRows     *int     `json:"faceplate_rows" gorm:"column:faceplate_rows"`
+	FaceplateSFPPorts IntSlice `json:"faceplate_sfp_ports" gorm:"column:faceplate_sfp_ports;type:jsonb"`
+	// FaceplatePortStyle draws every main port as "sfp" or "rj45"; nil is Auto.
+	FaceplatePortStyle  *string    `json:"faceplate_port_style" gorm:"column:faceplate_port_style"`
 	LastStatsAt         *time.Time `json:"last_stats_at" gorm:"column:last_stats_at"`
 	LastStatsDurationMs *int       `json:"last_stats_duration_ms" gorm:"column:last_stats_duration_ms"`
 	CreatedBy           *uuid.UUID `json:"created_by" gorm:"column:created_by;type:uuid"`
@@ -493,12 +495,13 @@ func optValue[T any](o Opt[T]) any {
 // DeviceDetailsPatch is PATCH /devices/:id/details: the user's overrides. An
 // empty string or null clears an override, so the SNMP value shows again.
 type DeviceDetailsPatch struct {
-	VendorOverride    Opt[string] `json:"vendor_override"`
-	ModelOverride     Opt[string] `json:"model_override"`
-	LocationOverride  Opt[string] `json:"location_override"`
-	DeviceType        Opt[string] `json:"device_type"`
-	FaceplateRows     Opt[int]    `json:"faceplate_rows"`
-	FaceplateSFPPorts Opt[[]int]  `json:"faceplate_sfp_ports"`
+	VendorOverride     Opt[string] `json:"vendor_override"`
+	ModelOverride      Opt[string] `json:"model_override"`
+	LocationOverride   Opt[string] `json:"location_override"`
+	DeviceType         Opt[string] `json:"device_type"`
+	FaceplateRows      Opt[int]    `json:"faceplate_rows"`
+	FaceplateSFPPorts  Opt[[]int]  `json:"faceplate_sfp_ports"`
+	FaceplatePortStyle Opt[string] `json:"faceplate_port_style"`
 }
 
 // Updates validates the patch and returns its column map.
@@ -564,6 +567,16 @@ func (p DeviceDetailsPatch) Updates() (map[string]any, error) {
 			}
 			sort.Ints(ports)
 			u["faceplate_sfp_ports"] = ports
+		}
+	}
+	if p.FaceplatePortStyle.Set {
+		switch v := p.FaceplatePortStyle.Value; {
+		case v == nil || *v == "":
+			u["faceplate_port_style"] = nil
+		case *v == "sfp" || *v == "rj45":
+			u["faceplate_port_style"] = *v
+		default:
+			return nil, errors.New("port style must be sfp, rj45 or empty for automatic")
 		}
 	}
 	if len(u) == 0 {
