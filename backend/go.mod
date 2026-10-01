@@ -10,6 +10,7 @@ require (
 	github.com/gosnmp/gosnmp v1.45.0
 	github.com/pquerna/otp v1.5.0
 	github.com/robfig/cron/v3 v3.0.1
+	github.com/sleepinggenius2/gosmi v0.4.4
 	golang.org/x/crypto v0.54.0
 	golang.org/x/net v0.57.0
 	golang.org/x/sys v0.47.0
@@ -19,6 +20,7 @@ require (
 )
 
 require (
+	github.com/alecthomas/participle v0.4.1 // indirect
 	github.com/boombuler/barcode v1.0.1 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic v1.15.0 // indirect
