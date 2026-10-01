@@ -40,7 +40,7 @@ export default function DeviceTable({ devices, showSite }: { devices: Device[]; 
                   {d.host}
                   {d.port !== 161 && `:${d.port}`}
                 </td>
-                <td className="px-4 py-3 text-slate-400">{[d.vendor, d.model].filter(Boolean).join(' · ') || '—'}</td>
+                <td className="px-4 py-3 text-slate-400">{[d.effective_vendor || d.vendor, d.effective_model || d.model].filter(Boolean).join(' · ') || '—'}</td>
                 <td className="px-4 py-3 text-slate-400">{ago(d.last_seen_at)}</td>
                 <td className="px-4 py-3 text-right tabular-nums text-slate-300">
                   {d.availability_30d == null ? '—' : `${d.availability_30d.toFixed(2)}%`}

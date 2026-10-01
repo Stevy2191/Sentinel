@@ -28,6 +28,7 @@ const networkNav: { to: string; label: string; end?: boolean; adminOnly?: boolea
   { to: '/network/sites', label: 'Sites' },
   { to: '/network/devices', label: 'Devices' },
   { to: '/network/credentials', label: 'Credentials', adminOnly: true },
+  { to: '/network/settings', label: 'Settings', adminOnly: true },
 ]
 
 /** Whether a path belongs to the Network Monitoring section. */
