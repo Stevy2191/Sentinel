@@ -100,3 +100,19 @@ func TestSimStatsCountersIncrease(t *testing.T) {
 		t.Errorf("port 3 should be down: %+v", a[3])
 	}
 }
+
+// The simulated Tripp Lite: UPS-MIB readings, and inventory with no ports.
+func TestSimUPS(t *testing.T) {
+	target := simTarget(t, Credential{Version: "2c", Community: "ups"})
+	r, err := ReadUPS(context.Background(), GoSNMPClient{}, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.ChargePct == nil || *r.ChargePct != 96 || r.LoadPct == nil || *r.LoadPct != 34 || r.OutputSource != 3 {
+		t.Errorf("readings %+v", r)
+	}
+	inv, err := ReadInventory(context.Background(), GoSNMPClient{}, target)
+	if err != nil || inv.Model != "SMART1500RM2UN" || inv.Vendor != "Tripp Lite" || len(inv.Interfaces) != 0 {
+		t.Errorf("inventory %+v (%d interfaces) err %v", inv.System, len(inv.Interfaces), err)
+	}
+}
