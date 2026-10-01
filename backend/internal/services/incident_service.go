@@ -700,6 +700,19 @@ func (s *IncidentService) OpenPortIncidents(ctx context.Context, interfaceID uui
 	return rows, nil
 }
 
+// OpenPortIncidentsForDevice lists every open port incident on a device
+// (every port, every condition), for PortMonitor's reconciliation pass.
+func (s *IncidentService) OpenPortIncidentsForDevice(ctx context.Context, deviceID uuid.UUID) ([]models.Incident, error) {
+	var rows []models.Incident
+	err := s.db.WithContext(ctx).
+		Where("device_id = ? AND interface_id IS NOT NULL AND end_time IS NULL", deviceID).
+		Order("start_time DESC").Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("listing open port incidents for device %s: %w", deviceID, err)
+	}
+	return rows, nil
+}
+
 func (s *IncidentService) activePortIncident(ctx context.Context, interfaceID uuid.UUID, condition string) (*models.Incident, error) {
 	var rows []models.Incident
 	err := s.db.WithContext(ctx).

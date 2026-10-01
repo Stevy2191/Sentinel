@@ -77,7 +77,12 @@ func (s *PortService) SavePortState(ctx context.Context, interfaceID uuid.UUID, 
 	if u.OperChangedAt != nil {
 		updates["oper_changed_at"] = *u.OperChangedAt
 	}
-	if err := s.db.WithContext(ctx).Model(&models.DeviceInterface{}).Where("id = ?", interfaceID).Updates(updates).Error; err != nil {
+	// Guarded on the port still being collected: a poll that loaded its row
+	// just before UpdatePort turned collection off for it must not write its
+	// now-stale live state and conditions back over what UpdatePort just
+	// cleared.
+	if err := s.db.WithContext(ctx).Model(&models.DeviceInterface{}).
+		Where("id = ? AND COALESCE(collect, collect_default)", interfaceID).Updates(updates).Error; err != nil {
 		return fmt.Errorf("saving port state: %w", err)
 	}
 	return nil
@@ -97,8 +102,38 @@ func (s *PortService) RecordPortEvents(ctx context.Context, starts []models.Port
 	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if len(starts) > 0 {
-			if err := tx.Create(&starts).Error; err != nil {
-				return fmt.Errorf("recording port events: %w", err)
+			// Only for interfaces still collected: a poll that loaded its row
+			// just before UpdatePort turned collection off for it must not
+			// log a fresh span start for a port whose spans UpdatePort just
+			// ended.
+			ids := make([]uuid.UUID, 0, len(starts))
+			seen := make(map[uuid.UUID]bool, len(starts))
+			for _, e := range starts {
+				if !seen[e.InterfaceID] {
+					seen[e.InterfaceID] = true
+					ids = append(ids, e.InterfaceID)
+				}
+			}
+			var collected []uuid.UUID
+			if err := tx.Model(&models.DeviceInterface{}).
+				Where("id IN ? AND COALESCE(collect, collect_default)", ids).
+				Pluck("id", &collected).Error; err != nil {
+				return fmt.Errorf("checking collected interfaces: %w", err)
+			}
+			ok := make(map[uuid.UUID]bool, len(collected))
+			for _, id := range collected {
+				ok[id] = true
+			}
+			kept := starts[:0]
+			for _, e := range starts {
+				if ok[e.InterfaceID] {
+					kept = append(kept, e)
+				}
+			}
+			if len(kept) > 0 {
+				if err := tx.Create(&kept).Error; err != nil {
+					return fmt.Errorf("recording port events: %w", err)
+				}
 			}
 		}
 		for _, e := range ends {
@@ -528,9 +563,13 @@ func (s *PortService) UpdatePort(ctx context.Context, deviceID uuid.UUID, ifInde
 		}
 		if touchedNeighbor && newNeighborDevice != nil && newNeighborIfIndex != nil {
 			// Only takes hold when the far port has no neighbor of its own;
-			// a far port already linked elsewhere is left alone.
+			// a far port already linked elsewhere is left alone. A far port
+			// already marked WAN is left alone too: it is the internet side,
+			// never a neighbor's uplink, however this port's own admin
+			// pointed at it.
 			if err := tx.Model(&models.DeviceInterface{}).
-				Where("device_id = ? AND if_index = ? AND neighbor_device_id IS NULL", *newNeighborDevice, *newNeighborIfIndex).
+				Where("device_id = ? AND if_index = ? AND neighbor_device_id IS NULL AND role <> ?",
+					*newNeighborDevice, *newNeighborIfIndex, models.PortRoleWAN).
 				Updates(map[string]any{"neighbor_device_id": deviceID, "neighbor_if_index": ifIndex, "role": models.PortRoleUplink, "updated_at": now}).Error; err != nil {
 				return fmt.Errorf("pointing the far port back: %w", err)
 			}
@@ -850,8 +889,16 @@ func (s *PortService) SiteTraffic(ctx context.Context, siteID uuid.UUID, from, t
 
 	// A bucket needs both access sums to mean anything; missing WAN sums at a
 	// bucket default to 0 (map lookups of an absent key), so a quiet WAN still
-	// yields an east-west point.
+	// yields an east-west point. `to` rarely lands on a bucket boundary, so
+	// the newest bucket can be partial; its WAN and access sides then cover
+	// different spans, which reads as a dip that is not real traffic. Drop
+	// any bucket within one step of `to` rather than publish that dip.
+	step := time.Duration(out.StepSeconds) * time.Second
+	cutoff := to.Add(-step)
 	for _, t := range sortedTimes(accIn, accOut) {
+		if t.After(cutoff) {
+			continue
+		}
 		accInV, inOK := accIn[t]
 		accOutV, outOK := accOut[t]
 		if !inOK || !outOK {

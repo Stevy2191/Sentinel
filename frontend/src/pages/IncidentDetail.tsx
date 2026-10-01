@@ -9,6 +9,7 @@ import {
   formatDuration,
   type Incident,
 } from '@/hooks/useIncidents'
+import { CONDITION_LABEL } from '@/utils/network'
 
 const STATUS_STYLE: Record<Incident['status'], string> = {
   ongoing: 'border-red-500/30 bg-red-500/20 text-red-400',
@@ -178,7 +179,8 @@ export default function IncidentDetail() {
           to={subjectLink}
           className="inline-flex items-center gap-1.5 text-sm text-emerald-400 underline-offset-2 hover:underline"
         >
-          {isDevice ? 'View device' : 'View monitor'} <ExternalLink className="h-3.5 w-3.5" />
+          {isDevice ? (inc.port_if_index != null ? 'View port' : 'View device') : 'View monitor'}{' '}
+          <ExternalLink className="h-3.5 w-3.5" />
         </Link>
       </div>
 
@@ -247,7 +249,11 @@ export default function IncidentDetail() {
             {isDevice && (
               <div>
                 <dt className="text-xs uppercase tracking-widest text-slate-500">Detected by</dt>
-                <dd className="mt-0.5 text-sm text-slate-200">3 consecutive SNMP polls without an answer</dd>
+                <dd className="mt-0.5 text-sm text-slate-200">
+                  {inc.port_if_index != null
+                    ? `The port's stats poll: ${(inc.condition && CONDITION_LABEL[inc.condition]) || inc.condition}`
+                    : '3 consecutive SNMP polls without an answer'}
+                </dd>
               </div>
             )}
           </dl>

@@ -366,3 +366,32 @@ func TestDBUpdateDeviceSiteMoveClearsNeighborLinks(t *testing.T) {
 		t.Errorf("the port pointing at the moved device should have cleared: %+v", routerPort)
 	}
 }
+
+// M1: the reverse link must never repoint a far port that is already the
+// site's WAN port — only its own admin should touch its role.
+func TestDBUpdatePortDoesNotOverwriteAFarWANPort(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	sw := seedDevice(t, db, "HQ", "10.0.0.2")
+	router := seedDeviceInSite(t, db, sw.SiteID, "10.0.0.1")
+	seedPort(t, db, sw.DeviceID, 51, "0/51", "")
+	seedPort(t, db, router, 10, "0/10", "")
+	testdb.Exec(t, db, `UPDATE device_interfaces SET role = 'wan' WHERE device_id = ? AND if_index = 10`, router)
+	svc := NewPortService(db, NewMetricsStore(db), NewIncidentService(db), NewSettingsService(db))
+
+	ten := 10
+	_, after, err := svc.UpdatePort(ctx, sw.DeviceID, 51, models.PortPatch{
+		NeighborDeviceID: models.Opt[uuid.UUID]{Set: true, Value: &router},
+		NeighborIfIndex:  models.Opt[int]{Set: true, Value: &ten},
+	})
+	testdb.Must(t, err)
+	// The chosen (local) side of the link is set regardless.
+	if after.Role != models.PortRoleUplink || after.NeighborDeviceID == nil || *after.NeighborDeviceID != router ||
+		after.NeighborIfIndex == nil || *after.NeighborIfIndex != 10 {
+		t.Fatalf("switch port 51 after link: %+v", after)
+	}
+	routerPort := interfaceRow(t, db, router, 10)
+	if routerPort.Role != models.PortRoleWAN || routerPort.NeighborDeviceID != nil || routerPort.NeighborIfIndex != nil {
+		t.Fatalf("WAN port overwritten by the reverse link: %+v", routerPort)
+	}
+}

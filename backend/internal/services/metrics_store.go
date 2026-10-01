@@ -101,6 +101,22 @@ func (m *MetricsStore) Write(ctx context.Context, deviceID uuid.UUID, at time.Ti
 	return nil
 }
 
+// Forget drops a device's cached series ids (M7: DeviceService.Delete calls
+// this once the device and its series rows are gone). Without this, a
+// device id reused by a restored backup would resolve writes to this
+// process's still-cached (but now deleted, and queued for the nightly
+// cleanup to remove) series ids instead of fresh ones, silently losing the
+// restored device's new samples.
+func (m *MetricsStore) Forget(deviceID uuid.UUID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for k := range m.ids {
+		if k.device == deviceID {
+			delete(m.ids, k)
+		}
+	}
+}
+
 // deleteDeviceSeries removes a device's series and queues their ids for the
 // nightly sample cleanup. Run inside the device deletion's transaction.
 func deleteDeviceSeries(tx *gorm.DB, deviceID uuid.UUID) error {
