@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
 	"github.com/Stevy2191/Sentinel/backend/internal/snmp"
 	"github.com/Stevy2191/Sentinel/backend/internal/testdb"
@@ -129,6 +131,68 @@ func TestDBSaveInventoryKeepsPortRole(t *testing.T) {
 	testdb.Must(t, db.First(&p2, "device_id = ? AND if_index = 2", s.DeviceID).Error)
 	if p2.Role != models.PortRoleAccess {
 		t.Errorf("new interface role = %q, want access", p2.Role)
+	}
+}
+
+// stackInventory is a two-member stack: unit/slot/port names, 24 physical
+// ports per member.
+func stackInventory() snmp.Inventory {
+	inv := snmp.Inventory{System: snmp.System{Name: "stack1"}, Vendor: "Cisco", Model: "WS-C2960X-24TS-L"}
+	idx := 1
+	for _, unit := range []int{1, 2} {
+		for i := 1; i <= 24; i++ {
+			inv.Interfaces = append(inv.Interfaces, snmp.Interface{
+				Index: idx, Name: fmt.Sprintf("%d/0/%d", unit, i), Type: 6, HasIfX: true,
+				OperStatus: "up", AdminStatus: "up", SpeedBps: 1_000_000_000,
+			})
+			idx++
+		}
+	}
+	return inv
+}
+
+// A stack's physical ports store their stack member (1, 2); a non-stacked
+// device's ports store 0. Inventory must never touch role or the neighbor
+// columns a user has set.
+func TestDBSaveInventoryStoresStackUnits(t *testing.T) {
+	db := testdb.Open(t)
+	s := seedDevice(t, db, "HQ", "10.0.0.2")
+	svc := NewDeviceService(db, NewSNMPCredentialService(db), NewIncidentService(db))
+	ctx := context.Background()
+
+	testdb.Must(t, svc.SaveInventory(ctx, s.DeviceID, stackInventory(), time.Now()))
+	var unit1, unit2 models.DeviceInterface
+	testdb.Must(t, db.First(&unit1, "device_id = ? AND if_index = 1", s.DeviceID).Error)
+	testdb.Must(t, db.First(&unit2, "device_id = ? AND if_index = 25", s.DeviceID).Error)
+	if unit1.StackUnit != 1 {
+		t.Errorf("unit 1 port: stack_unit %d, want 1", unit1.StackUnit)
+	}
+	if unit2.StackUnit != 2 {
+		t.Errorf("unit 2 port: stack_unit %d, want 2", unit2.StackUnit)
+	}
+
+	other := seedDevice(t, db, "Branch", "10.0.0.3")
+	testdb.Must(t, svc.SaveInventory(ctx, other.DeviceID, switchInventory(true), time.Now()))
+	var usw models.DeviceInterface
+	testdb.Must(t, db.First(&usw, "device_id = ? AND if_index = 1", other.DeviceID).Error)
+	if usw.StackUnit != 0 {
+		t.Errorf("non-stacked port: stack_unit %d, want 0", usw.StackUnit)
+	}
+
+	// Role and the neighbor columns are untouched by a re-inventory.
+	neighbor := uuid.New()
+	testdb.Exec(t, db, `INSERT INTO devices (id, site_id, credential_id, name, host) VALUES (?, ?, ?, 'nbr', '10.0.0.9')`,
+		neighbor, s.SiteID, s.CredentialID)
+	testdb.Exec(t, db, `UPDATE device_interfaces SET role = 'uplink', neighbor_device_id = ?, neighbor_if_index = 10
+		WHERE device_id = ? AND if_index = 1`, neighbor, s.DeviceID)
+	testdb.Must(t, svc.SaveInventory(ctx, s.DeviceID, stackInventory(), time.Now()))
+	testdb.Must(t, db.First(&unit1, "device_id = ? AND if_index = 1", s.DeviceID).Error)
+	if unit1.Role != models.PortRoleUplink || unit1.NeighborDeviceID == nil || *unit1.NeighborDeviceID != neighbor ||
+		unit1.NeighborIfIndex == nil || *unit1.NeighborIfIndex != 10 {
+		t.Errorf("inventory touched role/neighbor: %+v", unit1)
+	}
+	if unit1.StackUnit != 1 {
+		t.Errorf("stack_unit lost on re-inventory: %d", unit1.StackUnit)
 	}
 }
 

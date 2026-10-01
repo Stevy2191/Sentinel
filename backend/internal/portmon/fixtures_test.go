@@ -78,3 +78,22 @@ func unvr() []fixtureIf {
 		{3, "enp0s2", "Annapurna Labs Ltd. SFP+ 10G Ethernet Adapter", 6},
 	}
 }
+
+// stackedSwitch: a two-member 48-port stack, Cisco-style "unit/slot/port"
+// names: 1/0/1..1/0/48 and 2/0/1..2/0/48 copper, plus 1/1/1..1/1/4 and
+// 2/1/1..2/1/4 as 10G SFP+.
+func stackedSwitch() []fixtureIf {
+	var out []fixtureIf
+	idx := 1
+	for _, unit := range []int{1, 2} {
+		for i := 1; i <= 48; i++ {
+			out = append(out, fixtureIf{idx, fmt.Sprintf("%d/0/%d", unit, i), "", 6})
+			idx++
+		}
+		for i := 1; i <= 4; i++ {
+			out = append(out, fixtureIf{idx, fmt.Sprintf("%d/1/%d", unit, i), "10G SFP+", 6})
+			idx++
+		}
+	}
+	return out
+}

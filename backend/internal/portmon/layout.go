@@ -1,6 +1,7 @@
 package portmon
 
 import (
+	"fmt"
 	"regexp"
 	"sort"
 	"strconv"
@@ -11,6 +12,9 @@ type LayoutPort struct {
 	IfIndex int
 	Name    string
 	Descr   string
+	// Unit is the stack member this port belongs to (0 when the device is
+	// not a stack), as stored in device_interfaces.stack_unit.
+	Unit int
 }
 
 // FacePort is one port's place: its ifIndex and the number printed by it.
@@ -103,6 +107,38 @@ func Layout(ports []LayoutPort, rowsOverride *int, sfpOverride []int) Faceplate 
 		blocks = append(blocks, split(sfp, rows, true))
 	}
 	return Faceplate{Rows: rows, Blocks: blocks}
+}
+
+// UnitFaceplate is one stack member's faceplate.
+type UnitFaceplate struct {
+	Unit  int    `json:"unit"`
+	Label string `json:"label"`
+	Faceplate
+}
+
+// LayoutUnits groups ports by their stack Unit and lays out each group with
+// Layout, ordered by unit. Label is "Switch N" when there is more than one
+// group, else "" — a non-stacked device (every port's Unit is 0) always
+// yields exactly one entry, Unit 0 with an empty Label.
+func LayoutUnits(ports []LayoutPort, rowsOverride *int, sfpOverride []int) []UnitFaceplate {
+	byUnit := map[int][]LayoutPort{}
+	var units []int
+	for _, p := range ports {
+		if _, ok := byUnit[p.Unit]; !ok {
+			units = append(units, p.Unit)
+		}
+		byUnit[p.Unit] = append(byUnit[p.Unit], p)
+	}
+	sort.Ints(units)
+	out := make([]UnitFaceplate, 0, len(units))
+	for _, u := range units {
+		label := ""
+		if len(units) > 1 {
+			label = fmt.Sprintf("Switch %d", u)
+		}
+		out = append(out, UnitFaceplate{Unit: u, Label: label, Faceplate: Layout(byUnit[u], rowsOverride, sfpOverride)})
+	}
+	return out
 }
 
 func split(ps []FacePort, rows int, sfp bool) FaceBlock {

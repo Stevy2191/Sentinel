@@ -151,6 +151,11 @@ type PortView struct {
 	InUtilPct    *float64 `json:"in_util_pct"`
 	OutUtilPct   *float64 `json:"out_util_pct"`
 	ErrorsPerMin *float64 `json:"errors_per_min"`
+	// NeighborDeviceName and NeighborPortLabel describe NeighborDeviceID /
+	// NeighborIfIndex (from the embedded DeviceInterface); resolved by
+	// resolveNeighbors, empty when there is no neighbor.
+	NeighborDeviceName string `json:"neighbor_device_name"`
+	NeighborPortLabel  string `json:"neighbor_port_label"`
 }
 
 // PortDefaults are the instance thresholds a port uses when it has no
@@ -162,9 +167,9 @@ type PortDefaults struct {
 }
 
 type DevicePortsView struct {
-	Ports     []PortView        `json:"ports"`
-	Faceplate portmon.Faceplate `json:"faceplate"`
-	Defaults  PortDefaults      `json:"defaults"`
+	Ports      []PortView              `json:"ports"`
+	Faceplates []portmon.UnitFaceplate `json:"faceplates"`
+	Defaults   PortDefaults            `json:"defaults"`
 }
 
 type PortDetailView struct {
@@ -217,8 +222,9 @@ func toPortView(row models.DeviceInterface, live map[string]map[string]float64) 
 	return v
 }
 
-// DevicePorts lists a device's present interfaces with live figures, and the
-// faceplate of its physical ports.
+// DevicePorts lists a device's present interfaces with live figures, and one
+// faceplate per stack member (one entry, Unit 0, for a device that is not a
+// stack).
 func (s *PortService) DevicePorts(ctx context.Context, d *DeviceView) (*DevicePortsView, error) {
 	var rows []models.DeviceInterface
 	if err := s.db.WithContext(ctx).Where("device_id = ? AND present", d.ID).Order("if_index").Find(&rows).Error; err != nil {
@@ -234,11 +240,81 @@ func (s *PortService) DevicePorts(ctx context.Context, d *DeviceView) (*DevicePo
 		v := toPortView(r, latest[d.ID])
 		out.Ports = append(out.Ports, v)
 		if v.Physical {
-			layout = append(layout, portmon.LayoutPort{IfIndex: r.IfIndex, Name: r.Name, Descr: r.Descr})
+			layout = append(layout, portmon.LayoutPort{IfIndex: r.IfIndex, Name: r.Name, Descr: r.Descr, Unit: r.StackUnit})
 		}
 	}
-	out.Faceplate = portmon.Layout(layout, d.FaceplateRows, d.FaceplateSFPPorts)
+	if err := s.resolveNeighbors(ctx, out.Ports); err != nil {
+		return nil, err
+	}
+	out.Faceplates = portmon.LayoutUnits(layout, d.FaceplateRows, d.FaceplateSFPPorts)
 	return out, nil
+}
+
+// resolveNeighbors fills in NeighborDeviceName and NeighborPortLabel for
+// every port in views that has a neighbor, with (at most) one query for the
+// neighbor devices and one for their ports — not one per port.
+func (s *PortService) resolveNeighbors(ctx context.Context, views []PortView) error {
+	deviceIDSet := map[uuid.UUID]bool{}
+	for _, v := range views {
+		if v.NeighborDeviceID != nil {
+			deviceIDSet[*v.NeighborDeviceID] = true
+		}
+	}
+	if len(deviceIDSet) == 0 {
+		return nil
+	}
+	deviceIDs := make([]uuid.UUID, 0, len(deviceIDSet))
+	for id := range deviceIDSet {
+		deviceIDs = append(deviceIDs, id)
+	}
+	var devices []models.Device
+	if err := s.db.WithContext(ctx).Select("id", "name").Where("id IN ?", deviceIDs).Find(&devices).Error; err != nil {
+		return fmt.Errorf("loading neighbor devices: %w", err)
+	}
+	nameByID := make(map[uuid.UUID]string, len(devices))
+	for _, d := range devices {
+		nameByID[d.ID] = d.Name
+	}
+	var neighborPorts []models.DeviceInterface
+	if err := s.db.WithContext(ctx).Where("device_id IN ?", deviceIDs).Find(&neighborPorts).Error; err != nil {
+		return fmt.Errorf("loading neighbor ports: %w", err)
+	}
+	type portKey struct {
+		deviceID uuid.UUID
+		ifIndex  int
+	}
+	portByKey := make(map[portKey]models.DeviceInterface, len(neighborPorts))
+	for _, p := range neighborPorts {
+		portByKey[portKey{p.DeviceID, p.IfIndex}] = p
+	}
+	for i := range views {
+		v := &views[i]
+		if v.NeighborDeviceID == nil {
+			continue
+		}
+		v.NeighborDeviceName = nameByID[*v.NeighborDeviceID]
+		if v.NeighborIfIndex != nil {
+			if np, ok := portByKey[portKey{*v.NeighborDeviceID, *v.NeighborIfIndex}]; ok {
+				v.NeighborPortLabel = neighborPortLabel(np)
+			}
+		}
+	}
+	return nil
+}
+
+// neighborPortLabel is the far port's title for the "Connects to" line:
+// "Port 10" or (stacked) "Switch 2 · Port 12", plus " (alias)" when it has
+// one.
+func neighborPortLabel(i models.DeviceInterface) string {
+	num := portmon.PortNumber(i.Name, i.Descr, i.IfIndex)
+	label := fmt.Sprintf("Port %d", num)
+	if i.StackUnit > 0 {
+		label = fmt.Sprintf("Switch %d · Port %d", i.StackUnit, num)
+	}
+	if i.Alias != "" {
+		label += fmt.Sprintf(" (%s)", i.Alias)
+	}
+	return label
 }
 
 // Port is one interface with live figures and its open incidents.
@@ -261,8 +337,17 @@ func (s *PortService) Port(ctx context.Context, d *DeviceView, ifIndex int) (*Po
 	if open == nil {
 		open = []models.Incident{}
 	}
-	return &PortDetailView{PortView: toPortView(rows[0], latest[d.ID]), Defaults: s.defaults(ctx), OpenIncidents: open}, nil
+	views := []PortView{toPortView(rows[0], latest[d.ID])}
+	if err := s.resolveNeighbors(ctx, views); err != nil {
+		return nil, err
+	}
+	return &PortDetailView{PortView: views[0], Defaults: s.defaults(ctx), OpenIncidents: open}, nil
 }
+
+// ErrPortNeighborInvalid is a 400: the chosen neighbor device is not in the
+// same site as this port's device, is this device itself, or (when a
+// neighbor port is given) does not have that port.
+var ErrPortNeighborInvalid = errors.New("the neighbor must be a device in the same site, with a port it actually has")
 
 // UpdatePort applies a port patch, in one transaction: if closing an
 // incident (or clearing stale state) fails, the column change is rolled back
@@ -273,6 +358,13 @@ func (s *PortService) Port(ctx context.Context, d *DeviceView, ifIndex int) (*Po
 // and also clears its conditions (and conditions_since) and ends any open
 // event spans: the port is no longer polled, so nothing else will ever
 // notice those conditions clear or those spans end.
+//
+// A non-null neighbor implies role uplink (set automatically when the patch
+// does not name a role); setting role to access or wan clears the neighbor.
+// Linking this port to (device, port) also points that far port back here,
+// unless it already points somewhere else; losing or changing this port's
+// link clears a far port that pointed back here, resetting its role to
+// access.
 func (s *PortService) UpdatePort(ctx context.Context, deviceID uuid.UUID, ifIndex int, p models.PortPatch) (*models.DeviceInterface, *models.DeviceInterface, error) {
 	if err := p.Validate(); err != nil {
 		return nil, nil, err
@@ -295,9 +387,84 @@ func (s *PortService) UpdatePort(ctx context.Context, deviceID uuid.UUID, ifInde
 	collectionStopped := before.CollectEffective() && !afterCollect.CollectEffective()
 	now := time.Now().UTC()
 
+	// The role this patch will leave in place, and the neighbor it implies.
+	// Role access/wan always clears the neighbor, even when the patch only
+	// touches role. Changing NeighborDeviceID without naming a port clears
+	// NeighborIfIndex too, rather than keeping a port number that belonged
+	// to a different device.
+	afterRole := before.Role
+	if p.Role.Set {
+		afterRole = *p.Role.Value
+	}
+	clearingRole := p.Role.Set && (afterRole == models.PortRoleAccess || afterRole == models.PortRoleWAN)
+	newNeighborDevice := before.NeighborDeviceID
+	if p.NeighborDeviceID.Set {
+		newNeighborDevice = p.NeighborDeviceID.Value
+	}
+	newNeighborIfIndex := before.NeighborIfIndex
+	switch {
+	case clearingRole:
+		newNeighborDevice, newNeighborIfIndex = nil, nil
+	case p.NeighborIfIndex.Set:
+		newNeighborIfIndex = p.NeighborIfIndex.Value
+	case p.NeighborDeviceID.Set:
+		newNeighborIfIndex = nil
+	}
+	touchedNeighbor := p.NeighborDeviceID.Set || p.NeighborIfIndex.Set || clearingRole
+
+	// A neighbor port never makes sense without a neighbor device: PortPatch
+	// validates this when the patch itself sets neighbor_device_id to null,
+	// but a patch that sets neighbor_if_index alone (no existing neighbor
+	// device stored either) reaches here instead.
+	if newNeighborDevice == nil && newNeighborIfIndex != nil {
+		return nil, nil, ErrPortNeighborInvalid
+	}
+
+	if newNeighborDevice != nil {
+		if *newNeighborDevice == deviceID {
+			return nil, nil, ErrPortNeighborInvalid
+		}
+		var thisDevice, neighborDevice models.Device
+		if err := s.db.WithContext(ctx).Select("id", "site_id").Where("id = ?", deviceID).First(&thisDevice).Error; err != nil {
+			return nil, nil, fmt.Errorf("loading device: %w", err)
+		}
+		err := s.db.WithContext(ctx).Select("id", "site_id").Where("id = ?", *newNeighborDevice).First(&neighborDevice).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, ErrPortNeighborInvalid
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("loading neighbor device: %w", err)
+		}
+		if neighborDevice.SiteID != thisDevice.SiteID {
+			return nil, nil, ErrPortNeighborInvalid
+		}
+		if newNeighborIfIndex != nil {
+			err := s.db.WithContext(ctx).Where("device_id = ? AND if_index = ? AND present", *newNeighborDevice, *newNeighborIfIndex).
+				First(&models.DeviceInterface{}).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil, ErrPortNeighborInvalid
+			}
+			if err != nil {
+				return nil, nil, fmt.Errorf("loading neighbor port: %w", err)
+			}
+		}
+	}
+
+	updates := p.Updates()
+	if touchedNeighbor {
+		updates["neighbor_device_id"] = newNeighborDevice
+		updates["neighbor_if_index"] = newNeighborIfIndex
+		if !p.Role.Set && newNeighborDevice != nil {
+			updates["role"] = models.PortRoleUplink
+		}
+	}
+
+	oldNeighborDevice, oldNeighborIfIndex := before.NeighborDeviceID, before.NeighborIfIndex
+	linkChanged := touchedNeighbor && (!uuidPtrEqual(oldNeighborDevice, newNeighborDevice) || !intPtrEqual(oldNeighborIfIndex, newNeighborIfIndex))
+
 	var after models.DeviceInterface
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&models.DeviceInterface{}).Where("id = ?", before.ID).Updates(p.Updates()).Error; err != nil {
+		if err := tx.Model(&models.DeviceInterface{}).Where("id = ?", before.ID).Updates(updates).Error; err != nil {
 			return fmt.Errorf("saving port: %w", err)
 		}
 		if before.Important && p.Important.Value != nil && !*p.Important.Value {
@@ -318,6 +485,25 @@ func (s *PortService) UpdatePort(ctx context.Context, deviceID uuid.UUID, ifInde
 				return err
 			}
 		}
+		if linkChanged && oldNeighborDevice != nil && oldNeighborIfIndex != nil {
+			// A far port only clears if it still points back at exactly this
+			// port: it may have been repointed elsewhere since.
+			if err := tx.Model(&models.DeviceInterface{}).
+				Where("device_id = ? AND if_index = ? AND neighbor_device_id = ? AND neighbor_if_index = ?",
+					*oldNeighborDevice, *oldNeighborIfIndex, deviceID, ifIndex).
+				Updates(map[string]any{"neighbor_device_id": nil, "neighbor_if_index": nil, "role": models.PortRoleAccess, "updated_at": now}).Error; err != nil {
+				return fmt.Errorf("clearing the far port: %w", err)
+			}
+		}
+		if touchedNeighbor && newNeighborDevice != nil && newNeighborIfIndex != nil {
+			// Only takes hold when the far port has no neighbor of its own;
+			// a far port already linked elsewhere is left alone.
+			if err := tx.Model(&models.DeviceInterface{}).
+				Where("device_id = ? AND if_index = ? AND neighbor_device_id IS NULL", *newNeighborDevice, *newNeighborIfIndex).
+				Updates(map[string]any{"neighbor_device_id": deviceID, "neighbor_if_index": ifIndex, "role": models.PortRoleUplink, "updated_at": now}).Error; err != nil {
+				return fmt.Errorf("pointing the far port back: %w", err)
+			}
+		}
 		if err := tx.First(&after, "id = ?", before.ID).Error; err != nil {
 			return fmt.Errorf("reloading port: %w", err)
 		}
@@ -327,6 +513,20 @@ func (s *PortService) UpdatePort(ctx context.Context, deviceID uuid.UUID, ifInde
 		return nil, nil, err
 	}
 	return &before, &after, nil
+}
+
+func uuidPtrEqual(a, b *uuid.UUID) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+func intPtrEqual(a, b *int) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 // PortEventFilter narrows the event log. Exactly one of DeviceID and SiteID
@@ -346,6 +546,7 @@ type PortEventView struct {
 	PortAlias  string `json:"port_alias" gorm:"column:port_alias"`
 	PortDescr  string `json:"-" gorm:"column:port_descr"`
 	PortNumber int    `json:"port_number" gorm:"-"`
+	StackUnit  int    `json:"stack_unit" gorm:"column:stack_unit"`
 }
 
 // Events returns a page of the port event log, newest first, and the total.
@@ -374,7 +575,7 @@ func (s *PortService) Events(ctx context.Context, f PortEventFilter) ([]PortEven
 	}
 	var rows []PortEventView
 	err := q.Session(&gorm.Session{}).
-		Select("e.*, d.name AS device_name, COALESCE(i.name, '') AS port_name, COALESCE(i.alias, '') AS port_alias, COALESCE(i.descr, '') AS port_descr").
+		Select("e.*, d.name AS device_name, COALESCE(i.name, '') AS port_name, COALESCE(i.alias, '') AS port_alias, COALESCE(i.descr, '') AS port_descr, COALESCE(i.stack_unit, 0) AS stack_unit").
 		Order("e.started_at DESC, e.id DESC").Limit(f.Limit).Offset((f.Page - 1) * f.Limit).
 		Scan(&rows).Error
 	if err != nil {
@@ -403,6 +604,7 @@ type PortRef struct {
 	InBps      *float64  `json:"in_bps"`
 	OutBps     *float64  `json:"out_bps"`
 	UtilPct    *float64  `json:"util_pct"`
+	StackUnit  int       `json:"stack_unit"`
 }
 
 type SitePortSummary struct {
@@ -449,7 +651,7 @@ func (s *PortService) SiteSummary(ctx context.Context, siteID uuid.UUID) (*SiteP
 		}
 		ref := PortRef{DeviceID: r.DeviceID, DeviceName: r.DeviceName, IfIndex: r.IfIndex, Number: v.Number,
 			Name: r.Name, Alias: r.Alias, OperStatus: r.OperStatus, Important: r.Important, Conditions: conds,
-			InBps: v.InBps, OutBps: v.OutBps}
+			InBps: v.InBps, OutBps: v.OutBps, StackUnit: r.StackUnit}
 		if v.InUtilPct != nil || v.OutUtilPct != nil {
 			u := 0.0
 			if v.InUtilPct != nil {

@@ -1,6 +1,7 @@
 package portmon
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -87,6 +88,72 @@ func TestLayoutOverridesAndSmallDevices(t *testing.T) {
 	// Empty input still yields well-formed JSON-able slices.
 	if fp := Layout(nil, nil, nil); fp.Blocks == nil || len(fp.Blocks) != 0 {
 		t.Errorf("empty layout: %+v", fp)
+	}
+}
+
+// stackLayoutPorts builds LayoutPorts with Unit set the way SaveInventory
+// would: from StackUnits over the fixture's physical ports.
+func stackLayoutPorts(fixture []fixtureIf) []LayoutPort {
+	var physical []fixtureIf
+	for _, f := range fixture {
+		if IsPhysical(info(f)) {
+			physical = append(physical, f)
+		}
+	}
+	var infos []IfInfo
+	for _, f := range physical {
+		infos = append(infos, info(f))
+	}
+	units := StackUnits(infos)
+	var ps []LayoutPort
+	for i, f := range physical {
+		ps = append(ps, LayoutPort{IfIndex: f.Index, Name: f.Name, Descr: f.Descr, Unit: units[i]})
+	}
+	return ps
+}
+
+// A two-member 48-port stack draws as two faceplates, "Switch 1" and
+// "Switch 2", each with four copper blocks of twelve plus an SFP+ block.
+func TestLayoutUnitsStack(t *testing.T) {
+	faces := LayoutUnits(stackLayoutPorts(stackedSwitch()), nil, nil)
+	if len(faces) != 2 {
+		t.Fatalf("faces %d, want 2", len(faces))
+	}
+	for i, want := range []struct {
+		unit  int
+		label string
+	}{{1, "Switch 1"}, {2, "Switch 2"}} {
+		f := faces[i]
+		if f.Unit != want.unit || f.Label != want.label {
+			t.Errorf("face %d: unit %d label %q, want %d %q", i, f.Unit, f.Label, want.unit, want.label)
+		}
+		if len(f.Blocks) != 5 {
+			t.Errorf("face %d: %d blocks, want 5 (4 copper + 1 sfp)", i, len(f.Blocks))
+		}
+		if !f.Blocks[4].SFP {
+			t.Errorf("face %d: last block should be SFP", i)
+		}
+	}
+}
+
+// The USW-Pro-48 (0/N names, not a stack) yields one faceplate with no label.
+func TestLayoutUnitsNotStacked(t *testing.T) {
+	faces := LayoutUnits(stackLayoutPorts(uswPro48()), nil, nil)
+	if len(faces) != 1 || faces[0].Unit != 0 || faces[0].Label != "" {
+		t.Fatalf("faces %+v", faces)
+	}
+}
+
+// A single-member stack-style device (1/0/N throughout, only one unit seen)
+// also yields one faceplate, Unit 0, no label.
+func TestLayoutUnitsSingleMember(t *testing.T) {
+	var fixture []fixtureIf
+	for i := 1; i <= 24; i++ {
+		fixture = append(fixture, fixtureIf{i, fmt.Sprintf("1/0/%d", i), "", 6})
+	}
+	faces := LayoutUnits(stackLayoutPorts(fixture), nil, nil)
+	if len(faces) != 1 || faces[0].Unit != 0 || faces[0].Label != "" {
+		t.Fatalf("faces %+v", faces)
 	}
 }
 

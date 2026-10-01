@@ -41,6 +41,8 @@ func respondPortError(c *gin.Context, op string, err error) {
 	switch {
 	case errors.Is(err, services.ErrPortNotFound):
 		respondError(c, http.StatusNotFound, "port not found")
+	case errors.Is(err, services.ErrPortNeighborInvalid):
+		respondError(c, http.StatusBadRequest, err.Error())
 	case isInternal(err):
 		respondInternal(c, op, err)
 	default: // validation message from PortPatch
@@ -100,7 +102,8 @@ func portHandler(devices deviceStore, ports portStore, sites siteAccessChecker) 
 func portAudit(i *models.DeviceInterface) map[string]any {
 	return map[string]any{"if_index": i.IfIndex, "important": i.Important, "collect": i.Collect,
 		"util_threshold_pct": i.UtilThresholdPct, "error_threshold_per_min": i.ErrorThresholdPerMin,
-		"down_grace_seconds": i.DownGraceSeconds, "role": i.Role}
+		"down_grace_seconds": i.DownGraceSeconds, "role": i.Role,
+		"neighbor_device_id": i.NeighborDeviceID, "neighbor_if_index": i.NeighborIfIndex}
 }
 
 func updatePortHandler(devices deviceStore, ports portStore, sites siteAccessChecker, audit auditRecorder) gin.HandlerFunc {
