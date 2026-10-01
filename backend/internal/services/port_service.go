@@ -303,6 +303,46 @@ func (s *PortService) DevicePorts(ctx context.Context, d *DeviceView) (*DevicePo
 	return out, nil
 }
 
+// UPSStatusView is a UPS's latest readings (metric key -> value, only those
+// reported within the live window), its open UPS conditions, and the
+// thresholds in force with the instance defaults beside them.
+type UPSStatusView struct {
+	Readings             map[string]float64 `json:"readings"`
+	Conditions           []string           `json:"conditions"`
+	LowBatteryPct        int                `json:"low_battery_pct"`
+	HighLoadPct          int                `json:"high_load_pct"`
+	DefaultLowBatteryPct int                `json:"default_low_battery_pct"`
+	DefaultHighLoadPct   int                `json:"default_high_load_pct"`
+}
+
+// UPSStatus is the device page's Power panel.
+func (s *PortService) UPSStatus(ctx context.Context, d *DeviceView) (*UPSStatusView, error) {
+	latest, err := s.metrics.LatestMany(ctx, []uuid.UUID{d.ID}, UPSMetrics, liveSince(time.Now(), d.PollInterval))
+	if err != nil {
+		return nil, err
+	}
+	out := &UPSStatusView{Readings: map[string]float64{}, Conditions: []string{}}
+	for metric, byInst := range latest[d.ID] {
+		if v, ok := byInst[""]; ok {
+			out.Readings[metric] = v
+		}
+	}
+	open, err := s.incidents.OpenDeviceConditionIncidents(ctx, d.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, inc := range open {
+		if inc.Condition != nil {
+			out.Conditions = append(out.Conditions, *inc.Condition)
+		}
+	}
+	def := s.settings.UPSThresholds(ctx)
+	eff := thresholdsFor(d.Device, def)
+	out.DefaultLowBatteryPct, out.DefaultHighLoadPct = int(def.LowBatteryPct), int(def.HighLoadPct)
+	out.LowBatteryPct, out.HighLoadPct = int(eff.LowBatteryPct), int(eff.HighLoadPct)
+	return out, nil
+}
+
 // resolveNeighbors fills in NeighborDeviceName and the NeighborPort* fields
 // for every port in views that has a neighbor, with (at most) one query for
 // the neighbor devices and one for their ports — not one per port. A

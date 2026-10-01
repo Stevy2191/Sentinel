@@ -22,6 +22,7 @@ type portStore interface {
 	SiteSummary(ctx context.Context, siteID uuid.UUID) (*services.SitePortSummary, error)
 	PhysicalInterfaceIDs(ctx context.Context, deviceIDs []uuid.UUID) ([]uuid.UUID, error)
 	SiteTraffic(ctx context.Context, siteID uuid.UUID, from, to time.Time) (*services.SiteTraffic, error)
+	UPSStatus(ctx context.Context, d *services.DeviceView) (*services.UPSStatusView, error)
 }
 
 // RegisterPortRoutes mounts the port, event and site summary routes. Access
@@ -31,6 +32,7 @@ func RegisterPortRoutes(rg *gin.RouterGroup, devices deviceStore, ports portStor
 	rg.GET("/devices/:id/ports", devicePortsHandler(devices, ports, sites))
 	rg.GET("/devices/:id/ports/:ifIndex", portHandler(devices, ports, sites))
 	rg.PATCH("/devices/:id/ports/:ifIndex", updatePortHandler(devices, ports, sites, audit))
+	rg.GET("/devices/:id/ups", deviceUPSHandler(devices, ports, sites))
 	rg.GET("/devices/:id/events", deviceEventsHandler(devices, ports, sites))
 	rg.GET("/sites/:id/port-events", siteEventsHandler(ports, sites))
 	rg.GET("/sites/:id/ports/summary", siteSummaryHandler(ports, sites))
@@ -74,6 +76,21 @@ func devicePortsHandler(devices deviceStore, ports portStore, sites siteAccessCh
 		v, err := ports.DevicePorts(c.Request.Context(), d)
 		if err != nil {
 			respondInternal(c, "devicePorts", err)
+			return
+		}
+		respondSuccess(c, http.StatusOK, v)
+	}
+}
+
+func deviceUPSHandler(devices deviceStore, ports portStore, sites siteAccessChecker) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		d, ok := loadDevice(c, devices, sites, services.SiteAccessReadonly)
+		if !ok {
+			return
+		}
+		v, err := ports.UPSStatus(c.Request.Context(), d)
+		if err != nil {
+			respondInternal(c, "deviceUPS", err)
 			return
 		}
 		respondSuccess(c, http.StatusOK, v)
