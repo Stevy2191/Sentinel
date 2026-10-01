@@ -59,16 +59,55 @@ export const EVENT_LABEL: Record<string, string> = {
 
 /** What a port's role means, in the "Connects to" select and the port table. */
 export const PORT_ROLE_LABEL: Record<PortRole, string> = {
-  access: 'A device (camera, PC, AP…)',
-  uplink: 'Another of my network devices',
-  wan: 'The internet (WAN)',
+  access: 'Endpoint',
+  uplink: 'Network link',
+  wan: 'Internet (WAN)',
+}
+
+/** The one-line description shown under each role option. */
+export const PORT_ROLE_HINT: Record<PortRole, string> = {
+  access: 'A camera, PC or AP plugged in.',
+  uplink: 'Goes to another of your network devices.',
+  wan: 'The internet connection.',
 }
 
 export const PORT_ROLES: PortRole[] = ['access', 'uplink', 'wan']
 
-/** "Port 51 · Uplink To Quantum Gate". */
-export function portTitle(p: { number: number; alias?: string }): string {
-  return p.alias ? `Port ${p.number} · ${p.alias}` : `Port ${p.number}`
+/** "Port 51 · Uplink To Quantum Gate", or "Switch 2 · Port 12 · alias" for a
+ *  stacked port (stack_unit > 0). */
+export function portTitle(p: { number: number; alias?: string; stack_unit?: number }): string {
+  const base = p.stack_unit && p.stack_unit > 0 ? `Switch ${p.stack_unit} · Port ${p.number}` : `Port ${p.number}`
+  return p.alias ? `${base} · ${p.alias}` : base
+}
+
+export interface TrafficRow {
+  label: string
+  value: string
+}
+
+/** The hover box's Download/Upload (or Received/Sent) and Busy % rows,
+ *  labelled by role and direction from the point of view of what is plugged
+ *  in. A row whose value is unknown is omitted. */
+export function portTraffic(p: Pick<PortView, 'role' | 'in_bps' | 'out_bps' | 'in_util_pct' | 'out_util_pct'>): TrafficRow[] {
+  let downLabel = 'Download'
+  let upLabel = 'Upload'
+  let down = p.out_bps
+  let up = p.in_bps
+  if (p.role === 'wan') {
+    down = p.in_bps
+    up = p.out_bps
+  } else if (p.role === 'uplink') {
+    downLabel = 'Received'
+    upLabel = 'Sent'
+    down = p.in_bps
+    up = p.out_bps
+  }
+  const rows: TrafficRow[] = []
+  if (down != null) rows.push({ label: `↓ ${downLabel}`, value: formatBps(down) })
+  if (up != null) rows.push({ label: `↑ ${upLabel}`, value: formatBps(up) })
+  const busy = busiestUtil(p)
+  if (busy != null) rows.push({ label: '▮ Busy %', value: formatPct(busy) })
+  return rows
 }
 
 /** The busier direction's utilisation, or null. */
@@ -77,13 +116,10 @@ export function busiestUtil(p: Pick<PortView, 'in_util_pct' | 'out_util_pct'>): 
   return Math.max(p.in_util_pct ?? 0, p.out_util_pct ?? 0)
 }
 
-/** "In 412 Mb/s · Out 88 Mb/s · 41% busy", for the faceplate hover; omits
- *  whatever figure is not known, and is '' when none are. */
-export function portLiveDetail(p: Pick<PortView, 'in_bps' | 'out_bps' | 'in_util_pct' | 'out_util_pct'>): string {
-  const parts: string[] = []
-  if (p.in_bps != null) parts.push(`In ${formatBps(p.in_bps)}`)
-  if (p.out_bps != null) parts.push(`Out ${formatBps(p.out_bps)}`)
-  const busy = busiestUtil(p)
-  if (busy != null) parts.push(`${formatPct(busy)} busy`)
-  return parts.join(' · ')
+/** "Download 412 Mb/s · Upload 88 Mb/s · Busy % 41%", the plain-text form of
+ *  portTraffic for aria-label (the hover box itself renders the rows). */
+export function portTrafficText(p: Pick<PortView, 'role' | 'in_bps' | 'out_bps' | 'in_util_pct' | 'out_util_pct'>): string {
+  return portTraffic(p)
+    .map((r) => `${r.label.replace(/^[↓↑▮]\s*/, '')} ${r.value}`)
+    .join(' · ')
 }

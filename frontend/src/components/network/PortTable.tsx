@@ -17,6 +17,10 @@ import {
 } from '@/utils/network'
 import type { ApiError } from '@/services/api'
 
+/** Beyond this many rows (after filtering), the table caps its height and
+ *  scrolls with a sticky header, like MonitorTable. */
+const SCROLL_THRESHOLD = 24
+
 /** Stops a control's click (and so its bubbled-up row navigation) without
  *  stopping the control itself from doing its own thing. */
 function stopRowClick(e: React.SyntheticEvent) {
@@ -109,10 +113,15 @@ export default function PortTable({ deviceId, ports, canEdit, onChanged }: Props
         <p className="text-sm text-slate-500">No ports reported yet. The list arrives with the first inventory.</p>
       ) : (
         <div className="overflow-hidden rounded-lg border border-white/10 bg-slate-800/40">
-          <div className="overflow-x-auto">
+          {/* max-h + overflow-auto on this same element, not a separate
+              horizontal-only wrapper — see MonitorTable.tsx's comment for why
+              splitting the two scroll axes across nested divs breaks the
+              sticky header. Below the threshold, this is just the ordinary
+              horizontal-scroll wrapper with no height cap. */}
+          <div className={rows.length > SCROLL_THRESHOLD ? 'max-h-[65vh] overflow-auto' : 'overflow-x-auto'}>
             <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-white/10 text-left text-xs text-slate-400">
+              <thead className={rows.length > SCROLL_THRESHOLD ? 'sticky top-0 z-10' : undefined}>
+                <tr className={`border-b border-white/10 text-left text-xs text-slate-400 ${rows.length > SCROLL_THRESHOLD ? 'bg-slate-900' : ''}`}>
                   <th className="w-8 px-3 py-2">
                     <span className="sr-only">Important</span>
                   </th>
@@ -166,7 +175,7 @@ export default function PortTable({ deviceId, ports, canEdit, onChanged }: Props
                           className="text-slate-200 hover:text-primary-400"
                           title={p.name}
                         >
-                          {p.number}
+                          {p.stack_unit > 0 ? `${p.stack_unit}/${p.number}` : p.number}
                         </Link>
                       </td>
                       <td className="max-w-[16rem] truncate px-3 py-2 text-slate-300" title={p.alias || p.name}>
@@ -201,6 +210,12 @@ export default function PortTable({ deviceId, ports, canEdit, onChanged }: Props
                           </select>
                         ) : (
                           <span className="text-slate-400">{PORT_ROLE_LABEL[p.role]}</span>
+                        )}
+                        {p.role === 'uplink' && p.neighbor_device_name && (
+                          <p className="mt-0.5 truncate text-xs text-slate-500">
+                            → {p.neighbor_device_name}
+                            {p.neighbor_port_label && ` · ${p.neighbor_port_label}`}
+                          </p>
                         )}
                       </td>
                       <td className="px-3 py-2">

@@ -92,6 +92,9 @@ export interface DeviceInterface {
   present: boolean
   connector_present: boolean | null
   role: PortRole
+  neighbor_device_id: string | null
+  neighbor_if_index: number | null
+  stack_unit: number
   collect: boolean | null
   collect_default: boolean
   important: boolean
