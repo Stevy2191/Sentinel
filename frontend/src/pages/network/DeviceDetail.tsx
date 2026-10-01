@@ -1,20 +1,27 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Pause, Pencil, Play, RefreshCw, Trash2 } from 'lucide-react'
+import { Pause, Pencil, Play, RefreshCw, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { useSite } from '@/hooks/useSites'
-import { formatSpeed, useDevice, useDeviceActions, useDeviceInterfaces, type Device } from '@/hooks/useDevices'
+import { DEVICE_TYPE_LABEL, formatSpeed, useDevice, useDeviceActions, type Device } from '@/hooks/useDevices'
 import { useIncidents, formatDuration, DEFAULT_FILTERS } from '@/hooks/useIncidents'
+import { useDevicePorts, usePortEvents, type PortView } from '@/hooks/usePorts'
 import DeviceStatusBadge from '@/components/network/DeviceStatusBadge'
 import DeviceFormModal from '@/components/network/DeviceFormModal'
+import EditDetailsModal from '@/components/network/EditDetailsModal'
+import Faceplate, { FaceplateLegend } from '@/components/network/Faceplate'
+import TrafficChart from '@/components/network/TrafficChart'
+import PortTable from '@/components/network/PortTable'
+import PortEventList from '@/components/network/PortEventList'
+import { busiestUtil, CONDITION_LABEL, formatBps, formatPct, PORT_STATE, portState, portTitle, WARNING_CONDITIONS } from '@/utils/network'
 import type { ApiError } from '@/services/api'
 
-const PORT_TONE: Record<string, string> = {
-  up: 'text-emerald-400',
-  down: 'text-red-400',
-  lowerLayerDown: 'text-red-400',
-  dormant: 'text-slate-400',
-  notPresent: 'text-slate-500',
-}
+/** Device types drawn as a faceplate; the rest get the port table only. */
+const FACEPLATE_TYPES = new Set(['switch', 'router'])
+
+const TRAFFIC_LINES = [
+  { metric: 'if_in_bps', label: 'In', colour: '#22d3ee' },
+  { metric: 'if_out_bps', label: 'Out', colour: '#a78bfa' },
+]
 
 function upSince(d: Device): string {
   if (d.sys_uptime_seconds == null || !d.last_seen_at) return '—'
@@ -29,19 +36,57 @@ function toInput(d: Device, enabled: boolean) {
   }
 }
 
+function PortQuickPanel({ deviceId, port }: { deviceId: string; port: PortView }) {
+  const st = portState(port)
+  const warns = (port.conditions ?? []).filter((c) => WARNING_CONDITIONS.includes(c))
+  const facts: [string, string][] = [
+    ['Link', port.oper_status === 'up' ? formatSpeed(port.speed_bps) : '—'],
+    ['In', formatBps(port.in_bps)],
+    ['Out', formatBps(port.out_bps)],
+    ['Busy', formatPct(busiestUtil(port))],
+    ['Errors/min', port.errors_per_min == null ? '—' : String(+port.errors_per_min.toFixed(1))],
+  ]
+  return (
+    <div className="card flex flex-wrap items-start gap-x-8 gap-y-3 p-4">
+      <div className="min-w-[12rem]">
+        <p className="font-medium text-white">{portTitle(port)}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <span className={`rounded-full border px-2 py-0.5 text-xs ${PORT_STATE[st].badge}`}>{PORT_STATE[st].label}</span>
+          {port.important && <span className="rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-xs text-sky-300">Important</span>}
+          {warns.map((c) => (
+            <span key={c} className="text-xs text-yellow-400">
+              {CONDITION_LABEL[c]}
+            </span>
+          ))}
+        </div>
+      </div>
+      {facts.map(([k, v]) => (
+        <div key={k}>
+          <p className="text-[11px] uppercase tracking-widest text-slate-500">{k}</p>
+          <p className="text-sm tabular-nums text-slate-200">{v}</p>
+        </div>
+      ))}
+      <Link to={`/network/devices/${deviceId}/ports/${port.if_index}`} className="ml-auto self-center text-sm text-primary-400 hover:underline">
+        Open port page →
+      </Link>
+    </div>
+  )
+}
+
 export default function DeviceDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { device, loading, notFound, refetch } = useDevice(id)
   const { site } = useSite(device?.site_id)
-  const [showAbsent, setShowAbsent] = useState(false)
-  const [hideAdminDown, setHideAdminDown] = useState(false)
-  const { interfaces } = useDeviceInterfaces(id, showAbsent)
+  const { data: portsView, refetch: refetchPorts } = useDevicePorts(id)
+  const { events } = usePortEvents({ deviceId: id }, 15)
   const { incidents } = useIncidents({ ...DEFAULT_FILTERS, limit: 10, deviceId: id })
   const { update, remove, refresh, busy } = useDeviceActions()
   const [editing, setEditing] = useState(false)
+  const [editingDetails, setEditingDetails] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [selected, setSelected] = useState<number | null>(null)
 
   if (loading) return <p className="text-sm text-slate-400">Loading…</p>
   if (notFound || !device) {
@@ -65,7 +110,10 @@ export default function DeviceDetail() {
       setError((err as ApiError).message || 'Something went wrong')
     }
   }
-  const ports = interfaces.filter((i) => !hideAdminDown || i.admin_status !== 'down')
+  const type = device.effective_type ?? device.device_type_detected ?? 'other'
+  const ports = portsView?.ports ?? []
+  const showFaceplate = FACEPLATE_TYPES.has(type) && (portsView?.faceplate.blocks.length ?? 0) > 0
+  const selectedPort = ports.find((p) => p.if_index === selected) ?? null
 
   return (
     <div className="space-y-8">
@@ -89,16 +137,18 @@ export default function DeviceDetail() {
             <button className="btn-secondary flex items-center gap-2" disabled={busy || !device.enabled} onClick={() => void act(() => refresh(device.id))}>
               <RefreshCw className="h-4 w-4" /> Refresh now
             </button>
+            <button className="btn-secondary flex items-center gap-2" onClick={() => setEditingDetails(true)}>
+              <SlidersHorizontal className="h-4 w-4" /> Edit details
+            </button>
             <button className="btn-secondary flex items-center gap-2" onClick={() => setEditing(true)}>
               <Pencil className="h-4 w-4" /> Edit
             </button>
-            <button className="btn-secondary flex items-center gap-2" disabled={busy}
-              onClick={() => void act(() => update(device.id, toInput(device, !device.enabled)))}>
+            <button className="btn-secondary flex items-center gap-2" disabled={busy} onClick={() => void act(() => update(device.id, toInput(device, !device.enabled)))}>
               {device.enabled ? <><Pause className="h-4 w-4" /> Pause</> : <><Play className="h-4 w-4" /> Resume</>}
             </button>
             {confirmDelete ? (
               <>
-                <span className="self-center text-xs text-slate-400">Its incident history is deleted too.</span>
+                <span className="self-center text-xs text-slate-400">Its incident history and graphs are deleted too.</span>
                 <button className="btn-secondary" onClick={() => setConfirmDelete(false)}>Cancel</button>
                 <button className="btn bg-red-600 text-white hover:bg-red-700" disabled={busy}
                   onClick={() => void act(async () => { await remove(device.id); navigate(`/network/sites/${device.site_id}`) })}>
@@ -118,15 +168,17 @@ export default function DeviceDetail() {
 
       <dl className="card grid gap-x-6 gap-y-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
         {[
-          ['Vendor', device.vendor || '—'],
-          ['Model', device.model || '—'],
+          ['Vendor', device.effective_vendor || device.vendor || '—'],
+          ['Model', device.effective_model || device.model || '—'],
+          ['Type', DEVICE_TYPE_LABEL[type] ?? 'Other'],
           ['Serial', device.serial || '—'],
-          ['Location', device.sys_location || '—'],
+          ['Location', device.effective_location || device.sys_location || '—'],
           ['Contact', device.sys_contact || '—'],
           ['Up since', upSince(device)],
           ['Last seen', device.last_seen_at ? new Date(device.last_seen_at).toLocaleString() : 'never'],
           ['Credential profile', device.credential_name || '—'],
           ['30-day availability', device.availability_30d == null ? '—' : `${device.availability_30d.toFixed(2)}%`],
+          ['Stats poll', device.last_stats_duration_ms == null ? 'not yet' : `${device.last_stats_duration_ms} ms`],
         ].map(([k, v]) => (
           <div key={k}>
             <dt className="text-xs uppercase tracking-widest text-slate-500">{k}</dt>
@@ -141,50 +193,31 @@ export default function DeviceDetail() {
         )}
       </dl>
 
+      {showFaceplate && portsView && (
+        <section className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-light text-white">Front panel</h2>
+            <FaceplateLegend />
+          </div>
+          <Faceplate
+            layout={portsView.faceplate}
+            ports={ports}
+            title={device.name}
+            subtitle={device.effective_model || device.host}
+            selected={selected}
+            onSelect={(i) => setSelected((s) => (s === i ? null : i))}
+          />
+          {selectedPort && <PortQuickPanel deviceId={device.id} port={selectedPort} />}
+        </section>
+      )}
+
+      <TrafficChart title="Traffic" query={{ deviceIds: [device.id], sum: true, physicalOnly: true }} lines={TRAFFIC_LINES} unit="bps" />
+
+      <PortTable deviceId={device.id} ports={ports} canEdit={canEdit} onChanged={() => void refetchPorts()} />
+
       <section className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-lg font-light text-white">Interfaces ({ports.length})</h2>
-          <div className="flex gap-4 text-sm text-slate-400">
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={hideAdminDown} onChange={(e) => setHideAdminDown(e.target.checked)} /> Hide disabled ports
-            </label>
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={showAbsent} onChange={(e) => setShowAbsent(e.target.checked)} /> Show removed ports
-            </label>
-          </div>
-        </div>
-        {ports.length === 0 ? (
-          <p className="text-sm text-slate-500">{device.last_inventory_at ? 'No interfaces reported.' : 'The interface list arrives with the first inventory.'}</p>
-        ) : (
-          <div className="overflow-hidden rounded-lg border border-white/10 bg-slate-800/40">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-white/10 text-left text-xs text-slate-400">
-                    <th className="px-4 py-2 font-medium">Port</th>
-                    <th className="px-4 py-2 font-medium">Description</th>
-                    <th className="px-4 py-2 font-medium">Admin</th>
-                    <th className="px-4 py-2 font-medium">Link</th>
-                    <th className="px-4 py-2 font-medium">Speed</th>
-                    <th className="px-4 py-2 font-medium">MAC</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {ports.map((p) => (
-                    <tr key={p.id} className={p.present ? '' : 'opacity-50'}>
-                      <td className="px-4 py-2 font-medium text-slate-200" title={p.descr}>{p.name}</td>
-                      <td className="px-4 py-2 text-slate-400">{p.alias || '—'}</td>
-                      <td className={`px-4 py-2 ${p.admin_status === 'down' ? 'text-slate-500' : 'text-slate-300'}`}>{p.admin_status || '—'}</td>
-                      <td className={`px-4 py-2 ${PORT_TONE[p.oper_status] ?? 'text-slate-400'}`}>{p.present ? p.oper_status || '—' : 'removed'}</td>
-                      <td className="px-4 py-2 tabular-nums text-slate-400">{formatSpeed(p.speed_bps)}</td>
-                      <td className="px-4 py-2 font-mono text-xs text-slate-500">{p.mac || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+        <h2 className="text-lg font-light text-white">Recent port events</h2>
+        <PortEventList events={events} />
       </section>
 
       <section className="space-y-3">
@@ -197,7 +230,8 @@ export default function DeviceDetail() {
               <li key={inc.id}>
                 <Link to={`/incidents/${inc.id}`} className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm hover:bg-white/5">
                   <span className={inc.status === 'ongoing' ? 'text-red-400' : 'text-slate-300'}>
-                    {inc.status === 'ongoing' ? 'Ongoing' : 'Resolved'} · {new Date(inc.start_time).toLocaleString()}
+                    {inc.status === 'ongoing' ? 'Ongoing' : 'Resolved'} · {new Date(inc.start_time).toLocaleString()} ·{' '}
+                    {inc.port_if_index != null ? `${inc.subject_name}: ${CONDITION_LABEL[inc.condition ?? ''] ?? 'problem'}` : 'Device unreachable'}
                   </span>
                   <span className="text-slate-400">{formatDuration(inc.duration_seconds)}</span>
                 </Link>
@@ -209,6 +243,9 @@ export default function DeviceDetail() {
 
       {editing && (
         <DeviceFormModal initial={device} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); void refetch() }} />
+      )}
+      {editingDetails && (
+        <EditDetailsModal device={device} onClose={() => setEditingDetails(false)} onSaved={() => { setEditingDetails(false); void refetch(); void refetchPorts() }} />
       )}
     </div>
   )

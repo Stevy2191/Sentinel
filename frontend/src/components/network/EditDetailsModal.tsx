@@ -1,0 +1,128 @@
+import { useState } from 'react'
+import { X } from 'lucide-react'
+import { DEVICE_TYPE_LABEL, type Device, type DeviceType } from '@/hooks/useDevices'
+import { usePortActions } from '@/hooks/usePorts'
+import type { ApiError } from '@/services/api'
+
+const inputCls =
+  'w-full rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary-500'
+
+interface Props {
+  device: Device
+  onClose: () => void
+  onSaved: () => void
+}
+
+/** The user's corrections to what SNMP reports. Inventory never overwrites
+ *  them; clearing a field shows the SNMP value again. */
+export default function EditDetailsModal({ device, onClose, onSaved }: Props) {
+  const { updateDetails, busy } = usePortActions()
+  const [vendor, setVendor] = useState(device.vendor_override ?? '')
+  const [model, setModel] = useState(device.model_override ?? '')
+  const [location, setLocation] = useState(device.location_override ?? '')
+  const [type, setType] = useState<DeviceType | ''>(device.device_type ?? '')
+  const [rows, setRows] = useState(device.faceplate_rows ? String(device.faceplate_rows) : '')
+  const [sfp, setSfp] = useState((device.faceplate_sfp_ports ?? []).join(', '))
+  const [error, setError] = useState<string | null>(null)
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    const ports = sfp.split(/[\s,]+/).filter(Boolean).map(Number)
+    if (ports.some((n) => !Number.isInteger(n) || n < 1)) {
+      setError('SFP ports are port numbers, e.g. 49, 50, 51, 52')
+      return
+    }
+    try {
+      await updateDetails(device.id, {
+        vendor_override: vendor,
+        model_override: model,
+        location_override: location,
+        device_type: type || null,
+        faceplate_rows: rows ? Number(rows) : null,
+        faceplate_sfp_ports: ports.length ? ports : null,
+      })
+      onSaved()
+    } catch (err) {
+      setError((err as ApiError).message || 'Could not save the details')
+    }
+  }
+
+  const field = (label: string, value: string, set: (v: string) => void, reported: string) => (
+    <label className="block space-y-1">
+      <span className="text-sm text-slate-300">{label}</span>
+      <input className={inputCls} value={value} onChange={(e) => set(e.target.value)} placeholder={reported || 'Not reported'} maxLength={255} />
+      <span className="flex items-center justify-between gap-2 text-xs text-slate-500">
+        <span className="truncate">SNMP says: {reported || 'nothing'}</span>
+        {value && (
+          <button type="button" className="shrink-0 text-primary-400 hover:underline" onClick={() => set('')}>
+            Use SNMP value
+          </button>
+        )}
+      </span>
+    </label>
+  )
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <form
+        className="card max-h-[90vh] w-full max-w-md space-y-4 overflow-y-auto p-6"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => void submit(e)}
+      >
+        <div className="flex items-start justify-between">
+          <h2 className="text-lg font-semibold">Edit device details</h2>
+          <button type="button" className="text-slate-400 hover:text-slate-300" onClick={onClose} aria-label="Close">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <p className="text-sm text-slate-400">Your values are shown instead of what the device reports, and are never overwritten.</p>
+
+        {field('Vendor', vendor, setVendor, device.vendor)}
+        {field('Model', model, setModel, device.model)}
+        {field('Location', location, setLocation, device.sys_location)}
+
+        <label className="block space-y-1">
+          <span className="text-sm text-slate-300">Device type</span>
+          <select className={inputCls} value={type} onChange={(e) => setType(e.target.value as DeviceType | '')}>
+            <option value="">Automatic ({DEVICE_TYPE_LABEL[device.device_type_detected] ?? 'Other'})</option>
+            {(Object.keys(DEVICE_TYPE_LABEL) as DeviceType[]).map((t) => (
+              <option key={t} value={t}>
+                {DEVICE_TYPE_LABEL[t]}
+              </option>
+            ))}
+          </select>
+          <span className="text-xs text-slate-500">Switches and routers are drawn as a faceplate.</span>
+        </label>
+
+        <fieldset className="space-y-3 rounded-lg border border-white/10 p-3">
+          <legend className="px-1 text-sm text-slate-300">Faceplate</legend>
+          <label className="block space-y-1">
+            <span className="text-xs text-slate-400">Rows</span>
+            <select className={inputCls} value={rows} onChange={(e) => setRows(e.target.value)}>
+              <option value="">Automatic</option>
+              <option value="1">One row</option>
+              <option value="2">Two rows</option>
+            </select>
+          </label>
+          <label className="block space-y-1">
+            <span className="text-xs text-slate-400">SFP ports</span>
+            <input className={inputCls} value={sfp} onChange={(e) => setSfp(e.target.value)} placeholder="Detected automatically" />
+            <span className="text-xs text-slate-500">Port numbers to draw as SFP, e.g. 49, 50, 51, 52.</span>
+          </label>
+        </fieldset>
+
+        {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">{error}</div>}
+
+        <div className="flex justify-end gap-2">
+          <button type="button" className="btn-secondary" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="btn-primary" disabled={busy}>
+            Save details
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}
