@@ -255,7 +255,7 @@ export default function DeviceDetail() {
 
       <TrafficChart title="Traffic" query={{ deviceIds: [device.id], sum: true, physicalOnly: true }} lines={TRAFFIC_LINES} unit="bps" />
 
-      <PortTable deviceId={device.id} ports={ports} canEdit={canEdit} onChanged={() => void refetchPorts()} />
+      <PortTable deviceId={device.id} ports={ports} canEdit={canEdit} inventoried={!!device.last_inventory_at} onChanged={() => void refetchPorts()} />
 
       <section className="space-y-3">
         <h2 className="text-lg font-light text-white">Recent port events</h2>

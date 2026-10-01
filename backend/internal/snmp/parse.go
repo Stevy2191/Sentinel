@@ -26,6 +26,7 @@ const (
 	oidIfEntry    = "1.3.6.1.2.1.2.2.1"      // IF-MIB ifTable
 	oidIfXEntry   = "1.3.6.1.2.1.31.1.1.1"   // IF-MIB ifXTable
 	oidEntPhysEnt = "1.3.6.1.2.1.47.1.1.1.1" // ENTITY-MIB entPhysicalTable
+	oidUPSIdent   = "1.3.6.1.2.1.33.1.1"     // UPS-MIB upsIdent
 )
 
 // ifTableColumns and ifXTableColumns are walked one column at a time, so the
@@ -288,12 +289,37 @@ func ParseEntity(pdus []PDU) (model, serial string) {
 	return "", ""
 }
 
+// ParseUPSIdent reads UPS-MIB's upsIdentManufacturer and upsIdentModel, which
+// every UPS network card reports even when it has no ENTITY-MIB (Tripp Lite,
+// Eaton). Both are "" on a device that is not a UPS.
+func ParseUPSIdent(pdus []PDU) (manufacturer, model string) {
+	for _, p := range pdus {
+		switch p.OID {
+		case oidUPSIdent + ".1.0":
+			manufacturer = Clean(p.Text())
+		case oidUPSIdent + ".2.0":
+			model = Clean(p.Text())
+		}
+	}
+	return manufacturer, model
+}
+
+// upsVendor keeps a vendor named from the enterprise number, and otherwise
+// takes the manufacturer the UPS reports.
+func upsVendor(vendor, manufacturer string) string {
+	if manufacturer != "" && (vendor == "" || strings.HasPrefix(vendor, "Unknown")) {
+		return manufacturer
+	}
+	return vendor
+}
+
 // vendors maps IANA private enterprise numbers to names.
 var vendors = map[int]string{
 	9: "Cisco", 11: "HP", 674: "Dell", 2636: "Juniper", 4413: "Ubiquiti (EdgeSwitch)",
 	4526: "Netgear", 6486: "Alcatel-Lucent", 11863: "TP-Link", 12356: "Fortinet",
 	14823: "Aruba", 14988: "MikroTik", 17713: "Cambium Networks", 25053: "Ruckus",
 	25461: "Palo Alto Networks", 29671: "Cisco Meraki", 41112: "Ubiquiti",
+	318: "APC", 534: "Eaton", 850: "Tripp Lite",
 	8072: "Net-SNMP (Linux)",
 }
 
@@ -380,7 +406,7 @@ func Identify(ctx context.Context, c Client, t Target) (System, error) {
 
 // ReadInventory reads identity, model/serial and interfaces. Only a failure
 // of the system group or ifTable is an error: ifXTable (absent on v1 and some
-// radios) and ENTITY-MIB (absent on many small devices) are optional.
+// radios), ENTITY-MIB (absent on many small devices) and UPS-MIB are optional.
 func ReadInventory(ctx context.Context, c Client, t Target) (Inventory, error) {
 	sys, err := Identify(ctx, c, t)
 	if err != nil {
@@ -410,7 +436,16 @@ func ReadInventory(ctx context.Context, c Client, t Target) (Inventory, error) {
 		}
 	}
 	entityModel, serial := ParseEntity(entPDUs)
+	// No ENTITY-MIB model: a UPS still names itself in UPS-MIB. Optional, so
+	// an agent that refuses the request is simply not a UPS.
+	var upsMaker string
+	if entityModel == "" {
+		if p, err := c.Get(ctx, t, []string{oidUPSIdent + ".1.0", oidUPSIdent + ".2.0"}); err == nil {
+			upsMaker, entityModel = ParseUPSIdent(p)
+		}
+	}
 	inv.Serial = serial
 	inv.Vendor, inv.Model = Identity(sys.ObjectID, sys.Descr, entityModel)
+	inv.Vendor = upsVendor(inv.Vendor, upsMaker)
 	return inv, nil
 }
