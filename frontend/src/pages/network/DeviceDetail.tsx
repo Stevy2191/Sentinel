@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Pause, Pencil, Play, RefreshCw, SlidersHorizontal, Trash2 } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Loader2, Pause, Pencil, Play, RefreshCw, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { useSite } from '@/hooks/useSites'
 import { DEVICE_TYPE_LABEL, formatSpeed, useDevice, useDeviceActions, type Device } from '@/hooks/useDevices'
 import { useIncidents, formatDuration, DEFAULT_FILTERS } from '@/hooks/useIncidents'
 import { useDevicePorts, usePortEvents, type PortView } from '@/hooks/usePorts'
+import { useRefreshWatch } from '@/hooks/useRefreshWatch'
 import DeviceStatusBadge from '@/components/network/DeviceStatusBadge'
 import DeviceFormModal from '@/components/network/DeviceFormModal'
 import EditDetailsModal from '@/components/network/EditDetailsModal'
@@ -85,6 +86,11 @@ export default function DeviceDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<number | null>(null)
+  const refreshWatch = useRefreshWatch(device, refetch)
+  // A finished refresh re-read the interfaces too.
+  useEffect(() => {
+    if (refreshWatch.phase === 'done') void refetchPorts()
+  }, [refreshWatch.phase, refetchPorts])
 
   if (loading) return <p className="text-sm text-slate-400">Loading…</p>
   if (notFound || !device) {
@@ -108,7 +114,23 @@ export default function DeviceDetail() {
       setError((err as ApiError).message || 'Something went wrong')
     }
   }
+  const startRefresh = async () => {
+    setError(null)
+    try {
+      await refresh(device.id)
+      refreshWatch.start()
+    } catch (err) {
+      setError((err as ApiError).message || 'Could not request a refresh')
+    }
+  }
   const type = device.effective_type ?? device.device_type_detected ?? 'other'
+  // When the user's chosen type differs from what inventory detected, say so:
+  // the choice wins, and it is otherwise invisible why detection "did nothing".
+  const detectedLabel = DEVICE_TYPE_LABEL[device.device_type_detected] ?? 'Other'
+  const typeText =
+    device.device_type && device.device_type !== device.device_type_detected
+      ? `${DEVICE_TYPE_LABEL[device.device_type] ?? 'Other'} (your choice; detected as ${detectedLabel})`
+      : (DEVICE_TYPE_LABEL[type] ?? 'Other')
   const ports = portsView?.ports ?? []
   const showFaceplate = FACEPLATE_TYPES.has(type) && (portsView?.faceplates.some((f) => f.blocks.length > 0) ?? false)
   const selectedPort = ports.find((p) => p.if_index === selected) ?? null
@@ -132,8 +154,8 @@ export default function DeviceDetail() {
         </div>
         {canEdit && (
           <div className="flex flex-wrap gap-2">
-            <button className="btn-secondary flex items-center gap-2" disabled={busy || !device.enabled} onClick={() => void act(() => refresh(device.id))}>
-              <RefreshCw className="h-4 w-4" /> Refresh now
+            <button className="btn-secondary flex items-center gap-2" disabled={busy || !device.enabled || refreshWatch.phase === 'running'} onClick={() => void startRefresh()}>
+              <RefreshCw className={`h-4 w-4 ${refreshWatch.phase === 'running' ? 'animate-spin' : ''}`} /> Refresh now
             </button>
             <button className="btn-secondary flex items-center gap-2" onClick={() => setEditingDetails(true)}>
               <SlidersHorizontal className="h-4 w-4" /> Edit details
@@ -164,11 +186,33 @@ export default function DeviceDetail() {
 
       {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">{error}</div>}
 
+      {refreshWatch.phase === 'running' && (
+        <p className="flex items-center gap-2 text-sm text-slate-400" role="status">
+          <Loader2 className="h-4 w-4 animate-spin" /> Refreshing: polling the device and re-reading its details…
+        </p>
+      )}
+      {refreshWatch.phase === 'done' && (
+        <p className="flex items-center gap-2 text-sm text-emerald-400" role="status">
+          <CheckCircle2 className="h-4 w-4" /> Refreshed: details and ports were re-read just now.
+        </p>
+      )}
+      {refreshWatch.phase === 'failed' && (
+        <p className="flex items-center gap-2 text-sm text-amber-400" role="status">
+          <AlertTriangle className="h-4 w-4" /> The refresh didn't finish: {refreshWatch.message}
+        </p>
+      )}
+      {refreshWatch.phase === 'slow' && (
+        <p className="flex items-center gap-2 text-sm text-slate-400" role="status">
+          <Loader2 className="h-4 w-4" /> Still queued: the poller hasn't reached this device yet. The page updates when it does.
+        </p>
+      )}
+
       <dl className="card grid gap-x-6 gap-y-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
         {[
           ['Vendor', device.effective_vendor || device.vendor || '—'],
           ['Model', device.effective_model || device.model || '—'],
-          ['Type', DEVICE_TYPE_LABEL[type] ?? 'Other'],
+          ['Type', typeText],
+          ['SNMP object ID', device.sys_object_id || '—'],
           ['Serial', device.serial || '—'],
           ['Location', device.effective_location || device.sys_location || '—'],
           ['Contact', device.sys_contact || '—'],
