@@ -322,6 +322,14 @@ type DeviceInterface struct {
 	// Role is what this port connects to (access/uplink/wan); never written by
 	// inventory, only by PortPatch.
 	Role string `json:"role" gorm:"column:role;not null;default:access"`
+	// NeighborDeviceID/NeighborIfIndex: the device (and optionally its port)
+	// on the other end of a Network link port. Only PortService.UpdatePort
+	// writes these; a non-null NeighborDeviceID implies Role is uplink.
+	NeighborDeviceID *uuid.UUID `json:"neighbor_device_id" gorm:"column:neighbor_device_id;type:uuid"`
+	NeighborIfIndex  *int       `json:"neighbor_if_index" gorm:"column:neighbor_if_index"`
+	// StackUnit is this port's stack member (1, 2, ...) when the device is a
+	// stack of more than one switch, 0 otherwise. Set by inventory only.
+	StackUnit int `json:"stack_unit" gorm:"column:stack_unit;not null"`
 	// HasIfX: the ifXTable has answered for this interface at least once, so
 	// its name, alias and high speed are not overwritten by an inventory whose
 	// ifXTable walk failed.
@@ -392,17 +400,24 @@ func (PortEvent) TableName() string { return "port_events" }
 // alone; null clears an override back to the default (collect: back to the
 // classifier's choice; thresholds: back to the instance defaults).
 type PortPatch struct {
-	Important            Opt[bool]   `json:"important"`
-	Collect              Opt[bool]   `json:"collect"`
-	UtilThresholdPct     Opt[int]    `json:"util_threshold_pct"`
-	ErrorThresholdPerMin Opt[int]    `json:"error_threshold_per_min"`
-	DownGraceSeconds     Opt[int]    `json:"down_grace_seconds"`
-	Role                 Opt[string] `json:"role"`
+	Important            Opt[bool]      `json:"important"`
+	Collect              Opt[bool]      `json:"collect"`
+	UtilThresholdPct     Opt[int]       `json:"util_threshold_pct"`
+	ErrorThresholdPerMin Opt[int]       `json:"error_threshold_per_min"`
+	DownGraceSeconds     Opt[int]       `json:"down_grace_seconds"`
+	Role                 Opt[string]    `json:"role"`
+	NeighborDeviceID     Opt[uuid.UUID] `json:"neighbor_device_id"`
+	NeighborIfIndex      Opt[int]       `json:"neighbor_if_index"`
 }
 
-// Validate checks ranges (the same as the schema's CHECKs).
+// Validate checks ranges (the same as the schema's CHECKs) and the
+// combinations PortService.UpdatePort relies on not having to untangle:
+// neighbor_if_index only makes sense with a neighbor device, and a port
+// cannot be both an endpoint/WAN port and point at a neighbor in the same
+// patch (UpdatePort itself clears the neighbor when the role alone changes).
 func (p PortPatch) Validate() error {
-	if !p.Important.Set && !p.Collect.Set && !p.UtilThresholdPct.Set && !p.ErrorThresholdPerMin.Set && !p.DownGraceSeconds.Set && !p.Role.Set {
+	if !p.Important.Set && !p.Collect.Set && !p.UtilThresholdPct.Set && !p.ErrorThresholdPerMin.Set &&
+		!p.DownGraceSeconds.Set && !p.Role.Set && !p.NeighborDeviceID.Set && !p.NeighborIfIndex.Set {
 		return errors.New("nothing to change")
 	}
 	if p.Important.Set && p.Important.Value == nil {
@@ -410,6 +425,16 @@ func (p PortPatch) Validate() error {
 	}
 	if p.Role.Set && (p.Role.Value == nil || !ValidPortRoles[*p.Role.Value]) {
 		return errors.New("role must be access, uplink or wan")
+	}
+	if p.NeighborIfIndex.Set && p.NeighborIfIndex.Value != nil && *p.NeighborIfIndex.Value < 1 {
+		return errors.New("neighbor port must be a positive port number")
+	}
+	if p.NeighborDeviceID.Set && p.NeighborDeviceID.Value == nil && p.NeighborIfIndex.Set && p.NeighborIfIndex.Value != nil {
+		return errors.New("neighbor port cannot be given without a neighbor device")
+	}
+	if p.Role.Set && p.Role.Value != nil && (*p.Role.Value == PortRoleAccess || *p.Role.Value == PortRoleWAN) &&
+		p.NeighborDeviceID.Set && p.NeighborDeviceID.Value != nil {
+		return errors.New("an endpoint or internet (WAN) port cannot have a neighbor device")
 	}
 	inRange := func(o Opt[int], name string, min, max int) error {
 		if o.Value != nil && (*o.Value < min || *o.Value > max) {
@@ -446,6 +471,12 @@ func (p PortPatch) Updates() map[string]any {
 	}
 	if p.Role.Set {
 		u["role"] = *p.Role.Value
+	}
+	if p.NeighborDeviceID.Set {
+		u["neighbor_device_id"] = optValue(p.NeighborDeviceID)
+	}
+	if p.NeighborIfIndex.Set {
+		u["neighbor_if_index"] = optValue(p.NeighborIfIndex)
 	}
 	return u
 }

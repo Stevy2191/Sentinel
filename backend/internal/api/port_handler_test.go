@@ -131,6 +131,26 @@ func TestPortRoutesAccess(t *testing.T) {
 	}
 }
 
+// PATCH with neighbor fields follows the same access rule as any other port
+// patch: 403 for a readonly caller, 200 for an editable one.
+func TestPortPatchNeighborAccess(t *testing.T) {
+	site := uuid.New()
+	dev := services.DeviceView{Device: models.Device{ID: uuid.New(), SiteID: site}}
+	base := "/api/v1/devices/" + dev.ID.String()
+	neighbor := uuid.New()
+	body := map[string]any{"neighbor_device_id": neighbor.String(), "neighbor_if_index": 10}
+
+	rig := newPortRig(dev, fakeSiteLevels{site: services.SiteAccessReadonly}, false)
+	if w := do(rig.r, http.MethodPatch, base+"/ports/1", body); w.Code != http.StatusForbidden || rig.ports.updates != 0 {
+		t.Errorf("readonly neighbor patch: %d updates %d", w.Code, rig.ports.updates)
+	}
+
+	rig = newPortRig(dev, fakeSiteLevels{site: services.SiteAccessEditable}, false)
+	if w := do(rig.r, http.MethodPatch, base+"/ports/1", body); w.Code != http.StatusOK || rig.ports.updates != 1 {
+		t.Errorf("editable neighbor patch: %d updates %d", w.Code, rig.ports.updates)
+	}
+}
+
 // Review Focus 4: a foreign device in a metrics query is a 404, and nothing
 // is queried.
 func TestMetricsQueryAccess(t *testing.T) {

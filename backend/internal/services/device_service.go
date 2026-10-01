@@ -400,12 +400,17 @@ func (s *DeviceService) SaveReachability(ctx context.Context, id uuid.UUID, u Re
 // and friends, device_type) are never written here.
 func (s *DeviceService) SaveInventory(ctx context.Context, id uuid.UUID, inv snmp.Inventory, at time.Time) error {
 	physical := 0
-	for _, it := range inv.Interfaces {
-		if portmon.IsPhysical(ifInfo(it)) {
+	infos := make([]portmon.IfInfo, len(inv.Interfaces))
+	for i, it := range inv.Interfaces {
+		infos[i] = ifInfo(it)
+		if portmon.IsPhysical(infos[i]) {
 			physical++
 		}
 	}
 	detected := portmon.DetectDeviceType(inv.Model, physical)
+	// Stack units: physical ports decide whether this walk's device counts
+	// as a stack; see portmon.StackUnits.
+	units := portmon.StackUnits(infos)
 
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		sys := inv.System
@@ -429,7 +434,7 @@ func (s *DeviceService) SaveInventory(ctx context.Context, id uuid.UUID, inv snm
 					" ELSE EXCLUDED." + col + " END")}
 		}
 		set := clause.AssignmentColumns([]string{"descr", "if_type", "mac", "admin_status", "oper_status",
-			"last_change_seconds", "present", "updated_at", "collect_default"})
+			"last_change_seconds", "present", "updated_at", "collect_default", "stack_unit"})
 		set = append(set,
 			keepIfX("name"), keepIfX("alias"), keepIfX("speed_bps"),
 			clause.Assignment{Column: clause.Column{Name: "has_ifx"}, Value: gorm.Expr("device_interfaces.has_ifx OR EXCLUDED.has_ifx")},
@@ -438,14 +443,14 @@ func (s *DeviceService) SaveInventory(ctx context.Context, id uuid.UUID, inv snm
 		)
 
 		seen := make([]int, 0, len(inv.Interfaces))
-		for _, it := range inv.Interfaces {
+		for i, it := range inv.Interfaces {
 			seen = append(seen, it.Index)
 			row := models.DeviceInterface{
 				DeviceID: id, IfIndex: it.Index, Name: it.Name, Descr: it.Descr, Alias: it.Alias, IfType: it.Type,
 				SpeedBps: it.SpeedBps, MAC: it.MAC, AdminStatus: it.AdminStatus, OperStatus: it.OperStatus,
 				LastChangeSeconds: it.LastChangeSeconds, Present: true, UpdatedAt: at,
 				ConnectorPresent: it.ConnectorPresent, HasIfX: it.HasIfX,
-				CollectDefault: portmon.DefaultCollect(ifInfo(it)),
+				CollectDefault: portmon.DefaultCollect(infos[i]), StackUnit: units[i],
 			}
 			if err := tx.Clauses(clause.OnConflict{
 				Columns:   []clause.Column{{Name: "device_id"}, {Name: "if_index"}},

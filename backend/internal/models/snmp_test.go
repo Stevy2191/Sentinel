@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func sp(s string) *string { return &s }
@@ -152,6 +154,50 @@ func TestPortPatchRole(t *testing.T) {
 		_ = json.Unmarshal([]byte(body), &bad)
 		if bad.Validate() == nil {
 			t.Errorf("%s accepted", body)
+		}
+	}
+}
+
+func TestPortPatchNeighbor(t *testing.T) {
+	id := uuid.New()
+	body := `{"neighbor_device_id":"` + id.String() + `","neighbor_if_index":10}`
+	var p PortPatch
+	if err := json.Unmarshal([]byte(body), &p); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	u := p.Updates()
+	if u["neighbor_device_id"] != id || u["neighbor_if_index"] != 10 {
+		t.Errorf("updates %v", u)
+	}
+
+	// Clearing the neighbor (null) with no if_index is fine.
+	var clear PortPatch
+	if err := json.Unmarshal([]byte(`{"neighbor_device_id": null}`), &clear); err != nil {
+		t.Fatal(err)
+	}
+	if err := clear.Validate(); err != nil {
+		t.Errorf("clearing neighbor: %v", err)
+	}
+	if u := clear.Updates(); u["neighbor_device_id"] != nil {
+		t.Errorf("clear updates %v", u)
+	}
+
+	for name, body := range map[string]string{
+		"if_index 0":                `{"neighbor_device_id":"` + id.String() + `","neighbor_if_index":0}`,
+		"if_index negative":         `{"neighbor_device_id":"` + id.String() + `","neighbor_if_index":-1}`,
+		"if_index without a device": `{"neighbor_device_id":null,"neighbor_if_index":5}`,
+		"access role with neighbor": `{"role":"access","neighbor_device_id":"` + id.String() + `"}`,
+		"wan role with neighbor":    `{"role":"wan","neighbor_device_id":"` + id.String() + `"}`,
+	} {
+		var bad PortPatch
+		if err := json.Unmarshal([]byte(body), &bad); err != nil {
+			t.Fatalf("%s: unmarshal: %v", name, err)
+		}
+		if bad.Validate() == nil {
+			t.Errorf("%s: accepted", name)
 		}
 	}
 }

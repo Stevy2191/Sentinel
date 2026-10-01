@@ -58,8 +58,65 @@ func TestDBDevicePortsView(t *testing.T) {
 	if cpu.Physical || cpu.Collected {
 		t.Errorf("cpu interface: %+v", cpu)
 	}
-	if v.Faceplate.Rows != 2 || len(v.Faceplate.Blocks) != 5 {
-		t.Errorf("faceplate rows %d blocks %d", v.Faceplate.Rows, len(v.Faceplate.Blocks))
+	if len(v.Faceplates) != 1 || v.Faceplates[0].Unit != 0 || v.Faceplates[0].Label != "" ||
+		v.Faceplates[0].Rows != 2 || len(v.Faceplates[0].Blocks) != 5 {
+		t.Errorf("faceplates %+v", v.Faceplates)
+	}
+}
+
+// DevicePorts and Port resolve a port's neighbor device name and port label
+// without an N+1 of queries (one for devices, one for ports, regardless of
+// how many ports have a neighbor).
+func TestDBDevicePortsViewResolvesNeighbor(t *testing.T) {
+	ports, _, d, _ := portsFixture(t)
+	ctx := context.Background()
+	router := seedDeviceInSite(t, ports.db, d.SiteID, "10.0.0.1")
+	testdb.Exec(t, ports.db, `UPDATE devices SET name = 'Quantum-Gate' WHERE id = ?`, router)
+	seedPort(t, ports.db, router, 10, "0/10", "Core uplink")
+
+	ten := 10
+	_, _, err := ports.UpdatePort(ctx, d.ID, 49, models.PortPatch{
+		NeighborDeviceID: models.Opt[uuid.UUID]{Set: true, Value: &router},
+		NeighborIfIndex:  models.Opt[int]{Set: true, Value: &ten},
+	})
+	testdb.Must(t, err)
+
+	v, err := ports.DevicePorts(ctx, d)
+	testdb.Must(t, err)
+	var p49 PortView
+	for _, p := range v.Ports {
+		if p.IfIndex == 49 {
+			p49 = p
+		}
+	}
+	if p49.NeighborDeviceName != "Quantum-Gate" || p49.NeighborPortLabel != "Port 10 (Core uplink)" {
+		t.Errorf("port 49 neighbor: name %q label %q", p49.NeighborDeviceName, p49.NeighborPortLabel)
+	}
+
+	detail, err := ports.Port(ctx, d, 49)
+	testdb.Must(t, err)
+	if detail.NeighborDeviceName != "Quantum-Gate" || detail.NeighborPortLabel != "Port 10 (Core uplink)" {
+		t.Errorf("port detail neighbor: name %q label %q", detail.NeighborDeviceName, detail.NeighborPortLabel)
+	}
+}
+
+// A stacked device's DevicePorts gives one faceplate per member.
+func TestDBDevicePortsViewStackedFaceplates(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	s := seedDevice(t, db, "HQ", "10.0.0.2")
+	incidents := NewIncidentService(db)
+	devices := NewDeviceService(db, NewSNMPCredentialService(db), incidents)
+	testdb.Must(t, devices.SaveInventory(ctx, s.DeviceID, stackInventory(), time.Now()))
+	ports := NewPortService(db, NewMetricsStore(db), incidents, NewSettingsService(db))
+	d, err := devices.Get(ctx, s.DeviceID)
+	testdb.Must(t, err)
+
+	v, err := ports.DevicePorts(ctx, d)
+	testdb.Must(t, err)
+	if len(v.Faceplates) != 2 || v.Faceplates[0].Unit != 1 || v.Faceplates[0].Label != "Switch 1" ||
+		v.Faceplates[1].Unit != 2 || v.Faceplates[1].Label != "Switch 2" {
+		t.Fatalf("faceplates %+v", v.Faceplates)
 	}
 }
 
