@@ -10,6 +10,10 @@ const NORTH_SOUTH_LINES: ChartLine[] = [
 ]
 const EAST_WEST_LINES: ChartLine[] = [{ metric: 'bps', label: 'Inside the site', colour: '#34d399' }]
 
+/** 1h/6h/24h show the time of day on the x-axis; longer ranges show the
+ *  date. Same rule as TrafficChart's own range picker. */
+const SHORT: MetricsRange[] = ['1h', '6h', '24h']
+
 const EMPTY = (
   <div className="rounded-lg border border-white/10 bg-slate-800/40 p-10 text-center text-sm text-slate-400">
     No data in this range yet. Figures appear a minute or two after the first stats poll.
@@ -60,17 +64,25 @@ export default function SiteTrafficCharts({ siteId }: { siteId: string }) {
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400">{error}</div>
       ) : !data?.wan_configured ? (
         <div className="rounded-lg border border-white/10 bg-slate-800/40 p-10 text-center text-sm text-slate-400">
-          Mark the port that faces the internet as WAN (on its port page) to see internet and east-west traffic.
+          Mark the port that faces the internet as WAN (on its port page), with Collect statistics on, to see internet and east-west traffic.
         </div>
       ) : (
         <div className="space-y-6">
           <section>
             <h3 className="mb-3 text-sm font-medium text-slate-300">Internet (north-south)</h3>
-            {northSouth.length === 0 ? EMPTY : <AreaSeriesChart data={northSouth} lines={NORTH_SOUTH_LINES} unit="bps" step={data.step_seconds} />}
+            {northSouth.length === 0 ? (
+              EMPTY
+            ) : (
+              <AreaSeriesChart data={northSouth} lines={NORTH_SOUTH_LINES} unit="bps" step={data.step_seconds} shortTicks={SHORT.includes(range)} />
+            )}
           </section>
           <section>
             <h3 className="mb-3 text-sm font-medium text-slate-300">Inside the site (east-west)</h3>
-            {eastWest.length === 0 ? EMPTY : <AreaSeriesChart data={eastWest} lines={EAST_WEST_LINES} unit="bps" step={data.step_seconds} />}
+            {eastWest.length === 0 ? (
+              EMPTY
+            ) : (
+              <AreaSeriesChart data={eastWest} lines={EAST_WEST_LINES} unit="bps" step={data.step_seconds} shortTicks={SHORT.includes(range)} />
+            )}
           </section>
         </div>
       )}

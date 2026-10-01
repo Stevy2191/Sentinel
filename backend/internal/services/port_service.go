@@ -538,10 +538,14 @@ func sortedTimes(maps ...map[time.Time]float64) []time.Time {
 }
 
 // SiteTraffic splits a site's port traffic into north-south (the sum of the
-// site's WAN-role ports) and east-west (an estimate derived from the site's
-// switch/router access ports and its WAN ports: see the design doc for the
-// formula). With no WAN-role port in the site, WANConfigured is false and
-// both series are empty: there is nothing to tell north-south from east-west.
+// site's collected WAN-role ports) and east-west (an estimate derived from
+// the site's switch/router access ports and its WAN ports: see the design
+// doc for the formula). A WAN-role port that is not collected has no samples
+// to query, so it is excluded same as any other uncollected port: counting
+// it would show north-south as empty while east-west quietly absorbed all
+// of its internet traffic as if it were internal. With no collected WAN-role
+// port in the site, WANConfigured is false and both series are empty: there
+// is nothing to tell north-south from east-west.
 func (s *PortService) SiteTraffic(ctx context.Context, siteID uuid.UUID, from, to time.Time) (*SiteTraffic, error) {
 	var rows []struct {
 		models.DeviceInterface
@@ -559,6 +563,9 @@ func (s *PortService) SiteTraffic(ctx context.Context, siteID uuid.UUID, from, t
 	for _, r := range rows {
 		switch r.Role {
 		case models.PortRoleWAN:
+			if !r.CollectEffective() {
+				continue
+			}
 			wanIfaceIDs = append(wanIfaceIDs, r.ID)
 			if !wanDevSeen[r.DeviceID] {
 				wanDevSeen[r.DeviceID] = true
