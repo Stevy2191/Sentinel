@@ -180,11 +180,12 @@ const (
 	DeviceTypeRouter      = "router"
 	DeviceTypeAccessPoint = "access_point"
 	DeviceTypeNVR         = "nvr"
+	DeviceTypeUPS         = "ups"
 	DeviceTypeOther       = "other"
 )
 
 var ValidDeviceTypes = map[string]bool{
-	DeviceTypeSwitch: true, DeviceTypeRouter: true, DeviceTypeAccessPoint: true, DeviceTypeNVR: true, DeviceTypeOther: true,
+	DeviceTypeSwitch: true, DeviceTypeRouter: true, DeviceTypeAccessPoint: true, DeviceTypeNVR: true, DeviceTypeUPS: true, DeviceTypeOther: true,
 }
 
 // Port roles: what each port connects to. Set by the user (PortPatch.Role);
@@ -534,7 +535,7 @@ func (p DeviceDetailsPatch) Updates() (map[string]any, error) {
 		case ValidDeviceTypes[*p.DeviceType.Value]:
 			u["device_type"] = *p.DeviceType.Value
 		default:
-			return nil, fmt.Errorf("device type must be switch, router, access_point, nvr or other")
+			return nil, fmt.Errorf("device type must be switch, router, access_point, nvr, ups or other")
 		}
 	}
 	if p.FaceplateRows.Set {

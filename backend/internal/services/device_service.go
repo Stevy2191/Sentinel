@@ -439,7 +439,7 @@ func (s *DeviceService) SaveInventory(ctx context.Context, id uuid.UUID, inv snm
 			physical++
 		}
 	}
-	detected := portmon.DetectDeviceType(inv.Model, physical)
+	detected := portmon.DetectDeviceType(inv.Model, inv.System.ObjectID, physical)
 	// Stack units: physical ports decide whether this walk's device counts
 	// as a stack; see portmon.StackUnits.
 	units := portmon.StackUnits(infos)

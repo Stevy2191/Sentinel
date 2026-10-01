@@ -95,8 +95,31 @@ func TestDetectDeviceType(t *testing.T) {
 		{"Cambium ePMP", 2, "other"},
 	}
 	for _, c := range cases {
-		if got := DetectDeviceType(c.model, c.ports); got != c.want {
+		if got := DetectDeviceType(c.model, "", c.ports); got != c.want {
 			t.Errorf("DetectDeviceType(%q, %d) = %q, want %q", c.model, c.ports, got, c.want)
+		}
+	}
+}
+
+// UPS makers are recognised by their SNMP enterprise number, whatever the
+// model string says; any other vendor falls through to the usual rules.
+func TestDetectDeviceTypeUPS(t *testing.T) {
+	cases := []struct {
+		objectID string
+		want     string
+	}{
+		{"1.3.6.1.4.1.318.1.3.27", "ups"}, // APC Smart-UPS (NMC2)
+		{".1.3.6.1.4.1.534.1", "ups"},     // Eaton / Powerware
+		{"1.3.6.1.4.1.705.1", "ups"},      // Eaton (MGE)
+		{"1.3.6.1.4.1.3808.1.1.1", "ups"}, // CyberPower
+		{"1.3.6.1.4.1.476.1.42", "ups"},   // Vertiv / Liebert
+		{"1.3.6.1.4.1.3180", "other"},     // 318 as a prefix of another number is not APC
+		{"1.3.6.1.4.1.8072.3.2.10", "other"},
+		{"", "other"},
+	}
+	for _, c := range cases {
+		if got := DetectDeviceType("", c.objectID, 1); got != c.want {
+			t.Errorf("DetectDeviceType(sysObjectID %q) = %q, want %q", c.objectID, got, c.want)
 		}
 	}
 }
