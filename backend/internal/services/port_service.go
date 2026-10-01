@@ -483,6 +483,149 @@ func (s *PortService) SiteSummary(ctx context.Context, siteID uuid.UUID) (*SiteP
 	return out, nil
 }
 
+// NorthSouthPoint is one bucket of a site's internet traffic.
+type NorthSouthPoint struct {
+	Time   time.Time `json:"t"`
+	InBps  float64   `json:"in_bps"`
+	OutBps float64   `json:"out_bps"`
+}
+
+// EastWestPoint is one bucket of a site's traffic that stays inside the site.
+type EastWestPoint struct {
+	Time time.Time `json:"t"`
+	Bps  float64   `json:"bps"`
+}
+
+// SiteTraffic is the response of GET /sites/:id/traffic: the site's
+// north-south (internet) and east-west (internal) traffic over a range.
+type SiteTraffic struct {
+	Resolution    string            `json:"resolution"`
+	StepSeconds   int               `json:"step_seconds"`
+	WANConfigured bool              `json:"wan_configured"`
+	NorthSouth    []NorthSouthPoint `json:"north_south"`
+	EastWest      []EastWestPoint   `json:"east_west"`
+}
+
+// bucketValues is one metric's Sum series as a map keyed by bucket time, for
+// easy lookup when combining several metrics' buckets.
+func bucketValues(res *MetricsResult, metric string) map[time.Time]float64 {
+	out := map[time.Time]float64{}
+	for _, s := range res.Series {
+		if s.Metric != metric {
+			continue
+		}
+		for _, p := range s.Points {
+			out[p.Time] = p.Avg
+		}
+	}
+	return out
+}
+
+// sortedTimes returns a's keys, b's keys, or both (deduplicated) in order.
+func sortedTimes(maps ...map[time.Time]float64) []time.Time {
+	seen := map[time.Time]bool{}
+	var out []time.Time
+	for _, m := range maps {
+		for t := range m {
+			if !seen[t] {
+				seen[t] = true
+				out = append(out, t)
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Before(out[j]) })
+	return out
+}
+
+// SiteTraffic splits a site's port traffic into north-south (the sum of the
+// site's WAN-role ports) and east-west (an estimate derived from the site's
+// switch/router access ports and its WAN ports: see the design doc for the
+// formula). With no WAN-role port in the site, WANConfigured is false and
+// both series are empty: there is nothing to tell north-south from east-west.
+func (s *PortService) SiteTraffic(ctx context.Context, siteID uuid.UUID, from, to time.Time) (*SiteTraffic, error) {
+	var rows []struct {
+		models.DeviceInterface
+		EffectiveType string `gorm:"column:effective_type"`
+	}
+	err := s.db.WithContext(ctx).Raw(`SELECT i.*, COALESCE(d.device_type, d.device_type_detected) AS effective_type
+		FROM device_interfaces i JOIN devices d ON d.id = i.device_id
+		WHERE d.site_id = ? AND i.present`, siteID).Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("listing site ports for traffic: %w", err)
+	}
+
+	var wanIfaceIDs, wanDeviceIDs, accessIfaceIDs, accessDeviceIDs []uuid.UUID
+	wanDevSeen, accessDevSeen := map[uuid.UUID]bool{}, map[uuid.UUID]bool{}
+	for _, r := range rows {
+		switch r.Role {
+		case models.PortRoleWAN:
+			wanIfaceIDs = append(wanIfaceIDs, r.ID)
+			if !wanDevSeen[r.DeviceID] {
+				wanDevSeen[r.DeviceID] = true
+				wanDeviceIDs = append(wanDeviceIDs, r.DeviceID)
+			}
+		case models.PortRoleAccess:
+			if r.EffectiveType != models.DeviceTypeSwitch && r.EffectiveType != models.DeviceTypeRouter {
+				continue
+			}
+			if !r.CollectEffective() {
+				continue
+			}
+			info := portmon.IfInfo{Name: r.Name, Descr: r.Descr, Type: r.IfType, ConnectorPresent: r.ConnectorPresent}
+			if !portmon.IsPhysical(info) {
+				continue
+			}
+			accessIfaceIDs = append(accessIfaceIDs, r.ID)
+			if !accessDevSeen[r.DeviceID] {
+				accessDevSeen[r.DeviceID] = true
+				accessDeviceIDs = append(accessDeviceIDs, r.DeviceID)
+			}
+		}
+	}
+
+	bpsMetrics := []string{MetricIfInBps, MetricIfOutBps}
+	wanRes, err := s.metrics.Query(ctx, MetricsQuery{DeviceIDs: wanDeviceIDs, Metrics: bpsMetrics,
+		InterfaceIDs: wanIfaceIDs, From: from, To: to, Sum: true})
+	if err != nil {
+		return nil, err
+	}
+	out := &SiteTraffic{Resolution: wanRes.Resolution, StepSeconds: wanRes.StepSeconds,
+		WANConfigured: len(wanIfaceIDs) > 0, NorthSouth: []NorthSouthPoint{}, EastWest: []EastWestPoint{}}
+	if !out.WANConfigured {
+		return out, nil
+	}
+
+	accessRes, err := s.metrics.Query(ctx, MetricsQuery{DeviceIDs: accessDeviceIDs, Metrics: bpsMetrics,
+		InterfaceIDs: accessIfaceIDs, From: from, To: to, Sum: true})
+	if err != nil {
+		return nil, err
+	}
+
+	wanIn, wanOut := bucketValues(wanRes, MetricIfInBps), bucketValues(wanRes, MetricIfOutBps)
+	accIn, accOut := bucketValues(accessRes, MetricIfInBps), bucketValues(accessRes, MetricIfOutBps)
+
+	for _, t := range sortedTimes(wanIn, wanOut) {
+		out.NorthSouth = append(out.NorthSouth, NorthSouthPoint{Time: t, InBps: wanIn[t], OutBps: wanOut[t]})
+	}
+
+	// A bucket needs both access sums to mean anything; missing WAN sums at a
+	// bucket default to 0 (map lookups of an absent key), so a quiet WAN still
+	// yields an east-west point.
+	for _, t := range sortedTimes(accIn, accOut) {
+		accInV, inOK := accIn[t]
+		accOutV, outOK := accOut[t]
+		if !inOK || !outOK {
+			continue
+		}
+		ew := ((accInV - wanOut[t]) + (accOutV - wanIn[t])) / 2
+		if ew < 0 {
+			ew = 0
+		}
+		out.EastWest = append(out.EastWest, EastWestPoint{Time: t, Bps: ew})
+	}
+	return out, nil
+}
+
 // PhysicalInterfaceIDs returns the ids of the physical ports of the given
 // devices, for totals that must not count a link aggregate and its members
 // twice.

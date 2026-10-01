@@ -103,6 +103,35 @@ func TestDBSaveInventoryClosesIncidentsOfPortsThatDisappear(t *testing.T) {
 	}
 }
 
+// Inventory must never reset a port's role: the upsert's DoUpdates column set
+// must not include "role".
+func TestDBSaveInventoryKeepsPortRole(t *testing.T) {
+	db := testdb.Open(t)
+	s := seedDevice(t, db, "HQ", "10.0.0.2")
+	svc := NewDeviceService(db, NewSNMPCredentialService(db), NewIncidentService(db))
+	ctx := context.Background()
+
+	testdb.Must(t, svc.SaveInventory(ctx, s.DeviceID, switchInventory(true), time.Now()))
+	testdb.Exec(t, db, `UPDATE device_interfaces SET role = 'wan' WHERE device_id = ? AND if_index = 1`, s.DeviceID)
+
+	// Walk again: role must survive even though every other ifTable-sourced
+	// column is refreshed.
+	testdb.Must(t, svc.SaveInventory(ctx, s.DeviceID, switchInventory(true), time.Now()))
+
+	var p1 models.DeviceInterface
+	testdb.Must(t, db.First(&p1, "device_id = ? AND if_index = 1", s.DeviceID).Error)
+	if p1.Role != models.PortRoleWAN {
+		t.Errorf("role = %q, want wan", p1.Role)
+	}
+
+	// A newly seen interface still defaults to access.
+	var p2 models.DeviceInterface
+	testdb.Must(t, db.First(&p2, "device_id = ? AND if_index = 2", s.DeviceID).Error)
+	if p2.Role != models.PortRoleAccess {
+		t.Errorf("new interface role = %q, want access", p2.Role)
+	}
+}
+
 // Overrides are never written by inventory.
 func TestDBSaveInventoryLeavesOverrides(t *testing.T) {
 	db := testdb.Open(t)
