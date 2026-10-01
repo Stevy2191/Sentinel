@@ -14,6 +14,7 @@ import (
 
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
 	"github.com/Stevy2191/Sentinel/backend/internal/portmon"
+	"github.com/Stevy2191/Sentinel/backend/internal/upsmon"
 )
 
 // BaseURLFunc resolves the instance's externally reachable base URL. It is
@@ -310,5 +311,15 @@ func (s *SettingsService) PortThresholds(ctx context.Context) portmon.Thresholds
 			models.MinPortUtilThresholdPct, models.MaxPortUtilThresholdPct)),
 		DownGrace: time.Duration(s.intSetting(ctx, models.SettingPortDownGraceSeconds, models.DefaultPortDownGraceSeconds,
 			models.MinPortDownGraceSeconds, models.MaxPortDownGraceSeconds)) * time.Second,
+	}
+}
+
+// UPSThresholds are the instance-wide UPS alert thresholds.
+func (s *SettingsService) UPSThresholds(ctx context.Context) upsmon.Thresholds {
+	return upsmon.Thresholds{
+		LowBatteryPct: float64(s.intSetting(ctx, models.SettingUPSLowBatteryPct, models.DefaultUPSLowBatteryPct,
+			models.MinUPSLowBatteryPct, models.MaxUPSLowBatteryPct)),
+		HighLoadPct: float64(s.intSetting(ctx, models.SettingUPSHighLoadPct, models.DefaultUPSHighLoadPct,
+			models.MinUPSHighLoadPct, models.MaxUPSHighLoadPct)),
 	}
 }
