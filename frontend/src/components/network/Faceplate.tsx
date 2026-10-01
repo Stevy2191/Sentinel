@@ -31,12 +31,14 @@ export default function Faceplate({ faceplates, ports, title, subtitle, selected
           {fp.label && <p className="mb-1 text-xs font-semibold text-slate-400">{fp.label}</p>}
           <div className="overflow-x-auto pb-1">
             <div className="inline-flex items-center gap-5 rounded-lg border border-slate-700/70 bg-gradient-to-b from-slate-900 to-slate-950 px-4 py-3 shadow-inner">
-              <div className="w-28 shrink-0">
-                <p className="flex items-center gap-1.5 truncate text-xs font-semibold text-slate-200">
-                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" aria-hidden />
-                  {title}
+              {/* Grows to fit the name and model, so neither is cut off; a
+                  very long one wraps rather than pushing the ports away. */}
+              <div className="min-w-28 max-w-64 shrink-0">
+                <p className="flex items-start gap-1.5 text-xs font-semibold text-slate-200">
+                  <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" aria-hidden />
+                  <span className="min-w-0 break-words">{title}</span>
                 </p>
-                {subtitle && <p className="truncate text-[11px] text-slate-500">{subtitle}</p>}
+                {subtitle && <p className="break-words text-[11px] text-slate-500">{subtitle}</p>}
               </div>
               {fp.blocks.map((b, i) => (
                 <Block key={i} block={b} rows={fp.rows} byIndex={byIndex} selected={selected} onSelect={onSelect} />
