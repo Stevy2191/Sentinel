@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import api, { type ApiError } from '@/services/api'
 import type { ApiResponse } from '@/types'
-import type { Device, DeviceInterface, DeviceType } from '@/hooks/useDevices'
+import type { Device, DeviceInterface, DeviceType, PortRole } from '@/hooks/useDevices'
+import type { MetricsRange } from '@/hooks/useMetrics'
 
 export type PortCondition = 'link_down' | 'errors' | 'flapping' | 'slow_link' | 'saturated'
 
@@ -89,13 +90,36 @@ export interface SitePortSummary {
   problems: PortRef[]
 }
 
-/** PATCH body: absent = unchanged, null = back to the default. */
+export interface NorthSouthPoint {
+  t: string
+  in_bps: number
+  out_bps: number
+}
+export interface EastWestPoint {
+  t: string
+  bps: number
+}
+
+/** GET /sites/:id/traffic: the site's internet (north-south) and internal
+ *  (east-west) traffic. wan_configured is false until a port is marked WAN,
+ *  and both series are empty until then. */
+export interface SiteTraffic {
+  resolution: 'raw' | '5m' | '1h'
+  step_seconds: number
+  wan_configured: boolean
+  north_south: NorthSouthPoint[]
+  east_west: EastWestPoint[]
+}
+
+/** PATCH body: absent = unchanged, null = back to the default. role has no
+ *  "back to the default": absent is the only way to leave it unchanged. */
 export interface PortPatch {
   important?: boolean
   collect?: boolean | null
   util_threshold_pct?: number | null
   error_threshold_per_min?: number | null
   down_grace_seconds?: number | null
+  role?: PortRole
 }
 
 /** PATCH body: absent = unchanged, null or '' = back to what SNMP reports. */
@@ -169,6 +193,13 @@ export function usePortEvents(scope: { deviceId?: string; siteId?: string; ifInd
 
 export function useSitePortSummary(siteId: string | undefined) {
   return useResource<SitePortSummary>(siteId ? `/sites/${siteId}/ports/summary` : null, undefined, LIVE_MS)
+}
+
+/** A site's north-south and east-west traffic for one range. Short ranges
+ *  refresh every minute; long ones every five, same as useMetricsQuery. */
+export function useSiteTraffic(siteId: string | undefined, range: MetricsRange) {
+  const refreshMs = range === '1h' || range === '6h' || range === '24h' ? 60_000 : 300_000
+  return useResource<SiteTraffic>(siteId ? `/sites/${siteId}/traffic` : null, { range }, refreshMs)
 }
 
 export function usePortActions() {

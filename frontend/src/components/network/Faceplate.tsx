@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import type { FaceBlock, FacePort, Faceplate as Layout, PortView } from '@/hooks/usePorts'
-import { busiestUtil, PORT_STATE, portState, portTitle, type PortState } from '@/utils/network'
+import { busiestUtil, PORT_STATE, portLiveDetail, portState, portTitle, type PortState } from '@/utils/network'
 
 // RJ45 outline with the latch notch facing away from the other row, as on
 // the real switch: top-row notch at the bottom, bottom-row notch at the top.
@@ -93,7 +93,8 @@ function PortCell({
 }) {
   const state: PortState = port ? portState(port) : 'down'
   const util = port ? busiestUtil(port) : null
-  const label = port ? `${portTitle(port)}: ${PORT_STATE[state].label}` : `Port ${fp.number}`
+  const detail = port ? portLiveDetail(port) : ''
+  const label = port ? `${portTitle(port)}: ${PORT_STATE[state].label}${detail ? ` · ${detail}` : ''}` : `Port ${fp.number}`
   return (
     <button
       type="button"

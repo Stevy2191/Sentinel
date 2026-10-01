@@ -1,12 +1,23 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Star } from 'lucide-react'
-import { formatSpeed, useDevice } from '@/hooks/useDevices'
+import { formatSpeed, useDevice, type PortRole } from '@/hooks/useDevices'
 import { useSite } from '@/hooks/useSites'
 import { usePort, usePortActions, usePortEvents, type PortDetail as Port, type PortPatch } from '@/hooks/usePorts'
 import TrafficChart from '@/components/network/TrafficChart'
 import PortEventList from '@/components/network/PortEventList'
-import { busiestUtil, CONDITION_LABEL, formatBps, formatPct, PORT_STATE, portState, portTitle, WARNING_CONDITIONS } from '@/utils/network'
+import {
+  busiestUtil,
+  CONDITION_LABEL,
+  formatBps,
+  formatPct,
+  PORT_ROLE_LABEL,
+  PORT_ROLES,
+  PORT_STATE,
+  portState,
+  portTitle,
+  WARNING_CONDITIONS,
+} from '@/utils/network'
 import type { ApiError } from '@/services/api'
 
 const inputCls =
@@ -127,6 +138,7 @@ export default function PortDetail() {
           ['Link last changed', port.oper_changed_at ? new Date(port.oper_changed_at).toLocaleString() : '—'],
           ['MAC', port.mac || '—'],
           ['Statistics', port.collected ? 'Collected every poll' : 'Not collected'],
+          ['Connects to', PORT_ROLE_LABEL[port.role]],
         ].map(([k, v]) => (
           <div key={k}>
             <dt className="text-xs uppercase tracking-widest text-slate-500">{k}</dt>
@@ -150,6 +162,21 @@ export default function PortDetail() {
                 Back to automatic
               </button>
             )}
+            <label className="flex items-center gap-2 text-sm text-slate-300">
+              Connects to
+              <select
+                value={port.role}
+                disabled={busy}
+                onChange={(e) => void change({ role: e.target.value as PortRole })}
+                className="cursor-pointer rounded-md border border-white/10 bg-slate-900/60 px-2 py-1 text-sm text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+              >
+                {PORT_ROLES.map((r) => (
+                  <option key={r} value={r}>
+                    {PORT_ROLE_LABEL[r]}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
           <ThresholdsForm
             key={`${port.util_threshold_pct}-${port.error_threshold_per_min}-${port.down_grace_seconds}`}

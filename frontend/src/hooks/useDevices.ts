@@ -75,6 +75,8 @@ export interface DeviceInput {
   notify_channels: string[] | null
 }
 
+export type PortRole = 'access' | 'uplink' | 'wan'
+
 export interface DeviceInterface {
   id: string
   if_index: number
@@ -89,6 +91,7 @@ export interface DeviceInterface {
   last_change_seconds: number
   present: boolean
   connector_present: boolean | null
+  role: PortRole
   collect: boolean | null
   collect_default: boolean
   important: boolean

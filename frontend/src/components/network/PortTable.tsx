@@ -1,10 +1,27 @@
 import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { Star } from 'lucide-react'
-import { formatSpeed } from '@/hooks/useDevices'
+import { Link, useNavigate } from 'react-router-dom'
+import { ChevronRight, Star } from 'lucide-react'
+import { formatSpeed, type PortRole } from '@/hooks/useDevices'
 import { usePortActions, type PortPatch, type PortView } from '@/hooks/usePorts'
-import { busiestUtil, CONDITION_LABEL, formatBps, formatPct, PORT_STATE, portState, WARNING_CONDITIONS, type PortState } from '@/utils/network'
+import {
+  busiestUtil,
+  CONDITION_LABEL,
+  formatBps,
+  formatPct,
+  PORT_ROLE_LABEL,
+  PORT_ROLES,
+  PORT_STATE,
+  portState,
+  WARNING_CONDITIONS,
+  type PortState,
+} from '@/utils/network'
 import type { ApiError } from '@/services/api'
+
+/** Stops a control's click (and so its bubbled-up row navigation) without
+ *  stopping the control itself from doing its own thing. */
+function stopRowClick(e: React.SyntheticEvent) {
+  e.stopPropagation()
+}
 
 type SortKey = 'number' | 'alias' | 'state' | 'speed' | 'in' | 'out' | 'busy' | 'errors'
 const STATE_ORDER: Record<PortState, number> = { critical: 0, warning: 1, up: 2, down: 3, disabled: 4 }
@@ -40,6 +57,7 @@ interface Props {
 /** Every port with its live figures; sortable, with the important star and
  *  the collect switch for editors. */
 export default function PortTable({ deviceId, ports, canEdit, onChanged }: Props) {
+  const navigate = useNavigate()
   const { updatePort, busy } = usePortActions()
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'number', desc: false })
   const [showAll, setShowAll] = useState(false)
@@ -106,7 +124,11 @@ export default function PortTable({ deviceId, ports, canEdit, onChanged }: Props
                   {head('out', 'Out', true)}
                   {head('busy', 'Busy', true)}
                   {head('errors', 'Errors/min', true)}
+                  <th className="px-3 py-2 font-medium">Role</th>
                   <th className="px-3 py-2 font-medium">Collect</th>
+                  <th className="w-8 px-3 py-2">
+                    <span className="sr-only">Open</span>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
@@ -114,8 +136,12 @@ export default function PortTable({ deviceId, ports, canEdit, onChanged }: Props
                   const st = portState(p)
                   const warns = (p.conditions ?? []).filter((c) => WARNING_CONDITIONS.includes(c))
                   return (
-                    <tr key={p.id} className={p.collected ? '' : 'opacity-60'}>
-                      <td className="px-3 py-2">
+                    <tr
+                      key={p.id}
+                      onClick={() => navigate(`/network/devices/${deviceId}/ports/${p.if_index}`)}
+                      className={`cursor-pointer hover:bg-white/5 ${p.collected ? '' : 'opacity-60'}`}
+                    >
+                      <td className="px-3 py-2" onClick={stopRowClick}>
                         {canEdit ? (
                           <button
                             type="button"
@@ -131,7 +157,12 @@ export default function PortTable({ deviceId, ports, canEdit, onChanged }: Props
                         )}
                       </td>
                       <td className="px-3 py-2 font-medium tabular-nums">
-                        <Link to={`/network/devices/${deviceId}/ports/${p.if_index}`} className="text-slate-200 hover:text-primary-400" title={p.name}>
+                        <Link
+                          to={`/network/devices/${deviceId}/ports/${p.if_index}`}
+                          onClick={stopRowClick}
+                          className="text-slate-200 hover:text-primary-400"
+                          title={p.name}
+                        >
                           {p.number}
                         </Link>
                       </td>
@@ -149,7 +180,26 @@ export default function PortTable({ deviceId, ports, canEdit, onChanged }: Props
                       <td className="px-3 py-2 text-right tabular-nums text-slate-300">
                         {p.errors_per_min == null ? '—' : +p.errors_per_min.toFixed(1)}
                       </td>
-                      <td className="px-3 py-2">
+                      <td className="max-w-[12rem] px-3 py-2" onClick={stopRowClick}>
+                        {canEdit ? (
+                          <select
+                            value={p.role}
+                            disabled={busy}
+                            onChange={(e) => void change(p, { role: e.target.value as PortRole })}
+                            aria-label={`Connects to, for port ${p.number}`}
+                            className="w-full cursor-pointer truncate rounded-md border border-white/10 bg-slate-900/60 px-2 py-1 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                          >
+                            {PORT_ROLES.map((r) => (
+                              <option key={r} value={r}>
+                                {PORT_ROLE_LABEL[r]}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="text-slate-400">{PORT_ROLE_LABEL[p.role]}</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2" onClick={stopRowClick}>
                         {canEdit ? (
                           <input
                             type="checkbox"
@@ -161,6 +211,9 @@ export default function PortTable({ deviceId, ports, canEdit, onChanged }: Props
                         ) : (
                           <span className="text-slate-400">{p.collected ? 'Yes' : 'No'}</span>
                         )}
+                      </td>
+                      <td className="px-3 py-2 text-slate-600">
+                        <ChevronRight className="h-4 w-4" aria-hidden />
                       </td>
                     </tr>
                   )

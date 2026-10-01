@@ -9,7 +9,7 @@ import DeviceTable from '@/components/network/DeviceTable'
 import DeviceFormModal from '@/components/network/DeviceFormModal'
 import ScanModal from '@/components/network/ScanModal'
 import { useSitePortSummary, usePortEvents, type PortRef } from '@/hooks/usePorts'
-import TrafficChart from '@/components/network/TrafficChart'
+import SiteTrafficCharts from '@/components/network/SiteTrafficCharts'
 import PortEventList from '@/components/network/PortEventList'
 import { CONDITION_LABEL, formatPct, portTitle } from '@/utils/network'
 import type { ApiError } from '@/services/api'
@@ -146,15 +146,7 @@ export default function SiteDetail() {
 
       {devices.length > 0 && (
         <>
-          <TrafficChart
-            title="Site traffic"
-            query={{ siteId: site.id, sum: true, physicalOnly: true }}
-            lines={[
-              { metric: 'if_in_bps', label: 'In', colour: '#22d3ee' },
-              { metric: 'if_out_bps', label: 'Out', colour: '#a78bfa' },
-            ]}
-            unit="bps"
-          />
+          <SiteTrafficCharts siteId={site.id} />
           <div className="grid gap-6 lg:grid-cols-2">
             <PortRefList title="Busiest ports" refs={summary?.busiest ?? []} empty="No traffic figures yet." detail={(r) => formatPct(r.util_pct)} />
             <PortRefList
