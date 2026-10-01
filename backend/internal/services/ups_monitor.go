@@ -46,13 +46,17 @@ type UPSMonitor struct {
 	now    func() time.Time
 	logger *log.Logger
 
-	mu     sync.Mutex
-	states map[uuid.UUID]*upsmon.State
+	// overLoad is each UPS's high-load clock (when load first went over the
+	// threshold). It is the only state kept between polls: which conditions
+	// are active is read from the open incidents every poll, so a pause, a
+	// failed close or a restart can never leave the two disagreeing.
+	mu       sync.Mutex
+	overLoad map[uuid.UUID]*time.Time
 }
 
 func NewUPSMonitor(metrics MetricsWriter, incidents UPSIncidents, notifier Notifier, client snmp.Client, thresholds UPSThresholdSource, sites SiteNamer) *UPSMonitor {
 	return &UPSMonitor{metrics: metrics, incidents: incidents, notifier: notifier, client: client, thresholds: thresholds,
-		sites: sites, now: time.Now, logger: log.Default(), states: map[uuid.UUID]*upsmon.State{}}
+		sites: sites, now: time.Now, logger: log.Default(), overLoad: map[uuid.UUID]*time.Time{}}
 }
 
 // IsUPS reports whether a device's effective type (the user's choice, else
@@ -79,36 +83,29 @@ func thresholdsFor(d models.Device, def upsmon.Thresholds) upsmon.Thresholds {
 	return def
 }
 
-// state returns the device's remembered state, rebuilding it from open
-// incidents the first time (after a restart). ok is false when that lookup
-// failed; the poll then skips alerting rather than alert twice.
-func (m *UPSMonitor) state(ctx context.Context, deviceID uuid.UUID) (*upsmon.State, bool) {
-	m.mu.Lock()
-	st := m.states[deviceID]
-	m.mu.Unlock()
-	if st != nil {
-		return st, true
-	}
+// openConditions reads the device's open UPS incidents: condition -> the
+// incident's start.
+func (m *UPSMonitor) openConditions(ctx context.Context, deviceID uuid.UUID) (map[upsmon.Condition]time.Time, error) {
 	open, err := m.incidents.OpenDeviceConditionIncidents(ctx, deviceID)
 	if err != nil {
-		m.logger.Printf("[ups] listing open incidents for %s: %v", deviceID, err)
-		return nil, false
+		return nil, err
 	}
-	seed := map[upsmon.Condition]time.Time{}
+	out := map[upsmon.Condition]time.Time{}
 	for _, inc := range open {
 		if inc.Condition != nil {
-			seed[upsmon.Condition(*inc.Condition)] = inc.StartTime
+			out[upsmon.Condition(*inc.Condition)] = inc.StartTime
 		}
 	}
-	restored := upsmon.Restore(seed)
-	m.mu.Lock()
-	m.states[deviceID] = &restored
-	m.mu.Unlock()
-	return &restored, true
+	return out, nil
 }
 
 // PollUPS reads one UPS and applies the result. A failed read changes
 // nothing: an unreachable UPS is the device-down incident's business.
+//
+// The conditions active before this poll are the device's open incidents,
+// so an alert whose incident was closed elsewhere (a pause) starts afresh
+// now, an open that failed is retried as a new start, and an incident whose
+// condition is no longer active (a close that failed) is closed quietly.
 func (m *UPSMonitor) PollUPS(ctx context.Context, d models.Device, t snmp.Target) {
 	r, err := snmp.ReadUPS(ctx, m.client, t)
 	if err != nil {
@@ -121,19 +118,22 @@ func (m *UPSMonitor) PollUPS(ctx context.Context, d models.Device, t snmp.Target
 			m.logger.Printf("[ups] writing samples for %s: %v", d.Host, err)
 		}
 	}
-	st, ok := m.state(ctx, d.ID)
-	if !ok {
+	open, err := m.openConditions(ctx, d.ID)
+	if err != nil {
+		m.logger.Printf("[ups] listing open incidents for %s: %v", d.Host, err)
 		return
 	}
-	next, changes := upsmon.Evaluate(*st, r, thresholdsFor(d, m.thresholds.UPSThresholds(ctx)), now)
+	prev := upsmon.Restore(open)
 	m.mu.Lock()
-	m.states[d.ID] = &next
+	prev.OverLoadSince = m.overLoad[d.ID]
+	m.mu.Unlock()
+	next, changes := upsmon.Evaluate(prev, r, thresholdsFor(d, m.thresholds.UPSThresholds(ctx)), now)
+	m.mu.Lock()
+	m.overLoad[d.ID] = next.OverLoadSince
 	m.mu.Unlock()
 
 	site := ""
-	handled := map[upsmon.Condition]bool{}
 	for _, c := range changes {
-		handled[c.Condition] = true
 		if c.Started {
 			inc, opened, err := m.incidents.OpenDeviceConditionIncident(ctx, d.ID, string(c.Condition), c.At, upsProblem(d, c))
 			if err != nil {
@@ -154,28 +154,13 @@ func (m *UPSMonitor) PollUPS(ctx context.Context, d models.Device, t snmp.Target
 			m.notify(ctx, d, c, inc, &site)
 		}
 	}
-	// Retry an open that failed on an earlier poll (idempotent).
-	for c, since := range next.Active {
-		if handled[c] {
-			continue
-		}
-		ch := upsmon.Change{Condition: c, Started: true, At: since}
-		inc, opened, err := m.incidents.OpenDeviceConditionIncident(ctx, d.ID, string(c), since, upsProblem(d, ch))
-		if err != nil {
-			m.logger.Printf("[ups] ensuring %s incident for %s: %v", c, d.Host, err)
-			continue
-		}
-		if opened {
-			m.notify(ctx, d, ch, inc, &site)
-		}
-	}
 }
 
 // ReconcileUPS closes, without notifying, any UPS incident left open on a
 // device that is no longer a UPS, and forgets its state.
 func (m *UPSMonitor) ReconcileUPS(ctx context.Context, d models.Device) {
 	m.mu.Lock()
-	delete(m.states, d.ID)
+	delete(m.overLoad, d.ID)
 	m.mu.Unlock()
 	open, err := m.incidents.OpenDeviceConditionIncidents(ctx, d.ID)
 	if err != nil {
