@@ -215,8 +215,17 @@ Depends on: 2.
 
 ### Later
 
-Running a dashboard as a report (its widgets rendered into the PDF), and a
-geographic multi-site view. Neither is designed yet.
+Wanted, but not designed yet:
+
+- Running a dashboard as a report (its widgets rendered into the PDF).
+- A geographic multi-site view.
+- **A site Power page** (asked for 2026-10-01). From a site, a Power option
+  lists every UPS in that site at a glance: on mains or on battery, charge,
+  runtime left, load, and any open UPS alerts — one screen to check during
+  an outage instead of opening each UPS. It builds on UPS monitoring
+  (`2026-10-01-ups-monitoring-design.md`, shipped to `dev`): the readings,
+  alerts and Power panel styling exist; what is new is the site page and one
+  request that returns every UPS in the site together.
 
 ## Order and milestones
 
