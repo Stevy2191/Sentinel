@@ -3,6 +3,7 @@ package snmp
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,7 +33,7 @@ const (
 var (
 	ifTableColumns  = []int{1, 2, 3, 5, 6, 7, 8, 9} // index, descr, type, speed, physAddress, admin, oper, lastChange
 	ifXTableColumns = []int{1, 15, 17, 18}          // name, highSpeed, connectorPresent, alias
-	entityColumns   = []int{5, 11, 13}              // class, serialNum, modelName
+	entityColumns   = []int{2, 5, 11, 13}           // descr, class, serialNum, modelName
 )
 
 // System is the SNMPv2-MIB system group. Tagged for the Test connection and
@@ -209,12 +210,32 @@ func ParseInterfaces(pdus []PDU) []Interface {
 	return out
 }
 
-// ParseEntity picks the model and serial of the chassis (entPhysicalClass 3),
-// or else of the first entry with a model name, from walked ENTITY-MIB columns.
+// ENTITY-MIB entPhysicalClass values.
+const (
+	entClassChassis     = 3
+	entClassPowerSupply = 6
+	entClassFan         = 7
+	entClassSensor      = 8
+)
+
+var (
+	// modelInDescr finds a model code such as "WS-C4500X-16" inside a
+	// description like "Cisco Systems, Inc. WS-C4500X-16 2 slot switch".
+	modelInDescr = regexp.MustCompile(`\b[A-Z][A-Z0-9]*(-[A-Z0-9+]+)+\b`)
+	// partName is how power supplies and fans are named ("C4KX-PWR-750AC-F",
+	// "PWR-C1-350WAC", "C4KX-FAN-F"), for entries whose class is unknown.
+	partName = regexp.MustCompile(`(?i)(^|-)(PWR|PSU|FAN)(-|$)`)
+)
+
+// ParseEntity picks the model and serial of the chassis (entPhysicalClass 3)
+// from walked ENTITY-MIB columns: its model name, else a model code in its
+// description (Catalyst 4500s leave the name blank). With no chassis model
+// it takes the first entry with a model name that is not a power supply,
+// fan or sensor, so a part is never taken for the device.
 func ParseEntity(pdus []PDU) (model, serial string) {
 	type ent struct {
-		class         uint64
-		model, serial string
+		class                uint64
+		descr, model, serial string
 	}
 	byIndex := map[int]*ent{}
 	for _, p := range pdus {
@@ -228,6 +249,8 @@ func ParseEntity(pdus []PDU) (model, serial string) {
 			byIndex[idx] = e
 		}
 		switch col {
+		case 2:
+			e.descr = Clean(p.Text())
 		case 5:
 			e.class, _ = p.Number()
 		case 11:
@@ -242,14 +265,25 @@ func ParseEntity(pdus []PDU) (model, serial string) {
 	}
 	sort.Ints(idxs)
 	for _, i := range idxs {
-		if e := byIndex[i]; e.class == 3 && e.model != "" {
+		if e := byIndex[i]; e.class == entClassChassis && e.model != "" {
 			return e.model, e.serial
 		}
 	}
 	for _, i := range idxs {
-		if e := byIndex[i]; e.model != "" {
-			return e.model, e.serial
+		if e := byIndex[i]; e.class == entClassChassis {
+			if m := modelInDescr.FindString(e.descr); m != "" {
+				return m, e.serial
+			}
 		}
+	}
+	for _, i := range idxs {
+		e := byIndex[i]
+		switch {
+		case e.model == "", e.class == entClassPowerSupply, e.class == entClassFan, e.class == entClassSensor,
+			partName.MatchString(e.model):
+			continue
+		}
+		return e.model, e.serial
 	}
 	return "", ""
 }

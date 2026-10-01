@@ -119,3 +119,17 @@ func cisco3850() []fixtureIf {
 		fixtureIf{37, "Nu0", "Null0", 1},
 	)
 }
+
+// cisco4500X is one member of a Catalyst 4500-X-16 VSS pair: its sixteen
+// built-in SFP+ ports are slot 1 (Te1/1/1-16) and the uplink module slot 2
+// (Te1/2/1-8).
+func cisco4500X() []fixtureIf {
+	var out []fixtureIf
+	for i := 1; i <= 16; i++ {
+		out = append(out, fixtureIf{i, fmt.Sprintf("Te1/1/%d", i), fmt.Sprintf("TenGigabitEthernet1/1/%d", i), 6})
+	}
+	for i := 1; i <= 8; i++ {
+		out = append(out, fixtureIf{16 + i, fmt.Sprintf("Te1/2/%d", i), fmt.Sprintf("TenGigabitEthernet1/2/%d", i), 6})
+	}
+	return out
+}
