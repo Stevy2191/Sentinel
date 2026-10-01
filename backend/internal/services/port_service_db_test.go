@@ -17,6 +17,7 @@ func TestDBRecordPortEventsKeepsStartFiguresOnEnd(t *testing.T) {
 	db := testdb.Open(t)
 	s := seedDevice(t, db, "HQ", "10.0.0.2")
 	port := seedPort(t, db, s.DeviceID, 3, "0/3", "")
+	testdb.Exec(t, db, `UPDATE device_interfaces SET collect = true WHERE id = ?`, port)
 	svc := NewPortService(db, NewMetricsStore(db), NewIncidentService(db), NewSettingsService(db))
 	ctx := context.Background()
 	start := time.Now().UTC().Add(-time.Hour)
@@ -53,6 +54,7 @@ func TestDBRecordPortEventsNoEndDetailWritesNoEndKey(t *testing.T) {
 	db := testdb.Open(t)
 	s := seedDevice(t, db, "HQ", "10.0.0.2")
 	port := seedPort(t, db, s.DeviceID, 3, "0/3", "")
+	testdb.Exec(t, db, `UPDATE device_interfaces SET collect = true WHERE id = ?`, port)
 	svc := NewPortService(db, NewMetricsStore(db), NewIncidentService(db), NewSettingsService(db))
 	ctx := context.Background()
 	start := time.Now().UTC().Add(-time.Hour)
@@ -76,5 +78,49 @@ func TestDBRecordPortEventsNoEndDetailWritesNoEndKey(t *testing.T) {
 	}
 	if v, ok := row.Detail["transitions"].(float64); !ok || v != 4 {
 		t.Errorf("top-level transitions changed: %+v", row.Detail)
+	}
+}
+
+// I1: SavePortState must not touch a port that is no longer collected — a
+// poll that loaded its row just before UpdatePort turned collection off for
+// it must not write stale live state or conditions back.
+func TestDBSavePortStateSkipsUncollectedPort(t *testing.T) {
+	db := testdb.Open(t)
+	s := seedDevice(t, db, "HQ", "10.0.0.2")
+	port := seedPort(t, db, s.DeviceID, 3, "0/3", "") // collect NULL, collect_default false: uncollected
+	testdb.Exec(t, db, `UPDATE device_interfaces SET oper_status = 'up', admin_status = 'up', speed_bps = 1000000000 WHERE id = ?`, port)
+	svc := NewPortService(db, NewMetricsStore(db), NewIncidentService(db), NewSettingsService(db))
+	ctx := context.Background()
+
+	testdb.Must(t, svc.SavePortState(ctx, port, PortStateUpdate{
+		OperStatus: "down", AdminStatus: "down", SpeedBps: 0, LastChangeSeconds: 10,
+		Conditions: []string{"link_down"}, ConditionsSince: map[string]time.Time{"link_down": time.Now().UTC()},
+	}))
+
+	var row models.DeviceInterface
+	testdb.Must(t, db.First(&row, "id = ?", port).Error)
+	if row.OperStatus != "up" || row.AdminStatus != "up" || row.SpeedBps != 1000000000 || len(row.Conditions) != 0 {
+		t.Errorf("SavePortState changed an uncollected port: %+v", row)
+	}
+}
+
+// I1: RecordPortEvents must not record a new span-start event for a port
+// that is no longer collected (the same race as SavePortState above).
+func TestDBRecordPortEventsSkipsUncollectedPort(t *testing.T) {
+	db := testdb.Open(t)
+	s := seedDevice(t, db, "HQ", "10.0.0.2")
+	port := seedPort(t, db, s.DeviceID, 3, "0/3", "") // collect NULL, collect_default false: uncollected
+	svc := NewPortService(db, NewMetricsStore(db), NewIncidentService(db), NewSettingsService(db))
+	ctx := context.Background()
+
+	testdb.Must(t, svc.RecordPortEvents(ctx, []models.PortEvent{
+		{DeviceID: s.DeviceID, InterfaceID: port, IfIndex: 3, Kind: models.PortEventErrors, StartedAt: time.Now().UTC(),
+			Detail: models.JSONMap{"per_minute": 50}},
+	}, nil))
+
+	var n int64
+	testdb.Must(t, db.Model(&models.PortEvent{}).Where("interface_id = ?", port).Count(&n).Error)
+	if n != 0 {
+		t.Errorf("event recorded for an uncollected port: %d rows", n)
 	}
 }

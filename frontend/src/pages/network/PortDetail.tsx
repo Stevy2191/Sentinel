@@ -130,7 +130,7 @@ function ConnectsToForm({ port, deviceId, siteId, onSaved }: { port: Port; devic
               <select value={neighborIfIndex} disabled={busy} onChange={(e) => setNeighborIfIndex(e.target.value)} className={selectCls}>
                 <option value="">Not sure</option>
                 {(neighborPorts?.ports ?? [])
-                  .filter((p) => p.present && p.physical)
+                  .filter((p) => p.present && p.physical && p.role !== 'wan')
                   .map((p) => (
                     <option key={p.if_index} value={p.if_index}>
                       {portTitle(p)}

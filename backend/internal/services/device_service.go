@@ -52,6 +52,9 @@ type DeviceService struct {
 	db        *gorm.DB
 	creds     *SNMPCredentialService
 	incidents *IncidentService
+	// metrics, when wired with SetMetricsStore, has its cached series ids
+	// for a deleted device dropped by Delete (M7).
+	metrics *MetricsStore
 }
 
 var _ PollerStore = (*DeviceService)(nil)
@@ -59,6 +62,11 @@ var _ PollerStore = (*DeviceService)(nil)
 func NewDeviceService(db *gorm.DB, creds *SNMPCredentialService, incidents *IncidentService) *DeviceService {
 	return &DeviceService{db: db, creds: creds, incidents: incidents}
 }
+
+// SetMetricsStore wires the metrics store Delete forgets a deleted device's
+// cached series ids from. Optional: a DeviceService used without it (as in
+// most tests) just skips that step.
+func (s *DeviceService) SetMetricsStore(m *MetricsStore) { s.metrics = m }
 
 // availabilitySQL is the share of the last 30 days (or of the device's life,
 // if shorter) not covered by its incidents. NULL for a device younger than a
@@ -305,6 +313,11 @@ func (s *DeviceService) Delete(ctx context.Context, id uuid.UUID) (*models.Devic
 	})
 	if err != nil {
 		return nil, err
+	}
+	// Forgotten only once the delete has committed: in-memory cache state
+	// must not be dropped for a delete that then rolled back.
+	if s.metrics != nil {
+		s.metrics.Forget(id)
 	}
 	return d, nil
 }

@@ -131,7 +131,7 @@ func (f *pmIncidents) OpenPortIncident(_ context.Context, dev, port uuid.UUID, c
 	if inc, ok := f.open[k]; ok {
 		return inc, false, nil
 	}
-	inc := &models.Incident{ID: uuid.New(), DeviceID: &dev, InterfaceID: &port, StartTime: start}
+	inc := &models.Incident{ID: uuid.New(), DeviceID: &dev, InterfaceID: &port, Condition: &cond, StartTime: start}
 	f.open[k] = inc
 	return inc, true, nil
 }
@@ -146,6 +146,21 @@ func (f *pmIncidents) ClosePortIncident(_ context.Context, port uuid.UUID, cond 
 	inc.EndTime = &end
 	inc.DurationSeconds = int(end.Sub(inc.StartTime).Seconds())
 	return inc, nil
+}
+
+// OpenPortIncidentsForDevice mirrors IncidentService.OpenPortIncidentsForDevice:
+// every still-open entry whose DeviceID matches (an incident a test inserted
+// directly into f.open without a DeviceID is returned regardless, since the
+// real query only filters what it is given to filter on).
+func (f *pmIncidents) OpenPortIncidentsForDevice(_ context.Context, dev uuid.UUID) ([]models.Incident, error) {
+	var out []models.Incident
+	for _, inc := range f.open {
+		if inc.DeviceID != nil && *inc.DeviceID != dev {
+			continue
+		}
+		out = append(out, *inc)
+	}
+	return out, nil
 }
 
 type pmThresholds struct{}
@@ -325,5 +340,98 @@ func TestPortMonitorNoChannelsStillOpensIncident(t *testing.T) {
 	}
 	if len(r.incs.open) != 1 || len(r.notif.sent) != 0 {
 		t.Fatalf("open %d sent %d", len(r.incs.open), len(r.notif.sent))
+	}
+}
+
+// I1: a port's tracker must not survive collection being turned off. A port
+// down long enough opens an incident and leaves the tracker holding an
+// active condition; the port then disappears from CollectedInterfaces
+// (collection turned off clears its ds.ports entry too); when it reappears
+// with no stored conditions (as UpdatePort left it) and reporting healthy,
+// the old condition must not come back and nothing must reopen.
+func TestPortMonitorPrunesTrackerWhenPortStopsBeingCollected(t *testing.T) {
+	r := newPMRig(true)
+	port := r.store.rows[0]
+	since := r.clock.Add(-time.Hour)
+
+	// Seed the live tracker with an active "errors" condition the stored row
+	// does not have — as if a real problem had been found, then collection
+	// was turned off (UpdatePort clears the stored row and its incidents,
+	// but has no way to reach this process's in-memory tracker) and is now
+	// back on. Errors needs 5 consecutive clean polls of real rate data to
+	// clear on its own, so a single clean poll cannot be mistaken for the
+	// fix: only pruning (a fresh tracker from a fresh snapshot) can explain
+	// it going away immediately.
+	ds := r.m.state(r.dev.ID)
+	ds.ports[port.ID] = &portStats{tracker: portmon.NewTracker(portmon.Snapshot{
+		OperUp: true, AdminUp: true, SpeedBps: 1e9,
+		Active: map[portmon.Condition]time.Time{portmon.Errors: since},
+	})}
+
+	// Collection turned off: the port disappears from CollectedInterfaces.
+	r.store.rows = nil
+	r.poll(100) // nothing collected this poll
+
+	// Collection turned back on; the row reappears (its stored conditions
+	// were already empty) reporting cleanly.
+	r.store.rows = []models.DeviceInterface{port}
+	r.snmp.port(1, 0, 0, true, 1000)
+	r.poll(160)
+	if r.incs.opens != 0 || len(r.incs.open) != 0 {
+		t.Fatalf("stale condition came back: opens=%d open=%+v", r.incs.opens, r.incs.open)
+	}
+}
+
+// I2: an open incident whose condition the tracker no longer has active is
+// closed on the next poll (e.g. after a failed close, or an in-app config
+// restore that left the incident row open), and this reconciliation close
+// does not notify.
+func TestPortMonitorReconcileClosesStaleIncident(t *testing.T) {
+	r := newPMRig(true)
+	port := r.store.rows[0].ID
+	r.incs.open[port.String()+"errors"] = &models.Incident{ID: uuid.New(), DeviceID: &r.dev.ID, InterfaceID: &port,
+		Condition: strPtr("errors"), StartTime: r.clock.Add(-time.Hour)}
+	r.snmp.port(1, 0, 0, true, 1000)
+	r.poll(100)
+	if r.incs.closes != 1 || len(r.incs.open) != 0 {
+		t.Fatalf("stale incident not closed: closes=%d open=%+v", r.incs.closes, r.incs.open)
+	}
+	if len(r.notif.sent) != 0 {
+		t.Fatalf("reconciliation close notified: %+v", r.notif.sent)
+	}
+}
+
+// I2: an open incident on a port that is no longer important is closed too,
+// even though alert() itself never looks at an unimportant port.
+func TestPortMonitorReconcileClosesIncidentOnUnimportantPort(t *testing.T) {
+	r := newPMRig(false)
+	port := r.store.rows[0].ID
+	r.incs.open[port.String()+"link_down"] = &models.Incident{ID: uuid.New(), DeviceID: &r.dev.ID, InterfaceID: &port,
+		Condition: strPtr("link_down"), StartTime: r.clock.Add(-time.Hour)}
+	r.snmp.port(1, 0, 0, true, 1000)
+	r.poll(100)
+	if r.incs.closes != 1 || len(r.incs.open) != 0 {
+		t.Fatalf("incident on unimportant port not closed: closes=%d open=%+v", r.incs.closes, r.incs.open)
+	}
+	if len(r.notif.sent) != 0 {
+		t.Fatalf("reconciliation close notified: %+v", r.notif.sent)
+	}
+}
+
+func strPtr(s string) *string { return &s }
+
+// M3: a stacked switch's port label names its stack member.
+func TestPortLabelIncludesStackUnit(t *testing.T) {
+	row := models.DeviceInterface{IfIndex: 5, StackUnit: 2, Alias: "Uplink"}
+	if got, want := portLabel(row), "switch 2 port 5 (Uplink)"; got != want {
+		t.Errorf("portLabel = %q, want %q", got, want)
+	}
+	row.Alias = ""
+	if got, want := portLabel(row), "switch 2 port 5"; got != want {
+		t.Errorf("portLabel (no alias) = %q, want %q", got, want)
+	}
+	row.StackUnit = 0
+	if got, want := portLabel(row), "port 5"; got != want {
+		t.Errorf("portLabel (not stacked) = %q, want %q", got, want)
 	}
 }

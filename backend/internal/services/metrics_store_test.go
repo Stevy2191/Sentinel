@@ -3,6 +3,8 @@ package services
 import (
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func TestPickResolution(t *testing.T) {
@@ -48,5 +50,25 @@ func TestMetricCatalogue(t *testing.T) {
 	}
 	if KnownMetric("if_in_octets") || len(MetricCatalogue) != 9 {
 		t.Error("catalogue must be exactly the spec's nine metrics")
+	}
+}
+
+// M7: Forget drops only the given device's cached series ids, so a device id
+// reused by a restored backup resolves fresh series instead of writing new
+// samples under ids that were queued for the nightly cleanup to remove.
+func TestMetricsStoreForgetDropsOnlyThatDevicesSeriesIDs(t *testing.T) {
+	m := NewMetricsStore(nil)
+	dead, alive := uuid.New(), uuid.New()
+	m.ids[seriesKey{device: dead, metric: MetricIfInBps, instance: "1"}] = 10
+	m.ids[seriesKey{device: dead, metric: MetricIfOutBps, instance: "1"}] = 11
+	m.ids[seriesKey{device: alive, metric: MetricIfInBps, instance: "1"}] = 20
+
+	m.Forget(dead)
+
+	if len(m.ids) != 1 {
+		t.Fatalf("after Forget: %d cached ids, want 1: %+v", len(m.ids), m.ids)
+	}
+	if id, ok := m.ids[seriesKey{device: alive, metric: MetricIfInBps, instance: "1"}]; !ok || id != 20 {
+		t.Errorf("the other device's cached id should survive: %v %v", id, ok)
 	}
 }

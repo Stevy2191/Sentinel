@@ -32,6 +32,9 @@ type PortStore interface {
 type PortIncidents interface {
 	OpenPortIncident(ctx context.Context, deviceID, interfaceID uuid.UUID, condition string, start time.Time, reason string) (*models.Incident, bool, error)
 	ClosePortIncident(ctx context.Context, interfaceID uuid.UUID, condition string, end time.Time, note string) (*models.Incident, error)
+	// OpenPortIncidentsForDevice lists a device's open port incidents (every
+	// port, every condition), for PollStats' reconciliation pass.
+	OpenPortIncidentsForDevice(ctx context.Context, deviceID uuid.UUID) ([]models.Incident, error)
 }
 
 // MetricsWriter stores samples (MetricsStore).
@@ -109,6 +112,25 @@ func (ds *deviceStats) port(row models.DeviceInterface) *portStats {
 	return ps
 }
 
+// pruneStalePorts drops every ds.ports entry whose interface id is not among
+// this poll's collected rows: the port stopped being collected (or was
+// deleted, or is simply not present right now), so its tracker must not go
+// on remembering conditions that are stale by the time collection resumes.
+func pruneStalePorts(ds *deviceStats, rows []models.DeviceInterface) {
+	if len(ds.ports) == 0 {
+		return
+	}
+	keep := make(map[uuid.UUID]bool, len(rows))
+	for _, r := range rows {
+		keep[r.ID] = true
+	}
+	for id := range ds.ports {
+		if !keep[id] {
+			delete(ds.ports, id)
+		}
+	}
+}
+
 // snapshotOf restores a tracker from the stored interface row.
 func snapshotOf(row models.DeviceInterface) portmon.Snapshot {
 	active := map[portmon.Condition]time.Time{}
@@ -159,10 +181,11 @@ func (m *PortMonitor) PollStats(ctx context.Context, d models.Device, t snmp.Tar
 		m.logger.Printf("[snmp] listing ports of %s: %v", d.Host, err)
 		return
 	}
+	ds := m.state(d.ID)
+	pruneStalePorts(ds, rows)
 	if len(rows) == 0 {
 		return
 	}
-	ds := m.state(d.ID)
 	hc := t.Credential.Version != models.SNMPVersion1 && (ds.hc == nil || *ds.hc)
 	indexes := make([]int, len(rows))
 	for i, r := range rows {
@@ -258,11 +281,62 @@ func (m *PortMonitor) PollStats(ctx context.Context, d models.Device, t snmp.Tar
 		}
 	}
 
+	m.reconcileOpenIncidents(ctx, d, ds, rows)
+
 	if err := m.store.RecordPortEvents(ctx, starts, ends); err != nil {
 		m.logger.Printf("[snmp] recording port events of %s: %v", d.Host, err)
 	}
 	if err := m.metrics.Write(ctx, d.ID, now, points); err != nil {
 		m.logger.Printf("[snmp] writing samples of %s: %v", d.Host, err)
+	}
+}
+
+// reconcileOpenIncidents closes any open port incident this poll's tracker
+// states say should not still be open: its port is no longer important, its
+// condition is not in that port's tracker.Active(), or its port is not
+// collected/present at all (not among this poll's rows). This catches what a
+// changed-condition alert alone cannot: an incident left open by a failed
+// close, an in-app config restore, or the ensure loop re-opening what
+// UpdatePort just closed while a poll was in flight. These closes are
+// reconciliation, not a real recovery, so they do not notify.
+func (m *PortMonitor) reconcileOpenIncidents(ctx context.Context, d models.Device, ds *deviceStats, rows []models.DeviceInterface) {
+	open, err := m.incidents.OpenPortIncidentsForDevice(ctx, d.ID)
+	if err != nil {
+		m.logger.Printf("[snmp] listing open port incidents for %s: %v", d.Host, err)
+		return
+	}
+	if len(open) == 0 {
+		return
+	}
+	byID := make(map[uuid.UUID]models.DeviceInterface, len(rows))
+	for _, r := range rows {
+		byID[r.ID] = r
+	}
+	for _, inc := range open {
+		if inc.InterfaceID == nil || inc.Condition == nil {
+			continue
+		}
+		row, present := byID[*inc.InterfaceID]
+		stale := false
+		switch {
+		case !present:
+			stale = true
+		case !row.Important:
+			stale = true
+		default:
+			if ps := ds.ports[*inc.InterfaceID]; ps != nil {
+				if _, active := ps.tracker.Active()[portmon.Condition(*inc.Condition)]; !active {
+					stale = true
+				}
+			}
+		}
+		if !stale {
+			continue
+		}
+		if _, err := m.incidents.ClosePortIncident(ctx, *inc.InterfaceID, *inc.Condition, m.now().UTC(),
+			"Closed: the condition is no longer active."); err != nil {
+			m.logger.Printf("[snmp] reconciling %s incident for %s port: %v", *inc.Condition, d.Host, err)
+		}
 	}
 }
 
@@ -412,13 +486,18 @@ func (m *PortMonitor) alert(ctx context.Context, d models.Device, row models.Dev
 	}
 }
 
-// portLabel names a port for people: "port 51 (Uplink To Quantum Gate)".
+// portLabel names a port for people: "port 51 (Uplink To Quantum Gate)", or
+// "switch 2 port 5 (Uplink)" on a stack member.
 func portLabel(row models.DeviceInterface) string {
 	n := portmon.PortNumber(row.Name, row.Descr, row.IfIndex)
-	if row.Alias != "" {
-		return fmt.Sprintf("port %d (%s)", n, row.Alias)
+	label := fmt.Sprintf("port %d", n)
+	if row.StackUnit > 0 {
+		label = fmt.Sprintf("switch %d port %d", row.StackUnit, n)
 	}
-	return fmt.Sprintf("port %d", n)
+	if row.Alias != "" {
+		return fmt.Sprintf("%s (%s)", label, row.Alias)
+	}
+	return label
 }
 
 var conditionNoun = map[portmon.Condition]string{

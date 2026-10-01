@@ -86,6 +86,59 @@ func TestDBPortIncidentOpenCloseIdempotent(t *testing.T) {
 	}
 }
 
+// I2: OpenPortIncidentsForDevice lists a device's open port incidents across
+// every port and condition, leaves out closed ones, and never pulls in
+// another device's port incidents or the device's own (interface_id IS
+// NULL) incidents.
+func TestDBOpenPortIncidentsForDevice(t *testing.T) {
+	db := testdb.Open(t)
+	s := seedDevice(t, db, "HQ", "10.0.0.2")
+	other := seedDeviceInSite(t, db, s.SiteID, "10.0.0.9")
+	portA := seedPort(t, db, s.DeviceID, 1, "0/1", "")
+	portB := seedPort(t, db, s.DeviceID, 2, "0/2", "")
+	otherPort := seedPort(t, db, other, 1, "0/1", "")
+	svc := NewIncidentService(db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	if _, _, err := svc.OpenPortIncident(ctx, s.DeviceID, portA, "errors", now, "errors rising"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.OpenPortIncident(ctx, s.DeviceID, portB, "link_down", now, "down"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.OpenPortIncident(ctx, s.DeviceID, portA, "saturated", now, "full"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ClosePortIncident(ctx, portA, "saturated", now.Add(time.Minute), ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.OpenPortIncident(ctx, other, otherPort, "errors", now, "errors rising"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.OpenDeviceIncident(ctx, s.DeviceID, now, "unreachable"); err != nil {
+		t.Fatal(err)
+	}
+
+	open, err := svc.OpenPortIncidentsForDevice(ctx, s.DeviceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 2 {
+		t.Fatalf("open port incidents for device = %d, want 2: %+v", len(open), open)
+	}
+	byCondition := map[string]uuid.UUID{}
+	for _, inc := range open {
+		if inc.InterfaceID == nil || inc.Condition == nil {
+			t.Fatalf("incident missing interface/condition: %+v", inc)
+		}
+		byCondition[*inc.Condition] = *inc.InterfaceID
+	}
+	if byCondition["errors"] != portA || byCondition["link_down"] != portB {
+		t.Fatalf("open incidents: %+v", byCondition)
+	}
+}
+
 func TestDBIncidentListNamesThePort(t *testing.T) {
 	db := testdb.Open(t)
 	s := seedDevice(t, db, "HQ", "10.0.0.2")

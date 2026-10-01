@@ -137,6 +137,10 @@ func run() error {
 	snmpCredentialService := services.NewSNMPCredentialService(db)
 	deviceService := services.NewDeviceService(db, snmpCredentialService, incidentService)
 	metricsStore := services.NewMetricsStore(db)
+	// So a deleted device's cached series ids do not outlive it (M7): a
+	// device id reused by a restored backup must resolve fresh series, not
+	// write to ones already queued for the nightly cleanup to remove.
+	deviceService.SetMetricsStore(metricsStore)
 	portService := services.NewPortService(db, metricsStore, incidentService, settingsService)
 	networkSettings := services.NewNetworkSettingsService(settingsService, metricsStore)
 	snmpClient := snmp.GoSNMPClient{}

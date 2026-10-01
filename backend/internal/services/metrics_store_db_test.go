@@ -175,6 +175,41 @@ func TestDBDeviceDeleteAndCleanup(t *testing.T) {
 	}
 }
 
+// M7: a DeviceService wired to the MetricsStore it shares with the poller
+// forgets a deleted device's cached series ids, so a device id reused by a
+// restored backup resolves a fresh series instead of writing new samples
+// under an id already queued for the nightly cleanup to remove (which would
+// silently discard them the next time Cleanup runs).
+func TestDBDeviceDeleteForgetsMetricsStoreCache(t *testing.T) {
+	db := testdb.Open(t)
+	s := seedDevice(t, db, "HQ", "10.0.0.2")
+	m := NewMetricsStore(db)
+	ctx := context.Background()
+	testdb.Must(t, m.Write(ctx, s.DeviceID, time.Now().UTC(), []SamplePoint{{Metric: MetricIfInBps, Instance: "1", Value: 1}}))
+
+	devices := NewDeviceService(db, NewSNMPCredentialService(db), NewIncidentService(db))
+	devices.SetMetricsStore(m)
+	if _, err := devices.Delete(ctx, s.DeviceID); err != nil {
+		t.Fatal(err)
+	}
+
+	// The device id is reused, as a restore from backup would do, and
+	// written to again through the same MetricsStore instance the poller
+	// would use.
+	testdb.Exec(t, db, `INSERT INTO devices (id, site_id, credential_id, name, host) VALUES (?, ?, ?, 'restored', '10.0.0.2')`,
+		s.DeviceID, s.SiteID, s.CredentialID)
+	testdb.Must(t, m.Write(ctx, s.DeviceID, time.Now().UTC(), []SamplePoint{{Metric: MetricIfInBps, Instance: "1", Value: 2}}))
+
+	var seriesID int64
+	testdb.Must(t, db.Raw(`SELECT id FROM metrics.series WHERE device_id = ? AND metric = ? AND instance = '1'`,
+		s.DeviceID, MetricIfInBps).Scan(&seriesID).Error)
+	var sampleCount int64
+	testdb.Must(t, db.Raw(`SELECT count(*) FROM metrics.samples WHERE series_id = ?`, seriesID).Scan(&sampleCount).Error)
+	if sampleCount != 1 {
+		t.Fatalf("restored device's write landed on a stale cached series id: %d samples on series %d", sampleCount, seriesID)
+	}
+}
+
 // The deleted-series queue is processed in batches: Postgres rejects more
 // than 65535 bind parameters in one "IN (...)" list, so a queue larger than
 // one batch must still be fully drained in one Cleanup call.

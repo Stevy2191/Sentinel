@@ -273,7 +273,9 @@ func TestDBSiteTrafficExcludesUncollectedAndLAGAccessPorts(t *testing.T) {
 	uncollected := trafficPortFull(t, db, router, 4, models.PortRoleAccess, 6, false)
 	lag := trafficPortFull(t, db, router, 5, models.PortRoleAccess, 161, true)
 
-	at := time.Now().UTC().Truncate(time.Minute)
+	// More than one step before `to` (below), so it is not treated as the
+	// newest, possibly-partial bucket and dropped from east-west.
+	at := time.Now().UTC().Add(-2 * time.Minute).Truncate(time.Minute)
 	writeBps(t, metrics, router, wan, 1, at, 100, 20)
 	writeBps(t, metrics, router, access, 3, at, 200, 300)
 	// Huge, distinct values: if either leaked into the access sum, ew would
@@ -291,5 +293,41 @@ func TestDBSiteTrafficExcludesUncollectedAndLAGAccessPorts(t *testing.T) {
 	// ew = ((200-20)+(300-100))/2 = (180+200)/2 = 190
 	if v.EastWest[0].Bps != 190 {
 		t.Errorf("east_west[0].Bps = %v, want 190 (uncollected port and LAG excluded)", v.EastWest[0].Bps)
+	}
+}
+
+// M2: `to` rarely lands exactly on a bucket boundary, so the newest bucket
+// can be partial — its WAN and access sums may not cover the same span,
+// which reads as a dip that is not real traffic. North-south (summed
+// independently per side) keeps it; east-west, which combines both sides,
+// drops it.
+func TestDBSiteTrafficDropsPartialNewestEastWestBucket(t *testing.T) {
+	db := testdb.Open(t)
+	s := seedDevice(t, db, "HQ6", "10.0.6.2")
+	ctx := context.Background()
+	metrics := NewMetricsStore(db)
+	ports := NewPortService(db, metrics, NewIncidentService(db), NewSettingsService(db))
+
+	router := trafficDevice(t, db, s.SiteID, s.CredentialID, "10.0.6.10", models.DeviceTypeRouter)
+	wan := trafficPort(t, db, router, 1, models.PortRoleWAN)
+	access := trafficPort(t, db, router, 3, models.PortRoleAccess)
+
+	now := time.Now().UTC()
+	t1 := now.Add(-2 * time.Minute).Truncate(time.Minute)
+	t2 := now.Truncate(time.Minute) // within one step of `to` (now): the partial newest bucket
+	writeBps(t, metrics, router, wan, 1, t1, 300, 50)
+	writeBps(t, metrics, router, access, 3, t1, 400, 900)
+	writeBps(t, metrics, router, wan, 1, t2, 320, 60)
+	writeBps(t, metrics, router, access, 3, t2, 420, 950)
+
+	v, err := ports.SiteTraffic(ctx, s.SiteID, t1.Add(-time.Minute), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.NorthSouth) != 2 {
+		t.Fatalf("north_south should keep the newest bucket: %+v", v.NorthSouth)
+	}
+	if len(v.EastWest) != 1 || !v.EastWest[0].Time.Equal(t1) {
+		t.Fatalf("east_west should drop the partial newest bucket: %+v", v.EastWest)
 	}
 }
