@@ -59,12 +59,14 @@ interface Props {
   deviceId: string
   ports: PortView[]
   canEdit: boolean
+  /** Whether inventory has run, so an empty list means "none" rather than "not yet". */
+  inventoried: boolean
   onChanged: () => void
 }
 
 /** Every port with its live figures; sortable, with the important star and
  *  the collect switch for editors. */
-export default function PortTable({ deviceId, ports, canEdit, onChanged }: Props) {
+export default function PortTable({ deviceId, ports, canEdit, inventoried, onChanged }: Props) {
   const navigate = useNavigate()
   const { updatePort, busy } = usePortActions()
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'number', desc: false })
@@ -114,7 +116,13 @@ export default function PortTable({ deviceId, ports, canEdit, onChanged }: Props
       </div>
       {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">{error}</div>}
       {rows.length === 0 ? (
-        <p className="text-sm text-slate-500">No ports reported yet. The list arrives with the first inventory.</p>
+        <p className="text-sm text-slate-500">
+          {!inventoried
+            ? 'No ports reported yet. The list arrives with the first inventory.'
+            : ports.length === 0
+              ? 'This device does not report any network interfaces over SNMP.'
+              : 'No physical ports. Tick "Show aggregates and virtual interfaces" to see the rest.'}
+        </p>
       ) : (
         <div className="overflow-hidden rounded-lg border border-white/10 bg-slate-800/40">
           {/* max-h + overflow-auto on this same element, not a separate
