@@ -8,6 +8,7 @@ import { useSystemResources } from '@/hooks/useSystemResources'
 import { useSSLSummary } from '@/hooks/useSSLCertificates'
 import { useSummaryReport } from '@/hooks/useReports'
 import { useStatusPages } from '@/hooks/useStatusPages'
+import { useDashboards } from '@/hooks/useDashboards'
 import { useSavedReports } from '@/hooks/useReportBuilder'
 import { useCardShimmer } from '@/hooks/useCardShimmer'
 import ShimmerStatCard from '@/components/ShimmerStatCard'
@@ -64,6 +65,7 @@ export default function Overview() {
   const siteSummary = useSiteSummary()
   const deviceSummary = useDeviceSummary()
   const { pages: statusPages } = useStatusPages()
+  const { dashboards } = useDashboards()
   const { reports: savedReports, listReports } = useSavedReports()
   const { resources: host } = useSystemResources()
   const [refreshedAt, setRefreshedAt] = useState(() => Date.now())
@@ -101,6 +103,7 @@ export default function Overview() {
   // hovering a card lights up nothing.
   const shimmer = useCardShimmer([
     'operational',
+    'dashboards',
     'uptime',
     'ssl',
     'agents',
@@ -142,6 +145,17 @@ export default function Overview() {
   // card leads with a count of what is on that page and opens it.
   const sectionCards = useMemo(
     () => [
+      {
+        key: 'dashboards',
+        title: 'Dashboards',
+        to: '/dashboards',
+        colorType: 'dashboards' as const,
+        value: String(dashboards.length),
+        subtitle:
+          dashboards.length === 0
+            ? 'build one'
+            : `${dashboards.filter((d) => d.published).length} with a public link`,
+      },
       {
         key: 'uptime',
         title: 'Uptime Monitoring',
@@ -218,6 +232,7 @@ export default function Overview() {
       summary,
       periodHeading,
       savedReports,
+      dashboards,
     ],
   )
 
