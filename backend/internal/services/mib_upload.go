@@ -22,15 +22,18 @@ var (
 	ErrMIBTooManyFiles   = errors.New("the zip holds more than 500 files")
 )
 
-// UploadFile is one uploaded file: a MIB, or a zip of them.
+// UploadFile is one uploaded file: a MIB, or a zip of them. ExpandUpload
+// sets Path to where the file came from (a zip entry's path inside the zip,
+// else the base name), for messages; FileName is the base name stored.
 type UploadFile struct {
 	FileName string
+	Path     string
 	Content  []byte
 }
 
 // ExpandUpload replaces each .zip with its files (read in memory; folders,
-// dot files and __MACOSX entries dropped; base names only) and enforces the
-// size and count limits.
+// dot files and __MACOSX entries dropped; FileName is the base name, Path
+// the entry's path in the zip) and enforces the size and count limits.
 func ExpandUpload(files []UploadFile) ([]UploadFile, error) {
 	total := 0
 	// budget is the decompressed-bytes-in-the-output ceiling for the whole
@@ -55,7 +58,8 @@ func ExpandUpload(files []UploadFile) ([]UploadFile, error) {
 			if budget > MaxMIBUploadBytes {
 				return nil, ErrMIBUploadTooLarge
 			}
-			out = append(out, UploadFile{FileName: path.Base(f.FileName), Content: f.Content})
+			base := path.Base(f.FileName)
+			out = append(out, UploadFile{FileName: base, Path: base, Content: f.Content})
 			continue
 		}
 		zr, err := zip.NewReader(bytes.NewReader(f.Content), int64(len(f.Content)))
@@ -71,25 +75,25 @@ func ExpandUpload(files []UploadFile) ([]UploadFile, error) {
 				continue
 			}
 			if zf.UncompressedSize64 > MaxMIBFileBytes {
-				return nil, fmt.Errorf("%s: %w", base, ErrMIBFileTooLarge)
+				return nil, fmt.Errorf("%s: %w", zf.Name, ErrMIBFileTooLarge)
 			}
 			rc, err := zf.Open()
 			if err != nil {
-				return nil, fmt.Errorf("%s: %w", base, err)
+				return nil, fmt.Errorf("%s: %w", zf.Name, err)
 			}
 			b, err := io.ReadAll(io.LimitReader(rc, MaxMIBFileBytes+1))
 			rc.Close()
 			if err != nil {
-				return nil, fmt.Errorf("%s: %w", base, err)
+				return nil, fmt.Errorf("%s: %w", zf.Name, err)
 			}
 			if len(b) > MaxMIBFileBytes {
-				return nil, fmt.Errorf("%s: %w", base, ErrMIBFileTooLarge)
+				return nil, fmt.Errorf("%s: %w", zf.Name, ErrMIBFileTooLarge)
 			}
 			budget += len(b)
 			if budget > MaxMIBUploadBytes {
 				return nil, ErrMIBUploadTooLarge
 			}
-			out = append(out, UploadFile{FileName: base, Content: b})
+			out = append(out, UploadFile{FileName: base, Path: zf.Name, Content: b})
 		}
 	}
 	return out, nil

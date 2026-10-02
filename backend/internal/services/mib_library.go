@@ -162,19 +162,27 @@ func (l *MIBLibrary) Upload(ctx context.Context, files []UploadFile, by uuid.UUI
 	res := &MIBUploadResult{Waiting: map[string][]string{}}
 	var mods []mib.File
 	fileNames := map[string]string{}
+	// paths is where each module came from (its path inside a zip), for
+	// messages: two vendor folders often hold the same base name.
+	paths := map[string]string{}
 	for _, f := range expanded {
+		where := f.Path
+		if where == "" {
+			where = f.FileName
+		}
 		h, err := mib.Inspect(f.Content)
 		if errors.Is(err, mib.ErrNotAMIB) {
 			res.Skipped = append(res.Skipped, f.FileName)
 			continue
 		}
 		if err != nil {
-			return nil, &MIBUploadError{File: f.FileName, Err: err}
+			return nil, &MIBUploadError{File: where, Err: err}
 		}
-		if prev, dup := fileNames[h.Name]; dup {
-			return nil, &MIBUploadError{File: f.FileName, Err: fmt.Errorf("module %s is also in %s", h.Name, prev)}
+		if prev, dup := paths[h.Name]; dup {
+			return nil, &MIBUploadError{File: where, Err: fmt.Errorf("module %s is also in %s", h.Name, prev)}
 		}
 		fileNames[h.Name] = f.FileName
+		paths[h.Name] = where
 		mods = append(mods, mib.File{Name: h.Name, Content: string(f.Content)})
 	}
 	var byPtr *uuid.UUID

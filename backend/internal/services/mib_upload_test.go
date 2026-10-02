@@ -3,11 +3,15 @@ package services
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func sortedCopy(in []string) []string {
@@ -21,7 +25,13 @@ func zipOf(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	w := zip.NewWriter(&buf)
-	for name, body := range files {
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	slices.Sort(names) // entries in a stable order
+	for _, name := range names {
+		body := files[name]
 		f, err := w.Create(name)
 		if err != nil {
 			t.Fatal(err)
@@ -92,5 +102,30 @@ func TestExpandUploadBudgetAcrossZips(t *testing.T) {
 	// just because each zip's own unpacked count starts back at zero.
 	if _, err := ExpandUpload([]UploadFile{{FileName: "one.zip", Content: z1}, {FileName: "two.zip", Content: z2}}); !errors.Is(err, ErrMIBUploadTooLarge) {
 		t.Errorf("two zips: %v", err)
+	}
+}
+
+// A zip entry keeps its path inside the zip, so an error can say which of
+// two same-named files it means; the stored file name stays the base name.
+func TestExpandUploadKeepsZipPath(t *testing.T) {
+	z := zipOf(t, map[string]string{"v1/ACME-MIB.my": "ACME-MIB DEFINITIONS ::= BEGIN END"})
+	out, err := ExpandUpload([]UploadFile{{FileName: "bundle.zip", Content: z}, {FileName: "dir/OTHER.my", Content: []byte("x")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 2 || out[0].FileName != "ACME-MIB.my" || out[0].Path != "v1/ACME-MIB.my" ||
+		out[1].FileName != "OTHER.my" || out[1].Path != "OTHER.my" {
+		t.Errorf("out %+v", out)
+	}
+}
+
+// Two copies of one module in a vendor zip: the error names both by their
+// paths in the zip, not two identical base names.
+func TestMIBUploadDuplicateModuleNamesZipPaths(t *testing.T) {
+	mod := "CISCO-SMI DEFINITIONS ::= BEGIN\nIMPORTS enterprises FROM SNMPv2-SMI;\ncisco OBJECT IDENTIFIER ::= { enterprises 9 }\nEND\n"
+	z := zipOf(t, map[string]string{"v1/CISCO-SMI.my": mod, "v2/CISCO-SMI.my": mod})
+	_, err := NewMIBLibrary(nil).Upload(context.Background(), []UploadFile{{FileName: "cisco.zip", Content: z}}, uuid.Nil)
+	if err == nil || err.Error() != "v2/CISCO-SMI.my: module CISCO-SMI is also in v1/CISCO-SMI.my" {
+		t.Errorf("err %v", err)
 	}
 }
