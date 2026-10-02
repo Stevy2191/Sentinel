@@ -78,6 +78,20 @@ func (s *MonitorService) GetMonitor(ctx context.Context, id uuid.UUID) (*models.
 	return &monitor, nil
 }
 
+// MonitorsByIDs returns the monitors with these ids that exist, in no
+// particular order. Unlike GetMonitor it does not log each lookup: a
+// dashboard asks for up to 50 of them every 30 seconds.
+func (s *MonitorService) MonitorsByIDs(ctx context.Context, ids []uuid.UUID) ([]models.Monitor, error) {
+	if len(ids) == 0 {
+		return []models.Monitor{}, nil
+	}
+	var out []models.Monitor
+	if err := s.db.WithContext(ctx).Where("id IN ?", ids).Find(&out).Error; err != nil {
+		return nil, fmt.Errorf("loading monitors: %w", err)
+	}
+	return out, nil
+}
+
 // ListMonitors returns monitors newest-first, optionally filtered by the
 // "enabled" (bool), "type" (string), and "status" (string) keys.
 func (s *MonitorService) ListMonitors(ctx context.Context, filters map[string]interface{}) ([]models.Monitor, error) {

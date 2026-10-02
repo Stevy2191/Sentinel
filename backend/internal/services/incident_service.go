@@ -331,6 +331,13 @@ type IncidentListOptions struct {
 	MonitorID *uuid.UUID
 	// DeviceID restricts to one device.
 	DeviceID *uuid.UUID
+	// SiteID restricts to incidents of devices in one site. Monitors are not
+	// in sites, so a site filter never returns monitor incidents.
+	SiteID *uuid.UUID
+	// DeviceIDs and MonitorIDs restrict to these subjects; with both set, an
+	// incident of either kind matches.
+	DeviceIDs  []uuid.UUID
+	MonitorIDs []uuid.UUID
 	// Subject is "", "monitor" or "device".
 	Subject string
 	// Search matches the subject's name.
@@ -438,6 +445,17 @@ func (s *IncidentService) ListIncidents(ctx context.Context, opts IncidentListOp
 	}
 	if opts.DeviceID != nil {
 		base = base.Where("i.device_id = ?", *opts.DeviceID)
+	}
+	if opts.SiteID != nil {
+		base = base.Where("d.site_id = ?", *opts.SiteID)
+	}
+	switch {
+	case len(opts.DeviceIDs) > 0 && len(opts.MonitorIDs) > 0:
+		base = base.Where("(i.device_id IN ? OR i.monitor_id IN ?)", opts.DeviceIDs, opts.MonitorIDs)
+	case len(opts.DeviceIDs) > 0:
+		base = base.Where("i.device_id IN ?", opts.DeviceIDs)
+	case len(opts.MonitorIDs) > 0:
+		base = base.Where("i.monitor_id IN ?", opts.MonitorIDs)
 	}
 	switch opts.Subject {
 	case "monitor":
@@ -966,4 +984,26 @@ func (s *IncidentService) NotificationsForIncident(ctx context.Context, incident
 		return nil, fmt.Errorf("listing incident notifications: %w", err)
 	}
 	return sent, nil
+}
+
+// OpenCountsByDevice counts each device's open incidents of every kind
+// (down, port, UPS, metric). Devices with none are absent.
+func (s *IncidentService) OpenCountsByDevice(ctx context.Context, deviceIDs []uuid.UUID) (map[uuid.UUID]int, error) {
+	out := map[uuid.UUID]int{}
+	if len(deviceIDs) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		DeviceID uuid.UUID
+		N        int
+	}
+	err := s.db.WithContext(ctx).Table("incidents").Select("device_id, count(*) AS n").
+		Where("end_time IS NULL AND device_id IN ?", deviceIDs).Group("device_id").Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("counting open incidents: %w", err)
+	}
+	for _, r := range rows {
+		out[r.DeviceID] = r.N
+	}
+	return out, nil
 }
