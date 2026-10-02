@@ -40,10 +40,14 @@ export function useDashboards(siteId?: string) {
   const [version, setVersion] = useState(0)
   const refetch = useCallback(() => setVersion((v) => v + 1), [])
 
+  // Reset only when the input changes; a refetch keeps what is on screen.
   useEffect(() => {
-    let cancelled = false
     setLoading(true)
     setError(null)
+  }, [siteId])
+
+  useEffect(() => {
+    let cancelled = false
     api
       .get<ApiResponse<Dashboard[]>>('/dashboards', { params: siteId ? { site_id: siteId } : {} })
       .then(({ data }) => {
@@ -75,16 +79,17 @@ export function useDashboard(id: string | undefined) {
   const [version, setVersion] = useState(0)
   const refetch = useCallback(() => setVersion((v) => v + 1), [])
 
+  // Reset only when the id changes; a refetch keeps the dashboard on screen.
   useEffect(() => {
-    if (!id) {
-      setLoading(false)
-      return
-    }
-    let cancelled = false
     setDashboard(null)
     setNotFound(false)
     setError(null)
-    setLoading(true)
+    setLoading(Boolean(id))
+  }, [id])
+
+  useEffect(() => {
+    if (!id) return
+    let cancelled = false
     api
       .get<ApiResponse<DashboardDetail>>(`/dashboards/${id}`)
       .then(({ data }) => {
