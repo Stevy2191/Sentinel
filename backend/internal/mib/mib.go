@@ -100,16 +100,20 @@ var kinds = map[types.NodeKind]string{
 }
 
 // Build loads every file and returns, per module, its objects (ready modules
-// only) and its transitively missing imports. Files must have distinct Names.
+// only) and its transitively missing imports. Everything is keyed by the
+// module name declared in each file's content (what Inspect returns), never
+// by File.Name: a file whose Inspect fails is ignored entirely.
 func Build(files []File) Result {
 	res := Result{Objects: map[string][]Object{}, Missing: map[string][]string{}}
 	byName := map[string]File{}
 	imports := map[string][]string{}
 	for _, f := range files {
-		byName[f.Name] = f
-		if h, err := Inspect([]byte(f.Content)); err == nil {
-			imports[f.Name] = h.Imports
+		h, err := Inspect([]byte(f.Content))
+		if err != nil {
+			continue
 		}
+		byName[h.Name] = f
+		imports[h.Name] = h.Imports
 	}
 	for name := range byName {
 		res.Missing[name] = missing(name, imports, byName, map[string]bool{})
