@@ -165,3 +165,18 @@ export function widgetSummary(w: DraftWidget): string {
       return widgetInfo(w.type).description
   }
 }
+
+/** Reads a string field of a widget config. */
+export function str(c: Record<string, unknown>, k: string): string {
+  return typeof c[k] === 'string' ? (c[k] as string) : ''
+}
+
+/** Reads a string-list field of a widget config. */
+export function strs(c: Record<string, unknown>, k: string): string[] {
+  return Array.isArray(c[k]) ? (c[k] as unknown[]).filter((v): v is string => typeof v === 'string') : []
+}
+
+/** Reads a number field of a widget config, or def. */
+export function num(c: Record<string, unknown>, k: string, def: number): number {
+  return typeof c[k] === 'number' ? (c[k] as number) : def
+}
