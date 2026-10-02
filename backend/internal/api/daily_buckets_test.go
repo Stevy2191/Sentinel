@@ -5,11 +5,12 @@ import (
 	"time"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
+	"github.com/Stevy2191/Sentinel/backend/internal/services"
 )
 
-// computeDailyUptimeBuckets always returns exactly 90 entries, oldest first,
+// services.DailyUptimeBuckets always returns exactly 90 entries, oldest first,
 // ending at the UTC calendar day containing "now" - the public status page's
-// lighter-weight, day-granularity counterpart to computeHourlyUptimeBuckets.
+// lighter-weight, day-granularity counterpart to services.HourlyUptimeBuckets.
 func TestComputeDailyUptimeBucketsStatusPerDay(t *testing.T) {
 	now := time.Date(2026, 9, 24, 15, 0, 0, 0, time.UTC)
 
@@ -22,7 +23,7 @@ func TestComputeDailyUptimeBucketsStatusPerDay(t *testing.T) {
 		check("failed", 0, time.Date(2026, 9, 20, 13, 0, 0, 0, time.UTC)),
 	}
 
-	daily := computeDailyUptimeBuckets(checks, now)
+	daily := services.DailyUptimeBuckets(checks, now)
 	if len(daily) != 90 {
 		t.Fatalf("want 90 entries, got %d", len(daily))
 	}
@@ -62,10 +63,10 @@ func TestComputeDailyUptimeBucketsStatusPerDay(t *testing.T) {
 
 // The public shape leaks nothing beyond the health signal: exactly date,
 // uptime, and status - no incident- or maintenance-derived detail, since this
-// function (unlike computeHourlyUptimeBuckets) never had it to begin with.
+// function (unlike services.HourlyUptimeBuckets) never had it to begin with.
 func TestComputeDailyUptimeBucketsShapeIsMinimal(t *testing.T) {
 	now := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
-	daily := computeDailyUptimeBuckets(nil, now)
+	daily := services.DailyUptimeBuckets(nil, now)
 	if len(daily) != 90 {
 		t.Fatalf("want 90 entries, got %d", len(daily))
 	}
@@ -86,7 +87,7 @@ func TestComputeDailyUptimeBucketsShapeIsMinimal(t *testing.T) {
 // outage instead of an absence of information).
 func TestComputeDailyUptimeBucketsNoChecksIsNodataNotZero(t *testing.T) {
 	now := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
-	daily := computeDailyUptimeBuckets(nil, now)
+	daily := services.DailyUptimeBuckets(nil, now)
 	last := daily[len(daily)-1]
 	if last["status"] != "nodata" {
 		t.Errorf("status = %v, want nodata", last["status"])

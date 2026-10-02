@@ -267,59 +267,7 @@ func UpdateMonitorPositionHandler(statusPageService *services.StatusPageService)
 	}
 }
 
-const publicStatusDays = 90
-
-// computeDailyUptimeBuckets buckets checks into the 90 UTC calendar days
-// ending at now, each summarized purely by pass/fail counts - no incident- or
-// maintenance-derived spans, since the public status page never surfaces
-// exact downtime clock times. Used only here; the authenticated endpoints
-// have their own, hourly, view (see computeHourlyUptimeBuckets).
-func computeDailyUptimeBuckets(checks []models.Check, now time.Time) []gin.H {
-	type bucket struct{ total, failed int }
-	buckets := make(map[time.Time]*bucket)
-	truncDay := func(t time.Time) time.Time {
-		t = t.UTC()
-		return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
-	}
-	for _, ch := range checks {
-		k := truncDay(ch.Timestamp)
-		b := buckets[k]
-		if b == nil {
-			b = &bucket{}
-			buckets[k] = b
-		}
-		b.total++
-		if ch.Status != "success" {
-			b.failed++
-		}
-	}
-
-	daily := make([]gin.H, 0, publicStatusDays)
-	curDay := truncDay(now)
-	for i := publicStatusDays - 1; i >= 0; i-- {
-		k := curDay.AddDate(0, 0, -i)
-		b := buckets[k]
-		status := "nodata"
-		uptime := 0.0
-		if b != nil && b.total > 0 {
-			uptime = round2(float64(b.total-b.failed) / float64(b.total) * 100)
-			switch {
-			case b.failed == 0:
-				status = "up"
-			case b.failed == b.total:
-				status = "down"
-			default:
-				status = "partial"
-			}
-		}
-		daily = append(daily, gin.H{
-			"date":   k.Format("2006-01-02"),
-			"uptime": uptime,
-			"status": status,
-		})
-	}
-	return daily
-}
+const publicStatusDays = services.UptimeDailyDays
 
 // GetPublicStatusPageHandler handles GET /api/v1/public/status/:slug. This
 // endpoint is public and requires no authentication. Unpublished pages return
@@ -373,11 +321,11 @@ func GetPublicStatusPageHandler(
 			// The 90-day health strip: a lighter-weight bucketing than the
 			// authenticated endpoints use, since the public page never needs
 			// exact downtime spans - just the daily pass/fail signal.
-			daily := make([]gin.H, 0, publicStatusDays)
+			daily := make([]map[string]any, 0, publicStatusDays)
 			if checks, err := checkService.GetChecksInRange(ctx, m.ID, windowStart, now, 0, 0); err != nil {
 				log.Printf("[statuspage] daily buckets failed for monitor %s: %v", m.ID, err)
 			} else {
-				daily = computeDailyUptimeBuckets(checks, now)
+				daily = services.DailyUptimeBuckets(checks, now)
 			}
 
 			monitorsResp = append(monitorsResp, gin.H{

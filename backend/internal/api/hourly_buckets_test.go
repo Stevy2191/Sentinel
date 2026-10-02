@@ -5,9 +5,10 @@ import (
 	"time"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
+	"github.com/Stevy2191/Sentinel/backend/internal/services"
 )
 
-// computeHourlyUptimeBuckets always returns exactly 24 entries, oldest first,
+// services.HourlyUptimeBuckets always returns exactly 24 entries, oldest first,
 // ending at the hour containing "now" - the shape both the authenticated
 // history endpoint and the public status page rely on.
 func TestComputeHourlyUptimeBucketsStatusPerHour(t *testing.T) {
@@ -23,7 +24,7 @@ func TestComputeHourlyUptimeBucketsStatusPerHour(t *testing.T) {
 		check("failed", 0, time.Date(2026, 9, 24, 8, 35, 0, 0, time.UTC)),
 	}
 
-	hourly := computeHourlyUptimeBuckets(checks, nil, nil, now, createdAt)
+	hourly := services.HourlyUptimeBuckets(checks, nil, nil, now, createdAt)
 	if len(hourly) != 24 {
 		t.Fatalf("want 24 entries, got %d", len(hourly))
 	}
