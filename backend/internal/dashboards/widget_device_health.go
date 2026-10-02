@@ -3,6 +3,7 @@ package dashboards
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -38,8 +39,11 @@ func (w deviceHealthWidget) Resolve(ctx context.Context, _ json.RawMessage, in R
 		return nil, ErrNoData
 	}
 	d, err := w.devices.Get(ctx, in.Visible.Devices[0])
-	if err != nil {
+	if errors.Is(err, services.ErrDeviceNotFound) {
 		return nil, ErrNoData
+	}
+	if err != nil {
+		return nil, err
 	}
 	h, err := w.health(ctx, d)
 	if err != nil {
