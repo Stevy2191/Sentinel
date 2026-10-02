@@ -19,11 +19,11 @@ func TestLabelValidate(t *testing.T) {
 		t.Errorf("normalised = %s, want trimmed text and default size m", got)
 	}
 	for raw, field := range map[string]string{
-		`{"text":""}`:                                      "text",
-		`{"text":"` + strings.Repeat("x", 201) + `"}`:      "text",
-		`{"text":"a\u0007b"}`:                              "text",
-		`{"text":"ok","size":"xl"}`:                        "size",
-		`{"text":5}`:                                       "text",
+		`{"text":""}`: "text",
+		`{"text":"` + strings.Repeat("x", 201) + `"}`: "text",
+		`{"text":"a\u0007b"}`:                         "text",
+		`{"text":"ok","size":"xl"}`:                   "size",
+		`{"text":5}`:                                  "text",
 	} {
 		_, err := w.Validate(ctx, json.RawMessage(raw))
 		var fe *FieldError
