@@ -381,6 +381,10 @@ const (
 	UPSConditionHighLoad   = "ups_high_load"
 )
 
+// IncidentConditionMetric is the device-level condition for a metric-rule
+// incident (Incident.MetricKey/MetricInstance identify the row it is about).
+const IncidentConditionMetric = "metric"
+
 // Port event kinds.
 const (
 	PortEventLinkUp      = "link_up"
