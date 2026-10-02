@@ -47,7 +47,7 @@ type Filtered struct {
 // visible, or "" when the widget should resolve. A widget with no subjects
 // (a label) or a broad scope always resolves.
 func (f Filtered) State() string {
-	if f.total == 0 || f.Visible.count() > 0 {
+	if f.total == 0 || f.Visible.Broad || f.Visible.count() > 0 {
 		return ""
 	}
 	if f.Hidden > 0 {
