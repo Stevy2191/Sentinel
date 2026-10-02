@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -134,6 +135,23 @@ func (m *MetricsStore) Forget(deviceID uuid.UUID) {
 	defer m.mu.Unlock()
 	for k := range m.ids {
 		if k.device == deviceID {
+			delete(m.ids, k)
+		}
+	}
+}
+
+// ForgetMetrics drops every device's cached series ids for these metric
+// keys. ProfileService calls it once a custom metric's (or a whole
+// profile's) series rows are deleted, so a key that comes back resolves a
+// fresh series instead of the deleted id the nightly cleanup will purge.
+func (m *MetricsStore) ForgetMetrics(keys []string) {
+	if len(keys) == 0 {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for k := range m.ids {
+		if slices.Contains(keys, k.metric) {
 			delete(m.ids, k)
 		}
 	}

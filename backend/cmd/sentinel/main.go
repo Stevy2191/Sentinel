@@ -145,6 +145,9 @@ func run() error {
 	networkSettings := services.NewNetworkSettingsService(settingsService, metricsStore)
 	mibLibrary := services.NewMIBLibrary(db)
 	profileService := services.NewProfileService(db)
+	// Deleting a custom metric or a profile deletes its series; the shared
+	// store must forget their cached ids so a returning key gets fresh ones.
+	profileService.SetMetricsStore(metricsStore)
 	snmpClient := snmp.GoSNMPClient{}
 	prober := services.NewProber(snmpCredentialService, snmpClient)
 	scanManager := services.NewScanManager(prober)
