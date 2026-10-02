@@ -149,90 +149,6 @@ func GetMonitorReportHandler(
 	}
 }
 
-// span is a stretch of time inside a single hourly bucket, together with how
-// many seconds of that bucket it covers. A zero start means "nothing here".
-type span struct {
-	start, end time.Time
-	seconds    int
-}
-
-// latest/earliest are the time equivalents of max/min.
-func latest(a, b time.Time) time.Time {
-	if a.After(b) {
-		return a
-	}
-	return b
-}
-
-func earliest(a, b time.Time) time.Time {
-	if a.Before(b) {
-		return a
-	}
-	return b
-}
-
-// rfc3339OrNil renders a timestamp for JSON, or nil when it is unset, so the
-// client can distinguish "no downtime" from "downtime at the epoch".
-func rfc3339OrNil(t time.Time) interface{} {
-	if t.IsZero() {
-		return nil
-	}
-	return t.UTC().Format(time.RFC3339)
-}
-
-// interval is a period of interest — an outage or a maintenance window — with a
-// nil end meaning it is still running.
-type interval struct {
-	start time.Time
-	end   *time.Time
-}
-
-func incidentIntervals(incidents []models.Incident) []interval {
-	out := make([]interval, 0, len(incidents))
-	for i := range incidents {
-		out = append(out, interval{start: incidents[i].StartTime, end: incidents[i].EndTime})
-	}
-	return out
-}
-
-func maintenanceIntervals(windows []models.MaintenanceHistory) []interval {
-	out := make([]interval, 0, len(windows))
-	for i := range windows {
-		end := windows[i].EndTime
-		out = append(out, interval{start: windows[i].StartTime, end: &end})
-	}
-	return out
-}
-
-// spanInHour clips every interval to [hourStart, hourEnd] and returns the outer
-// bounds of the clipped pieces plus their total duration. Reporting the outer
-// bounds (rather than each piece) keeps the client's tooltip to a single
-// "from — to" while the second count stays exact.
-func spanInHour(intervals []interval, hourStart, hourEnd, now time.Time) span {
-	var out span
-	for _, iv := range intervals {
-		segStart := latest(iv.start.UTC(), hourStart)
-		// An open interval is still running, so it covers the hour up to now.
-		segEnd := now
-		if iv.end != nil {
-			segEnd = iv.end.UTC()
-		}
-		segEnd = earliest(segEnd, hourEnd)
-
-		if !segEnd.After(segStart) {
-			continue
-		}
-		out.seconds += int(segEnd.Sub(segStart).Seconds())
-		if out.start.IsZero() || segStart.Before(out.start) {
-			out.start = segStart
-		}
-		if segEnd.After(out.end) {
-			out.end = segEnd
-		}
-	}
-	return out
-}
-
 // buildRecentChecks turns a newest-first run of checks into the oldest-first
 // series the dashboard's per-check strip draws, plus the pass rate across
 // exactly those checks.
@@ -290,111 +206,6 @@ func responseSeriesFor(raw string) (responseSeries, bool) {
 			func(t time.Time) string { return t.Format("Jan 2") }}, true
 	}
 	return responseSeries{}, false
-}
-
-// computeHourlyUptimeBuckets buckets checks into the 24 hours ending at now,
-// each annotated with two views of the hour: "uptime"/"status" summarize the
-// checks recorded in it (what a sparkline draws), while the down/maintenance
-// spans give the actual clock time derived from incidents and recorded
-// maintenance history (what a detailed 24-hour health bar draws). Shared by
-// the authenticated uptime-history endpoint and the public status page, so
-// both surfaces draw the same 24-hour strip from the same logic.
-//
-// checks may span a wider window than 24 hours (a caller reusing one fetch
-// for a longer response-time series too) - only checks that fall in the last
-// 24 hours affect the result. incidents and maintenanceWindows should already
-// be scoped to that same 24-hour window.
-func computeHourlyUptimeBuckets(
-	checks []models.Check,
-	incidents []models.Incident,
-	maintenanceWindows []models.MaintenanceHistory,
-	now time.Time,
-	createdAt time.Time,
-) []gin.H {
-	type bucket struct {
-		total, failed int
-		// First/last failing check in the hour: the fallback source for a
-		// downtime span when no incident was recorded (e.g. failures during a
-		// maintenance window, where incidents are suppressed).
-		firstFail, lastFail time.Time
-	}
-	buckets := make(map[time.Time]*bucket)
-	truncHour := func(t time.Time) time.Time {
-		t = t.UTC()
-		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, time.UTC)
-	}
-	for _, ch := range checks {
-		k := truncHour(ch.Timestamp)
-		b := buckets[k]
-		if b == nil {
-			b = &bucket{}
-			buckets[k] = b
-		}
-		b.total++
-		if ch.Status != "success" {
-			b.failed++
-			ts := ch.Timestamp.UTC()
-			if b.firstFail.IsZero() || ts.Before(b.firstFail) {
-				b.firstFail = ts
-			}
-			if ts.After(b.lastFail) {
-				b.lastFail = ts
-			}
-		}
-	}
-
-	downIntervals := incidentIntervals(incidents)
-	maintIntervals := maintenanceIntervals(maintenanceWindows)
-
-	hourly := make([]gin.H, 0, 24)
-	curHour := truncHour(now)
-	for i := 23; i >= 0; i-- {
-		k := curHour.Add(time.Duration(-i) * time.Hour)
-		b := buckets[k]
-		status := "nodata"
-		uptime := 0.0
-		if b != nil && b.total > 0 {
-			uptime = round2(float64(b.total-b.failed) / float64(b.total) * 100)
-			switch {
-			case b.failed == 0:
-				status = "up"
-			case b.failed == b.total:
-				status = "down"
-			default:
-				status = "partial"
-			}
-		}
-
-		// The hour is only observable up to "now" — never attribute downtime to
-		// the part of the current hour that hasn't happened yet.
-		hourEnd := earliest(k.Add(time.Hour), now.UTC())
-
-		downSpan := spanInHour(downIntervals, k, hourEnd, now.UTC())
-		if downSpan.seconds == 0 && b != nil && !b.firstFail.IsZero() {
-			// No incident on record, but checks failed here: report the span the
-			// failures cover so the hour still reads as degraded.
-			downSpan = span{start: b.firstFail, end: b.lastFail, seconds: 0}
-		}
-		maintSpan := spanInHour(maintIntervals, k, hourEnd, now.UTC())
-
-		entry := gin.H{
-			"hour":                k.Hour(),
-			"uptime":              uptime,
-			"status":              status,
-			"bucket_start":        k.Format(time.RFC3339),
-			"down_seconds":        downSpan.seconds,
-			"maintenance_seconds": maintSpan.seconds,
-			"down_start":          rfc3339OrNil(downSpan.start),
-			"down_end":            rfc3339OrNil(downSpan.end),
-			"maintenance_start":   rfc3339OrNil(maintSpan.start),
-			"maintenance_end":     rfc3339OrNil(maintSpan.end),
-			// An hour entirely before the monitor existed has nothing to report,
-			// as opposed to an hour that was simply quiet.
-			"observed": !k.Add(time.Hour).Before(createdAt.UTC()),
-		}
-		hourly = append(hourly, entry)
-	}
-	return hourly
 }
 
 // GetUptimeHistoryHandler handles GET /api/v1/monitors/:id/uptime-history. It
@@ -493,7 +304,7 @@ func GetUptimeHistoryHandler(
 			respondInternal(c, "GetUptimeHistoryHandler", err)
 			return
 		}
-		hourly := computeHourlyUptimeBuckets(checks, incidents, maintenanceWindows, now, monitor.CreatedAt)
+		hourly := services.HourlyUptimeBuckets(checks, incidents, maintenanceWindows, now, monitor.CreatedAt)
 
 		// The response-time series, over the requested range. Buckets are aligned
 		// to the bucket size rather than to "now", so a point covers the same
