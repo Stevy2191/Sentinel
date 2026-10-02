@@ -2,6 +2,18 @@
 import type { ProfileMetric } from '@/hooks/useProfiles'
 import type { MibObjectDetail } from '@/hooks/useMibs'
 
+/** The profile header fields shared by the "New profile" inline form
+ *  (Profiles.tsx) and the profile detail page's editable header
+ *  (ProfileDetail.tsx) - rendered by components/network/ProfileFields.tsx.
+ *  `prefixes` is the textarea's raw one-per-line text; callers split and
+ *  trim it into ProfileInput's match_prefixes at submit time. */
+export interface ProfileFieldsValue {
+  name: string
+  description: string
+  prefixes: string
+  pollMinutes: number
+}
+
 /** A new, unsaved metric draft: a scalar gauge with no rule, ready for the
  *  editor's fields to fill in. */
 export function emptyMetric(): ProfileMetric {

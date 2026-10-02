@@ -2,7 +2,11 @@ import { useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Copy, Plus, Trash2 } from 'lucide-react'
 import { copyProfile, createProfile, deleteProfile, useProfiles, type ProfileView } from '@/hooks/useProfiles'
+import ProfileFields from '@/components/network/ProfileFields'
+import type { ProfileFieldsValue } from '@/utils/metrics'
 import type { ApiError } from '@/services/api'
+
+const EMPTY_FIELDS: ProfileFieldsValue = { name: '', description: '', prefixes: '', pollMinutes: 1 }
 
 export default function Profiles() {
   const { profiles, loading, error, refetch } = useProfiles()
@@ -10,10 +14,7 @@ export default function Profiles() {
   const [searchParams] = useSearchParams()
 
   const [adding, setAdding] = useState(false)
-  const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
-  const [prefixes, setPrefixes] = useState('')
-  const [pollMinutes, setPollMinutes] = useState(1)
+  const [fields, setFields] = useState<ProfileFieldsValue>(EMPTY_FIELDS)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
 
@@ -27,13 +28,13 @@ export default function Profiles() {
     setCreating(true)
     try {
       const p = await createProfile({
-        name,
-        description,
-        match_prefixes: prefixes
+        name: fields.name,
+        description: fields.description,
+        match_prefixes: fields.prefixes
           .split('\n')
           .map((s) => s.trim())
           .filter(Boolean),
-        poll_interval_minutes: pollMinutes,
+        poll_interval_minutes: fields.pollMinutes,
       })
       navigate(`/network/profiles/${p.id}`)
     } catch (err) {
@@ -116,33 +117,7 @@ export default function Profiles() {
 
       {adding && (
         <form className="card max-w-2xl space-y-4 p-6" onSubmit={(e) => void submitNew(e)}>
-          <label className="block space-y-1">
-            <span className="text-sm text-slate-300">Name</span>
-            <input className="rd-input w-full" value={name} onChange={(e) => setName(e.target.value)} required />
-          </label>
-          <label className="block space-y-1">
-            <span className="text-sm text-slate-300">Description</span>
-            <textarea className="rd-input w-full" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
-          </label>
-          <label className="block space-y-1">
-            <span className="text-sm text-slate-300">Match prefixes (one per line)</span>
-            <textarea
-              className="rd-input w-full font-mono text-xs"
-              rows={3}
-              value={prefixes}
-              onChange={(e) => setPrefixes(e.target.value)}
-              placeholder="1.3.6.1.4.1.9.1"
-            />
-            <span className="block text-xs text-slate-500">Devices whose sysObjectID starts with one of these arcs get this profile.</span>
-          </label>
-          <label className="block space-y-1">
-            <span className="text-sm text-slate-300">Poll every</span>
-            <select className="rd-select" value={pollMinutes} onChange={(e) => setPollMinutes(Number(e.target.value))}>
-              <option value={1}>1 minute</option>
-              <option value={5}>5 minutes</option>
-              <option value={15}>15 minutes</option>
-            </select>
-          </label>
+          <ProfileFields value={fields} onChange={setFields} />
           {createError && <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">{createError}</div>}
           <div className="flex justify-end gap-2">
             <button type="button" className="btn-secondary" onClick={() => setAdding(false)}>
