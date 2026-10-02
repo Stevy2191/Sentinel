@@ -15,11 +15,11 @@ import (
 
 // accessWorld has one user per role against one personal and one site dashboard.
 type accessWorld struct {
-	db                                           *gorm.DB
-	svc                                          *Service
-	admin, owner, readonly, editable, siteRO     uuid.UUID
-	siteRW, stranger                             uuid.UUID
-	site, personal, siteDash                     uuid.UUID
+	db                                       *gorm.DB
+	svc                                      *Service
+	admin, owner, readonly, editable, siteRO uuid.UUID
+	siteRW, stranger                         uuid.UUID
+	site, personal, siteDash                 uuid.UUID
 }
 
 func newAccessWorld(t *testing.T) accessWorld {
