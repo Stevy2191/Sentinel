@@ -49,14 +49,21 @@ var (
 // Inspect checks one file's syntax and returns its module name and the
 // modules it imports (deduplicated, in order of first appearance).
 func Inspect(content []byte) (Header, error) {
-	n := len(definitions.FindAllIndex(content, -1))
-	if n == 0 {
+	found := definitions.FindAll(content, -1)
+	if len(found) == 0 {
 		return Header{}, ErrNotAMIB
 	}
-	if n > 1 {
+	if len(found) > 1 {
 		return Header{}, ErrSeveralModules
 	}
-	m, err := parser.Parse(bytes.NewReader(content))
+	var m *parser.Module
+	var err error
+	if perr := guard(strings.Fields(string(found[0]))[0], func() error {
+		m, err = parser.Parse(bytes.NewReader(content))
+		return nil
+	}); perr != nil {
+		return Header{}, perr
+	}
 	if err != nil {
 		pe := &ParseError{Message: err.Error()}
 		if g := position.FindStringSubmatch(err.Error()); g != nil {
@@ -140,19 +147,28 @@ func Build(files []File) Result {
 		if len(res.Missing[name]) > 0 {
 			continue
 		}
-		loaded, err := gosmi.LoadModule(name)
-		if err != nil || loaded == "" {
-			continue
-		}
-		mod, err := gosmi.GetModule(loaded)
-		if err != nil {
-			continue
-		}
-		for _, n := range mod.GetNodes() {
-			o := toObject(name, n)
-			if o.OID != "" {
-				res.Objects[name] = append(res.Objects[name], o)
+		var objects []Object
+		err := guard(name, func() error {
+			if loadModuleHook != nil {
+				loadModuleHook(name)
 			}
+			loaded, err := gosmi.LoadModule(name)
+			if err != nil || loaded == "" {
+				return nil
+			}
+			mod, err := gosmi.GetModule(loaded)
+			if err != nil {
+				return nil
+			}
+			for _, n := range mod.GetNodes() {
+				if o := toObject(name, n); o.OID != "" {
+					objects = append(objects, o)
+				}
+			}
+			return nil
+		})
+		if err == nil && len(objects) > 0 {
+			res.Objects[name] = objects
 		}
 	}
 	return res
@@ -209,4 +225,21 @@ func toObject(module string, n gosmi.SmiNode) Object {
 		}
 	}
 	return o
+}
+
+// loadModuleHook, when set (tests only), runs inside Build's guarded load of
+// each module, so a test can make a load panic.
+var loadModuleHook func(name string)
+
+// guard runs f, turning a panic (gosmi and its parser are not hardened
+// against hostile input, and stored modules are loaded at every start) into
+// "module X could not be loaded" so one bad module cannot crash-loop the
+// process.
+func guard(module string, f func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("module %s could not be loaded: %v", module, r)
+		}
+	}()
+	return f()
 }

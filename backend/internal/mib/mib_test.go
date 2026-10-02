@@ -111,3 +111,33 @@ func TestBuildKeysByDeclaredName(t *testing.T) {
 		t.Error("missing stored under the caller-supplied name WRONG-NAME")
 	}
 }
+
+// A pathological module that panics gosmi must not take the process down:
+// the panic becomes "module X could not be loaded".
+func TestGuardTurnsPanicIntoError(t *testing.T) {
+	err := guard("ACME-MIB", func() error { panic("index out of range") })
+	if err == nil || err.Error() != "module ACME-MIB could not be loaded: index out of range" {
+		t.Errorf("guard error %v", err)
+	}
+	if err := guard("ACME-MIB", func() error { return nil }); err != nil {
+		t.Errorf("no panic: %v", err)
+	}
+	want := errors.New("plain failure")
+	if err := guard("ACME-MIB", func() error { return want }); err != want {
+		t.Errorf("plain error %v", err)
+	}
+}
+
+// A module whose load panics yields no objects; the others still build.
+func TestBuildSurvivesAPanickingModule(t *testing.T) {
+	loadModuleHook = func(name string) {
+		if name == "IF-MIB" {
+			panic("boom")
+		}
+	}
+	defer func() { loadModuleHook = nil }()
+	res := Build(Builtins())
+	if len(res.Objects["IF-MIB"]) != 0 || len(res.Objects["SNMPv2-MIB"]) == 0 {
+		t.Errorf("IF-MIB %d objects, SNMPv2-MIB %d", len(res.Objects["IF-MIB"]), len(res.Objects["SNMPv2-MIB"]))
+	}
+}
