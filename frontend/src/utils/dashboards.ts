@@ -79,7 +79,7 @@ export function isStale(lastSuccess: number | null, refreshSeconds: number, now:
 export function chartRows(lines: SeriesLine[]): Record<string, number>[] {
   const byTime = new Map<number, Record<string, number>>()
   for (const l of lines) {
-    for (const p of l.points) {
+    for (const p of l.points ?? []) {
       const t = new Date(p.t).getTime()
       const row = byTime.get(t) ?? { t }
       row[l.key] = p.avg
@@ -179,4 +179,11 @@ export function strs(c: Record<string, unknown>, k: string): string[] {
 /** Reads a number field of a widget config, or def. */
 export function num(c: Record<string, unknown>, k: string, def: number): number {
   return typeof c[k] === 'number' ? (c[k] as number) : def
+}
+
+/** What every widget settings form takes. siteId is the dashboard's site. */
+export interface SettingsProps {
+  config: Record<string, unknown>
+  siteId: string | null
+  onChange: (config: Record<string, unknown>) => void
 }
