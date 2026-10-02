@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Stevy2191/Sentinel/backend/internal/snmp"
 	"github.com/Stevy2191/Sentinel/backend/internal/testdb"
 )
 
@@ -58,6 +59,48 @@ const acmeOldMIB = "ACME-OLD-MIB DEFINITIONS ::= BEGIN\nIMPORTS OBJECT-TYPE, Int
 	"oldName OBJECT-TYPE SYNTAX Integer32 MAX-ACCESS read-only STATUS current DESCRIPTION \"Old.\" ::= { acme 1 }\nEND\n"
 const acmeNewMIB = "ACME-NEW-MIB DEFINITIONS ::= BEGIN\nIMPORTS OBJECT-TYPE, Integer32 FROM SNMPv2-SMI acme FROM ACME-SMI;\n" +
 	"newName OBJECT-TYPE SYNTAX Integer32 MAX-ACCESS read-only STATUS current DESCRIPTION \"New.\" ::= { acme 1 }\nEND\n"
+
+// TestWalk shapes a table walk into columns named from the MIB library
+// (entPhysicalName) and enum meanings resolved against a column's own enum
+// (entPhysicalClass 3 -> "chassis", from ENTITY-MIB's IANAPhysicalClass
+// textual convention).
+func TestDBMIBTestWalkTable(t *testing.T) {
+	l, ctx := mibLib(t)
+	const tableOID = "1.3.6.1.2.1.47.1.1.1" // entPhysicalTable
+	f := &walkFake{walks: map[string][]snmp.PDU{
+		tableOID: {
+			{OID: tableOID + ".1.2.1001", Value: []byte("desc")},
+			{OID: tableOID + ".1.7.1001", Value: []byte("Switch 1")},
+			{OID: tableOID + ".1.5.1001", Value: int64(3)},
+		},
+	}}
+
+	res, err := l.TestWalk(ctx, f, snmp.Target{}, tableOID)
+	testdb.Must(t, err)
+	if len(res.Rows) != 1 || res.Rows[0].Index != "1001" {
+		t.Fatalf("rows %+v", res.Rows)
+	}
+
+	const nameOID = tableOID + ".1.7"
+	const classOID = tableOID + ".1.5"
+	var nameCol *TestWalkColumn
+	for i := range res.Columns {
+		if res.Columns[i].OID == nameOID {
+			nameCol = &res.Columns[i]
+		}
+	}
+	if nameCol == nil || nameCol.Name != "entPhysicalName" {
+		t.Errorf("entPhysicalName column not named: %+v", res.Columns)
+	}
+
+	row := res.Rows[0]
+	if cell := row.Values[classOID]; cell.Raw != "3" || cell.Meaning != "chassis" {
+		t.Errorf("class cell %+v", cell)
+	}
+	if cell := row.Values[nameOID]; cell.Raw != "Switch 1" {
+		t.Errorf("name cell %+v", cell)
+	}
+}
 
 func TestDBMIBSearchPicksNewestModule(t *testing.T) {
 	l, ctx := mibLib(t)

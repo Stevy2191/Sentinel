@@ -147,6 +147,7 @@ func run() error {
 	snmpClient := snmp.GoSNMPClient{}
 	prober := services.NewProber(snmpCredentialService, snmpClient)
 	scanManager := services.NewScanManager(prober)
+	deviceWalker := services.NewDeviceWalker(mibLibrary, prober, snmpClient)
 	pdfRenderer, err := services.NewPDFRendererService(cfg.ReportsDir)
 	if err != nil {
 		return fmt.Errorf("initializing report renderer: %w", err)
@@ -349,6 +350,7 @@ func run() error {
 	api.RegisterDeviceRoutes(v1, deviceService, prober, siteService, auditService)
 	api.RegisterScanRoutes(v1, scanManager, snmpCredentialService, deviceService, siteService, auditService)
 	api.RegisterPortRoutes(v1, deviceService, portService, siteService, auditService)
+	api.RegisterTestWalkRoutes(v1, deviceService, siteService, deviceWalker)
 	api.RegisterNetworkRoutes(v1, deviceService, portService, metricsStore, networkSettings, siteService, authService)
 	api.RegisterMIBRoutes(v1, mibLibrary, auditService, authService)
 	api.RegisterSystemRoutes(v1, hostSampler, version)

@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Stevy2191/Sentinel/backend/internal/models"
 	"github.com/Stevy2191/Sentinel/backend/internal/netguard"
 	"github.com/Stevy2191/Sentinel/backend/internal/snmp"
 )
@@ -61,4 +62,23 @@ func (p *Prober) IdentifyWith(ctx context.Context, host string, port int, cred s
 // connection cannot borrow another site's profile.
 func (p *Prober) UsableAt(ctx context.Context, credentialID, siteID uuid.UUID) (bool, error) {
 	return p.creds.UsableAt(ctx, credentialID, siteID)
+}
+
+// TargetFor builds the SNMP target for a device the way the poller does
+// (device_poller.go's TargetFor): its credential decrypted, its host
+// resolved fresh and checked against network policy, at its configured
+// port, timeout and retries.
+func (p *Prober) TargetFor(ctx context.Context, d models.Device) (snmp.Target, error) {
+	cred, err := p.creds.Decrypted(ctx, d.CredentialID)
+	if err != nil {
+		return snmp.Target{}, err
+	}
+	ip, err := p.resolve(ctx, d.Host)
+	if err != nil {
+		return snmp.Target{}, fmt.Errorf("cannot resolve %s: %v", d.Host, err)
+	}
+	if p.blocked(ip) {
+		return snmp.Target{}, ErrTargetBlocked
+	}
+	return TargetFor(d, ip.String(), cred), nil
 }

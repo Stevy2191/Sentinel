@@ -3,10 +3,12 @@ package services
 import (
 	"context"
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
+	"github.com/Stevy2191/Sentinel/backend/internal/snmp"
 )
 
 // ErrMIBObjectNotFound is returned by Object when no ready module defines an
@@ -145,6 +147,213 @@ func (l *MIBLibrary) Object(ctx context.Context, oid string) (*MIBObjectDetail, 
 		d.Columns = cols
 	}
 	return d, nil
+}
+
+// testWalkMaxRows caps how many rows a test walk keeps: a UI preview of a
+// table, not a bulk export, and some tables (the ARP cache, the bridge
+// forwarding table) run into the tens of thousands of rows.
+const testWalkMaxRows = 500
+
+// TestWalkColumn is one column a test walk found: its OID, its name when the
+// MIB library knows it (empty for a raw/unknown OID), and its enum when it is
+// a named-number INTEGER.
+type TestWalkColumn struct {
+	OID  string           `json:"oid"`
+	Name string           `json:"name"`
+	Enum map[int64]string `json:"enum"`
+}
+
+// TestWalkCell is one row's value in one column: Raw is the number (decimal,
+// no exponent) or the text: Meaning is the enum name for a numeric value
+// whose column has one, otherwise empty.
+type TestWalkCell struct {
+	Raw     string `json:"raw"`
+	Meaning string `json:"meaning"`
+}
+
+// TestWalkRow is one row of a test walk, keyed by column OID. Index is a
+// scalar's "" or a table/row's index (the walked OID's suffix past the
+// column, which may itself have several dotted parts for a composite index).
+type TestWalkRow struct {
+	Index  string                  `json:"index"`
+	Values map[string]TestWalkCell `json:"values"`
+}
+
+// TestWalkResult is what the MIB browser's "test walk" shows for one OID.
+type TestWalkResult struct {
+	OID       string           `json:"oid"`
+	Columns   []TestWalkColumn `json:"columns"`
+	Rows      []TestWalkRow    `json:"rows"`
+	Truncated bool             `json:"truncated"`
+}
+
+// TestWalk walks oid against a real device and shapes the answer for the MIB
+// browser: a table or row walk splits into columns and rows; a lone column
+// (or any OID the library does not recognise) walks as a single column
+// keyed by its own index; anything else — a scalar, or an OID whose walk came
+// back empty — is read with one GET of oid+".0".
+func (l *MIBLibrary) TestWalk(ctx context.Context, c snmp.Client, t snmp.Target, oid string) (*TestWalkResult, error) {
+	obj, err := l.Object(ctx, oid)
+	if err != nil && !errors.Is(err, ErrMIBObjectNotFound) {
+		return nil, err
+	}
+
+	switch {
+	case obj != nil && obj.Kind == "table":
+		pdus, err := c.Walk(ctx, t, oid)
+		if err != nil {
+			return nil, err
+		}
+		return buildTestWalkTable(oid, obj, pdus, 1), nil
+	case obj != nil && obj.Kind == "row":
+		pdus, err := c.Walk(ctx, t, oid)
+		if err != nil {
+			return nil, err
+		}
+		return buildTestWalkTable(oid, obj, pdus, 0), nil
+	case obj != nil && obj.Kind == "scalar":
+		return testWalkScalar(ctx, c, t, oid, obj)
+	default:
+		pdus, err := c.Walk(ctx, t, oid)
+		if err != nil {
+			return nil, err
+		}
+		if len(pdus) == 0 {
+			return testWalkScalar(ctx, c, t, oid, obj)
+		}
+		return buildTestWalkColumn(oid, obj, pdus), nil
+	}
+}
+
+// testWalkCell formats one answer for its column: a number (or its enum name
+// when the column has one for that value), else the text.
+func testWalkCell(p snmp.PDU, col TestWalkColumn) TestWalkCell {
+	v := ValueOf(p)
+	if !v.NumOK {
+		return TestWalkCell{Raw: v.Text}
+	}
+	cell := TestWalkCell{Raw: strconv.FormatFloat(v.Num, 'f', -1, 64)}
+	if name, ok := col.Enum[int64(v.Num)]; ok {
+		cell.Meaning = name
+	}
+	return cell
+}
+
+// testWalkScalar reads oid+".0" with one GET (retried per OID if the agent
+// refuses it), for a scalar object or any OID whose walk answered nothing.
+func testWalkScalar(ctx context.Context, c snmp.Client, t snmp.Target, oid string, obj *MIBObjectDetail) (*TestWalkResult, error) {
+	scalarOID := oid + ".0"
+	pdus, err := snmp.GetEach(ctx, c, t, []string{scalarOID})
+	if err != nil {
+		return nil, err
+	}
+	col := TestWalkColumn{OID: scalarOID}
+	if obj != nil {
+		col.Name, col.Enum = obj.Name, obj.Enum
+	}
+	rows := make([]TestWalkRow, 0, len(pdus))
+	for _, p := range pdus {
+		rows = append(rows, TestWalkRow{Values: map[string]TestWalkCell{col.OID: testWalkCell(p, col)}})
+	}
+	return &TestWalkResult{OID: oid, Columns: []TestWalkColumn{col}, Rows: rows}, nil
+}
+
+// buildTestWalkColumn shapes a walk of a single column (or an OID the
+// library does not recognise) into one column, one row per index: the
+// walked OID's suffix past oid.
+func buildTestWalkColumn(oid string, obj *MIBObjectDetail, pdus []snmp.PDU) *TestWalkResult {
+	col := TestWalkColumn{OID: oid}
+	if obj != nil {
+		col.Name, col.Enum = obj.Name, obj.Enum
+	}
+	rows := make([]TestWalkRow, 0, len(pdus))
+	truncated := false
+	for _, p := range pdus {
+		index, ok := strings.CutPrefix(p.OID, oid+".")
+		if !ok {
+			continue
+		}
+		if len(rows) >= testWalkMaxRows {
+			truncated = true
+			continue
+		}
+		rows = append(rows, TestWalkRow{Index: index, Values: map[string]TestWalkCell{col.OID: testWalkCell(p, col)}})
+	}
+	return &TestWalkResult{OID: oid, Columns: []TestWalkColumn{col}, Rows: rows, Truncated: truncated}
+}
+
+// buildTestWalkTable shapes a table or row walk into columns and rows. skip
+// is 1 for a table walk, where each PDU's suffix past oid is
+// "1.<col>.<index>" (the leading 1 is the table's one row-entry sub-id), and
+// 0 for a row walk, where the suffix is already "<col>.<index>". obj's
+// Columns (already loaded by Object, for a table from its row, for a row
+// directly) name and enum the columns the library knows.
+func buildTestWalkTable(oid string, obj *MIBObjectDetail, pdus []snmp.PDU, skip int) *TestWalkResult {
+	known := map[string]MIBObjectView{}
+	if obj != nil {
+		for _, c := range obj.Columns {
+			known[c.OID] = c
+		}
+	}
+
+	cols := map[string]TestWalkColumn{}
+	rows := map[string]*TestWalkRow{}
+	truncated := false
+
+	for _, p := range pdus {
+		suffix, ok := strings.CutPrefix(p.OID, oid+".")
+		if !ok {
+			continue
+		}
+		parts := strings.Split(suffix, ".")
+		if len(parts) < skip+2 {
+			continue
+		}
+		colOID := oid + "." + strings.Join(parts[:skip+1], ".")
+		index := strings.Join(parts[skip+1:], ".")
+
+		col, ok := cols[colOID]
+		if !ok {
+			col = TestWalkColumn{OID: colOID}
+			if kc, ok := known[colOID]; ok {
+				col.Name, col.Enum = kc.Name, kc.Enum
+			}
+			cols[colOID] = col
+		}
+
+		row, ok := rows[index]
+		if !ok {
+			if len(rows) >= testWalkMaxRows {
+				truncated = true
+				continue
+			}
+			row = &TestWalkRow{Index: index, Values: map[string]TestWalkCell{}}
+			rows[index] = row
+		}
+		row.Values[colOID] = testWalkCell(p, col)
+	}
+
+	colOIDs := make([]string, 0, len(cols))
+	for k := range cols {
+		colOIDs = append(colOIDs, k)
+	}
+	sort.Slice(colOIDs, func(i, j int) bool { return oidLess(colOIDs[i], colOIDs[j]) })
+	outCols := make([]TestWalkColumn, len(colOIDs))
+	for i, k := range colOIDs {
+		outCols[i] = cols[k]
+	}
+
+	indices := make([]string, 0, len(rows))
+	for k := range rows {
+		indices = append(indices, k)
+	}
+	sort.Slice(indices, func(i, j int) bool { return oidLess(indices[i], indices[j]) })
+	outRows := make([]TestWalkRow, len(indices))
+	for i, k := range indices {
+		outRows[i] = *rows[k]
+	}
+
+	return &TestWalkResult{OID: oid, Columns: outCols, Rows: outRows, Truncated: truncated}
 }
 
 // oidLess reports whether OID a sorts before OID b by numeric arc comparison
