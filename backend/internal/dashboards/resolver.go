@@ -109,7 +109,14 @@ func (r *Resolver) ResolvePublic(ctx context.Context, d *models.Dashboard, w *mo
 	// The flight is shared, so it must not die with the first caller's request:
 	// it runs on a context detached from the leader (with its own deadline),
 	// and each caller stops waiting when its own ctx ends.
-	ch := r.group.DoChan(fmt.Sprintf("%s/%d/%s", key.dashboard, key.version, key.widget), func() (any, error) {
+	ch := r.group.DoChan(fmt.Sprintf("%s/%d/%s", key.dashboard, key.version, key.widget), func() (_ any, err error) {
+		// DoChan re-panics a flight's panic in a fresh goroutine, which would
+		// crash the process instead of reaching the HTTP recovery middleware.
+		defer func() {
+			if p := recover(); p != nil {
+				err = fmt.Errorf("resolving %s widget panicked: %v", w.Type, p)
+			}
+		}()
 		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), publicResolveTimeout)
 		defer cancel()
 		resp, err := r.resolve(sctx, PublicViewer, w.Type, json.RawMessage(w.Config), "")

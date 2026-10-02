@@ -244,6 +244,36 @@ func TestPublicCacheDoesNotCacheFailures(t *testing.T) {
 	}
 }
 
+// panicWidget panics in Resolve on its first call only.
+type panicWidget struct{ calls *atomic.Int32 }
+
+func (panicWidget) Type() string { return "panicky" }
+func (panicWidget) Validate(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	return raw, nil
+}
+func (panicWidget) Subjects(json.RawMessage) Subjects { return Subjects{} }
+func (w panicWidget) Resolve(context.Context, json.RawMessage, ResolveInput) (any, error) {
+	if w.calls.Add(1) == 1 {
+		panic("kaboom")
+	}
+	return map[string]any{"ok": true}, nil
+}
+func (panicWidget) Refresh(json.RawMessage, string) time.Duration { return time.Minute }
+
+func TestPublicCachePanicBecomesErrorAndIsNotCached(t *testing.T) {
+	calls := &atomic.Int32{}
+	r := NewResolver(NewRegistry(panicWidget{calls: calls}), openChecker{})
+	d := &models.Dashboard{ID: uuid.New(), Version: 1}
+	w := &models.DashboardWidget{ID: uuid.New(), Type: "panicky", Config: models.RawJSON(`{}`)}
+	if _, err := r.ResolvePublic(context.Background(), d, w); err == nil {
+		t.Fatal("a panicking resolve returned no error")
+	}
+	resp, err := r.ResolvePublic(context.Background(), d, w)
+	if err != nil || resp.State != StateOK || calls.Load() != 2 {
+		t.Errorf("after the panic: resp = %+v err = %v resolves = %d; want ok and 2 resolves", resp, err, calls.Load())
+	}
+}
+
 func TestPublicCacheLeaderCancelDoesNotFailWaiter(t *testing.T) {
 	r, bw := newBlockingResolver()
 	d, w := blockingFixtures()
