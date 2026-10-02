@@ -1,11 +1,16 @@
 package dashboards
 
 import (
+	"context"
+	"encoding/json"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"github.com/Stevy2191/Sentinel/backend/internal/services"
 	"github.com/Stevy2191/Sentinel/backend/internal/testdb"
 )
 
@@ -81,4 +86,57 @@ func publish(t *testing.T, db *gorm.DB, dashboardID, creator uuid.UUID) string {
 	testdb.Exec(t, db, `INSERT INTO dashboard_public_links (dashboard_id, token, created_by) VALUES (?, ?, ?)`,
 		dashboardID, token, creator)
 	return token
+}
+
+// newPort inserts a present, physical (ethernetCsmacd) port.
+func newPort(t *testing.T, db *gorm.DB, deviceID uuid.UUID, ifIndex int, name, alias string) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	testdb.Exec(t, db, `INSERT INTO device_interfaces (id, device_id, if_index, name, alias, if_type, present, oper_status, admin_status)
+		VALUES (?, ?, ?, ?, ?, 6, true, 'up', 'up')`, id, deviceID, ifIndex, name, alias)
+	return id
+}
+
+// realDeps wires the widgets to the real services on db.
+func realDeps(t *testing.T, db *gorm.DB) Deps {
+	t.Helper()
+	incidents := services.NewIncidentService(db)
+	metrics := services.NewMetricsStore(db)
+	ports := services.NewPortService(db, metrics, incidents, services.NewSettingsService(db))
+	devices := services.NewDeviceService(db, services.NewSNMPCredentialService(db), incidents)
+	devices.SetMetricsStore(metrics)
+	profiles := services.NewProfileService(db)
+	return Deps{
+		Metrics: metrics, Ports: ports, Devices: devices,
+		Health: func(ctx context.Context, d *services.DeviceView) (*services.DeviceHealthView, error) {
+			return profiles.DeviceHealth(ctx, d, metrics, incidents)
+		},
+		Incidents: incidents, Monitors: services.NewMonitorService(db),
+		Checks: services.NewCheckService(db), Agents: services.NewAgentService(db),
+	}
+}
+
+// writePortBps writes in/out traffic for a port at at.
+func writePortBps(t *testing.T, d Deps, deviceID, portID uuid.UUID, ifIndex int, at time.Time, in, out float64) {
+	t.Helper()
+	m := d.Metrics.(*services.MetricsStore)
+	inst := strconv.Itoa(ifIndex)
+	testdb.Must(t, m.Write(context.Background(), deviceID, at, []services.SamplePoint{
+		{Metric: services.MetricIfInBps, Instance: inst, InterfaceID: &portID, Value: in},
+		{Metric: services.MetricIfOutBps, Instance: inst, InterfaceID: &portID, Value: out},
+	}))
+}
+
+// resolveWidget validates cfg with w, then resolves it with in (Now defaults
+// to now).
+func resolveWidget(t *testing.T, w Widget, cfg string, in ResolveInput) (any, error) {
+	t.Helper()
+	clean, err := w.Validate(context.Background(), json.RawMessage(cfg))
+	if err != nil {
+		t.Fatalf("validating %s: %v", cfg, err)
+	}
+	if in.Now.IsZero() {
+		in.Now = time.Now()
+	}
+	return w.Resolve(context.Background(), clean, in)
 }
