@@ -22,6 +22,9 @@ export interface ApiError {
   status: number
   message: string
   code?: string
+  /** The whole error body, for endpoints that add fields to it (a dashboard
+   *  save adds widget_index and field; a conflict adds current_version). */
+  details?: Record<string, unknown>
 }
 
 // No request interceptor for auth: nothing writes 'sentinel:token' to
@@ -49,7 +52,8 @@ api.interceptors.response.use(
       error.response?.data?.error,
       error.message || 'An unexpected error occurred'
     )
-    const apiError: ApiError = { status, message, code }
+    const details = error.response?.data as unknown as Record<string, unknown> | undefined
+    const apiError: ApiError = { status, message, code, details }
     return Promise.reject(apiError)
   }
 )
