@@ -163,6 +163,32 @@ func TestDBTimeseriesSiteTraffic(t *testing.T) {
 	}
 }
 
+func TestDBTimeseriesSiteTrafficEastWest(t *testing.T) {
+	db := testdb.Open(t)
+	d := realDeps(t, db)
+	w := timeseriesWidget{metrics: d.Metrics, ports: d.Ports, devices: d.Devices}
+	site := newSite(t, db, "HQ")
+	router, sw := newDevice(t, db, site, "router", "10.0.0.1"), newDevice(t, db, site, "switch", "10.0.0.2")
+	testdb.Exec(t, db, `UPDATE devices SET device_type = 'switch' WHERE id = ?`, sw)
+	wan, access := newPort(t, db, router, 1, "Gi0/0", ""), newPort(t, db, sw, 1, "Gi1/0/1", "")
+	testdb.Exec(t, db, `UPDATE device_interfaces SET role = 'wan', collect = true WHERE id = ?`, wan)
+	testdb.Exec(t, db, `UPDATE device_interfaces SET role = 'access', collect = true WHERE id = ?`, access)
+	now := time.Now().UTC()
+	at := now.Add(-20 * time.Minute)
+	writePortBps(t, d, router, wan, 1, at, 200, 80)
+	writePortBps(t, d, sw, access, 1, at, 500, 300)
+
+	data, err := resolveWidget(t, w, fmt.Sprintf(`{"source":"site_traffic","site_id":"%s","view":"east_west","range":"1h"}`, site),
+		ResolveInput{Visible: Subjects{Sites: []uuid.UUID{site}}, Now: now})
+	testdb.Must(t, err)
+	lines := data.(TimeseriesData).Lines
+	// ((access in - wan out) + (access out - wan in)) / 2 = ((500-80) + (300-200)) / 2
+	if len(lines) != 1 || lines[0].Label != "Inside the site" || lines[0].Unit != "bps" ||
+		len(lines[0].Points) != 1 || lines[0].Points[0].Avg != 260 || lines[0].Points[0].Min != 260 || lines[0].Points[0].Max != 260 {
+		t.Errorf("east_west = %+v, want one Inside the site line with a point of 260 bps", lines)
+	}
+}
+
 func TestTimeseriesValidate(t *testing.T) {
 	w := timeseriesWidget{}
 	dev, site := uuid.New(), uuid.New()
