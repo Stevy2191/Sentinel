@@ -90,6 +90,9 @@ func NewDefaultRegistry(d Deps) *Registry {
 		labelWidget{},
 		timeseriesWidget{metrics: d.Metrics, ports: d.Ports, devices: d.Devices},
 		statWidget{metrics: d.Metrics, ports: d.Ports, devices: d.Devices},
+		portGridWidget{devices: d.Devices, ports: d.Ports},
+		deviceHealthWidget{devices: d.Devices, health: d.Health},
+		sitePowerWidget{devices: d.Devices, ports: d.Ports},
 	)
 }
 
