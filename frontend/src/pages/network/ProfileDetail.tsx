@@ -10,8 +10,9 @@ import {
   type ProfileMetric,
 } from '@/hooks/useProfiles'
 import { mibObject } from '@/hooks/useMibs'
-import { metricFromMibObject, ruleText } from '@/utils/metrics'
+import { metricFromMibObject, ruleText, type ProfileFieldsValue } from '@/utils/metrics'
 import MetricEditor from '@/components/network/MetricEditor'
+import ProfileFields from '@/components/network/ProfileFields'
 import type { ApiError } from '@/services/api'
 
 const SOURCE_LABEL: Record<ProfileMetric['source'], string> = {
@@ -30,10 +31,7 @@ export default function ProfileDetail() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { profile, loading, notFound, refetch } = useProfile(id)
 
-  const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
-  const [prefixes, setPrefixes] = useState('')
-  const [pollMinutes, setPollMinutes] = useState(1)
+  const [fields, setFields] = useState<ProfileFieldsValue>({ name: '', description: '', prefixes: '', pollMinutes: 1 })
   const [savingHeader, setSavingHeader] = useState(false)
   const [headerSaved, setHeaderSaved] = useState(false)
   const [headerError, setHeaderError] = useState<string | null>(null)
@@ -45,10 +43,12 @@ export default function ProfileDetail() {
 
   useEffect(() => {
     if (profile) {
-      setName(profile.name)
-      setDescription(profile.description)
-      setPrefixes(profile.match_prefixes.join('\n'))
-      setPollMinutes(profile.poll_interval_minutes)
+      setFields({
+        name: profile.name,
+        description: profile.description,
+        prefixes: profile.match_prefixes.join('\n'),
+        pollMinutes: profile.poll_interval_minutes,
+      })
       setHeaderSaved(false)
     }
   }, [profile])
@@ -101,13 +101,13 @@ export default function ProfileDetail() {
     setHeaderSaved(false)
     setSavingHeader(true)
     const input: ProfileInput = {
-      name,
-      description,
-      match_prefixes: prefixes
+      name: fields.name,
+      description: fields.description,
+      match_prefixes: fields.prefixes
         .split('\n')
         .map((p) => p.trim())
         .filter(Boolean),
-      poll_interval_minutes: pollMinutes,
+      poll_interval_minutes: fields.pollMinutes,
     }
     try {
       await updateProfile(id, input)
@@ -159,33 +159,7 @@ export default function ProfileDetail() {
       </div>
 
       <form className="card max-w-2xl space-y-4 p-6" onSubmit={(e) => void submitHeader(e)}>
-        <label className="block space-y-1">
-          <span className="text-sm text-slate-300">Name</span>
-          <input className="rd-input w-full" value={name} onChange={(e) => setName(e.target.value)} required />
-        </label>
-        <label className="block space-y-1">
-          <span className="text-sm text-slate-300">Description</span>
-          <textarea className="rd-input w-full" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
-        </label>
-        <label className="block space-y-1">
-          <span className="text-sm text-slate-300">Match prefixes (one per line)</span>
-          <textarea
-            className="rd-input w-full font-mono text-xs"
-            rows={3}
-            value={prefixes}
-            onChange={(e) => setPrefixes(e.target.value)}
-            placeholder="1.3.6.1.4.1.9.1"
-          />
-          <span className="block text-xs text-slate-500">Devices whose sysObjectID starts with one of these arcs get this profile.</span>
-        </label>
-        <label className="block space-y-1">
-          <span className="text-sm text-slate-300">Poll every</span>
-          <select className="rd-select" value={pollMinutes} onChange={(e) => setPollMinutes(Number(e.target.value))}>
-            <option value={1}>1 minute</option>
-            <option value={5}>5 minutes</option>
-            <option value={15}>15 minutes</option>
-          </select>
-        </label>
+        <ProfileFields value={fields} onChange={setFields} />
         {headerError && <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">{headerError}</div>}
         <div className="flex items-center gap-3">
           <button type="submit" className="btn-primary" disabled={savingHeader}>
