@@ -39,9 +39,15 @@ type fakeMetricIncidents struct {
 	closed    []string
 	notes     []string
 	failClose bool
+	// failOpens makes that many next OpenMetricIncident calls fail.
+	failOpens int
 }
 
 func (f *fakeMetricIncidents) OpenMetricIncident(_ context.Context, d uuid.UUID, key, inst string, start time.Time, _ string) (*models.Incident, bool, error) {
+	if f.failOpens > 0 {
+		f.failOpens--
+		return nil, false, errors.New("database unavailable")
+	}
 	k := key + "|" + inst
 	if inc, ok := f.open[k]; ok {
 		return inc, false, nil
@@ -440,5 +446,51 @@ func TestProfileMonitorCounterScale(t *testing.T) {
 	r.poll()
 	if got := r.points("acme_octets"); len(got) != 1 || got[0].Value != 50 {
 		t.Errorf("scaled rate %+v", got)
+	}
+}
+
+// An incident open that fails is retried on the next poll (the row is not
+// active until its incident exists), and the alert goes out once in total.
+func TestProfileMonitorRetriesFailedOpen(t *testing.T) {
+	r := newProfileRig(1)
+	r.poll()
+	r.set(tFanState, "2", int64(3))
+	r.inc.failOpens = 1
+	r.poll()
+	if len(r.inc.open) != 0 || len(r.notif.sent) != 0 {
+		t.Fatalf("failed open: open %d sent %d", len(r.inc.open), len(r.notif.sent))
+	}
+	r.poll()
+	r.poll()
+	if len(r.inc.opened) != 1 || r.inc.opened[0] != "cisco_fan_envmon|2" || len(r.notif.sent) != 1 ||
+		r.notif.sent[0].Message != "core-3850 Fan 2 is critical" {
+		t.Fatalf("retry: opened %v sent %+v", r.inc.opened, r.notif.sent)
+	}
+}
+
+// After a restart the monitor has no memory, only the open incidents: a row
+// still violating sends nothing new, and its recovery sends exactly one
+// recovery.
+func TestProfileMonitorRestartMidIncident(t *testing.T) {
+	r := newProfileRig(1)
+	r.set(tFanState, "2", int64(3))
+	r.poll()
+	if len(r.notif.sent) != 1 {
+		t.Fatalf("before restart: sent %d", len(r.notif.sent))
+	}
+	// Restart: a fresh monitor over the same incidents.
+	r.mon = NewProfileMonitor(r.src, r.mets, r.inc, r.notif, r.agent, fakeSiteNamer{})
+	r.mon.now = func() time.Time { return r.now }
+	r.poll()
+	r.poll()
+	if len(r.inc.opened) != 1 || len(r.inc.open) != 1 || len(r.notif.sent) != 1 {
+		t.Fatalf("still violating after restart: opened %v open %d sent %d", r.inc.opened, len(r.inc.open), len(r.notif.sent))
+	}
+	r.set(tFanState, "2", int64(1))
+	r.poll()
+	r.poll()
+	if len(r.inc.closed) != 1 || len(r.inc.open) != 0 || len(r.notif.sent) != 2 ||
+		r.notif.sent[1].Status != "recovered" || r.notif.sent[1].Message != "core-3850 Fan 2 is normal again after 3 minutes." {
+		t.Errorf("recovery after restart: closed %v sent %+v", r.inc.closed, r.notif.sent)
 	}
 }
