@@ -18,6 +18,9 @@ import (
 // TVs on one link cost one query per widget per 15 s (spec §4).
 const publicCacheTTL = 15 * time.Second
 
+// publicResolveTimeout bounds a shared public resolve, which outlives any one caller.
+const publicResolveTimeout = 30 * time.Second
+
 // Response is one widget's data, as the data routes return it. Expected
 // states (no_access, removed, no_data) are 200s.
 type Response struct {
@@ -85,7 +88,7 @@ func (r *Resolver) Preview(ctx context.Context, v Viewer, typ string, cfg json.R
 	if f.Hidden+f.Removed > 0 {
 		return nil, fieldErr("config", msgSubjectUnavailable)
 	}
-	return r.resolve(ctx, v, typ, clean, override)
+	return r.resolveFiltered(ctx, v, wd, clean, override, f)
 }
 
 // ResolvePublic loads w's data for d's public link, with the public trim,
@@ -103,8 +106,13 @@ func (r *Resolver) ResolvePublic(ctx context.Context, d *models.Dashboard, w *mo
 	}
 	r.mu.Unlock()
 
-	res, err, _ := r.group.Do(fmt.Sprintf("%s/%d/%s", key.dashboard, key.version, key.widget), func() (any, error) {
-		resp, err := r.resolve(ctx, PublicViewer, w.Type, json.RawMessage(w.Config), "")
+	// The flight is shared, so it must not die with the first caller's request:
+	// it runs on a context detached from the leader (with its own deadline),
+	// and each caller stops waiting when its own ctx ends.
+	ch := r.group.DoChan(fmt.Sprintf("%s/%d/%s", key.dashboard, key.version, key.widget), func() (any, error) {
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), publicResolveTimeout)
+		defer cancel()
+		resp, err := r.resolve(sctx, PublicViewer, w.Type, json.RawMessage(w.Config), "")
 		if err != nil {
 			return nil, err
 		}
@@ -114,10 +122,15 @@ func (r *Resolver) ResolvePublic(ctx context.Context, d *models.Dashboard, w *mo
 		r.mu.Unlock()
 		return resp, nil
 	})
-	if err != nil {
-		return nil, err
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-ch:
+		if res.Err != nil {
+			return nil, res.Err
+		}
+		return res.Val.(*Response), nil
 	}
-	return res.(*Response), nil
 }
 
 // sweepLocked drops expired entries; called with mu held.
@@ -138,11 +151,17 @@ func (r *Resolver) resolve(ctx context.Context, v Viewer, typ string, cfg json.R
 		resp.State = StateNoData
 		return resp, nil
 	}
-	resp.RefreshSeconds = int(wd.Refresh(cfg, override).Seconds())
 	f, err := Filter(ctx, r.checker, v, wd.Subjects(cfg))
 	if err != nil {
 		return nil, err
 	}
+	return r.resolveFiltered(ctx, v, wd, cfg, override, f)
+}
+
+// resolveFiltered resolves wd for v given its already-filtered subjects f.
+func (r *Resolver) resolveFiltered(ctx context.Context, v Viewer, wd Widget, cfg json.RawMessage, override string, f Filtered) (*Response, error) {
+	now := r.now()
+	resp := &Response{GeneratedAt: now.UTC(), RefreshSeconds: int(wd.Refresh(cfg, override).Seconds())}
 	resp.Hidden, resp.Removed = f.Hidden, f.Removed
 	if st := f.State(); st != "" {
 		resp.State = st
@@ -154,7 +173,7 @@ func (r *Resolver) resolve(ctx context.Context, v Viewer, typ string, cfg json.R
 		return resp, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("resolving %s widget: %w", typ, err)
+		return nil, fmt.Errorf("resolving %s widget: %w", wd.Type(), err)
 	}
 	resp.State = StateOK
 	resp.Data = data
