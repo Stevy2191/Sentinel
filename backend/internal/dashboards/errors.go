@@ -28,6 +28,11 @@ var (
 	ErrNoLink = errors.New("this dashboard has no public link")
 )
 
+// msgSubjectUnavailable is the one message for a widget subject that is hidden
+// from the editor and one that does not exist, so neither Save nor Preview can
+// be used to probe which ids exist.
+const msgSubjectUnavailable = "uses a site, device, monitor or server that does not exist or that you cannot see"
+
 // invalid wraps msg as an ErrInvalid.
 func invalid(msg string) error { return fmt.Errorf("%w: %s", ErrInvalid, msg) }
 
