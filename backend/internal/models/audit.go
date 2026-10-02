@@ -31,6 +31,15 @@ const (
 	ActionDeviceCreated     = "device_created"
 	ActionDeviceUpdated     = "device_updated"
 	ActionDeviceDeleted     = "device_deleted"
+
+	ActionMIBUploaded    = "mib_uploaded"
+	ActionMIBDeleted     = "mib_deleted"
+	ActionProfileCreated = "metric_profile_created"
+	ActionProfileUpdated = "metric_profile_updated"
+	ActionProfileDeleted = "metric_profile_deleted"
+	ActionMetricCreated  = "custom_metric_created"
+	ActionMetricUpdated  = "custom_metric_updated"
+	ActionMetricDeleted  = "custom_metric_deleted"
 )
 
 // Audited resource types.
@@ -42,6 +51,10 @@ const (
 
 	ResourceSNMPCredential = "snmp_credential"
 	ResourceDevice         = "device"
+
+	ResourceMIBModule     = "mib_module"
+	ResourceMetricProfile = "metric_profile"
+	ResourceCustomMetric  = "custom_metric"
 )
 
 // AuditChanges is the JSONB detail on an audit entry. For an update it carries

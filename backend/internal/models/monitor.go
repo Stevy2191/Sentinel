@@ -420,7 +420,11 @@ type Incident struct {
 	// incident about one of the device's ports); incidents_port_check.
 	InterfaceID *uuid.UUID `json:"interface_id" gorm:"column:interface_id;type:uuid"`
 	Condition   *string    `json:"condition" gorm:"column:condition"`
-	StartTime   time.Time  `json:"start_time" gorm:"column:start_time;not null"`
+	// MetricKey and MetricInstance identify the row of a metric-rule incident
+	// (Condition "metric"); nil otherwise.
+	MetricKey      *string   `json:"metric_key" gorm:"column:metric_key"`
+	MetricInstance *string   `json:"metric_instance" gorm:"column:metric_instance"`
+	StartTime      time.Time `json:"start_time" gorm:"column:start_time;not null"`
 	// IncidentType is how the check failed when the incident opened.
 	IncidentType    string     `json:"incident_type" gorm:"column:incident_type;default:down"`
 	EndTime         *time.Time `json:"end_time" gorm:"column:end_time"`
