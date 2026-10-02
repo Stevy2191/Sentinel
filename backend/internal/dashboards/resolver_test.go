@@ -153,3 +153,146 @@ func TestPreviewValidatesFirst(t *testing.T) {
 		t.Error("previewing an unknown type succeeded")
 	}
 }
+
+// blockingWidget holds Resolve until release is closed, so tests can control
+// when a public flight finishes.
+type blockingWidget struct {
+	calls   *atomic.Int32
+	started chan struct{} // receives one value per Resolve call
+	release chan struct{}
+	failOne *atomic.Bool // when set, the next Resolve fails once
+}
+
+func (blockingWidget) Type() string { return "blocking" }
+func (blockingWidget) Validate(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	return raw, nil
+}
+func (blockingWidget) Subjects(json.RawMessage) Subjects { return Subjects{} }
+func (w blockingWidget) Resolve(ctx context.Context, _ json.RawMessage, _ ResolveInput) (any, error) {
+	w.calls.Add(1)
+	w.started <- struct{}{}
+	<-w.release
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if w.failOne.CompareAndSwap(true, false) {
+		return nil, errors.New("boom")
+	}
+	return map[string]any{"ok": true}, nil
+}
+func (blockingWidget) Refresh(json.RawMessage, string) time.Duration { return time.Minute }
+
+func newBlockingResolver() (*Resolver, blockingWidget) {
+	bw := blockingWidget{
+		calls:   &atomic.Int32{},
+		started: make(chan struct{}, 16),
+		release: make(chan struct{}),
+		failOne: &atomic.Bool{},
+	}
+	return NewResolver(NewRegistry(bw), openChecker{}), bw
+}
+
+func blockingFixtures() (*models.Dashboard, *models.DashboardWidget) {
+	return &models.Dashboard{ID: uuid.New(), Version: 1},
+		&models.DashboardWidget{ID: uuid.New(), Type: "blocking", Config: models.RawJSON(`{}`)}
+}
+
+type publicResult struct {
+	resp *Response
+	err  error
+}
+
+func TestPublicCacheConcurrentRequestsShareOneResolve(t *testing.T) {
+	r, bw := newBlockingResolver()
+	d, w := blockingFixtures()
+	const n = 8
+	results := make(chan publicResult, n)
+	for i := 0; i < n; i++ {
+		go func() {
+			resp, err := r.ResolvePublic(context.Background(), d, w)
+			results <- publicResult{resp, err}
+		}()
+	}
+	<-bw.started // the flight is running; give the other callers time to join it
+	time.Sleep(50 * time.Millisecond)
+	close(bw.release)
+	for i := 0; i < n; i++ {
+		res := <-results
+		if res.err != nil || res.resp.State != StateOK {
+			t.Errorf("caller %d: resp = %+v err = %v, want ok", i, res.resp, res.err)
+		}
+	}
+	if bw.calls.Load() != 1 {
+		t.Errorf("%d concurrent requests resolved %d times, want 1", n, bw.calls.Load())
+	}
+}
+
+func TestPublicCacheDoesNotCacheFailures(t *testing.T) {
+	r, bw := newBlockingResolver()
+	close(bw.release)
+	d, w := blockingFixtures()
+	bw.failOne.Store(true)
+	if _, err := r.ResolvePublic(context.Background(), d, w); err == nil {
+		t.Fatal("first resolve succeeded, want the failure")
+	}
+	resp, err := r.ResolvePublic(context.Background(), d, w)
+	if err != nil || resp.State != StateOK {
+		t.Fatalf("second resolve = %+v, %v; want ok", resp, err)
+	}
+	if bw.calls.Load() != 2 {
+		t.Errorf("resolves = %d, want 2 (the failure was not cached)", bw.calls.Load())
+	}
+}
+
+func TestPublicCacheLeaderCancelDoesNotFailWaiter(t *testing.T) {
+	r, bw := newBlockingResolver()
+	d, w := blockingFixtures()
+	leaderCtx, cancelLeader := context.WithCancel(context.Background())
+	leaderErr := make(chan error, 1)
+	go func() {
+		_, err := r.ResolvePublic(leaderCtx, d, w)
+		leaderErr <- err
+	}()
+	<-bw.started // the leader's flight is blocked in Resolve
+
+	waiter := make(chan publicResult, 1)
+	go func() {
+		resp, err := r.ResolvePublic(context.Background(), d, w)
+		waiter <- publicResult{resp, err}
+	}()
+	time.Sleep(50 * time.Millisecond) // let the waiter join the flight
+	cancelLeader()
+	if err := <-leaderErr; !errors.Is(err, context.Canceled) {
+		t.Errorf("leader err = %v, want context.Canceled", err)
+	}
+	close(bw.release)
+	res := <-waiter
+	if res.err != nil || res.resp.State != StateOK {
+		t.Errorf("waiter = %+v, %v; want ok despite the leader's cancellation", res.resp, res.err)
+	}
+	if bw.calls.Load() != 1 {
+		t.Errorf("resolves = %d, want 1", bw.calls.Load())
+	}
+}
+
+func TestPublicCacheSweepDropsExpiredEntries(t *testing.T) {
+	ctx := context.Background()
+	r, _ := newCountingResolver(nil)
+	now := time.Now()
+	r.now = func() time.Time { return now }
+	d := &models.Dashboard{ID: uuid.New(), Version: 1}
+	old := &models.DashboardWidget{ID: uuid.New(), Type: "counting", Config: models.RawJSON(`{}`)}
+	fresh := &models.DashboardWidget{ID: uuid.New(), Type: "counting", Config: models.RawJSON(`{}`)}
+	if _, err := r.ResolvePublic(ctx, d, old); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(publicCacheTTL + time.Second)
+	if _, err := r.ResolvePublic(ctx, d, fresh); err != nil {
+		t.Fatal(err)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.cache[cacheKey{d.ID, d.Version, old.ID}]; ok || len(r.cache) != 1 {
+		t.Errorf("cache has %d entries, want only the fresh one", len(r.cache))
+	}
+}
