@@ -92,13 +92,44 @@ def write(name, lines):
         f.write("\n".join(sorted(lines, key=oid_key)) + "\n")
 
 
+def cisco_health():
+    """Rows for the Cisco starter profile's metrics: ENTITY names for CPU/fan/
+    sensor labels, CPU load (two indexes, one with no entity so its label
+    falls back to "Row <index>"), enhanced and classic memory pools, ENVMON
+    temperature/fan/supply, ENTITY-SENSOR temperature and voltage (the latter
+    must not be read as a temperature), and FRU fan-tray/power status."""
+    ent = "1.3.6.1.2.1.47.1.1.1.1.7"
+    names = {1000: "Switch 1", 1004: "Switch 1 - Fan 1", 1005: "Switch 1 - Fan 2", 1010: "Switch 1 - Inlet Temp Sensor",
+             1011: "Switch 1 - 12V Rail", 1020: "Switch 1 - FAN-T1", 1030: "Switch 1 - Power Supply A"}
+    rows = [f"{ent}.{i}|4|{n}" for i, n in names.items()]
+    cpu = "1.3.6.1.4.1.9.9.109.1.1.1.1"
+    rows += [f"{cpu}.2.1|2|1000", f"{cpu}.8.1|66|23", f"{cpu}.2.2|2|0", f"{cpu}.8.2|66|4"]
+    emp = "1.3.6.1.4.1.9.9.221.1.1.1.1"
+    rows += [f"{emp}.3.1.1|4|Processor", f"{emp}.18.1.1|70|300", f"{emp}.20.1.1|70|700"]
+    cmp_ = "1.3.6.1.4.1.9.9.48.1.1.1"
+    rows += [f"{cmp_}.2.1|4|Processor", f"{cmp_}.5.1|66|600", f"{cmp_}.6.1|66|400"]
+    env = "1.3.6.1.4.1.9.9.13.1"
+    rows += [f"{env}.3.1.2.1|4|Switch 1 Inlet", f"{env}.3.1.3.1|66|31",
+             f"{env}.4.1.2.1|4|Switch 1 Fan 1", f"{env}.4.1.3.1|2|1",
+             f"{env}.4.1.2.2|4|Switch 1 Fan 2", f"{env}.4.1.3.2|2|3",
+             f"{env}.5.1.2.1|4|Switch 1 PS A", f"{env}.5.1.3.1|2|1",
+             f"{env}.5.1.2.2|4|Switch 1 PS B", f"{env}.5.1.3.2|2|5"]
+    sen = "1.3.6.1.4.1.9.9.91.1.1.1.1"
+    rows += [f"{sen}.1.1010|2|8", f"{sen}.3.1010|2|1", f"{sen}.4.1010|2|415",
+             f"{sen}.1.1011|2|4", f"{sen}.3.1011|2|3", f"{sen}.4.1011|2|12000"]
+    fru = "1.3.6.1.4.1.9.9.117.1"
+    rows += [f"{fru}.4.1.1.1.1020|2|2", f"{fru}.1.2.1.2.1030|2|2"]
+    return rows
+
+
 edgeswitch = (system("EdgeSwitch 48-Port 500W, 1.9.3.5372984", "1.3.6.1.4.1.4413", "sim-edgeswitch", "Simulator rack", 123456789)
               + ports(52, "0/{i}", "Slot: 0 Port: {i} Gigabit - Level", 1_000_000_000)
               + entity("ES-48-500W", "SIMSERIAL001"))
 cisco = (system("Cisco IOS Software, C2960X Software (C2960X-UNIVERSALK9-M), Version 15.2(7)E8", "1.3.6.1.4.1.9.1.1208",
                 "sim-cisco", "Simulator rack", 98765432)
          + ports(26, "Gi1/0/{i}", "GigabitEthernet1/0/{i}", 1_000_000_000, mac_base=0x00AABB000000)
-         + entity("WS-C2960X-24TS-L", "SIMSERIAL002"))
+         + entity("WS-C2960X-24TS-L", "SIMSERIAL002")
+         + cisco_health())
 radio = (system("Cambium ePMP 1000", "1.3.6.1.4.1.17713.21", "sim-radio", "Tower 3", 5555555)
          + ports(2, "", "eth{i}", 100_000_000, xtable=False, mac_base=0x000456000000))
 
