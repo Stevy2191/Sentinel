@@ -13,6 +13,7 @@ require (
 	github.com/sleepinggenius2/gosmi v0.4.4
 	golang.org/x/crypto v0.54.0
 	golang.org/x/net v0.57.0
+	golang.org/x/sync v0.22.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/time v0.15.0
 	gorm.io/driver/postgres v1.6.0
@@ -52,7 +53,6 @@ require (
 	github.com/ugorji/go/codec v1.3.1 // indirect
 	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
 	golang.org/x/arch v0.22.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
 )

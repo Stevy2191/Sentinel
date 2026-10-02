@@ -172,7 +172,7 @@ func (s *Service) validateWidget(ctx context.Context, v Viewer, i int, in Widget
 	}
 	// One message for both, so a save cannot be used to probe which ids exist.
 	if f.Hidden+f.Removed > 0 {
-		return fail("config", "uses a site, device, monitor or server that does not exist or that you cannot see")
+		return fail("config", msgSubjectUnavailable)
 	}
 	out := models.DashboardWidget{Type: in.Type, Title: title, Config: models.RawJSON(cfg), X: in.X, Y: in.Y, W: in.W, H: in.H}
 	if in.ID != nil {
