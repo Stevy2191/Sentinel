@@ -41,7 +41,8 @@ type metricPreviewer interface {
 // RegisterProfileRoutes mounts metric profile and custom metric management
 // (admin) and the per-device profile standing and override (site access:
 // readonly to see, editable to change), plus the metric-preview button
-// (admin, site access readonly: it only reads from the device).
+// (admin, site access editable: it sends SNMP to a real device, like
+// test-walk and Test connection).
 func RegisterProfileRoutes(rg *gin.RouterGroup, profiles profileStore, devices deviceStore, sites siteAccessChecker, audit auditRecorder, users adminChecker, previewer metricPreviewer) {
 	profileAdmin := rg.Group("/network/profiles", RequireAdmin(users))
 	profileAdmin.GET("", listProfilesHandler(profiles))
@@ -333,7 +334,7 @@ func setDeviceProfileHandler(profiles profileStore, devices deviceStore, sites s
 // the device simply did not answer.
 func metricPreviewHandler(devices deviceStore, sites siteAccessChecker, previewer metricPreviewer) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		d, ok := loadDevice(c, devices, sites, services.SiteAccessReadonly)
+		d, ok := loadDevice(c, devices, sites, services.SiteAccessEditable)
 		if !ok {
 			return
 		}
