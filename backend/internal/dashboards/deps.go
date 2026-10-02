@@ -97,6 +97,7 @@ func NewDefaultRegistry(d Deps) *Registry {
 		eventLogWidget{ports: d.Ports, incidents: d.Incidents},
 		deviceTableWidget{devices: d.Devices, incidents: d.Incidents},
 		openIncidentsWidget{incidents: d.Incidents},
+		monitorsWidget{monitors: d.Monitors, checks: d.Checks, incidents: d.Incidents, agents: d.Agents},
 	)
 }
 
