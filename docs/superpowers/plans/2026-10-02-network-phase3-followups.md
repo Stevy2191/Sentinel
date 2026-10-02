@@ -59,3 +59,4 @@ Stale series-id cache after deleting a metric/profile (data loss when a key retu
 - (T14) EditDetailsModal profileBusy is one id, so rapid edits of two profiles re-enable the first select early (converges correctly)
 - (T14) device page ignores useDeviceHealth's error (Health just hides), as with ports
 - (T14) Health chip is amber for any not-OK row whose rule hasn't fired, as well as not-OK with no rule
+- (final) parentOf treats a numbered first OID element ({ iso(1) 3 }) as a parent reference; could flag a false cycle only in a contrived module
