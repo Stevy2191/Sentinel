@@ -1,5 +1,7 @@
 package services
 
+import "sync"
+
 // Built-in metric keys. Phase 3 adds user-defined metrics beside these; the
 // tables never need to change for it.
 const (
@@ -62,5 +64,32 @@ var knownMetrics = func() map[string]bool {
 	return m
 }()
 
-// KnownMetric reports whether key is in the catalogue.
-func KnownMetric(key string) bool { return knownMetrics[key] }
+var (
+	customMu      sync.RWMutex
+	customMetrics = map[string]bool{}
+)
+
+// SetCustomMetricKeys replaces the registered custom metric keys
+// (ProfileService.Load calls it whenever metrics change).
+func SetCustomMetricKeys(keys []string) {
+	m := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		m[k] = true
+	}
+	customMu.Lock()
+	customMetrics = m
+	customMu.Unlock()
+}
+
+// BuiltinMetric reports a key Sentinel itself writes.
+func BuiltinMetric(key string) bool { return knownMetrics[key] }
+
+// KnownMetric reports a built-in or registered custom key.
+func KnownMetric(key string) bool {
+	if knownMetrics[key] {
+		return true
+	}
+	customMu.RLock()
+	defer customMu.RUnlock()
+	return customMetrics[key]
+}

@@ -127,6 +127,20 @@ func TestDBMIBDeleteRefusals(t *testing.T) {
 	if _, err := l.Delete(ctx, module(t, l, "UPS-MIB").ID); !errors.Is(err, ErrMIBBuiltin) {
 		t.Errorf("delete built-in: %v", err)
 	}
+
+	// A profile metric reading one of ACME-MIB's OIDs blocks the delete too.
+	db := l.db
+	profileID := uuid.New()
+	testdb.Exec(t, db, `INSERT INTO metric_profiles (id, name, match_prefixes) VALUES (?, ?, '{1.3.6.1.4.1.99999}')`,
+		profileID, "ACME health")
+	testdb.Exec(t, db, `INSERT INTO profile_metrics (id, profile_id, name, key, source, kind, oid) VALUES (?, ?, ?, ?, 'scalar', 'gauge', ?)`,
+		uuid.New(), profileID, "ACME temperature", "acme_temp", "1.3.6.1.4.1.99999.1")
+	var inUseMetric *MIBInUseError
+	if _, err := l.Delete(ctx, module(t, l, "ACME-MIB").ID); !errors.As(err, &inUseMetric) || strings.Join(inUseMetric.Metrics, ",") != "acme_temp" {
+		t.Errorf("delete module referenced by a metric: %v", err)
+	}
+	testdb.Exec(t, db, `DELETE FROM metric_profiles WHERE id = ?`, profileID) // cascades the metric
+
 	if _, err := l.Delete(ctx, module(t, l, "ACME-MIB").ID); err != nil {
 		t.Errorf("delete leaf: %v", err)
 	}
