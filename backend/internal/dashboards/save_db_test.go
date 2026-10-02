@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -115,5 +117,97 @@ func TestDBSaveAccess(t *testing.T) {
 	}
 	if _, err := w.svc.Save(ctx, w.viewer(w.owner), w.personal, SaveInput{Version: 1, Name: "x", Widgets: many}); !errors.Is(err, ErrInvalid) {
 		t.Errorf("51 widgets err = %v, want ErrInvalid", err)
+	}
+}
+
+// deviceRefWidget is a test-only widget that refers to devices, so the
+// subject check on save has something to check.
+type deviceRefWidget struct{}
+
+func (deviceRefWidget) Type() string { return "device_ref" }
+
+func (deviceRefWidget) Validate(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	return raw, nil
+}
+
+func (deviceRefWidget) Subjects(raw json.RawMessage) Subjects {
+	var c struct {
+		Devices []uuid.UUID `json:"devices"`
+	}
+	_ = json.Unmarshal(raw, &c)
+	return Subjects{Devices: c.Devices}
+}
+
+func (deviceRefWidget) Resolve(context.Context, json.RawMessage, ResolveInput) (any, error) {
+	return nil, nil
+}
+
+func (deviceRefWidget) Refresh(json.RawMessage, string) time.Duration { return 0 }
+
+func TestDBSaveChecksSubjectsAgainstTheEditor(t *testing.T) {
+	w := newAccessWorld(t)
+	ctx := context.Background()
+	svc := NewService(w.svc.db, w.svc.sites, NewRegistry(labelWidget{}, deviceRefWidget{}), w.svc.checker)
+	editor := w.viewer(w.siteRW)
+	visible := newDevice(t, w.db, w.site, "visible", "10.0.0.1")
+	otherSite := newSite(t, w.db, "Elsewhere")
+	hidden := newDevice(t, w.db, otherSite, "hidden", "10.0.0.2")
+	ref := func(id uuid.UUID) WidgetInput {
+		return WidgetInput{Type: "device_ref", Config: json.RawMessage(`{"devices":["` + id.String() + `"]}`), W: 4, H: 2}
+	}
+	var msgs []string
+	for _, id := range []uuid.UUID{hidden, uuid.New()} {
+		_, err := svc.Save(ctx, editor, w.siteDash, SaveInput{Version: 1, Name: "HQ overview", Widgets: []WidgetInput{labelInput(nil, "ok", 0, 0), ref(id)}})
+		var we *WidgetError
+		if !errors.As(err, &we) || we.Index != 1 || we.Field != "config" {
+			t.Fatalf("device %s: err = %v, want a WidgetError on index 1, field config", id, err)
+		}
+		msgs = append(msgs, we.Msg)
+	}
+	if msgs[0] != msgs[1] {
+		t.Errorf("hidden and nonexistent devices give different messages (%q, %q); that would let a saver probe ids", msgs[0], msgs[1])
+	}
+	if _, err := svc.Save(ctx, editor, w.siteDash, SaveInput{Version: 1, Name: "HQ overview", Widgets: []WidgetInput{ref(visible)}}); err != nil {
+		t.Errorf("saving a visible device: %v", err)
+	}
+}
+
+func TestDBSaveRefusesTheSameWidgetIdTwice(t *testing.T) {
+	w := newAccessWorld(t)
+	ctx := context.Background()
+	owner := w.viewer(w.owner)
+	d, err := w.svc.Save(ctx, owner, w.personal, SaveInput{Version: 1, Name: "Mine", Widgets: []WidgetInput{labelInput(nil, "a", 0, 0)}})
+	testdb.Must(t, err)
+	id := d.Widgets[0].ID
+	_, err = w.svc.Save(ctx, owner, w.personal, SaveInput{Version: 2, Name: "Mine", Widgets: []WidgetInput{labelInput(&id, "a", 0, 0), labelInput(&id, "b", 4, 0)}})
+	var we *WidgetError
+	if !errors.As(err, &we) || we.Index != 1 || we.Field != "id" {
+		t.Errorf("repeated id err = %v, want a WidgetError on index 1, field id", err)
+	}
+}
+
+func TestDBSaveRejectsOversizeAndOffGridWidgets(t *testing.T) {
+	w := newAccessWorld(t)
+	ctx := context.Background()
+	owner := w.viewer(w.owner)
+	long := labelInput(nil, "ok", 0, 0)
+	long.Title = strings.Repeat("t", 101)
+	big := labelInput(nil, "ok", 0, 0)
+	big.Config = json.RawMessage(`{"text":"` + strings.Repeat("a", 16*1024) + `"}`)
+	cases := map[string]struct {
+		widget WidgetInput
+		field  string
+	}{
+		"title over 100":  {long, "title"},
+		"config over 16K": {big, "config"},
+		"negative x":      {labelInput(nil, "ok", -1, 0), "position"},
+		"negative y":      {labelInput(nil, "ok", 0, -1), "position"},
+	}
+	for name, c := range cases {
+		_, err := w.svc.Save(ctx, owner, w.personal, SaveInput{Version: 1, Name: "Mine", Widgets: []WidgetInput{c.widget}})
+		var we *WidgetError
+		if !errors.As(err, &we) || we.Index != 0 || we.Field != c.field {
+			t.Errorf("%s: err = %v, want a WidgetError on index 0, field %q", name, err, c.field)
+		}
 	}
 }
