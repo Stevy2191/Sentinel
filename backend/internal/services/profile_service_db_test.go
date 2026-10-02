@@ -119,3 +119,88 @@ func TestDBProfileCopySkipsExistingNameAndKey(t *testing.T) {
 		t.Errorf("copy name %q, metric key %q", cp.Name, cp.Metrics[0].Key)
 	}
 }
+
+// Deleting a metric removes its series rows; a MetricsStore wired to the
+// ProfileService must forget their cached ids, so a metric re-created with
+// the same key writes to a fresh series rather than the deleted one (whose
+// samples the nightly cleanup would then remove).
+func TestDBDeleteMetricForgetsMetricsStoreCache(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	svc := NewProfileService(db)
+	m := NewMetricsStore(db)
+	svc.SetMetricsStore(m)
+	testdb.Must(t, svc.SeedStarter(ctx))
+	cp, err := svc.Copy(ctx, got0(t, svc, ctx).ID)
+	testdb.Must(t, err)
+	s := seedDevice(t, db, "HQ", "10.0.0.9")
+	metric := cp.Metrics[0]
+	testdb.Must(t, m.Write(ctx, s.DeviceID, time.Now().UTC(), []SamplePoint{{Metric: metric.Key, Instance: "1", Value: 5}}))
+
+	_, err = svc.DeleteMetric(ctx, metric.ID)
+	testdb.Must(t, err)
+	_, err = svc.CreateMetric(ctx, cp.ID, metric)
+	testdb.Must(t, err)
+	testdb.Must(t, m.Write(ctx, s.DeviceID, time.Now().UTC(), []SamplePoint{{Metric: metric.Key, Instance: "1", Value: 6}}))
+
+	var landed int64
+	testdb.Must(t, db.Raw(`SELECT count(*) FROM metrics.samples x JOIN metrics.series s ON s.id = x.series_id
+		WHERE s.metric = ? AND x.value = 6`, metric.Key).Scan(&landed).Error)
+	if landed != 1 {
+		t.Fatalf("the re-created metric's sample landed on a deleted series (%d on a live series)", landed)
+	}
+
+	// The same holds for deleting the whole profile and copying again
+	// (which hands out the same "_copy" keys).
+	testdb.Must(t, m.Write(ctx, s.DeviceID, time.Now().UTC(), []SamplePoint{{Metric: cp.Metrics[1].Key, Instance: "1", Value: 7}}))
+	_, err = svc.Delete(ctx, cp.ID)
+	testdb.Must(t, err)
+	cp2, err := svc.Copy(ctx, got0(t, svc, ctx).ID)
+	testdb.Must(t, err)
+	if cp2.Metrics[1].Key != cp.Metrics[1].Key {
+		t.Fatalf("expected the copy to reuse key %q, got %q", cp.Metrics[1].Key, cp2.Metrics[1].Key)
+	}
+	testdb.Must(t, m.Write(ctx, s.DeviceID, time.Now().UTC(), []SamplePoint{{Metric: cp2.Metrics[1].Key, Instance: "1", Value: 8}}))
+	testdb.Must(t, db.Raw(`SELECT count(*) FROM metrics.samples x JOIN metrics.series s ON s.id = x.series_id
+		WHERE s.metric = ? AND x.value = 8`, cp2.Metrics[1].Key).Scan(&landed).Error)
+	if landed != 1 {
+		t.Fatalf("the re-copied metric's sample landed on a deleted series")
+	}
+}
+
+// A copy applies to no device until an admin adds prefixes or attaches it:
+// keeping the original's prefixes would poll (and alert on) every matching
+// device twice.
+func TestDBProfileCopyHasNoMatchPrefixes(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	svc := NewProfileService(db)
+	testdb.Must(t, svc.SeedStarter(ctx))
+	starter := got0(t, svc, ctx)
+	if len(starter.MatchPrefixes) == 0 {
+		t.Fatal("the starter should have match prefixes")
+	}
+	cp, err := svc.Copy(ctx, starter.ID)
+	testdb.Must(t, err)
+	stored, err := svc.Get(ctx, cp.ID)
+	testdb.Must(t, err)
+	if len(cp.MatchPrefixes) != 0 || len(stored.MatchPrefixes) != 0 {
+		t.Errorf("copy prefixes %v, stored %v", cp.MatchPrefixes, stored.MatchPrefixes)
+	}
+}
+
+// The built-in is found by builtin = true, not by name: renaming it must not
+// make the next start try (and fail) to seed a second one.
+func TestDBSeedStarterAfterRename(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	svc := NewProfileService(db)
+	testdb.Must(t, svc.SeedStarter(ctx))
+	testdb.Exec(t, db, `UPDATE metric_profiles SET name = 'Our Cisco switches' WHERE builtin`)
+	testdb.Must(t, svc.SeedStarter(ctx))
+	var builtins int64
+	testdb.Must(t, db.Raw(`SELECT count(*) FROM metric_profiles WHERE builtin`).Scan(&builtins).Error)
+	if builtins != 1 {
+		t.Errorf("%d built-in profiles after a rename and reseed", builtins)
+	}
+}

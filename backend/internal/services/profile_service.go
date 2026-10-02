@@ -71,9 +71,20 @@ type DeviceProfileView struct {
 // ProfileService stores metric profiles and their custom metrics.
 type ProfileService struct {
 	db *gorm.DB
+	// metrics, when wired with SetMetricsStore, has its cached series ids
+	// for a key dropped once that key's series rows are deleted.
+	metrics *MetricsStore
 }
 
 func NewProfileService(db *gorm.DB) *ProfileService { return &ProfileService{db: db} }
+
+// SetMetricsStore wires the metrics store (the one the poller writes
+// through) whose cached series ids Delete and DeleteMetric drop for the keys
+// they remove. Without it, a key that comes back (a metric re-created with
+// the same key, or a profile copied again after its copy was deleted) would
+// write to the deleted series id, and the nightly cleanup would discard
+// those samples.
+func (s *ProfileService) SetMetricsStore(m *MetricsStore) { s.metrics = m }
 
 // MatchesPrefix reports whether objectID starts with any prefix on whole
 // arcs: "1.3.6.1.4.1.9.1" matches "1.3.6.1.4.1.9.1.2066" but not
@@ -230,6 +241,14 @@ func queueMetricSeriesDeletion(tx *gorm.DB, key string) error {
 	return nil
 }
 
+// forgetSeries drops the wired metrics store's cached series ids for keys
+// whose series rows were just deleted (a no-op when none is wired).
+func (s *ProfileService) forgetSeries(keys []string) {
+	if s.metrics != nil {
+		s.metrics.ForgetMetrics(keys)
+	}
+}
+
 // normalizeProfileInput validates a ProfileInput and returns its normalized
 // name and match prefixes.
 func normalizeProfileInput(in ProfileInput) (string, models.StringArray, error) {
@@ -267,13 +286,13 @@ func (s *ProfileService) Load(ctx context.Context) error {
 	return nil
 }
 
-// SeedStarter creates the "Cisco switch health" built-in profile once, by
-// name. It never overwrites an existing profile of that name (an admin may
-// have edited or even renamed a copy, but the original stays untouched once
-// created).
+// SeedStarter creates the "Cisco switch health" built-in profile once: it
+// does nothing when a built-in profile already exists, whatever it is now
+// called (an admin may edit or rename the built-in; it is never
+// overwritten or seeded a second time).
 func (s *ProfileService) SeedStarter(ctx context.Context) error {
 	var n int64
-	if err := s.db.WithContext(ctx).Model(&models.MetricProfile{}).Where("name = ?", "Cisco switch health").Count(&n).Error; err != nil {
+	if err := s.db.WithContext(ctx).Model(&models.MetricProfile{}).Where("builtin").Count(&n).Error; err != nil {
 		return fmt.Errorf("checking for the starter profile: %w", err)
 	}
 	if n > 0 {
@@ -450,6 +469,7 @@ func (s *ProfileService) Update(ctx context.Context, id uuid.UUID, in ProfileInp
 // cleanup first.
 func (s *ProfileService) Delete(ctx context.Context, id uuid.UUID) (*models.MetricProfile, error) {
 	var p models.MetricProfile
+	var keys []string
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.First(&p, "id = ?", id).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -460,7 +480,6 @@ func (s *ProfileService) Delete(ctx context.Context, id uuid.UUID) (*models.Metr
 		if p.Builtin {
 			return ErrProfileBuiltin
 		}
-		var keys []string
 		if err := tx.Model(&models.ProfileMetric{}).Where("profile_id = ?", id).Pluck("key", &keys).Error; err != nil {
 			return fmt.Errorf("loading profile metric keys: %w", err)
 		}
@@ -477,15 +496,17 @@ func (s *ProfileService) Delete(ctx context.Context, id uuid.UUID) (*models.Metr
 	if err != nil {
 		return nil, err
 	}
-	if err := s.Load(ctx); err != nil {
+	err = s.Load(ctx)
+	s.forgetSeries(keys)
+	if err != nil {
 		return nil, err
 	}
 	return &p, nil
 }
 
-// Copy duplicates a profile (built-in or not) as a new, non-built-in one:
-// "<name> (copy)", then "<name> (copy 2)" and so on while the name is taken;
-// each metric gets a unique key via copyKey.
+// Copy duplicates a profile (built-in or not) as a new, non-built-in one with
+// no match prefixes: "<name> (copy)", then "<name> (copy 2)" and so on while
+// the name is taken; each metric gets a unique key via copyKey.
 func (s *ProfileService) Copy(ctx context.Context, id uuid.UUID) (*ProfileDetail, error) {
 	var detail *ProfileDetail
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -526,8 +547,12 @@ func (s *ProfileService) Copy(ctx context.Context, id uuid.UUID) (*ProfileDetail
 		if queryErr != nil {
 			return queryErr
 		}
+		// The copy starts with no match prefixes: keeping the original's
+		// would poll every matching device twice and raise every alert
+		// twice. It applies to nothing until an admin adds prefixes or
+		// attaches it to devices.
 		newProfile := models.MetricProfile{Name: newName, Description: p.Description,
-			MatchPrefixes: p.MatchPrefixes, PollIntervalMinutes: p.PollIntervalMinutes}
+			MatchPrefixes: models.StringArray{}, PollIntervalMinutes: p.PollIntervalMinutes}
 		if err := tx.Create(&newProfile).Error; err != nil {
 			// Backstop for a name taken between the check above and this
 			// insert (e.g. a concurrent Copy/Create), the same way Create maps it.
@@ -681,7 +706,9 @@ func (s *ProfileService) DeleteMetric(ctx context.Context, id uuid.UUID) (*model
 	if err != nil {
 		return nil, err
 	}
-	if err := s.Load(ctx); err != nil {
+	err = s.Load(ctx)
+	s.forgetSeries([]string{m.Key})
+	if err != nil {
 		return nil, err
 	}
 	return &m, nil
