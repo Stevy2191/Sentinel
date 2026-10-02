@@ -186,7 +186,7 @@ export default function Profiles() {
                         <div className="flex justify-end gap-2">
                           <button
                             className="btn-secondary !px-2 !py-1 disabled:opacity-40"
-                            title={`Copy ${p.name}`}
+                            title={`Copy ${p.name} (the copy starts with no match prefixes)`}
                             disabled={copyingId === p.id}
                             onClick={() => void doCopy(p)}
                           >

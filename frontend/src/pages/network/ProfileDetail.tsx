@@ -158,6 +158,12 @@ export default function ProfileDetail() {
         </div>
       </div>
 
+      {profile.match_prefixes.length === 0 && (
+        <div className="max-w-2xl rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300">
+          Not applied to any device automatically — add match prefixes or attach it to devices in Edit details.
+        </div>
+      )}
+
       <form className="card max-w-2xl space-y-4 p-6" onSubmit={(e) => void submitHeader(e)}>
         <ProfileFields value={fields} onChange={setFields} />
         {headerError && <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">{headerError}</div>}
