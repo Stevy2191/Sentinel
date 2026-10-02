@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -66,5 +67,30 @@ func TestExpandUploadLimits(t *testing.T) {
 	}
 	if _, err := ExpandUpload([]UploadFile{{FileName: "m.zip", Content: zipOf(t, many)}}); !errors.Is(err, ErrMIBTooManyFiles) {
 		t.Errorf("many files: %v", err)
+	}
+}
+
+// The 20 MB decompressed budget is for the whole call, not reset per zip:
+// several small, highly compressible zips must not be able to add up past it.
+func TestExpandUploadBudgetAcrossZips(t *testing.T) {
+	entry := strings.Repeat("A", 1900000) // just under the 2 MB per-file limit
+	zipOfEntries := func(prefix string) []byte {
+		files := map[string]string{}
+		for i := 0; i < 6; i++ {
+			files[fmt.Sprintf("%s%d.mib", prefix, i)] = entry
+		}
+		return zipOf(t, files) // ~11.4 MB unpacked, compresses to almost nothing
+	}
+	z1 := zipOfEntries("a")
+	z2 := zipOfEntries("b")
+
+	// One zip alone (~11.4 MB unpacked) is well under the 20 MB budget.
+	if _, err := ExpandUpload([]UploadFile{{FileName: "one.zip", Content: z1}}); err != nil {
+		t.Fatalf("one zip: %v", err)
+	}
+	// Two zips together (~22.8 MB unpacked) must not slip past the budget
+	// just because each zip's own unpacked count starts back at zero.
+	if _, err := ExpandUpload([]UploadFile{{FileName: "one.zip", Content: z1}, {FileName: "two.zip", Content: z2}}); !errors.Is(err, ErrMIBUploadTooLarge) {
+		t.Errorf("two zips: %v", err)
 	}
 }

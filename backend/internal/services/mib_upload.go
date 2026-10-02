@@ -33,8 +33,16 @@ type UploadFile struct {
 // size and count limits.
 func ExpandUpload(files []UploadFile) ([]UploadFile, error) {
 	total := 0
+	// budget is the decompressed-bytes-in-the-output ceiling for the whole
+	// call (not per file and not per zip): a plain file's own bytes, or a
+	// zip entry's decompressed bytes, add to one running total, so several
+	// small, highly compressible zips cannot each stay under the limit while
+	// together exceeding it.
+	budget := 0
 	var out []UploadFile
 	for _, f := range files {
+		// Cheap guard on the raw request: the sum of the uploaded files' own
+		// sizes (a zip counts at its compressed size here) must also fit.
 		total += len(f.Content)
 		if total > MaxMIBUploadBytes {
 			return nil, ErrMIBUploadTooLarge
@@ -42,6 +50,10 @@ func ExpandUpload(files []UploadFile) ([]UploadFile, error) {
 		if !strings.EqualFold(path.Ext(f.FileName), ".zip") {
 			if len(f.Content) > MaxMIBFileBytes {
 				return nil, fmt.Errorf("%s: %w", f.FileName, ErrMIBFileTooLarge)
+			}
+			budget += len(f.Content)
+			if budget > MaxMIBUploadBytes {
+				return nil, ErrMIBUploadTooLarge
 			}
 			out = append(out, UploadFile{FileName: path.Base(f.FileName), Content: f.Content})
 			continue
@@ -53,7 +65,6 @@ func ExpandUpload(files []UploadFile) ([]UploadFile, error) {
 		if len(zr.File) > MaxMIBZipFiles {
 			return nil, ErrMIBTooManyFiles
 		}
-		unpacked := 0
 		for _, zf := range zr.File {
 			base := path.Base(zf.Name)
 			if zf.FileInfo().IsDir() || strings.HasPrefix(base, ".") || strings.HasPrefix(zf.Name, "__MACOSX/") {
@@ -74,8 +85,8 @@ func ExpandUpload(files []UploadFile) ([]UploadFile, error) {
 			if len(b) > MaxMIBFileBytes {
 				return nil, fmt.Errorf("%s: %w", base, ErrMIBFileTooLarge)
 			}
-			unpacked += len(b)
-			if unpacked > MaxMIBUploadBytes {
+			budget += len(b)
+			if budget > MaxMIBUploadBytes {
 				return nil, ErrMIBUploadTooLarge
 			}
 			out = append(out, UploadFile{FileName: base, Content: b})
