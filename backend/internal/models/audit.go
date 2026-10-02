@@ -40,6 +40,14 @@ const (
 	ActionMetricCreated  = "custom_metric_created"
 	ActionMetricUpdated  = "custom_metric_updated"
 	ActionMetricDeleted  = "custom_metric_deleted"
+
+	ActionDashboardCreated     = "dashboard_created"
+	ActionDashboardUpdated     = "dashboard_updated"
+	ActionDashboardDeleted     = "dashboard_deleted"
+	ActionDashboardShared      = "dashboard_shared"
+	ActionDashboardUnshared    = "dashboard_unshared"
+	ActionDashboardLinkCreated = "dashboard_link_created"
+	ActionDashboardLinkRevoked = "dashboard_link_revoked"
 )
 
 // Audited resource types.
@@ -55,6 +63,8 @@ const (
 	ResourceMIBModule     = "mib_module"
 	ResourceMetricProfile = "metric_profile"
 	ResourceCustomMetric  = "custom_metric"
+
+	ResourceDashboard = "dashboard"
 )
 
 // AuditChanges is the JSONB detail on an audit entry. For an update it carries
