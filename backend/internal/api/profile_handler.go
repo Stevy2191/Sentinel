@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -30,10 +31,18 @@ type profileStore interface {
 	SetDeviceProfile(ctx context.Context, deviceID, profileID uuid.UUID, mode string) error
 }
 
+// metricPreviewer is DeviceWalker's PreviewDevice: it resolves the device's
+// SNMP target and evaluates a (not yet saved) metric definition against it
+// right now, for the metric editor's "preview" button.
+type metricPreviewer interface {
+	PreviewDevice(ctx context.Context, d *services.DeviceView, m models.ProfileMetric) (*services.MetricPreview, error)
+}
+
 // RegisterProfileRoutes mounts metric profile and custom metric management
 // (admin) and the per-device profile standing and override (site access:
-// readonly to see, editable to change).
-func RegisterProfileRoutes(rg *gin.RouterGroup, profiles profileStore, devices deviceStore, sites siteAccessChecker, audit auditRecorder, users adminChecker) {
+// readonly to see, editable to change), plus the metric-preview button
+// (admin, site access readonly: it only reads from the device).
+func RegisterProfileRoutes(rg *gin.RouterGroup, profiles profileStore, devices deviceStore, sites siteAccessChecker, audit auditRecorder, users adminChecker, previewer metricPreviewer) {
 	profileAdmin := rg.Group("/network/profiles", RequireAdmin(users))
 	profileAdmin.GET("", listProfilesHandler(profiles))
 	profileAdmin.POST("", createProfileHandler(profiles, audit))
@@ -50,6 +59,7 @@ func RegisterProfileRoutes(rg *gin.RouterGroup, profiles profileStore, devices d
 
 	rg.GET("/devices/:id/profiles", deviceProfilesHandler(profiles, devices, sites))
 	rg.PUT("/devices/:id/profiles/:profileId", setDeviceProfileHandler(profiles, devices, sites, audit))
+	rg.POST("/devices/:id/metric-preview", RequireAdmin(users), metricPreviewHandler(devices, sites, previewer))
 }
 
 func respondProfileError(c *gin.Context, op string, err error) {
@@ -313,5 +323,36 @@ func setDeviceProfileHandler(profiles profileStore, devices deviceStore, sites s
 		audit.Record(c.Request.Context(), actorFrom(c), models.ActionProfileUpdated, models.ResourceMetricProfile,
 			&profileID, models.AuditChanges{Summary: map[string]any{"device_id": d.ID, "mode": body.Mode}})
 		respondSuccess(c, http.StatusOK, gin.H{"mode": body.Mode})
+	}
+}
+
+// metricPreviewHandler evaluates a metric definition (not necessarily saved
+// yet) against one device right now. An invalid metric is a 400; an SNMP or
+// target failure is reported as a result, not a server error (the same
+// shape test-walk and Test connection use), since the server did its job and
+// the device simply did not answer.
+func metricPreviewHandler(devices deviceStore, sites siteAccessChecker, previewer metricPreviewer) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		d, ok := loadDevice(c, devices, sites, services.SiteAccessReadonly)
+		if !ok {
+			return
+		}
+		var m models.ProfileMetric
+		if err := c.ShouldBindJSON(&m); err != nil {
+			respondError(c, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
+		defer cancel()
+		preview, err := previewer.PreviewDevice(ctx, d, m)
+		if err != nil {
+			if errors.Is(err, services.ErrInvalidMetric) {
+				respondError(c, http.StatusBadRequest, err.Error())
+				return
+			}
+			respondSuccess(c, http.StatusOK, gin.H{"ok": false, "error": err.Error()})
+			return
+		}
+		respondSuccess(c, http.StatusOK, gin.H{"ok": true, "preview": preview})
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/Stevy2191/Sentinel/backend/internal/models"
 	"github.com/Stevy2191/Sentinel/backend/internal/snmp"
 )
 
@@ -44,6 +45,25 @@ func TestReadColumns(t *testing.T) {
 	}
 	if v, ok := cols["1.3.6.1.4.1.9.9.48.1.1.1.5"]; !ok || len(v) != 0 {
 		t.Errorf("unsupported table should be empty, got %v", v)
+	}
+}
+
+func TestPreviewMetric(t *testing.T) {
+	val, typ, name := "1.3.6.1.4.1.9.9.91.1.1.1.1.4", "1.3.6.1.4.1.9.9.91.1.1.1.1.1", "1.3.6.1.2.1.47.1.1.1.1.7"
+	f := &walkFake{walks: map[string][]snmp.PDU{
+		val:  {{OID: val + ".1010", Value: int64(75)}, {OID: val + ".1011", Value: int64(12)}},
+		typ:  {{OID: typ + ".1010", Value: int64(8)}, {OID: typ + ".1011", Value: int64(4)}},
+		name: {{OID: name + ".1010", Value: []byte("Inlet")}},
+	}}
+	m := models.ProfileMetric{Name: "Temp", Source: "column", Kind: "gauge", Scale: 1, OID: val, FilterOID: typ,
+		FilterValues: models.StringArray{"8"}, LabelMode: "same_index", LabelOID: name, RuleKind: "above", RuleValue: f64(70), RuleEnabled: true}
+	p, err := PreviewMetric(context.Background(), f, snmp.Target{}, m)
+	if err != nil || len(p.Rows) != 1 || p.Rows[0].Label != "Inlet" || p.Rows[0].Value != 75 || !p.Rows[0].Violates {
+		t.Fatalf("preview %+v err %v", p, err)
+	}
+	m.OID = "nope"
+	if _, err := PreviewMetric(context.Background(), f, snmp.Target{}, m); err == nil {
+		t.Error("invalid metric previewed")
 	}
 }
 

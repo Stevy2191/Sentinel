@@ -354,7 +354,7 @@ func run() error {
 	api.RegisterTestWalkRoutes(v1, deviceService, siteService, deviceWalker)
 	api.RegisterNetworkRoutes(v1, deviceService, portService, metricsStore, networkSettings, siteService, authService)
 	api.RegisterMIBRoutes(v1, mibLibrary, auditService, authService)
-	api.RegisterProfileRoutes(v1, profileService, deviceService, siteService, auditService, authService)
+	api.RegisterProfileRoutes(v1, profileService, deviceService, siteService, auditService, authService, deviceWalker)
 	api.RegisterSystemRoutes(v1, hostSampler, version)
 	// Per-user theme (not admin-gated): only AuthMiddleware applies.
 	// Self password change (any authenticated user).
