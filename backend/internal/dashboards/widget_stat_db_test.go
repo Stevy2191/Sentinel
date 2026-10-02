@@ -1,6 +1,8 @@
 package dashboards
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -37,5 +39,38 @@ func TestDBStat(t *testing.T) {
 	testdb.Must(t, err)
 	if s = data.(StatData); s.Value != 2000 || s.Spark != nil {
 		t.Errorf("average = %+v, want 2000 and no sparkline", s)
+	}
+}
+
+func TestDBStatSiteTotal(t *testing.T) {
+	db := testdb.Open(t)
+	d := realDeps(t, db)
+	w := statWidget{metrics: d.Metrics, ports: d.Ports, devices: d.Devices}
+	site := newSite(t, db, "HQ")
+	a, b := newDevice(t, db, site, "a", "10.0.0.1"), newDevice(t, db, site, "b", "10.0.0.2")
+	now := time.Now().UTC()
+	writePortBps(t, d, a, newPort(t, db, a, 1, "Gi1", ""), 1, now.Add(-5*time.Minute), 100, 0)
+	writePortBps(t, d, b, newPort(t, db, b, 1, "Gi1", ""), 1, now.Add(-5*time.Minute), 30, 0)
+	cfg := fmt.Sprintf(`{"metric":"if_in_bps","site_id":"%s","range":"1h"}`, site)
+	data, err := resolveWidget(t, w, cfg, ResolveInput{Visible: Subjects{Sites: []uuid.UUID{site}}, Now: now})
+	testdb.Must(t, err)
+	if s := data.(StatData); s.Value != 130 || s.Label != "Site total · Traffic in" {
+		t.Errorf("site total = %+v, want 130", s)
+	}
+	_, err = resolveWidget(t, w, cfg, ResolveInput{Now: now})
+	if !errors.Is(err, ErrNoData) {
+		t.Errorf("site not visible: err = %v, want ErrNoData", err)
+	}
+}
+
+func TestDBStatUnknownMetricIsNoData(t *testing.T) {
+	db := testdb.Open(t)
+	d := realDeps(t, db)
+	w := statWidget{metrics: d.Metrics, ports: d.Ports, devices: d.Devices}
+	dev := newDevice(t, db, newSite(t, db, "HQ"), "core", "10.0.0.1")
+	cfg := json.RawMessage(fmt.Sprintf(`{"metric":"fan_rpm","device_id":"%s","range":"1h"}`, dev))
+	_, err := w.Resolve(context.Background(), cfg, ResolveInput{Visible: Subjects{Devices: []uuid.UUID{dev}}, Now: time.Now()})
+	if !errors.Is(err, ErrNoData) {
+		t.Errorf("err = %v, want ErrNoData", err)
 	}
 }

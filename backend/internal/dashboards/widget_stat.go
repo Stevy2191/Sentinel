@@ -3,6 +3,7 @@ package dashboards
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"time"
 
@@ -139,6 +140,9 @@ func (w statWidget) Resolve(ctx context.Context, raw json.RawMessage, in Resolve
 	q := services.MetricsQuery{Metrics: []string{c.Metric}, From: to.Add(-rangeSpan(rng)), To: to, Sum: true}
 	var parts []string
 	if c.SiteID != nil {
+		if !slices.Contains(in.Visible.Sites, *c.SiteID) {
+			return nil, ErrNoData
+		}
 		ids, err := siteDeviceIDs(ctx, w.devices, *c.SiteID)
 		if err != nil {
 			return nil, err

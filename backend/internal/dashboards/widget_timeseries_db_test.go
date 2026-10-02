@@ -66,6 +66,103 @@ func TestDBTimeseriesUnknownMetricIsNoData(t *testing.T) {
 	}
 }
 
+func TestDBTimeseriesSumsPortsPerDevice(t *testing.T) {
+	db := testdb.Open(t)
+	d := realDeps(t, db)
+	w := timeseriesWidget{metrics: d.Metrics, ports: d.Ports, devices: d.Devices}
+	dev := newDevice(t, db, newSite(t, db, "HQ"), "core", "10.0.0.1")
+	p1, p2 := newPort(t, db, dev, 1, "Gi1/0/1", ""), newPort(t, db, dev, 2, "Gi1/0/2", "")
+	now := time.Now().UTC()
+	t1, t2 := now.Add(-30*time.Minute), now.Add(-10*time.Minute)
+	writePortBps(t, d, dev, p1, 1, t1, 100, 0)
+	writePortBps(t, d, dev, p2, 2, t1, 250, 0)
+	writePortBps(t, d, dev, p1, 1, t2, 400, 0)
+	writePortBps(t, d, dev, p2, 2, t2, 50, 0)
+	data, err := resolveWidget(t, w, fmt.Sprintf(`{"metrics":["if_in_bps"],"devices":["%s"],"range":"1h"}`, dev),
+		ResolveInput{Visible: Subjects{Devices: []uuid.UUID{dev}}, Now: now})
+	testdb.Must(t, err)
+	lines := data.(TimeseriesData).Lines
+	if len(lines) != 1 || len(lines[0].Points) != 2 || lines[0].Points[0].Avg != 350 || lines[0].Points[1].Avg != 450 {
+		t.Errorf("two ports summed per timestamp: %+v, want points 350 and 450", lines)
+	}
+}
+
+func TestDBTimeseriesMultiDeviceLabels(t *testing.T) {
+	db := testdb.Open(t)
+	d := realDeps(t, db)
+	w := timeseriesWidget{metrics: d.Metrics, ports: d.Ports, devices: d.Devices}
+	site := newSite(t, db, "HQ")
+	core, edge := newDevice(t, db, site, "core", "10.0.0.1"), newDevice(t, db, site, "edge", "10.0.0.2")
+	now := time.Now().UTC()
+	writePortBps(t, d, core, newPort(t, db, core, 1, "Gi1", ""), 1, now.Add(-10*time.Minute), 1, 1)
+	writePortBps(t, d, edge, newPort(t, db, edge, 1, "Gi1", ""), 1, now.Add(-10*time.Minute), 2, 2)
+	data, err := resolveWidget(t, w, fmt.Sprintf(`{"metrics":["if_in_bps"],"devices":["%s","%s"],"range":"1h"}`, core, edge),
+		ResolveInput{Visible: Subjects{Devices: []uuid.UUID{core, edge}}, Now: now})
+	testdb.Must(t, err)
+	got := map[string]bool{}
+	for _, l := range data.(TimeseriesData).Lines {
+		got[l.Label] = true
+	}
+	if len(got) != 2 || !got["core · Traffic in"] || !got["edge · Traffic in"] {
+		t.Errorf("labels = %v, want core · Traffic in and edge · Traffic in", got)
+	}
+}
+
+func TestDBTimeseriesSiteTotalValues(t *testing.T) {
+	db := testdb.Open(t)
+	d := realDeps(t, db)
+	w := timeseriesWidget{metrics: d.Metrics, ports: d.Ports, devices: d.Devices}
+	site := newSite(t, db, "HQ")
+	a, b := newDevice(t, db, site, "a", "10.0.0.1"), newDevice(t, db, site, "b", "10.0.0.2")
+	now := time.Now().UTC()
+	at := now.Add(-10 * time.Minute)
+	writePortBps(t, d, a, newPort(t, db, a, 1, "Gi1", ""), 1, at, 100, 0)
+	writePortBps(t, d, b, newPort(t, db, b, 1, "Gi1", ""), 1, at, 20, 0)
+	cfg := fmt.Sprintf(`{"metrics":["if_in_bps"],"site_id":"%s","range":"1h"}`, site)
+	data, err := resolveWidget(t, w, cfg, ResolveInput{Visible: Subjects{Sites: []uuid.UUID{site}}, Now: now})
+	testdb.Must(t, err)
+	lines := data.(TimeseriesData).Lines
+	if len(lines) != 1 || len(lines[0].Points) != 1 || lines[0].Points[0].Avg != 120 {
+		t.Errorf("site total = %+v, want one point of 120", lines)
+	}
+	_, err = resolveWidget(t, w, cfg, ResolveInput{Now: now})
+	if !errors.Is(err, ErrNoData) {
+		t.Errorf("site not visible: err = %v, want ErrNoData", err)
+	}
+}
+
+func TestDBTimeseriesSiteTraffic(t *testing.T) {
+	db := testdb.Open(t)
+	d := realDeps(t, db)
+	w := timeseriesWidget{metrics: d.Metrics, ports: d.Ports, devices: d.Devices}
+	site := newSite(t, db, "HQ")
+	router := newDevice(t, db, site, "router", "10.0.0.1")
+	wan := newPort(t, db, router, 1, "Gi0/0", "")
+	testdb.Exec(t, db, `UPDATE device_interfaces SET role = 'wan', collect = true WHERE id = ?`, wan)
+	now := time.Now().UTC()
+	writePortBps(t, d, router, wan, 1, now.Add(-20*time.Minute), 800, 80)
+	in := ResolveInput{Visible: Subjects{Sites: []uuid.UUID{site}}, Now: now}
+
+	data, err := resolveWidget(t, w, fmt.Sprintf(`{"source":"site_traffic","site_id":"%s","range":"1h"}`, site), in)
+	testdb.Must(t, err)
+	lines := data.(TimeseriesData).Lines
+	if len(lines) != 2 || lines[0].Label != "Download" || lines[1].Label != "Upload" ||
+		len(lines[0].Points) != 1 || lines[0].Points[0].Avg != 800 || lines[1].Points[0].Avg != 80 {
+		t.Errorf("internet = %+v, want Download 800 and Upload 80", lines)
+	}
+
+	// No access ports carry traffic, so there is no east-west estimate.
+	_, err = resolveWidget(t, w, fmt.Sprintf(`{"source":"site_traffic","site_id":"%s","view":"east_west","range":"1h"}`, site), in)
+	if !errors.Is(err, ErrNoData) {
+		t.Errorf("east_west with no access traffic: err = %v, want ErrNoData", err)
+	}
+
+	_, err = resolveWidget(t, w, fmt.Sprintf(`{"source":"site_traffic","site_id":"%s","range":"1h"}`, site), ResolveInput{Now: now})
+	if !errors.Is(err, ErrNoData) {
+		t.Errorf("site not visible: err = %v, want ErrNoData", err)
+	}
+}
+
 func TestTimeseriesValidate(t *testing.T) {
 	w := timeseriesWidget{}
 	dev, site := uuid.New(), uuid.New()

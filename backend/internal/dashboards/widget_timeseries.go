@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -125,6 +126,9 @@ func (w timeseriesWidget) Resolve(ctx context.Context, raw json.RawMessage, in R
 	to := in.Now.UTC()
 	from := to.Add(-rangeSpan(rng))
 	if c.Source == sourceSiteTraffic {
+		if c.SiteID == nil || !slices.Contains(in.Visible.Sites, *c.SiteID) {
+			return nil, ErrNoData
+		}
 		return w.siteTraffic(ctx, c, rng, from, to)
 	}
 
@@ -135,6 +139,9 @@ func (w timeseriesWidget) Resolve(ctx context.Context, raw json.RawMessage, in R
 	q := services.MetricsQuery{Metrics: keys, From: from, To: to}
 	siteTotal := c.SiteID != nil
 	if siteTotal {
+		if !slices.Contains(in.Visible.Sites, *c.SiteID) {
+			return nil, ErrNoData
+		}
 		ids, err := siteDeviceIDs(ctx, w.devices, *c.SiteID)
 		if err != nil {
 			return nil, err
