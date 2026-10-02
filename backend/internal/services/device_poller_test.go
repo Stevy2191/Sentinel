@@ -494,9 +494,15 @@ func TestPollerAgentErrorCountsAsReachable(t *testing.T) {
 	}
 }
 
-type recordingProfiles struct{ polled int }
+type recordingProfiles struct {
+	polled int
+	uptime int64
+}
 
-func (r *recordingProfiles) PollProfiles(context.Context, models.Device, snmp.Target) { r.polled++ }
+func (r *recordingProfiles) PollProfiles(_ context.Context, _ models.Device, _ snmp.Target, uptime int64) {
+	r.polled++
+	r.uptime = uptime
+}
 
 // An up switch gets its profile poll; a failed poll runs none.
 func TestPollerRunsProfilePoll(t *testing.T) {
@@ -506,8 +512,8 @@ func TestPollerRunsProfilePoll(t *testing.T) {
 	sw := device(models.DeviceStatusUp, 0)
 	sw.DeviceTypeDetected = models.DeviceTypeSwitch
 	p.PollOnce(context.Background(), sw)
-	if rec.polled != 1 {
-		t.Fatalf("up switch: polled %d", rec.polled)
+	if rec.polled != 1 || rec.uptime != 3600 {
+		t.Fatalf("up switch: polled %d uptime %d", rec.polled, rec.uptime)
 	}
 
 	p, _, _, _ = newTestPoller(&fakeSNMP{getErr: errors.New("timeout")})

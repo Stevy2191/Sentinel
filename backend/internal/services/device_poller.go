@@ -97,9 +97,10 @@ type UPSPoller interface {
 	ReconcileUPS(ctx context.Context, d models.Device)
 }
 
-// ProfilePoller runs a device's profile poll (ProfileMonitor).
+// ProfilePoller runs a device's profile poll (ProfileMonitor), given this
+// poll's sysUpTime like PortStatsPoller (-1 when unknown).
 type ProfilePoller interface {
-	PollProfiles(ctx context.Context, d models.Device, t snmp.Target)
+	PollProfiles(ctx context.Context, d models.Device, t snmp.Target, uptimeSeconds int64)
 }
 
 // DevicePoller polls every enabled device for reachability on a bounded
@@ -291,11 +292,11 @@ func (p *DevicePoller) PollOnce(ctx context.Context, d models.Device) {
 	}
 	p.apply(ctx, d, tr, detail, now)
 
+	up := int64(-1)
+	if uptime != nil {
+		up = *uptime
+	}
 	if result == PollOK && tr.Status == models.DeviceStatusUp && p.stats != nil {
-		up := int64(-1)
-		if uptime != nil {
-			up = *uptime
-		}
 		p.stats.PollStats(ctx, d, target, up)
 	}
 
@@ -308,7 +309,7 @@ func (p *DevicePoller) PollOnce(ctx context.Context, d models.Device) {
 	}
 
 	if result == PollOK && tr.Status == models.DeviceStatusUp && p.profiles != nil {
-		p.profiles.PollProfiles(ctx, d, target)
+		p.profiles.PollProfiles(ctx, d, target, up)
 	}
 
 	if result == PollOK && (d.LastInventoryAt == nil || now.Sub(*d.LastInventoryAt) >= inventoryInterval) {

@@ -96,20 +96,41 @@ func TestNeeded(t *testing.T) {
 func TestRates(t *testing.T) {
 	t0 := time.Unix(1000, 0)
 	rows := []Row{{Instance: "1", Value: 100}, {Instance: "2", Value: 4294967000}}
-	out, prev := Rates(nil, rows, t0)
+	out, prev := Rates(nil, rows, t0, 1)
 	if len(out) != 0 {
 		t.Fatalf("first sight produced %+v", out)
 	}
-	out, prev = Rates(prev, []Row{{Instance: "1", Value: 700}, {Instance: "2", Value: 704}}, t0.Add(60*time.Second))
+	out, prev = Rates(prev, []Row{{Instance: "1", Value: 700}, {Instance: "2", Value: 704}}, t0.Add(60*time.Second), 1)
 	if len(out) != 2 || out[0].Value != 10 || out[1].Value != 1000.0/60 {
 		t.Fatalf("rates %+v", out) // row 2 wrapped at 2^32: (704 + 2^32 - 4294967000) / 60
 	}
-	out, _ = Rates(prev, []Row{{Instance: "1", Value: 5e12}}, t0.Add(120*time.Second))
+	out, _ = Rates(prev, []Row{{Instance: "1", Value: 5e12}}, t0.Add(120*time.Second), 1)
 	if len(out) != 1 {
 		t.Fatalf("64-bit growth %+v", out)
 	}
 	big := map[string]Sample{"1": {Value: 5e12, At: t0}}
-	if out, _ := Rates(big, []Row{{Instance: "1", Value: 10}}, t0.Add(60*time.Second)); len(out) != 0 {
+	if out, _ := Rates(big, []Row{{Instance: "1", Value: 10}}, t0.Add(60*time.Second), 1); len(out) != 0 {
 		t.Errorf("reboot produced %+v", out)
+	}
+}
+
+// A counter's scale applies to its rate, not to the raw values the wrap
+// math runs on: Evaluate leaves counter rows raw and Rates scales the rate.
+func TestCounterScaleAppliesToTheRate(t *testing.T) {
+	const oid = "1.3.6.1.4.1.99999.1.1.1.2"
+	d := Definition{Source: "column", Kind: "counter", Scale: 0.5, OID: oid, LabelMode: "index"}
+	t0 := time.Unix(1000, 0)
+	raw := Evaluate(d, Columns{oid: {"1": {Num: 4294967000, NumOK: true}}})
+	if len(raw) != 1 || raw[0].Value != 4294967000 {
+		t.Fatalf("counter rows should be raw: %+v", raw)
+	}
+	_, prev := Rates(nil, raw, t0, d.Scale)
+	rows := Evaluate(d, Columns{oid: {"1": {Num: 704, NumOK: true}}})
+	out, _ := Rates(prev, rows, t0.Add(60*time.Second), d.Scale)
+	// The raw counter wrapped at 2^32 (1000 counts in 60 s); scale 0.5
+	// halves the rate. Scaling first would put the wrap at 2^31 and give a
+	// different, wrong answer.
+	if len(out) != 1 || out[0].Value != 1000.0/60*0.5 {
+		t.Errorf("scaled rate %+v", out)
 	}
 }

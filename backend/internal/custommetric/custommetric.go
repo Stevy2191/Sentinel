@@ -81,10 +81,12 @@ func Needed(d Definition) (every, cached []string) {
 	return every, cached
 }
 
-// Evaluate returns the metric's rows from the walked columns.
+// Evaluate returns the metric's rows from the walked columns. A counter's
+// rows are its raw values: its scale applies to the rate (see Rates), so the
+// wrap arithmetic runs on what the device actually counted.
 func Evaluate(d Definition, cols Columns) []Row {
 	scale := d.Scale
-	if scale == 0 {
+	if scale == 0 || d.Kind == "counter" {
 		scale = 1
 	}
 	if d.Source == "scalar" {
@@ -179,9 +181,15 @@ type Sample struct {
 	At    time.Time
 }
 
-// Rates turns counter rows into per-second rates against the previous
-// samples, returning the rate rows and the samples to keep for next time.
-func Rates(prev map[string]Sample, rows []Row, at time.Time) ([]Row, map[string]Sample) {
+// Rates turns raw counter rows into per-second rates against the previous
+// samples, multiplied by scale (0 means 1), returning the rate rows and the
+// samples to keep for next time. A decrease from below 2^32 is taken as a
+// 32-bit wrap; the caller detects device reboots (sysUpTime going backwards)
+// and passes no previous samples then, as the port monitor does.
+func Rates(prev map[string]Sample, rows []Row, at time.Time, scale float64) ([]Row, map[string]Sample) {
+	if scale == 0 {
+		scale = 1
+	}
 	next := make(map[string]Sample, len(rows))
 	var out []Row
 	for _, r := range rows {
@@ -201,7 +209,7 @@ func Rates(prev map[string]Sample, rows []Row, at time.Time) ([]Row, map[string]
 			}
 			delta += 1 << 32
 		}
-		r.Value = delta / dt
+		r.Value = delta / dt * scale
 		out = append(out, r)
 	}
 	return out, next

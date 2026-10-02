@@ -85,6 +85,8 @@ type profileRig struct {
 	mon   *ProfileMonitor
 	dev   models.Device
 	now   time.Time
+	// uptime is the sysUpTime (seconds) each poll passes, -1 when unknown.
+	uptime int64
 }
 
 func newProfileRig(interval int) *profileRig {
@@ -109,10 +111,11 @@ func newProfileRig(interval int) *profileRig {
 			tFanDescr: {{OID: tFanDescr + ".1", Value: []byte("Fan 1")}, {OID: tFanDescr + ".2", Value: []byte("Fan 2")}},
 			tCPU:      {{OID: tCPU + ".1", Value: uint64(20)}},
 		}, fail: map[string]bool{}},
-		inc:   &fakeMetricIncidents{open: map[string]*models.Incident{}},
-		mets:  &fakeUPSMetrics{},
-		notif: &fakeNotifier{},
-		now:   time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC),
+		inc:    &fakeMetricIncidents{open: map[string]*models.Incident{}},
+		mets:   &fakeUPSMetrics{},
+		notif:  &fakeNotifier{},
+		now:    time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC),
+		uptime: -1,
 	}
 	r.mon = NewProfileMonitor(r.src, r.mets, r.inc, r.notif, r.agent, fakeSiteNamer{})
 	r.mon.now = func() time.Time { return r.now }
@@ -130,8 +133,11 @@ func (r *profileRig) set(oid, idx string, v any) {
 }
 
 func (r *profileRig) poll() {
-	r.mon.PollProfiles(context.Background(), r.dev, snmp.Target{})
+	r.mon.PollProfiles(context.Background(), r.dev, snmp.Target{}, r.uptime)
 	r.now = r.now.Add(time.Minute)
+	if r.uptime >= 0 {
+		r.uptime += 60
+	}
 }
 
 // metric returns the rig profile's metric with key, to change it in a test.
@@ -382,5 +388,57 @@ func TestProfileMonitorCounterRates(t *testing.T) {
 	r.poll()
 	if got := r.points("acme_octets"); len(got) != 1 || got[0].Value != 100 || got[0].Instance != "1" {
 		t.Errorf("rate %+v", got)
+	}
+}
+
+// newCounterRig is a profile rig with one counter metric (scale given) on
+// tOctets, row 1 starting at first, and the device's uptime known.
+func newCounterRig(scale float64, first uint64) (*profileRig, string) {
+	const tOctets = "1.3.6.1.4.1.99999.1.1.1.2"
+	r := newProfileRig(1)
+	r.uptime = 1000
+	r.src.profiles[0].Metrics = append(r.src.profiles[0].Metrics, models.ProfileMetric{Name: "Octets in", Key: "acme_octets",
+		Source: "column", Kind: "counter", Units: "B/s", Scale: scale, OID: tOctets, LabelMode: "index"})
+	r.agent.walks[tOctets] = []snmp.PDU{{OID: tOctets + ".1", Value: first}}
+	return r, tOctets
+}
+
+// A device reboot resets its counters: uptime going backwards means no rate
+// this poll (not a 2^32 "wrap" spike), and rates resume from the new values.
+func TestProfileMonitorCounterReboot(t *testing.T) {
+	r, oid := newCounterRig(1, 1000)
+	r.poll()
+	r.set(oid, "1", uint64(7000))
+	r.poll() // 100/s
+	r.uptime = 30
+	r.set(oid, "1", uint64(10))
+	r.poll() // rebooted: no rate
+	r.set(oid, "1", uint64(6010))
+	r.poll() // 100/s again, from the post-reboot value
+	got := r.points("acme_octets")
+	if len(got) != 2 || got[0].Value != 100 || got[1].Value != 100 {
+		t.Errorf("rates across a reboot %+v", got)
+	}
+}
+
+// A genuine 32-bit wrap while uptime keeps rising still yields the rate.
+func TestProfileMonitorCounterWrap(t *testing.T) {
+	r, oid := newCounterRig(1, 4294967000)
+	r.poll()
+	r.set(oid, "1", uint64(704))
+	r.poll()
+	if got := r.points("acme_octets"); len(got) != 1 || got[0].Value != 1000.0/60 {
+		t.Errorf("wrapped rate %+v", got)
+	}
+}
+
+// A counter's scale multiplies its rate.
+func TestProfileMonitorCounterScale(t *testing.T) {
+	r, oid := newCounterRig(0.5, 1000)
+	r.poll()
+	r.set(oid, "1", uint64(7000))
+	r.poll()
+	if got := r.points("acme_octets"); len(got) != 1 || got[0].Value != 50 {
+		t.Errorf("scaled rate %+v", got)
 	}
 }
