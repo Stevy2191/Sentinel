@@ -374,7 +374,12 @@ export default function MibBrowser() {
               <div className="card p-6">
                 <ObjectDetail oid={oid} detail={detail} loading={detailLoading} error={detailError} />
               </div>
-              <TestWalkPanel oid={oid} kind={detail?.kind} />
+              {/* Keyed by oid: a walk started for the previous object can
+                  still be in flight (up to 20s) when a different one is
+                  selected. The key fully remounts the panel, dropping its
+                  state and in-flight closures, so a late response can never
+                  land under the wrong object. */}
+              <TestWalkPanel key={oid} oid={oid} kind={detail?.kind} />
             </>
           )}
         </div>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthContext } from '@/context/AuthContext'
 import { useDevices } from '@/hooks/useDevices'
@@ -25,28 +25,39 @@ export default function TestWalkPanel({ oid, kind }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<TestWalkResult | null>(null)
 
+  // Identifies the most recently started walk. A response only gets to touch
+  // state if it's still the latest one asked for — otherwise it's a late
+  // answer to a walk the person has since moved on from (e.g. MibBrowser
+  // remounts this panel with a new key per OID, but the superseded
+  // instance's in-flight promise still resolves into its old closure).
+  const requestRef = useRef(0)
+
   // A new object was selected: the previous walk no longer applies to it.
   useEffect(() => {
+    requestRef.current += 1
     setResult(null)
     setError(null)
   }, [oid])
 
   const run = async () => {
     if (!deviceId) return
+    const myRequest = ++requestRef.current
     setRunning(true)
     setError(null)
     setResult(null)
     try {
       const res = await testWalk(deviceId, oid)
+      if (requestRef.current !== myRequest) return
       if (res.ok) {
         setResult(res.result ?? null)
       } else {
         setError(res.error || 'The walk failed')
       }
     } catch (err) {
+      if (requestRef.current !== myRequest) return
       setError((err as ApiError).message || 'The walk failed')
     } finally {
-      setRunning(false)
+      if (requestRef.current === myRequest) setRunning(false)
     }
   }
 
