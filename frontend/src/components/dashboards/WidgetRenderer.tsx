@@ -1,4 +1,8 @@
-import type { DeviceHealthData, LabelData, PortGridData, SitePowerData, StatData, TimeseriesData, WidgetType } from '@/types/dashboards'
+import type { DeviceHealthData, DeviceTableData, EventLogData, LabelData, OpenIncidentsData, PortGridData, SitePowerData, StatData, TimeseriesData, TopNData, WidgetType } from '@/types/dashboards'
+import TopNWidget from '@/components/dashboards/widgets/TopNWidget'
+import EventLogWidget from '@/components/dashboards/widgets/EventLogWidget'
+import DeviceTableWidget from '@/components/dashboards/widgets/DeviceTableWidget'
+import OpenIncidentsWidget from '@/components/dashboards/widgets/OpenIncidentsWidget'
 import PortGridWidget from '@/components/dashboards/widgets/PortGridWidget'
 import DeviceHealthWidget from '@/components/dashboards/widgets/DeviceHealthWidget'
 import SitePowerWidget from '@/components/dashboards/widgets/SitePowerWidget'
@@ -29,6 +33,14 @@ export default function WidgetRenderer({ type, data, linkable }: Props) {
       return <DeviceHealthWidget data={data as DeviceHealthData} linkable={linkable} />
     case 'site_power':
       return <SitePowerWidget data={data as SitePowerData} linkable={linkable} />
+    case 'top_n':
+      return <TopNWidget data={data as TopNData} linkable={linkable} />
+    case 'event_log':
+      return <EventLogWidget data={data as EventLogData} linkable={linkable} />
+    case 'device_table':
+      return <DeviceTableWidget data={data as DeviceTableData} linkable={linkable} />
+    case 'open_incidents':
+      return <OpenIncidentsWidget data={data as OpenIncidentsData} linkable={linkable} />
     default:
       return <p className="text-sm text-slate-500">This version of Sentinel cannot show this widget.</p>
   }

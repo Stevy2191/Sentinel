@@ -4,6 +4,10 @@ import TimeseriesSettings from '@/components/dashboards/settings/TimeseriesSetti
 import StatSettings from '@/components/dashboards/settings/StatSettings'
 import DeviceSettings from '@/components/dashboards/settings/DeviceSettings'
 import SiteSettings from '@/components/dashboards/settings/SiteSettings'
+import TopNSettings from '@/components/dashboards/settings/TopNSettings'
+import EventLogSettings from '@/components/dashboards/settings/EventLogSettings'
+import DeviceTableSettings from '@/components/dashboards/settings/DeviceTableSettings'
+import OpenIncidentsSettings from '@/components/dashboards/settings/OpenIncidentsSettings'
 
 interface Props {
   type: WidgetType
@@ -27,6 +31,14 @@ export default function WidgetSettings({ type, config, siteId, onChange }: Props
       return <DeviceSettings {...props} />
     case 'site_power':
       return <SiteSettings {...props} />
+    case 'top_n':
+      return <TopNSettings {...props} />
+    case 'event_log':
+      return <EventLogSettings {...props} />
+    case 'device_table':
+      return <DeviceTableSettings {...props} />
+    case 'open_incidents':
+      return <OpenIncidentsSettings {...props} />
     default:
       return <p className="text-sm text-slate-500">This widget has no settings form yet.</p>
   }
