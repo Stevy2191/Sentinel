@@ -389,6 +389,14 @@ func run() error {
 	})
 	go agentService.StartOfflineSweep(loopCtx)
 	go hostSampler.Start(loopCtx)
+	// The MIB library seeds/refreshes its built-in (IETF) modules on every
+	// start; an upload that replaced one of them is left alone (SyncBuiltins
+	// checks each module's source before touching it). Logged, not fatal:
+	// the device poller - the primary job - must still start.
+	mibLibrary := services.NewMIBLibrary(db)
+	if err := mibLibrary.SyncBuiltins(context.Background()); err != nil {
+		log.Printf("[mib] syncing built-in MIBs: %v", err)
+	}
 	pollWorkers := settingsService.GetInt(context.Background(), models.SettingSNMPPollWorkers, 16)
 	devicePoller := services.NewDevicePoller(deviceService, snmpClient, incidentService, notificationManager, pollWorkers)
 	devicePoller.SetPortStats(services.NewPortMonitor(portService, metricsStore, incidentService, notificationManager, snmpClient, settingsService))
