@@ -86,8 +86,10 @@ func healthRow(def custommetric.Definition, instance, label string, value float6
 
 // DeviceHealth returns the device's Health view: profile standings and the
 // latest value of every applicable metric's rows within the live window
-// (three runs of the longest applicable profile interval, at least five
-// minutes), labelled from metrics.series.
+// (three runs of the longest applicable profile interval or of the device's
+// poll interval, whichever is longer, since a profile cannot run more often
+// than its device is polled; at least five minutes), labelled from
+// metrics.series.
 func (s *ProfileService) DeviceHealth(ctx context.Context, d *DeviceView, metrics *MetricsStore, incidents *IncidentService) (*DeviceHealthView, error) {
 	views, err := s.DeviceProfiles(ctx, d.Device)
 	if err != nil {
@@ -109,7 +111,7 @@ func (s *ProfileService) DeviceHealth(ctx context.Context, d *DeviceView, metric
 	if len(keys) == 0 {
 		return out, nil
 	}
-	latest, err := metrics.LatestMany(ctx, []uuid.UUID{d.ID}, keys, liveSince(time.Now(), longest*60))
+	latest, err := metrics.LatestMany(ctx, []uuid.UUID{d.ID}, keys, liveSince(time.Now(), max(d.PollInterval, longest*60)))
 	if err != nil {
 		return nil, err
 	}
