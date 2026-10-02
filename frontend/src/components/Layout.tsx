@@ -9,6 +9,8 @@ import { useAppConfig } from '@/context/AppConfigContext'
 // monitoring group in half.
 const nav = [
   { to: '/', label: 'Overview', end: true },
+  // Dashboards cover everything below, so they sit with the Overview.
+  { to: '/dashboards', label: 'Dashboards' },
   // What is being monitored.
   { to: '/uptime', label: 'Uptime Monitoring' },
   { to: '/ssl', label: 'SSL & Domains' },

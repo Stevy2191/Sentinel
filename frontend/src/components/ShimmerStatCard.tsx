@@ -4,7 +4,7 @@ interface ShimmerStatCardProps {
   title: string
   value: string | number
   subtitle?: string
-  colorType: 'monitoring' | 'responseTime' | 'incidents' | 'agents' | 'ssl' | 'statusPages' | 'reports' | 'network'
+  colorType: 'monitoring' | 'responseTime' | 'incidents' | 'agents' | 'ssl' | 'statusPages' | 'reports' | 'network' | 'dashboards'
   onMouseMove: (e: React.MouseEvent) => void
   onMouseEnter: () => void
   onMouseLeave: () => void
@@ -17,6 +17,15 @@ interface ShimmerStatCardProps {
 // names it can find spelled out in the source, so these cannot be assembled
 // from a key at runtime.
 const colorMap = {
+  dashboards: {
+    hoverBorder: 'hover:border-teal-500/50',
+    bg: 'from-teal-600/15',
+    text: 'text-teal-400',
+    subtle: 'text-teal-400/70',
+    border: 'border-teal-500/30',
+    glow: 'bg-teal-500/10',
+    glowHover: 'group-hover:bg-teal-500/20',
+  },
   monitoring: {
     hoverBorder: 'hover:border-emerald-500/50',
     bg: 'from-emerald-600/15',
