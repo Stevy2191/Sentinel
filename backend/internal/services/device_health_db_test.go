@@ -80,3 +80,53 @@ func TestDBDeviceHealthFollowsDevicePollInterval(t *testing.T) {
 		t.Errorf("metrics %+v", h.Metrics)
 	}
 }
+
+// An open problem whose row has no live sample (a fan that was removed, a
+// CPU that stopped answering) is still shown: "no reading", flagged.
+func TestDBDeviceHealthShowsProblemsWithoutReading(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	s := seedDevice(t, db, "HQ", "10.0.0.9")
+	testdb.Exec(t, db, `UPDATE devices SET sys_object_id = '1.3.6.1.4.1.9.1.2066' WHERE id = ?`, s.DeviceID)
+	profiles := NewProfileService(db)
+	testdb.Must(t, profiles.SeedStarter(ctx))
+	testdb.Must(t, profiles.Load(ctx))
+	defer SetCustomMetricKeys(nil)
+	incidents := NewIncidentService(db)
+	d, err := NewDeviceService(db, NewSNMPCredentialService(db), incidents).Get(ctx, s.DeviceID)
+	testdb.Must(t, err)
+	now := time.Now().UTC()
+	metrics := NewMetricsStore(db)
+	testdb.Must(t, metrics.Write(ctx, s.DeviceID, now.Add(-time.Minute), []SamplePoint{
+		{Metric: "cisco_fan_envmon", Instance: "1", Label: "Fan 1", Value: 1},
+	}))
+	// Fan 3 last answered an hour ago; the CPU never has.
+	testdb.Must(t, metrics.Write(ctx, s.DeviceID, now.Add(-time.Hour), []SamplePoint{
+		{Metric: "cisco_fan_envmon", Instance: "3", Label: "Fan 3", Value: 3},
+	}))
+	for _, k := range [][2]string{{"cisco_fan_envmon", "3"}, {"cisco_cpu_5min", "1"}} {
+		_, _, err = incidents.OpenMetricIncident(ctx, s.DeviceID, k[0], k[1], now.Add(-time.Hour), "problem")
+		testdb.Must(t, err)
+	}
+
+	h, err := profiles.DeviceHealth(ctx, d, metrics, incidents)
+	testdb.Must(t, err)
+	byKey := map[string]HealthMetric{}
+	for _, m := range h.Metrics {
+		byKey[m.Key] = m
+	}
+	fan := byKey["cisco_fan_envmon"].Rows
+	if len(fan) != 2 || fan[0].NoReading || fan[0].Problem {
+		t.Fatalf("fan rows %+v", fan)
+	}
+	if r := fan[1]; r.Instance != "3" || r.Label != "Fan 3" || !r.NoReading || !r.Problem || r.OK {
+		t.Errorf("fan 3 %+v", r)
+	}
+	cpu := byKey["cisco_cpu_5min"].Rows
+	if len(cpu) != 1 || cpu[0].Instance != "1" || cpu[0].Label != "1" || !cpu[0].NoReading || !cpu[0].Problem || cpu[0].OK {
+		t.Errorf("cpu rows %+v", cpu)
+	}
+	if len(h.Metrics) != 2 {
+		t.Errorf("metrics %+v", h.Metrics)
+	}
+}
