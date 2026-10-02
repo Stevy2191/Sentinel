@@ -55,3 +55,28 @@ func TestDBDeviceHealth(t *testing.T) {
 		t.Errorf("fan 2 %+v", r)
 	}
 }
+
+// A profile cannot run more often than its device is polled: a device polled
+// every 10 minutes keeps its 8-minute-old rows on the Health tab.
+func TestDBDeviceHealthFollowsDevicePollInterval(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	s := seedDevice(t, db, "HQ", "10.0.0.9")
+	testdb.Exec(t, db, `UPDATE devices SET sys_object_id = '1.3.6.1.4.1.9.1.2066', poll_interval = 600 WHERE id = ?`, s.DeviceID)
+	profiles := NewProfileService(db)
+	testdb.Must(t, profiles.SeedStarter(ctx))
+	testdb.Must(t, profiles.Load(ctx))
+	defer SetCustomMetricKeys(nil)
+	incidents := NewIncidentService(db)
+	d, err := NewDeviceService(db, NewSNMPCredentialService(db), incidents).Get(ctx, s.DeviceID)
+	testdb.Must(t, err)
+	metrics := NewMetricsStore(db)
+	testdb.Must(t, metrics.Write(ctx, s.DeviceID, time.Now().UTC().Add(-8*time.Minute), []SamplePoint{
+		{Metric: "cisco_fan_envmon", Instance: "1", Label: "Fan 1", Value: 1},
+	}))
+	h, err := profiles.DeviceHealth(ctx, d, metrics, incidents)
+	testdb.Must(t, err)
+	if len(h.Metrics) != 1 || len(h.Metrics[0].Rows) != 1 || h.Metrics[0].Rows[0].Label != "Fan 1" {
+		t.Errorf("metrics %+v", h.Metrics)
+	}
+}
