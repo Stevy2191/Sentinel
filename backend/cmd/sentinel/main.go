@@ -143,6 +143,7 @@ func run() error {
 	deviceService.SetMetricsStore(metricsStore)
 	portService := services.NewPortService(db, metricsStore, incidentService, settingsService)
 	networkSettings := services.NewNetworkSettingsService(settingsService, metricsStore)
+	mibLibrary := services.NewMIBLibrary(db)
 	snmpClient := snmp.GoSNMPClient{}
 	prober := services.NewProber(snmpCredentialService, snmpClient)
 	scanManager := services.NewScanManager(prober)
@@ -349,6 +350,7 @@ func run() error {
 	api.RegisterScanRoutes(v1, scanManager, snmpCredentialService, deviceService, siteService, auditService)
 	api.RegisterPortRoutes(v1, deviceService, portService, siteService, auditService)
 	api.RegisterNetworkRoutes(v1, deviceService, portService, metricsStore, networkSettings, siteService, authService)
+	api.RegisterMIBRoutes(v1, mibLibrary, auditService, authService)
 	api.RegisterSystemRoutes(v1, hostSampler, version)
 	// Per-user theme (not admin-gated): only AuthMiddleware applies.
 	// Self password change (any authenticated user).
@@ -393,7 +395,6 @@ func run() error {
 	// start; an upload that replaced one of them is left alone (SyncBuiltins
 	// checks each module's source before touching it). Logged, not fatal:
 	// the device poller - the primary job - must still start.
-	mibLibrary := services.NewMIBLibrary(db)
 	if err := mibLibrary.SyncBuiltins(context.Background()); err != nil {
 		log.Printf("[mib] syncing built-in MIBs: %v", err)
 	}
