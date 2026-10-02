@@ -363,11 +363,17 @@ type IncidentWithMonitor struct {
 const incidentSubjectJoins = `LEFT JOIN monitors AS m ON m.id = i.monitor_id
 	LEFT JOIN devices AS d ON d.id = i.device_id
 	LEFT JOIN sites AS st ON st.id = d.site_id
-	LEFT JOIN device_interfaces AS di ON di.id = i.interface_id`
+	LEFT JOIN device_interfaces AS di ON di.id = i.interface_id
+	LEFT JOIN profile_metrics AS pm ON pm.key = i.metric_key
+	LEFT JOIN metrics.series AS ms ON ms.device_id = i.device_id AND ms.metric = i.metric_key AND ms.instance = i.metric_instance`
 
 // A port incident keeps subject_type 'device' (it inherits the device's
-// access and pages) and reads "Device · 0/51 (Alias)" as its subject; a UPS
-// condition incident reads "Device · On battery".
+// access and pages) and reads "Device · 0/51 (Alias)" as its subject; a
+// metric-rule incident reads "Device · fan_status: Switch 1 - Fan 2" (the
+// metric's name when known, else its key; the row's label when known, else
+// its instance); a UPS condition incident reads "Device · On battery". The
+// metric branch comes before the UPS-condition one because the latter
+// matches any non-null condition, metric included.
 const incidentSubjectSelect = `i.*,
 	COALESCE(m.name, d.name) AS monitor_name,
 	COALESCE(m.url, d.host) AS monitor_url,
@@ -376,6 +382,8 @@ const incidentSubjectSelect = `i.*,
 	CASE WHEN di.id IS NOT NULL THEN
 		d.name || ' · ' || COALESCE(NULLIF(di.name, ''), di.if_index::text)
 		|| CASE WHEN COALESCE(di.alias, '') <> '' THEN ' (' || di.alias || ')' ELSE '' END
+	WHEN i.condition = 'metric' THEN
+		d.name || ' · ' || COALESCE(pm.name, i.metric_key) || ': ' || COALESCE(NULLIF(ms.label, ''), i.metric_instance)
 	WHEN i.device_id IS NOT NULL AND i.condition IS NOT NULL THEN
 		d.name || ' · ' || CASE i.condition
 			WHEN 'ups_on_battery' THEN 'On battery'
@@ -771,11 +779,14 @@ func (s *IncidentService) CloseDeviceConditionIncident(ctx context.Context, devi
 }
 
 // OpenDeviceConditionIncidents lists a device's open device-level condition
-// incidents, for UPSMonitor's restart rebuild and reconciliation.
+// incidents, for UPSMonitor's restart rebuild and reconciliation. Metric-rule
+// incidents are excluded: UPSMonitor.ReconcileUPS runs this for every
+// non-UPS device on every poll and closes whatever it does not recognise, so
+// a metric incident listed here would be closed a minute after it opened.
 func (s *IncidentService) OpenDeviceConditionIncidents(ctx context.Context, deviceID uuid.UUID) ([]models.Incident, error) {
 	var rows []models.Incident
 	err := s.db.WithContext(ctx).
-		Where("device_id = ? AND interface_id IS NULL AND condition IS NOT NULL AND end_time IS NULL", deviceID).
+		Where("device_id = ? AND interface_id IS NULL AND condition IS NOT NULL AND condition <> ? AND end_time IS NULL", deviceID, models.IncidentConditionMetric).
 		Order("start_time DESC").Find(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("listing open condition incidents for device %s: %w", deviceID, err)
@@ -807,6 +818,70 @@ func (s *IncidentService) activeDeviceConditionIncident(ctx context.Context, dev
 		Limit(1).Find(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("querying open %s incident for device %s: %w", condition, deviceID, err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return &rows[0], nil
+}
+
+// OpenMetricIncident opens a metric-rule incident for one row (key, instance)
+// of a device, unless one is already open for that row, in which case that
+// one is returned with opened=false. A concurrent open losing the race on
+// the partial unique index is reported the same way.
+func (s *IncidentService) OpenMetricIncident(ctx context.Context, deviceID uuid.UUID, key, instance string, start time.Time, reason string) (*models.Incident, bool, error) {
+	if active, err := s.activeMetricIncident(ctx, deviceID, key, instance); err != nil || active != nil {
+		return active, false, err
+	}
+	now := time.Now()
+	cond := models.IncidentConditionMetric
+	k, i := key, instance
+	incident := &models.Incident{
+		ID: uuid.New(), DeviceID: &deviceID, Condition: &cond, MetricKey: &k, MetricInstance: &i,
+		StartTime: start, Severity: defaultIncidentSeverity, IncidentType: models.IncidentTypeError,
+		RootCause: reason, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.db.WithContext(ctx).Create(incident).Error; err != nil {
+		if isDuplicateKey(err) {
+			active, err := s.activeMetricIncident(ctx, deviceID, key, instance)
+			return active, false, err
+		}
+		return nil, false, fmt.Errorf("creating metric incident for device %s key %s instance %s: %w", deviceID, key, instance, err)
+	}
+	s.logger.Printf("[incident] opened id=%s device=%s metric=%s instance=%s", incident.ID, deviceID, key, instance)
+	return incident, true, nil
+}
+
+// CloseMetricIncident closes the open incident for one device, metric key and
+// instance. Returns nil, nil when none is open.
+func (s *IncidentService) CloseMetricIncident(ctx context.Context, deviceID uuid.UUID, key, instance string, end time.Time, note string) (*models.Incident, error) {
+	active, err := s.activeMetricIncident(ctx, deviceID, key, instance)
+	if err != nil || active == nil {
+		return nil, err
+	}
+	return s.closeIncidentRow(s.db.WithContext(ctx), *active, end, note)
+}
+
+// OpenMetricIncidents lists a device's open metric-rule incidents.
+func (s *IncidentService) OpenMetricIncidents(ctx context.Context, deviceID uuid.UUID) ([]models.Incident, error) {
+	var rows []models.Incident
+	err := s.db.WithContext(ctx).
+		Where("device_id = ? AND condition = ? AND end_time IS NULL", deviceID, models.IncidentConditionMetric).
+		Order("start_time DESC").Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("listing open metric incidents for device %s: %w", deviceID, err)
+	}
+	return rows, nil
+}
+
+func (s *IncidentService) activeMetricIncident(ctx context.Context, deviceID uuid.UUID, key, instance string) (*models.Incident, error) {
+	var rows []models.Incident
+	err := s.db.WithContext(ctx).
+		Where("device_id = ? AND condition = ? AND metric_key = ? AND metric_instance = ? AND end_time IS NULL",
+			deviceID, models.IncidentConditionMetric, key, instance).
+		Limit(1).Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("querying open metric incident for device %s key %s instance %s: %w", deviceID, key, instance, err)
 	}
 	if len(rows) == 0 {
 		return nil, nil
