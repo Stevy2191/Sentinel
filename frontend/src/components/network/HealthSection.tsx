@@ -37,9 +37,18 @@ function profileLine(p: DeviceProfileView): { text: string; failed: boolean } {
 
 /** One row's tile: a status row shows a coloured chip and is not clickable; a
  *  numeric row shows its value and opens its history chart when clicked. A
- *  red ring marks a row an incident is currently open for. */
+ *  red ring marks a row an incident is currently open for; a row with an open
+ *  incident but no live sample says "No reading". */
 function RowTile({ row, units, open, onToggle }: { row: HealthRow; units: string; open: boolean; onToggle: () => void }) {
   const ring = row.problem ? 'ring-2 ring-red-500/60' : ''
+  if (row.no_reading) {
+    return (
+      <div className={`rounded-lg border border-white/10 bg-slate-800/40 p-2 ${ring}`}>
+        <p className="truncate text-xs text-slate-400">{row.label}</p>
+        <p className="mt-1 text-sm text-red-300">No reading</p>
+      </div>
+    )
+  }
   if (row.state !== undefined) {
     return (
       <div className={`rounded-lg border border-white/10 bg-slate-800/40 p-2 ${ring}`}>

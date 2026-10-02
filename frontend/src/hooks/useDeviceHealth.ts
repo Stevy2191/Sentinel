@@ -8,7 +8,9 @@ const LIVE_MS = 60_000
 /** One row's live value: for a status metric, state is the state's name and
  *  ok says whether it is one of the metric's OK states; otherwise ok says the
  *  value is inside the rule (always true when the metric has none). problem
- *  is set while an incident is open for this exact row. */
+ *  is set while an incident is open for this exact row. no_reading marks a
+ *  row with an open incident but no live sample (a removed fan): value is
+ *  then meaningless and state absent. */
 export interface HealthRow {
   instance: string
   label: string
@@ -16,11 +18,12 @@ export interface HealthRow {
   state?: string
   ok: boolean
   problem: boolean
+  no_reading?: boolean
 }
 
 /** One metric's live rows. rule describes its alert rule in words ("above
  *  90 % for 10 min", "not OK"); "" when it has none. A metric with no live
- *  rows in the live window is omitted by the backend. */
+ *  rows in the live window and no open problem is omitted by the backend. */
 export interface HealthMetric {
   key: string
   name: string

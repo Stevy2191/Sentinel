@@ -41,6 +41,10 @@ type HealthRow struct {
 	State    string  `json:"state,omitempty"`
 	OK       bool    `json:"ok"`
 	Problem  bool    `json:"problem"`
+	// NoReading: the row has an open problem but no live sample (a fan
+	// that was removed, a table that stopped answering); Value is then 0
+	// and meaningless.
+	NoReading bool `json:"no_reading,omitempty"`
 }
 
 // ruleText describes a metric's enabled rule; "" when it has none.
@@ -123,24 +127,40 @@ func (s *ProfileService) DeviceHealth(ctx context.Context, d *DeviceView, metric
 	if err != nil {
 		return nil, err
 	}
-	problem := map[string]bool{}
+	// problems is each metric's instances with an open incident.
+	problems := map[string]map[string]bool{}
 	for _, inc := range open {
 		if inc.MetricKey != nil && inc.MetricInstance != nil {
-			problem[*inc.MetricKey+"|"+*inc.MetricInstance] = true
+			if problems[*inc.MetricKey] == nil {
+				problems[*inc.MetricKey] = map[string]bool{}
+			}
+			problems[*inc.MetricKey][*inc.MetricInstance] = true
 		}
 	}
 	for _, p := range applicable {
 		for _, m := range p.Metrics {
 			values := latest[d.ID][m.Key]
-			if len(values) == 0 {
+			if len(values) == 0 && len(problems[m.Key]) == 0 {
 				continue
 			}
 			def := ToDefinition(m)
 			hm := HealthMetric{Key: m.Key, Name: m.Name, Kind: m.Kind, Units: m.Units, Rule: ruleText(m)}
 			for inst, v := range values {
 				row := healthRow(def, inst, labels[m.Key][inst], v)
-				row.Problem = problem[m.Key+"|"+inst]
+				row.Problem = problems[m.Key][inst]
 				hm.Rows = append(hm.Rows, row)
+			}
+			// An open problem with no live sample is still shown, so a
+			// removed fan or a silent table cannot hide it.
+			for inst := range problems[m.Key] {
+				if _, live := values[inst]; live {
+					continue
+				}
+				label := labels[m.Key][inst]
+				if label == "" {
+					label = inst
+				}
+				hm.Rows = append(hm.Rows, HealthRow{Instance: inst, Label: label, Problem: true, NoReading: true})
 			}
 			sort.Slice(hm.Rows, func(i, j int) bool { return custommetric.LessIndex(hm.Rows[i].Instance, hm.Rows[j].Instance) })
 			out.Metrics = append(out.Metrics, hm)
