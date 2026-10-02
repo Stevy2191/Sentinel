@@ -93,6 +93,10 @@ func NewDefaultRegistry(d Deps) *Registry {
 		portGridWidget{devices: d.Devices, ports: d.Ports},
 		deviceHealthWidget{devices: d.Devices, health: d.Health},
 		sitePowerWidget{devices: d.Devices, ports: d.Ports},
+		topNWidget{metrics: d.Metrics, ports: d.Ports, devices: d.Devices},
+		eventLogWidget{ports: d.Ports, incidents: d.Incidents},
+		deviceTableWidget{devices: d.Devices, incidents: d.Incidents},
+		openIncidentsWidget{incidents: d.Incidents},
 	)
 }
 
