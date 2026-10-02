@@ -97,16 +97,23 @@ func (l *MIBLibrary) objectByOID(ctx context.Context, oid string) (*MIBObjectVie
 // Search finds objects by name substring, OID prefix, or description words,
 // at most limit results. An exact name match (case-insensitive) sorts first,
 // then shorter names.
+//
+// The per-OID dedup must run before the text predicate: when two ready
+// modules define the same OID under different names, filtering text first
+// could leave only the superseded module's row as the sole match for that
+// OID, which DISTINCT ON would then wave through unopposed. Picking the
+// newest module's row for every OID first, and only then matching the query
+// against that already-deduped set, keeps Search agreeing with Object/
+// Children about which module currently owns an OID.
 func (l *MIBLibrary) Search(ctx context.Context, q string, limit int) ([]MIBObjectView, error) {
 	var out []MIBObjectView
 	err := l.db.WithContext(ctx).Raw(
-		`SELECT * FROM (`+objectSelect+`(
-			lower(o.name) LIKE '%' || lower(?) || '%'
-			OR o.oid LIKE ? || '%'
-			OR to_tsvector('simple', o.name || ' ' || o.description) @@ plainto_tsquery('simple', ?)
-		) ORDER BY o.oid, m.updated_at DESC) t
-		ORDER BY (lower(name) = lower(?)) DESC, length(name) ASC
-		LIMIT ?`, q, q, q, q, limit).Scan(&out).Error
+		`SELECT * FROM (`+objectSelect+`TRUE ORDER BY o.oid, m.updated_at DESC) picked
+		 WHERE lower(picked.name) LIKE '%' || lower(?) || '%'
+			OR picked.oid LIKE ? || '%'
+			OR to_tsvector('simple', picked.name || ' ' || picked.description) @@ plainto_tsquery('simple', ?)
+		 ORDER BY (lower(picked.name) = lower(?)) DESC, length(picked.name) ASC
+		 LIMIT ?`, q, q, q, q, limit).Scan(&out).Error
 	return out, err
 }
 
