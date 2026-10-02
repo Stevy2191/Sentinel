@@ -500,18 +500,40 @@ func (s *ProfileService) Copy(ctx context.Context, id uuid.UUID) (*ProfileDetail
 		if err := tx.Where("profile_id = ?", id).Order("position").Find(&metrics).Error; err != nil {
 			return fmt.Errorf("loading profile metrics: %w", err)
 		}
+		// queryErr captures the first lookup failure from nameTaken/keyTaken
+		// below. Both closures short-circuit to "not taken" once it is set, so
+		// copyKey's and the name-retry loop's own loops exit immediately
+		// instead of spinning (a Count error would otherwise persist on every
+		// retry) rather than wrongly treating a name/key the query never
+		// actually confirmed as free; the caller checks queryErr right after
+		// each loop and aborts the transaction with it.
+		var queryErr error
 		nameTaken := func(name string) bool {
+			if queryErr != nil {
+				return false
+			}
 			var n int64
-			tx.Model(&models.MetricProfile{}).Where("name = ?", name).Count(&n)
+			if err := tx.Model(&models.MetricProfile{}).Where("name = ?", name).Count(&n).Error; err != nil {
+				queryErr = fmt.Errorf("checking for a free profile name: %w", err)
+				return false
+			}
 			return n > 0
 		}
 		newName := p.Name + " (copy)"
 		for i := 2; nameTaken(newName); i++ {
 			newName = fmt.Sprintf("%s (copy %d)", p.Name, i)
 		}
+		if queryErr != nil {
+			return queryErr
+		}
 		newProfile := models.MetricProfile{Name: newName, Description: p.Description,
 			MatchPrefixes: p.MatchPrefixes, PollIntervalMinutes: p.PollIntervalMinutes}
 		if err := tx.Create(&newProfile).Error; err != nil {
+			// Backstop for a name taken between the check above and this
+			// insert (e.g. a concurrent Copy/Create), the same way Create maps it.
+			if isDuplicateKey(err) {
+				return ErrProfileNameTaken
+			}
 			return fmt.Errorf("creating profile copy: %w", err)
 		}
 		assigned := map[string]bool{}
@@ -519,13 +541,22 @@ func (s *ProfileService) Copy(ctx context.Context, id uuid.UUID) (*ProfileDetail
 			if assigned[k] {
 				return true
 			}
+			if queryErr != nil {
+				return false
+			}
 			var n int64
-			tx.Model(&models.ProfileMetric{}).Where("key = ?", k).Count(&n)
+			if err := tx.Model(&models.ProfileMetric{}).Where("key = ?", k).Count(&n).Error; err != nil {
+				queryErr = fmt.Errorf("checking for a free metric key: %w", err)
+				return false
+			}
 			return n > 0
 		}
 		newMetrics := make([]models.ProfileMetric, len(metrics))
 		for i, m := range metrics {
 			nk := copyKey(m.Key, keyTaken)
+			if queryErr != nil {
+				return queryErr
+			}
 			assigned[nk] = true
 			nm := m
 			nm.ID = uuid.Nil
@@ -536,6 +567,11 @@ func (s *ProfileService) Copy(ctx context.Context, id uuid.UUID) (*ProfileDetail
 		}
 		if len(newMetrics) > 0 {
 			if err := tx.Create(&newMetrics).Error; err != nil {
+				// Backstop for a key taken between the check above and this
+				// insert, the same way CreateMetric maps it.
+				if isDuplicateKey(err) {
+					return ErrMetricKeyTaken
+				}
 				return fmt.Errorf("creating metric copies: %w", err)
 			}
 		}

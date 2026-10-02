@@ -97,3 +97,25 @@ func TestDBProfileCopyDeleteAndRegistry(t *testing.T) {
 }
 
 func withKey(m models.ProfileMetric, k string) models.ProfileMetric { m.Key = k; return m }
+
+// A name or key Copy would pick can already be taken by a row that never
+// went through Copy itself (not just a previous copy): Copy must still find
+// the next free one.
+func TestDBProfileCopySkipsExistingNameAndKey(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	svc := NewProfileService(db)
+	testdb.Must(t, svc.SeedStarter(ctx))
+	starter := got0(t, svc, ctx)
+
+	conflictID := uuid.New()
+	testdb.Exec(t, db, `INSERT INTO metric_profiles (id, name) VALUES (?, ?)`, conflictID, "Cisco switch health (copy)")
+	testdb.Exec(t, db, `INSERT INTO profile_metrics (id, profile_id, name, key, source, kind, oid) VALUES (?, ?, ?, ?, 'column', 'gauge', ?)`,
+		uuid.New(), conflictID, "CPU busy (5 min)", "cisco_cpu_5min_copy", "1.3.6.1.4.1.9.9.109.1.1.1.1.8")
+
+	cp, err := svc.Copy(ctx, starter.ID)
+	testdb.Must(t, err)
+	if cp.Name != "Cisco switch health (copy 2)" || cp.Metrics[0].Key != "cisco_cpu_5min_copy2" {
+		t.Errorf("copy name %q, metric key %q", cp.Name, cp.Metrics[0].Key)
+	}
+}
