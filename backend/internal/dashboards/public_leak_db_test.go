@@ -40,6 +40,8 @@ func TestDBPublicLinkLeaksNothing(t *testing.T) {
 	mon := newMonitor(t, db, admin, "Intranet", "https://intranet.secret.test/health")
 	agent := newAgent(t, db, "fileserver")
 	now := time.Now().UTC()
+	testdb.Exec(t, db, `INSERT INTO checks (monitor_id, status, response_time_ms, status_code, error_message, timestamp) VALUES (?, 'failed', 0, 0, 'dial tcp 10.77.0.9:443: connection refused', ?)`,
+		mon, now.Add(-5*time.Minute))
 	writePortBps(t, deps, dev, port, 1, now.Add(-10*time.Minute), 5000, 100)
 	m := deps.Metrics.(*services.MetricsStore)
 	testdb.Must(t, m.Write(ctx, ups, now.Add(-time.Minute), []services.SamplePoint{{Metric: services.MetricUPSChargePct, Value: 90}}))
@@ -75,7 +77,7 @@ func TestDBPublicLinkLeaksNothing(t *testing.T) {
 	}
 	publish(t, db, dash, admin)
 
-	secrets := []string{"10.77.0.9", "10.77.0.50", "i/o timeout", "intranet.secret.test", "cannot reach", "call Bob",
+	secrets := []string{"10.77.0.9", "10.77.0.50", "i/o timeout", "intranet.secret.test", "cannot reach", "call Bob", "connection refused",
 		"aa:bb:cc:dd:ee:ff", site.String(), dev.String(), ups.String(), port.String(), mon.String(), agent.String(), incident.String()}
 
 	d, err := svc.Get(ctx, Viewer{UserID: admin, IsAdmin: true}, dash)
@@ -92,11 +94,24 @@ func TestDBPublicLinkLeaksNothing(t *testing.T) {
 		}
 	}
 	check("public layout", layout)
+	if len(layout.Widgets) != len(registry.Types()) {
+		t.Fatalf("public layout has %d widgets, want one per type (%d)", len(layout.Widgets), len(registry.Types()))
+	}
+	sawDevice := false
 	for _, pw := range layout.Widgets {
 		w, err := svc.PublicWidget(ctx, &d.Dashboard, pw.ID)
 		testdb.Must(t, err)
 		resp, err := resolver.ResolvePublic(ctx, &d.Dashboard, w)
 		testdb.Must(t, err)
 		check(pw.Type+" widget", resp)
+		if pw.Type == "device_table" {
+			raw, err := json.Marshal(resp)
+			testdb.Must(t, err)
+			sawDevice = strings.Contains(string(raw), `"core"`)
+		}
+	}
+	// Positive control: the trim must not be passing because everything is empty.
+	if !sawDevice {
+		t.Error("public device_table response does not carry the device name; the leak checks may be vacuous")
 	}
 }
