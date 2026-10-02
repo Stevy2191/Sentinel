@@ -46,16 +46,27 @@ func (p *Prober) Identify(ctx context.Context, host string, port int, credential
 
 // IdentifyWith reads the system group with an already-decrypted credential.
 func (p *Prober) IdentifyWith(ctx context.Context, host string, port int, cred snmp.Credential, timeout time.Duration, retries int) (snmp.System, error) {
-	ip, err := p.resolve(ctx, host)
+	ip, err := p.resolveAllowed(ctx, host)
 	if err != nil {
-		return snmp.System{}, fmt.Errorf("cannot resolve %s: %v", host, err)
-	}
-	if p.blocked(ip) {
-		return snmp.System{}, ErrTargetBlocked
+		return snmp.System{}, err
 	}
 	return snmp.Identify(ctx, p.client, snmp.Target{
 		Host: ip.String(), Port: uint16(port), Credential: cred, Timeout: timeout, Retries: retries,
 	})
+}
+
+// resolveAllowed resolves host fresh and checks it against network policy:
+// the one resolve-and-block step every probe (Identify, Test connection,
+// TargetFor) applies, so it exists in exactly one place.
+func (p *Prober) resolveAllowed(ctx context.Context, host string) (net.IP, error) {
+	ip, err := p.resolve(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("cannot resolve %s: %v", host, err)
+	}
+	if p.blocked(ip) {
+		return nil, ErrTargetBlocked
+	}
+	return ip, nil
 }
 
 // UsableAt reports whether a credential profile may be used in a site, so Test
@@ -73,12 +84,9 @@ func (p *Prober) TargetFor(ctx context.Context, d models.Device) (snmp.Target, e
 	if err != nil {
 		return snmp.Target{}, err
 	}
-	ip, err := p.resolve(ctx, d.Host)
+	ip, err := p.resolveAllowed(ctx, d.Host)
 	if err != nil {
-		return snmp.Target{}, fmt.Errorf("cannot resolve %s: %v", d.Host, err)
-	}
-	if p.blocked(ip) {
-		return snmp.Target{}, ErrTargetBlocked
+		return snmp.Target{}, err
 	}
 	return TargetFor(d, ip.String(), cred), nil
 }
