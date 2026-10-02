@@ -60,16 +60,16 @@ func TestMetricCatalogue(t *testing.T) {
 func TestMetricsStoreForgetDropsOnlyThatDevicesSeriesIDs(t *testing.T) {
 	m := NewMetricsStore(nil)
 	dead, alive := uuid.New(), uuid.New()
-	m.ids[seriesKey{device: dead, metric: MetricIfInBps, instance: "1"}] = 10
-	m.ids[seriesKey{device: dead, metric: MetricIfOutBps, instance: "1"}] = 11
-	m.ids[seriesKey{device: alive, metric: MetricIfInBps, instance: "1"}] = 20
+	m.ids[seriesKey{device: dead, metric: MetricIfInBps, instance: "1"}] = cachedSeries{id: 10}
+	m.ids[seriesKey{device: dead, metric: MetricIfOutBps, instance: "1"}] = cachedSeries{id: 11}
+	m.ids[seriesKey{device: alive, metric: MetricIfInBps, instance: "1"}] = cachedSeries{id: 20}
 
 	m.Forget(dead)
 
 	if len(m.ids) != 1 {
 		t.Fatalf("after Forget: %d cached ids, want 1: %+v", len(m.ids), m.ids)
 	}
-	if id, ok := m.ids[seriesKey{device: alive, metric: MetricIfInBps, instance: "1"}]; !ok || id != 20 {
-		t.Errorf("the other device's cached id should survive: %v %v", id, ok)
+	if c, ok := m.ids[seriesKey{device: alive, metric: MetricIfInBps, instance: "1"}]; !ok || c.id != 20 {
+		t.Errorf("the other device's cached id should survive: %v %v", c.id, ok)
 	}
 }

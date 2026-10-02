@@ -63,6 +63,34 @@ func RegisterProfileRoutes(rg *gin.RouterGroup, profiles profileStore, devices d
 	rg.POST("/devices/:id/metric-preview", RequireAdmin(users), metricPreviewHandler(devices, sites, previewer))
 }
 
+// deviceHealthFunc is ProfileService.DeviceHealth with its metrics store and
+// incident service bound.
+type deviceHealthFunc func(ctx context.Context, d *services.DeviceView) (*services.DeviceHealthView, error)
+
+// RegisterDeviceHealthRoute mounts a device's Health view (site access:
+// readonly).
+func RegisterDeviceHealthRoute(rg *gin.RouterGroup, profiles *services.ProfileService, metrics *services.MetricsStore, incidents *services.IncidentService, devices deviceStore, sites siteAccessChecker) {
+	health := func(ctx context.Context, d *services.DeviceView) (*services.DeviceHealthView, error) {
+		return profiles.DeviceHealth(ctx, d, metrics, incidents)
+	}
+	rg.GET("/devices/:id/health", deviceHealthHandler(health, devices, sites))
+}
+
+func deviceHealthHandler(health deviceHealthFunc, devices deviceStore, sites siteAccessChecker) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		d, ok := loadDevice(c, devices, sites, services.SiteAccessReadonly)
+		if !ok {
+			return
+		}
+		view, err := health(c.Request.Context(), d)
+		if err != nil {
+			respondInternal(c, "deviceHealth", err)
+			return
+		}
+		respondSuccess(c, http.StatusOK, view)
+	}
+}
+
 func respondProfileError(c *gin.Context, op string, err error) {
 	switch {
 	case errors.Is(err, services.ErrProfileNotFound), errors.Is(err, services.ErrMetricNotFound):

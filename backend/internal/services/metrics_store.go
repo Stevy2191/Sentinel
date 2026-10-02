@@ -21,7 +21,10 @@ type SamplePoint struct {
 	Instance string
 	// InterfaceID links a port series to its interface row (no FK: see 048).
 	InterfaceID *uuid.UUID
-	Value       float64
+	// Label names the instance for people (a custom metric's row label). It
+	// is stored on the series when non-empty; it is not part of its identity.
+	Label string
+	Value float64
 }
 
 type metricsSample struct {
@@ -35,11 +38,17 @@ type seriesKey struct {
 	metric, instance string
 }
 
+// cachedSeries is a resolved series id and the label last stored on it.
+type cachedSeries struct {
+	id    int64
+	label string
+}
+
 // MetricsStore reads and writes the generic metrics model (migration 048).
 type MetricsStore struct {
 	db  *gorm.DB
 	mu  sync.Mutex
-	ids map[seriesKey]int64
+	ids map[seriesKey]cachedSeries
 
 	// retMu guards retentionDays, a cache of the raw-samples retention policy
 	// (in days) so Query does not read timescaledb_information.jobs on every
@@ -50,29 +59,42 @@ type MetricsStore struct {
 }
 
 func NewMetricsStore(db *gorm.DB) *MetricsStore {
-	return &MetricsStore{db: db, ids: map[seriesKey]int64{}}
+	return &MetricsStore{db: db, ids: map[seriesKey]cachedSeries{}}
 }
 
 func (m *MetricsStore) seriesID(ctx context.Context, deviceID uuid.UUID, p SamplePoint) (int64, error) {
 	k := seriesKey{deviceID, p.Metric, p.Instance}
 	m.mu.Lock()
-	id, ok := m.ids[k]
+	cached, ok := m.ids[k]
 	m.mu.Unlock()
 	if ok {
-		return id, nil
+		if p.Label != "" && p.Label != cached.label {
+			if err := m.db.WithContext(ctx).Exec(`UPDATE metrics.series SET label = ? WHERE id = ?`, p.Label, cached.id).Error; err != nil {
+				return 0, fmt.Errorf("relabelling series %s/%s: %w", p.Metric, p.Instance, err)
+			}
+			m.mu.Lock()
+			m.ids[k] = cachedSeries{id: cached.id, label: p.Label}
+			m.mu.Unlock()
+		}
+		return cached.id, nil
 	}
-	err := m.db.WithContext(ctx).Raw(`INSERT INTO metrics.series (device_id, metric, instance, interface_id)
-		VALUES (?, ?, ?, ?)
+	var row struct {
+		ID    int64
+		Label string
+	}
+	err := m.db.WithContext(ctx).Raw(`INSERT INTO metrics.series (device_id, metric, instance, interface_id, label)
+		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT (device_id, metric, instance)
-		DO UPDATE SET interface_id = COALESCE(EXCLUDED.interface_id, metrics.series.interface_id)
-		RETURNING id`, deviceID, p.Metric, p.Instance, p.InterfaceID).Scan(&id).Error
+		DO UPDATE SET interface_id = COALESCE(EXCLUDED.interface_id, metrics.series.interface_id),
+			label = CASE WHEN EXCLUDED.label <> '' THEN EXCLUDED.label ELSE metrics.series.label END
+		RETURNING id, label`, deviceID, p.Metric, p.Instance, p.InterfaceID, p.Label).Scan(&row).Error
 	if err != nil {
 		return 0, fmt.Errorf("resolving series %s/%s: %w", p.Metric, p.Instance, err)
 	}
 	m.mu.Lock()
-	m.ids[k] = id
+	m.ids[k] = cachedSeries{id: row.ID, label: row.Label}
 	m.mu.Unlock()
-	return id, nil
+	return row.ID, nil
 }
 
 // Write stores one poll's points for a device, in one batch. Unknown metrics
@@ -327,6 +349,28 @@ func (m *MetricsStore) LatestMany(ctx context.Context, deviceIDs []uuid.UUID, me
 	return out, nil
 }
 
+// SeriesLabels returns the stored labels of a device's series of the given
+// metrics, as metric -> instance -> label (unlabelled series are left out).
+func (m *MetricsStore) SeriesLabels(ctx context.Context, deviceID uuid.UUID, metrics []string) (map[string]map[string]string, error) {
+	out := map[string]map[string]string{}
+	if len(metrics) == 0 {
+		return out, nil
+	}
+	var rows []struct{ Metric, Instance, Label string }
+	err := m.db.WithContext(ctx).Raw(`SELECT metric, instance, label FROM metrics.series
+		WHERE device_id = ? AND metric IN ? AND label <> ''`, deviceID, metrics).Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("reading series labels: %w", err)
+	}
+	for _, r := range rows {
+		if out[r.Metric] == nil {
+			out[r.Metric] = map[string]string{}
+		}
+		out[r.Metric][r.Instance] = r.Label
+	}
+	return out, nil
+}
+
 // ---- Retention and maintenance ---------------------------------------------
 
 // ApplyRetention replaces the raw-samples retention policy. days must be
@@ -426,7 +470,7 @@ func (m *MetricsStore) Cleanup(ctx context.Context, eventRetentionDays int) (Cle
 	}
 	if removedAny {
 		m.mu.Lock()
-		m.ids = map[seriesKey]int64{}
+		m.ids = map[seriesKey]cachedSeries{}
 		m.mu.Unlock()
 	}
 

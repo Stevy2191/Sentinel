@@ -120,7 +120,7 @@ func Evaluate(d Definition, cols Columns) []Row {
 		}
 		rows = append(rows, finish(d, Row{Instance: idx, Label: label(d, cols, idx)}, num*scale))
 	}
-	sort.Slice(rows, func(i, j int) bool { return lessIndex(rows[i].Instance, rows[j].Instance) })
+	sort.Slice(rows, func(i, j int) bool { return LessIndex(rows[i].Instance, rows[j].Instance) })
 	return rows
 }
 
@@ -155,8 +155,8 @@ func label(d Definition, cols Columns, idx string) string {
 	return l
 }
 
-// lessIndex orders row indexes by numeric arcs ("2" before "10", "1.2" before "1.10").
-func lessIndex(a, b string) bool {
+// LessIndex orders row indexes by numeric arcs ("2" before "10", "1.2" before "1.10").
+func LessIndex(a, b string) bool {
 	as, bs := strings.Split(a, "."), strings.Split(b, ".")
 	for i := 0; i < len(as) && i < len(bs); i++ {
 		x, ex := strconv.ParseUint(as[i], 10, 64)

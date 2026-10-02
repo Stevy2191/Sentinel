@@ -13,6 +13,8 @@ type walkFake struct {
 	walks map[string][]snmp.PDU
 	gets  map[string]any
 	fail  map[string]bool
+	// walked records every Walk root, in order.
+	walked []string
 }
 
 func (f *walkFake) Get(_ context.Context, _ snmp.Target, oids []string) ([]snmp.PDU, error) {
@@ -23,6 +25,7 @@ func (f *walkFake) Get(_ context.Context, _ snmp.Target, oids []string) ([]snmp.
 	return out, nil
 }
 func (f *walkFake) Walk(_ context.Context, _ snmp.Target, root string) ([]snmp.PDU, error) {
+	f.walked = append(f.walked, root)
 	if f.fail[root] {
 		return nil, errors.New("request timeout")
 	}
