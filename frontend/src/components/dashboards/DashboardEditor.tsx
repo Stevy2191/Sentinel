@@ -62,7 +62,10 @@ export default function DashboardEditor({ dashboard, onSaved, onCancel }: Props)
     setPicking(false)
   }
 
-  const patch = (key: string, p: Partial<DraftWidget>) => setWidgets((ws) => ws.map((w) => (w.key === key ? { ...w, ...p } : w)))
+  const patch = (key: string, p: Partial<DraftWidget>) => {
+    setWidgets((ws) => ws.map((w) => (w.key === key ? { ...w, ...p } : w)))
+    setError((e) => (e?.key === key ? null : e))
+  }
 
   const submit = async () => {
     setSaving(true)

@@ -31,7 +31,7 @@ export default function DashboardGrid<T extends GridItem>({ items, editing, rend
     () =>
       items.map((it) => {
         const info = widgetInfo(it.type)
-        return { i: it.id, x: it.x, y: it.y, w: it.w, h: it.h, minW: info.minW, minH: info.minH }
+        return { i: it.id, x: it.x, y: it.y, w: it.w, h: it.h, minW: info.minW, minH: info.minH, maxW: GRID_COLS, maxH: 24 }
       }),
     [items],
   )
