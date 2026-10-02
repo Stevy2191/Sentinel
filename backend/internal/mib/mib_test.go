@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuiltinsAllReady(t *testing.T) {
@@ -139,5 +140,46 @@ func TestBuildSurvivesAPanickingModule(t *testing.T) {
 	res := Build(Builtins())
 	if len(res.Objects["IF-MIB"]) != 0 || len(res.Objects["SNMPv2-MIB"]) == 0 {
 		t.Errorf("IF-MIB %d objects, SNMPv2-MIB %d", len(res.Objects["IF-MIB"]), len(res.Objects["SNMPv2-MIB"]))
+	}
+}
+
+// A module whose own OID assignments loop would hang gosmi forever: Inspect
+// refuses it, naming the loop.
+func TestInspectRejectsOIDCycle(t *testing.T) {
+	cyclic := "LOOP-MIB DEFINITIONS ::= BEGIN\nIMPORTS enterprises FROM SNMPv2-SMI;\n" +
+		"root OBJECT IDENTIFIER ::= { enterprises 99999 }\n" +
+		"a OBJECT IDENTIFIER ::= { b 1 }\nb OBJECT IDENTIFIER ::= { a 1 }\nEND\n"
+	_, err := Inspect([]byte(cyclic))
+	if !errors.Is(err, ErrOIDCycle) || !strings.Contains(err.Error(), "a → b → a") {
+		t.Fatalf("err %v", err)
+	}
+	self := "SELF-MIB DEFINITIONS ::= BEGIN\nx OBJECT IDENTIFIER ::= { x 1 }\nEND\n"
+	if _, err := Inspect([]byte(self)); !errors.Is(err, ErrOIDCycle) || !strings.Contains(err.Error(), "x → x") {
+		t.Errorf("self loop: %v", err)
+	}
+}
+
+// A loop across modules (each fine on its own) must not hang Build: those
+// modules, and any module importing them, get no objects; the rest build.
+func TestBuildSkipsCrossModuleOIDCycle(t *testing.T) {
+	a := "LOOP-A DEFINITIONS ::= BEGIN\nIMPORTS b FROM LOOP-B;\na OBJECT IDENTIFIER ::= { b 1 }\nEND\n"
+	b := "LOOP-B DEFINITIONS ::= BEGIN\nIMPORTS a FROM LOOP-A;\nb OBJECT IDENTIFIER ::= { a 1 }\nEND\n"
+	c := "LOOP-C DEFINITIONS ::= BEGIN\nIMPORTS a FROM LOOP-A;\nc OBJECT IDENTIFIER ::= { a 2 }\nEND\n"
+	files := append(Builtins(), File{Name: "LOOP-A", Content: a}, File{Name: "LOOP-B", Content: b}, File{Name: "LOOP-C", Content: c})
+	done := make(chan Result, 1)
+	go func() { done <- Build(files) }()
+	var res Result
+	select {
+	case res = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Build hung on an OID cycle")
+	}
+	for _, m := range []string{"LOOP-A", "LOOP-B", "LOOP-C"} {
+		if len(res.Objects[m]) != 0 {
+			t.Errorf("%s has %d objects", m, len(res.Objects[m]))
+		}
+	}
+	if len(res.Objects["IF-MIB"]) == 0 || len(res.Objects["UPS-MIB"]) == 0 {
+		t.Errorf("built-ins not built: IF-MIB %d, UPS-MIB %d", len(res.Objects["IF-MIB"]), len(res.Objects["UPS-MIB"]))
 	}
 }

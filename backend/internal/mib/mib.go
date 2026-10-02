@@ -27,6 +27,12 @@ type File struct {
 type Header struct {
 	Name    string
 	Imports []string
+	// parents maps each object the module defines to the name its OID is
+	// assigned under (the first element of "::= { parent N }"); from maps
+	// each imported name to the module it comes from. Build uses both to
+	// refuse OID cycles that span modules.
+	parents map[string]string
+	from    map[string]string
 }
 
 // ParseError is a syntax error at a line of the file.
@@ -40,6 +46,7 @@ func (e *ParseError) Error() string { return fmt.Sprintf("line %d: %s", e.Line, 
 var (
 	ErrNotAMIB        = errors.New("not a MIB module (no DEFINITIONS ::= BEGIN)")
 	ErrSeveralModules = errors.New("the file declares more than one module; upload one module per file")
+	ErrOIDCycle       = errors.New("OID cycle")
 
 	definitions = regexp.MustCompile(`(?m)^\s*[A-Za-z][A-Za-z0-9-]*\s+DEFINITIONS\s*::=\s*BEGIN`)
 	// participle errors read "L:C: message" (optionally prefixed by a name).
@@ -73,7 +80,7 @@ func Inspect(content []byte) (Header, error) {
 		}
 		return Header{}, pe
 	}
-	h := Header{Name: string(m.Name)}
+	h := Header{Name: string(m.Name), parents: map[string]string{}, from: map[string]string{}}
 	seen := map[string]bool{}
 	for _, im := range m.Body.Imports {
 		mod := string(im.Module)
@@ -81,8 +88,58 @@ func Inspect(content []byte) (Header, error) {
 			seen[mod] = true
 			h.Imports = append(h.Imports, mod)
 		}
+		for _, n := range im.Names {
+			h.from[string(n)] = mod
+		}
+	}
+	var order []string // declaration order, so the loop reported is stable
+	if id := m.Body.Identity; id != nil {
+		if p := parentOf(&id.Oid); p != "" {
+			h.parents[string(id.Name)] = p
+			order = append(order, string(id.Name))
+		}
+	}
+	for _, n := range m.Body.Nodes {
+		if p := parentOf(n.Oid); p != "" {
+			h.parents[string(n.Name)] = p
+			order = append(order, string(n.Name))
+		}
+	}
+	// gosmi never returns from a module whose OID assignments loop.
+	for _, name := range order {
+		if loop := cycleFrom(name, func(n string) (string, bool) { p, ok := h.parents[n]; return p, ok }); loop != nil {
+			return Header{}, fmt.Errorf("%w: %s", ErrOIDCycle, strings.Join(loop, " → "))
+		}
 	}
 	return h, nil
+}
+
+// parentOf is the name an OID value is assigned under, or "" when it starts
+// with a number.
+func parentOf(oid *parser.Oid) string {
+	if oid == nil || len(oid.SubIdentifiers) == 0 || oid.SubIdentifiers[0].Name == nil {
+		return ""
+	}
+	return string(*oid.SubIdentifiers[0].Name)
+}
+
+// cycleFrom follows parent links from start and returns the loop it falls
+// into ("a", "b", "a"), or nil when the chain ends.
+func cycleFrom(start string, parent func(string) (string, bool)) []string {
+	index := map[string]int{}
+	var path []string
+	for n := start; ; {
+		if i, seen := index[n]; seen {
+			return append(path[i:], n)
+		}
+		index[n] = len(path)
+		path = append(path, n)
+		p, ok := parent(n)
+		if !ok {
+			return nil
+		}
+		n = p
+	}
 }
 
 type Object struct {
@@ -114,6 +171,7 @@ func Build(files []File) Result {
 	res := Result{Objects: map[string][]Object{}, Missing: map[string][]string{}}
 	byName := map[string]File{}
 	imports := map[string][]string{}
+	headers := map[string]Header{}
 	for _, f := range files {
 		h, err := Inspect([]byte(f.Content))
 		if err != nil {
@@ -121,10 +179,12 @@ func Build(files []File) Result {
 		}
 		byName[h.Name] = f
 		imports[h.Name] = h.Imports
+		headers[h.Name] = h
 	}
 	for name := range byName {
 		res.Missing[name] = missing(name, imports, byName, map[string]bool{})
 	}
+	looping := loopingModules(headers)
 
 	buildMu.Lock()
 	defer buildMu.Unlock()
@@ -144,7 +204,7 @@ func Build(files []File) Result {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		if len(res.Missing[name]) > 0 {
+		if len(res.Missing[name]) > 0 || dependsOn(name, looping, imports, map[string]bool{}) {
 			continue
 		}
 		var objects []Object
@@ -172,6 +232,58 @@ func Build(files []File) Result {
 		}
 	}
 	return res
+}
+
+// loopingModules finds the modules taking part in an OID cycle that spans
+// modules (each module on its own passed Inspect). Objects are keyed
+// "MODULE.name"; a parent is resolved in the defining module, else through
+// that module's imports; anything unresolved is a root.
+func loopingModules(headers map[string]Header) map[string]bool {
+	parent := func(key string) (string, bool) {
+		mod, name, _ := strings.Cut(key, ".")
+		h, ok := headers[mod]
+		if !ok {
+			return "", false
+		}
+		p, ok := h.parents[name]
+		if !ok {
+			return "", false
+		}
+		if _, local := h.parents[p]; local {
+			return mod + "." + p, true
+		}
+		if src, imported := h.from[p]; imported {
+			return src + "." + p, true
+		}
+		return "", false
+	}
+	out := map[string]bool{}
+	for mod, h := range headers {
+		for name := range h.parents {
+			for _, key := range cycleFrom(mod+"."+name, parent) {
+				m, _, _ := strings.Cut(key, ".")
+				out[m] = true
+			}
+		}
+	}
+	return out
+}
+
+// dependsOn reports whether name is, or transitively imports, a module in bad.
+func dependsOn(name string, bad map[string]bool, imports map[string][]string, seen map[string]bool) bool {
+	if bad[name] {
+		return true
+	}
+	if seen[name] {
+		return false
+	}
+	seen[name] = true
+	for _, im := range imports[name] {
+		if dependsOn(im, bad, imports, seen) {
+			return true
+		}
+	}
+	return false
 }
 
 func missing(name string, imports map[string][]string, have map[string]File, seen map[string]bool) []string {
