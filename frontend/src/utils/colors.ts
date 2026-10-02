@@ -136,3 +136,10 @@ export const getMonitorTypeColor = (type: string) => {
       return colors.neutral
   }
 }
+
+// Chart line colours, in the order dashboard lines take them. Hex, not
+// Tailwind classes, because Recharts draws SVG strokes.
+export const chartPalette = [
+  '#22d3ee', '#a78bfa', '#34d399', '#60a5fa', '#f472b6',
+  '#fbbf24', '#f87171', '#2dd4bf', '#c084fc', '#a3e635',
+]
