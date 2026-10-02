@@ -93,6 +93,24 @@ func TestDBMIBUploadAllOrNothing(t *testing.T) {
 	}
 }
 
+// A module whose OID assignments loop is refused (gosmi would hang loading
+// it), naming the file and the loop; nothing from the upload is saved.
+func TestDBMIBUploadRefusesOIDCycle(t *testing.T) {
+	l, ctx := mibLib(t)
+	loop := "LOOP-MIB DEFINITIONS ::= BEGIN\na OBJECT IDENTIFIER ::= { b 1 }\nb OBJECT IDENTIFIER ::= { a 1 }\nEND\n"
+	_, err := l.Upload(ctx, []UploadFile{{FileName: "smi.my", Content: []byte(acmeSMI)}, {FileName: "loop.my", Content: []byte(loop)}}, uuid.Nil)
+	var ue *MIBUploadError
+	if !errors.As(err, &ue) || ue.File != "loop.my" || !errors.Is(err, mib.ErrOIDCycle) || !strings.Contains(err.Error(), "a → b → a") {
+		t.Fatalf("err %v", err)
+	}
+	list, _ := l.List(ctx)
+	for _, m := range list {
+		if m.Name == "ACME-SMI" || m.Name == "LOOP-MIB" {
+			t.Errorf("%s saved from a rejected upload", m.Name)
+		}
+	}
+}
+
 // Review focus 4: the same module under another file name replaces it.
 func TestDBMIBReuploadReplaces(t *testing.T) {
 	l, ctx := mibLib(t)
