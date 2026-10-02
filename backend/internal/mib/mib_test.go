@@ -83,3 +83,31 @@ func TestBuildWaitingThenReady(t *testing.T) {
 		t.Errorf("acmeTemp %+v", temp)
 	}
 }
+
+// Build must key everything by the module name declared in a file's content
+// (what Inspect returns), never by the caller-supplied File.Name: a file
+// could be uploaded, or embedded, under any filename.
+func TestBuildKeysByDeclaredName(t *testing.T) {
+	smi := "ACME-SMI DEFINITIONS ::= BEGIN\nIMPORTS enterprises FROM SNMPv2-SMI;\nacme OBJECT IDENTIFIER ::= { enterprises 99999 }\nEND\n"
+	files := append(Builtins(), File{Name: "WRONG-NAME", Content: smi})
+	res := Build(files)
+
+	if len(res.Missing["ACME-SMI"]) != 0 {
+		t.Fatalf("ACME-SMI missing: %v", res.Missing["ACME-SMI"])
+	}
+	var acme *Object
+	for i, o := range res.Objects["ACME-SMI"] {
+		if o.Name == "acme" {
+			acme = &res.Objects["ACME-SMI"][i]
+		}
+	}
+	if acme == nil || acme.OID != "1.3.6.1.4.1.99999" {
+		t.Fatalf("acme %+v", acme)
+	}
+	if _, ok := res.Objects["WRONG-NAME"]; ok {
+		t.Error("objects stored under the caller-supplied name WRONG-NAME")
+	}
+	if _, ok := res.Missing["WRONG-NAME"]; ok {
+		t.Error("missing stored under the caller-supplied name WRONG-NAME")
+	}
+}
