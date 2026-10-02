@@ -43,7 +43,7 @@ func TestDBSimCiscoHealthEndToEnd(t *testing.T) {
 	metrics := NewMetricsStore(db)
 	notif := &fakeNotifier{}
 	mon := NewProfileMonitor(profiles, metrics, incidents, notif, snmp.GoSNMPClient{}, NewPortService(db, metrics, incidents, NewSettingsService(db)))
-	mon.PollProfiles(ctx, d, target)
+	mon.PollProfiles(ctx, d, target, -1)
 
 	type row struct {
 		Metric, Instance, Label string

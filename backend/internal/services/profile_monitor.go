@@ -54,6 +54,9 @@ type profileState struct {
 	cacheAt time.Time
 	// prev is each counter's previous raw samples, by key then instance.
 	prev map[string]map[string]custommetric.Sample
+	// lastUptime is the device's sysUpTime (seconds) at the previous poll,
+	// -1 when unknown; going backwards means a reboot reset the counters.
+	lastUptime int64
 	// holds is each rule's hold clocks (when a row started violating), by
 	// key then instance.
 	holds map[string]map[string]time.Time
@@ -91,7 +94,7 @@ func (m *ProfileMonitor) with(deviceID uuid.UUID, f func(st *profileState)) {
 	defer m.mu.Unlock()
 	st := m.devices[deviceID]
 	if st == nil {
-		st = &profileState{lastRun: map[uuid.UUID]time.Time{}, prev: map[string]map[string]custommetric.Sample{},
+		st = &profileState{lastRun: map[uuid.UUID]time.Time{}, prev: map[string]map[string]custommetric.Sample{}, lastUptime: -1,
 			holds: map[string]map[string]time.Time{}, lastState: map[string]map[string]string{}}
 		m.devices[deviceID] = st
 	}
@@ -109,7 +112,10 @@ func hasRule(m models.ProfileMetric) bool { return m.RuleEnabled && m.RuleKind !
 
 // PollProfiles runs a device's due profiles and applies their rules, then
 // closes quietly any metric incident no applicable rule accounts for.
-func (m *ProfileMonitor) PollProfiles(ctx context.Context, d models.Device, t snmp.Target) {
+// uptimeSeconds is this poll's sysUpTime (-1 if unknown): when it went
+// backwards since the last poll the device rebooted, so counter rates start
+// afresh instead of reading the reset as a wrap.
+func (m *ProfileMonitor) PollProfiles(ctx context.Context, d models.Device, t snmp.Target, uptimeSeconds int64) {
 	profiles, err := m.profiles.ProfilesForDevice(ctx, d)
 	if err != nil {
 		m.logger.Printf("[profiles] loading profiles for %s: %v", d.Host, err)
@@ -123,6 +129,12 @@ func (m *ProfileMonitor) PollProfiles(ctx context.Context, d models.Device, t sn
 		m.reconcile(ctx, d, nil, now, "Closed: no profile applies to this device any more.")
 		return
 	}
+	m.with(d.ID, func(st *profileState) {
+		if uptimeSeconds >= 0 && st.lastUptime >= 0 && uptimeSeconds < st.lastUptime {
+			st.prev = map[string]map[string]custommetric.Sample{}
+		}
+		st.lastUptime = uptimeSeconds
+	})
 	var evaluated []evaluatedMetric
 	if due := m.due(d.ID, profiles, now); len(due) > 0 {
 		cols, errs := m.read(ctx, d, t, due, now)
@@ -241,7 +253,9 @@ func (m *ProfileMonitor) evaluateProfile(ctx context.Context, d models.Device, p
 		}
 		rows := custommetric.Evaluate(def, cols)
 		if def.Kind == "counter" {
-			m.with(d.ID, func(st *profileState) { rows, st.prev[def.Key] = custommetric.Rates(st.prev[def.Key], rows, now) })
+			m.with(d.ID, func(st *profileState) {
+				rows, st.prev[def.Key] = custommetric.Rates(st.prev[def.Key], rows, now, def.Scale)
+			})
 		}
 		out = append(out, evaluatedMetric{def: def, units: pm.Units, rows: rows})
 	}
