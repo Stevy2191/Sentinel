@@ -36,6 +36,8 @@ const Credentials = lazy(() => import('@/pages/network/Credentials'))
 const NetworkSettings = lazy(() => import('@/pages/network/NetworkSettings'))
 const MibLibrary = lazy(() => import('@/pages/network/MibLibrary'))
 const MibBrowser = lazy(() => import('@/pages/network/MibBrowser'))
+const Profiles = lazy(() => import('@/pages/network/Profiles'))
+const ProfileDetail = lazy(() => import('@/pages/network/ProfileDetail'))
 const SavedReports = lazy(() => import('@/pages/SavedReports'))
 const SavedReportDetail = lazy(() => import('@/pages/SavedReportDetail'))
 const PublicReport = lazy(() => import('@/pages/PublicReport'))
@@ -105,6 +107,8 @@ export default function App() {
               <Route path="/network/settings" element={<NetworkSettings />} />
               <Route path="/network/mibs" element={<MibLibrary />} />
               <Route path="/network/mibs/browse" element={<MibBrowser />} />
+              <Route path="/network/profiles" element={<Profiles />} />
+              <Route path="/network/profiles/:id" element={<ProfileDetail />} />
               <Route path="/monitors/create" element={<MonitorDetail mode="create" />} />
               <Route path="/monitors/new/wizard" element={<MonitorWizard />} />
               <Route path="/monitors/bulk" element={<BulkUpload />} />

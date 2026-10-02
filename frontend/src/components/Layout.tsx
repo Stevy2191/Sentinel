@@ -29,6 +29,7 @@ const networkNav: { to: string; label: string; end?: boolean; adminOnly?: boolea
   { to: '/network/devices', label: 'Devices' },
   { to: '/network/mibs/browse', label: 'MIB browser' },
   { to: '/network/credentials', label: 'Credentials', adminOnly: true },
+  { to: '/network/profiles', label: 'Profiles', adminOnly: true },
   { to: '/network/mibs', label: 'MIB library', end: true, adminOnly: true },
   { to: '/network/settings', label: 'Settings', adminOnly: true },
 ]
