@@ -369,6 +369,7 @@ func run() error {
 	api.RegisterMIBRoutes(v1, mibLibrary, auditService, authService)
 	api.RegisterProfileRoutes(v1, profileService, deviceService, siteService, auditService, authService, deviceWalker)
 	api.RegisterDeviceHealthRoute(v1, profileService, metricsStore, incidentService, deviceService, siteService)
+	api.RegisterDeviceMetricsRoute(v1, metricsStore, deviceService, siteService)
 	api.RegisterDashboardRoutes(v1, dashboardService, dashboardResolver, auditService, authService)
 	api.RegisterSystemRoutes(v1, hostSampler, version)
 	// Per-user theme (not admin-gated): only AuthMiddleware applies.
