@@ -46,6 +46,18 @@ export const CONDITION_LABEL: Record<string, string> = {
   ups_on_battery: 'On battery',
   ups_low_battery: 'Low battery',
   ups_high_load: 'High load',
+  metric: 'Metric rule',
+}
+
+/** "1 min ago", "3 h ago", or the date once it's more than a day old; "never"
+ *  for null. Used for a profile's last poll time on the device Health panel. */
+export function timeAgo(iso: string | null): string {
+  if (!iso) return 'never'
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000)
+  if (s < 90) return 'just now'
+  if (s < 3600) return `${Math.round(s / 60)} min ago`
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`
+  return new Date(iso).toLocaleDateString()
 }
 
 export const EVENT_LABEL: Record<string, string> = {

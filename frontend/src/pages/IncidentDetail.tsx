@@ -252,9 +252,11 @@ export default function IncidentDetail() {
                 <dd className="mt-0.5 text-sm text-slate-200">
                   {inc.port_if_index != null
                     ? `The port's stats poll: ${(inc.condition && CONDITION_LABEL[inc.condition]) || inc.condition}`
-                    : inc.condition
-                      ? `The UPS poll: ${CONDITION_LABEL[inc.condition] || inc.condition}`
-                      : '3 consecutive SNMP polls without an answer'}
+                    : inc.condition === 'metric'
+                      ? `The profile poll: ${inc.subject_name.split(' · ').slice(1).join(' · ')}`
+                      : inc.condition
+                        ? `The UPS poll: ${CONDITION_LABEL[inc.condition] || inc.condition}`
+                        : '3 consecutive SNMP polls without an answer'}
                 </dd>
               </div>
             )}

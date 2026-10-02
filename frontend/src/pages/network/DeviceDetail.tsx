@@ -5,11 +5,13 @@ import { useSite } from '@/hooks/useSites'
 import { DEVICE_TYPE_LABEL, formatSpeed, useDevice, useDeviceActions, type Device } from '@/hooks/useDevices'
 import { useIncidents, formatDuration, DEFAULT_FILTERS } from '@/hooks/useIncidents'
 import { useDevicePorts, usePortEvents, useUPSStatus, type PortView } from '@/hooks/usePorts'
+import { useDeviceHealth } from '@/hooks/useDeviceHealth'
 import { useRefreshWatch } from '@/hooks/useRefreshWatch'
 import DeviceStatusBadge from '@/components/network/DeviceStatusBadge'
 import DeviceFormModal from '@/components/network/DeviceFormModal'
 import EditDetailsModal from '@/components/network/EditDetailsModal'
 import Faceplate, { FaceplateLegend } from '@/components/network/Faceplate'
+import HealthSection from '@/components/network/HealthSection'
 import TrafficChart from '@/components/network/TrafficChart'
 import UPSPanel from '@/components/network/UPSPanel'
 import PortTable from '@/components/network/PortTable'
@@ -82,6 +84,7 @@ export default function DeviceDetail() {
   const { events } = usePortEvents({ deviceId: id }, 15)
   const deviceIsUPS = (device?.effective_type ?? device?.device_type_detected) === 'ups'
   const { data: upsStatus } = useUPSStatus(id, deviceIsUPS)
+  const { health, refetch: refetchHealth } = useDeviceHealth(id)
   const { incidents } = useIncidents({ ...DEFAULT_FILTERS, limit: 10, deviceId: id })
   const { update, remove, refresh, busy } = useDeviceActions()
   const [editing, setEditing] = useState(false)
@@ -258,6 +261,8 @@ export default function DeviceDetail() {
 
       {deviceIsUPS && <UPSPanel deviceId={device.id} status={upsStatus} />}
 
+      <HealthSection deviceId={device.id} health={health} />
+
       <TrafficChart title="Traffic" query={{ deviceIds: [device.id], sum: true, physicalOnly: true }} lines={TRAFFIC_LINES} unit="bps" />
 
       <PortTable deviceId={device.id} ports={ports} canEdit={canEdit} inventoried={!!device.last_inventory_at} onChanged={() => void refetchPorts()} />
@@ -278,11 +283,13 @@ export default function DeviceDetail() {
                 <Link to={`/incidents/${inc.id}`} className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm hover:bg-white/5">
                   <span className={inc.status === 'ongoing' ? 'text-red-400' : 'text-slate-300'}>
                     {inc.status === 'ongoing' ? 'Ongoing' : 'Resolved'} · {new Date(inc.start_time).toLocaleString()} ·{' '}
-                    {inc.port_if_index != null
-                      ? `${inc.subject_name}: ${CONDITION_LABEL[inc.condition ?? ''] ?? 'problem'}`
-                      : inc.condition
-                        ? (CONDITION_LABEL[inc.condition] ?? inc.condition)
-                        : 'Device unreachable'}
+                    {inc.condition === 'metric'
+                      ? inc.subject_name.split(' · ').slice(1).join(' · ')
+                      : inc.port_if_index != null
+                        ? `${inc.subject_name}: ${CONDITION_LABEL[inc.condition ?? ''] ?? 'problem'}`
+                        : inc.condition
+                          ? (CONDITION_LABEL[inc.condition] ?? inc.condition)
+                          : 'Device unreachable'}
                   </span>
                   <span className="text-slate-400">{formatDuration(inc.duration_seconds)}</span>
                 </Link>
@@ -299,6 +306,8 @@ export default function DeviceDetail() {
         <EditDetailsModal
           device={device}
           upsDefaults={upsStatus ? { low: upsStatus.default_low_battery_pct, high: upsStatus.default_high_load_pct } : undefined}
+          profiles={health?.profiles ?? []}
+          onProfilesChanged={() => void refetchHealth()}
           onClose={() => setEditingDetails(false)} onSaved={() => { setEditingDetails(false); void refetch(); void refetchPorts() }} />
       )}
     </div>

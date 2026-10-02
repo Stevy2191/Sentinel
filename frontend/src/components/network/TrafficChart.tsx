@@ -10,22 +10,25 @@ export interface ChartLine {
   colour: string
 }
 
-export type Unit = 'bps' | 'pct' | 'per_min' | 'min'
+export type Unit = 'bps' | 'pct' | 'per_min' | 'min' | 'custom'
 
 interface Props {
   title: string
   query: Omit<MetricsQuery, 'range' | 'metrics'>
   lines: ChartLine[]
   unit: Unit
+  /** unit 'custom' only: the units suffix, e.g. "°C". */
+  unitLabel?: string
   /** Drawn as a dashed line, e.g. the nearly-full threshold. */
   threshold?: number
   defaultRange?: MetricsRange
 }
 
-function formatValue(v: number, unit: Unit): string {
+function formatValue(v: number, unit: Unit, unitLabel?: string): string {
   if (unit === 'bps') return formatBps(v)
   if (unit === 'pct') return `${Math.round(v)}%`
   if (unit === 'min') return `${Math.round(v)} min`
+  if (unit === 'custom') return `${+v.toFixed(1)} ${unitLabel ?? ''}`.trim()
   return `${+v.toFixed(1)}/min`
 }
 
@@ -44,6 +47,8 @@ export interface AreaSeriesChartProps {
   data: Record<string, number>[]
   lines: ChartLine[]
   unit: Unit
+  /** unit 'custom' only: the units suffix, e.g. "°C". */
+  unitLabel?: string
   /** Drawn as a dashed line, e.g. the nearly-full threshold. */
   threshold?: number
   /** The query's step, for the "Averaged per N minutes" note. */
@@ -55,7 +60,7 @@ export interface AreaSeriesChartProps {
 
 /** The chart body: a gradient-filled area chart plus its legend. Assumes
  *  data.length > 0; callers handle their own loading/error/empty states. */
-export function AreaSeriesChart({ data, lines, unit, threshold, step, shortTicks = false }: AreaSeriesChartProps) {
+export function AreaSeriesChart({ data, lines, unit, unitLabel, threshold, step, shortTicks = false }: AreaSeriesChartProps) {
   const gid = useId().replace(/:/g, '')
   return (
     <div className="rounded-lg border border-white/10 bg-slate-800/40 p-4">
@@ -73,10 +78,10 @@ export function AreaSeriesChart({ data, lines, unit, threshold, step, shortTicks
             <CartesianGrid strokeDasharray="3 3" stroke="#16303a" strokeOpacity={0.6} />
             <XAxis dataKey="t" type="number" scale="time" domain={['dataMin', 'dataMax']} tickFormatter={(t: number) => tick(t, shortTicks)}
               tick={{ fontSize: 10, fill: '#7A8A94' }} minTickGap={24} />
-            <YAxis tickFormatter={(v: number) => formatValue(v, unit)} tick={{ fontSize: 10, fill: '#7A8A94' }} width={68} />
+            <YAxis tickFormatter={(v: number) => formatValue(v, unit, unitLabel)} tick={{ fontSize: 10, fill: '#7A8A94' }} width={68} />
             <Tooltip
               labelFormatter={(t: number) => new Date(t).toLocaleString()}
-              formatter={(v: number, name) => [formatValue(v, unit), lines.find((l) => l.metric === String(name))?.label ?? name]}
+              formatter={(v: number, name) => [formatValue(v, unit, unitLabel), lines.find((l) => l.metric === String(name))?.label ?? name]}
               contentStyle={{ background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#e2e8f0' }}
             />
             {threshold != null && <ReferenceLine y={threshold} stroke="#eab308" strokeDasharray="4 4" />}
@@ -101,7 +106,7 @@ export function AreaSeriesChart({ data, lines, unit, threshold, step, shortTicks
 
 /** A metrics chart with its own range picker. Several instances of one
  *  metric in the result (a device's ports) are added together. */
-export default function TrafficChart({ title, query, lines, unit, threshold, defaultRange = '24h' }: Props) {
+export default function TrafficChart({ title, query, lines, unit, unitLabel, threshold, defaultRange = '24h' }: Props) {
   const [range, setRange] = useState<MetricsRange>(defaultRange)
   const metrics = lines.map((l) => l.metric)
   // Keyed by value: callers pass a fresh object every render.
@@ -150,7 +155,7 @@ export default function TrafficChart({ title, query, lines, unit, threshold, def
           No data in this range yet. Figures appear a minute or two after the first stats poll.
         </div>
       ) : (
-        <AreaSeriesChart data={data} lines={lines} unit={unit} threshold={threshold} step={result?.step_seconds} shortTicks={SHORT.includes(range)} />
+        <AreaSeriesChart data={data} lines={lines} unit={unit} unitLabel={unitLabel} threshold={threshold} step={result?.step_seconds} shortTicks={SHORT.includes(range)} />
       )}
     </section>
   )
