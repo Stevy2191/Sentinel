@@ -56,15 +56,18 @@ export interface AreaSeriesChartProps {
   /** Whether the caller's selected range is short (1h/6h/24h): decides the
    *  x-axis tick format (time of day vs. date). Defaults to false (date). */
   shortTicks?: boolean
+  /** Fill the parent instead of drawing a fixed-height card: dashboard
+   *  widgets, whose frame is already the card. */
+  bare?: boolean
 }
 
 /** The chart body: a gradient-filled area chart plus its legend. Assumes
  *  data.length > 0; callers handle their own loading/error/empty states. */
-export function AreaSeriesChart({ data, lines, unit, unitLabel, threshold, step, shortTicks = false }: AreaSeriesChartProps) {
+export function AreaSeriesChart({ data, lines, unit, unitLabel, threshold, step, shortTicks = false, bare = false }: AreaSeriesChartProps) {
   const gid = useId().replace(/:/g, '')
   return (
-    <div className="rounded-lg border border-white/10 bg-slate-800/40 p-4">
-      <div className="h-64">
+    <div className={bare ? 'flex h-full flex-col' : 'rounded-lg border border-white/10 bg-slate-800/40 p-4'}>
+      <div className={bare ? 'min-h-0 flex-1' : 'h-64'}>
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data} margin={{ top: 5, right: 10, bottom: 0, left: 0 }}>
             <defs>

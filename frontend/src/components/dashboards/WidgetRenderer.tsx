@@ -1,5 +1,7 @@
-import type { LabelData, WidgetType } from '@/types/dashboards'
+import type { LabelData, StatData, TimeseriesData, WidgetType } from '@/types/dashboards'
 import LabelWidget from '@/components/dashboards/widgets/LabelWidget'
+import TimeseriesWidget from '@/components/dashboards/widgets/TimeseriesWidget'
+import StatWidget from '@/components/dashboards/widgets/StatWidget'
 
 interface Props {
   type: WidgetType
@@ -14,6 +16,10 @@ export default function WidgetRenderer({ type, data }: Props) {
   switch (type) {
     case 'label':
       return <LabelWidget data={data as LabelData} />
+    case 'timeseries':
+      return <TimeseriesWidget data={data as TimeseriesData} />
+    case 'stat':
+      return <StatWidget data={data as StatData} />
     default:
       return <p className="text-sm text-slate-500">This version of Sentinel cannot show this widget.</p>
   }
