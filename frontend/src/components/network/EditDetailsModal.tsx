@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { X } from 'lucide-react'
 import { DEVICE_TYPE_LABEL, type Device, type DeviceType } from '@/hooks/useDevices'
 import { usePortActions, type FaceplatePortStyle } from '@/hooks/usePorts'
+import { setDeviceProfile, type DeviceProfileView } from '@/hooks/useDeviceHealth'
 import type { ApiError } from '@/services/api'
 
 const inputCls =
@@ -13,12 +14,20 @@ interface Props {
   onSaved: () => void
   /** The instance UPS thresholds, shown as the fields' placeholders. */
   upsDefaults?: { low: number; high: number }
+  /** The device's standing with every metric profile, for the profile
+   *  attach/detach fieldset. */
+  profiles: DeviceProfileView[]
+  /** Called after a profile override is saved, so the caller can refresh its
+   *  own copy (the Health section's applies/last_run). */
+  onProfilesChanged: () => void
 }
 
 /** The user's corrections to what SNMP reports. Inventory never overwrites
  *  them; clearing a field shows the SNMP value again. */
-export default function EditDetailsModal({ device, onClose, onSaved, upsDefaults }: Props) {
+export default function EditDetailsModal({ device, onClose, onSaved, upsDefaults, profiles, onProfilesChanged }: Props) {
   const { updateDetails, busy } = usePortActions()
+  const [profileBusy, setProfileBusy] = useState<string | null>(null)
+  const [profileError, setProfileError] = useState<string | null>(null)
   const [vendor, setVendor] = useState(device.vendor_override ?? '')
   const [model, setModel] = useState(device.model_override ?? '')
   const [location, setLocation] = useState(device.location_override ?? '')
@@ -55,6 +64,19 @@ export default function EditDetailsModal({ device, onClose, onSaved, upsDefaults
       onSaved()
     } catch (err) {
       setError((err as ApiError).message || 'Could not save the details')
+    }
+  }
+
+  const changeProfileMode = async (profileId: string, mode: 'auto' | 'attach' | 'detach') => {
+    setProfileBusy(profileId)
+    setProfileError(null)
+    try {
+      await setDeviceProfile(device.id, profileId, mode)
+      onProfilesChanged()
+    } catch (err) {
+      setProfileError((err as ApiError).message || 'Could not update the profile')
+    } finally {
+      setProfileBusy(null)
     }
   }
 
@@ -135,6 +157,33 @@ export default function EditDetailsModal({ device, onClose, onSaved, upsDefaults
             <input className={inputCls} value={sfp} onChange={(e) => setSfp(e.target.value)} placeholder="Detected automatically" />
             <span className="text-xs text-slate-500">Port numbers to draw as SFP, e.g. 49, 50, 51, 52.</span>
           </label>
+        </fieldset>
+
+        <fieldset className="space-y-3 rounded-lg border border-white/10 p-3">
+          <legend className="px-1 text-sm text-slate-300">Metric profiles</legend>
+          {profiles.length === 0 ? (
+            <p className="text-xs text-slate-500">No metric profiles defined yet.</p>
+          ) : (
+            profiles.map((p) => (
+              <div key={p.profile.id} className="flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm text-slate-200">{p.profile.name}</p>
+                  <p className="text-xs text-slate-500">{p.matched ? 'Matches this device' : "Doesn't match this device"}</p>
+                </div>
+                <select
+                  className={`${inputCls} w-auto`}
+                  value={p.mode}
+                  disabled={profileBusy === p.profile.id}
+                  onChange={(e) => void changeProfileMode(p.profile.id, e.target.value as 'auto' | 'attach' | 'detach')}
+                >
+                  <option value="auto">Automatic</option>
+                  <option value="attach">Always use</option>
+                  <option value="detach">Never use</option>
+                </select>
+              </div>
+            ))
+          )}
+          {profileError && <p className="text-xs text-red-400">{profileError}</p>}
         </fieldset>
 
         {isUPS && (
