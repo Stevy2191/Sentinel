@@ -56,7 +56,7 @@ func TestDBFilterMember(t *testing.T) {
 	if len(f.Visible.Devices) != 1 || f.Visible.Devices[0] != w.sharedDev {
 		t.Errorf("visible devices = %v, want only the device in the shared site", f.Visible.Devices)
 	}
-	if len(f.Visible.Monitors) != 2 {
+	if len(f.Visible.Monitors) != 2 || f.Visible.Monitors[0] != w.ownMonitor || f.Visible.Monitors[1] != w.sharedMonitor {
 		t.Errorf("visible monitors = %v, want own and shared", f.Visible.Monitors)
 	}
 	if len(f.Visible.Agents) != 0 {
@@ -104,6 +104,11 @@ func TestDBFilterStates(t *testing.T) {
 	testdb.Must(t, err)
 	if f.State() != "" {
 		t.Errorf("no subjects (a label): State() = %q, want \"\"", f.State())
+	}
+	f, err = Filter(ctx, w.checker, member, Subjects{Broad: true, Devices: []uuid.UUID{w.otherDev}})
+	testdb.Must(t, err)
+	if f.State() != "" || !f.Visible.Broad || f.Hidden != 1 {
+		t.Errorf("broad with a hidden device: State() = %q, Broad = %v, Hidden = %d; want \"\", true, 1", f.State(), f.Visible.Broad, f.Hidden)
 	}
 	f, err = Filter(ctx, w.checker, member, Subjects{Broad: true})
 	testdb.Must(t, err)
