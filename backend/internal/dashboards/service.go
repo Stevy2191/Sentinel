@@ -65,6 +65,8 @@ type CreateInput struct {
 	Name        string     `json:"name"`
 	Description string     `json:"description"`
 	SiteID      *uuid.UUID `json:"site_id"`
+	// Starter fills a new site dashboard with the standard widgets.
+	Starter bool `json:"starter"`
 }
 
 // dashboardRow is one dashboard joined to what decides the caller's access.
@@ -220,8 +222,34 @@ func (s *Service) Create(ctx context.Context, v Viewer, in CreateInput) (*Dashbo
 	} else {
 		d.OwnerID = &creator
 	}
-	if err := s.db.WithContext(ctx).Create(&d).Error; err != nil {
-		return nil, fmt.Errorf("creating dashboard: %w", err)
+	var starter []models.DashboardWidget
+	if in.Starter {
+		if d.SiteID == nil {
+			return nil, invalid("the standard widgets are for site dashboards")
+		}
+		for i, w := range starterWidgets(*d.SiteID) {
+			clean, err := s.validateWidget(ctx, v, i, w)
+			if err != nil {
+				return nil, fmt.Errorf("standard widget %d: %w", i, err)
+			}
+			starter = append(starter, clean)
+		}
+	}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&d).Error; err != nil {
+			return fmt.Errorf("creating dashboard: %w", err)
+		}
+		for i := range starter {
+			starter[i].ID = uuid.New()
+			starter[i].DashboardID = d.ID
+			if err := tx.Create(&starter[i]).Error; err != nil {
+				return fmt.Errorf("adding standard widget: %w", err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return s.Get(ctx, v, d.ID)
 }
