@@ -165,19 +165,35 @@ func TestMetricPreviewRouteAccess(t *testing.T) {
 	base := "/api/v1/devices/" + dev.ID.String() + "/metric-preview"
 	body := map[string]any{"name": "Temp", "source": "scalar", "kind": "gauge", "oid": "1.3.6.1.2.1.1.3", "scale": 1}
 
-	// Non-admin, even with site access: 403, never reaching the previewer.
+	// Non-admin, even with editable site access: 403, never reaching the previewer.
 	previewer := &fakeMetricPreviewer{}
 	r := profileRouter(&fakeProfiles{}, devs, fakeSiteLevels{site: services.SiteAccessEditable}, &fakeAudit{}, false, previewer)
 	if w := do(r, http.MethodPost, base, body); w.Code != http.StatusForbidden || previewer.calls != 0 {
 		t.Errorf("non-admin: %d calls %d, want 403 and no call", w.Code, previewer.calls)
 	}
 
-	// Admin with readonly site access: previewing only reads from the device.
+	// Admin, no site access at all: 404, same as every other device route.
+	previewer = &fakeMetricPreviewer{}
+	r = profileRouter(&fakeProfiles{}, devs, fakeSiteLevels{}, &fakeAudit{}, true, previewer)
+	if w := do(r, http.MethodPost, base, body); w.Code != http.StatusNotFound || previewer.calls != 0 {
+		t.Errorf("no site access: %d calls %d, want 404 and no call", w.Code, previewer.calls)
+	}
+
+	// Admin with only readonly site access: 403. Preview sends SNMP to a real
+	// device (like test-walk and Test connection), so it needs editable, not
+	// just read, access to the site.
 	previewer = &fakeMetricPreviewer{}
 	r = profileRouter(&fakeProfiles{}, devs, fakeSiteLevels{site: services.SiteAccessReadonly}, &fakeAudit{}, true, previewer)
+	if w := do(r, http.MethodPost, base, body); w.Code != http.StatusForbidden || previewer.calls != 0 {
+		t.Errorf("admin readonly: %d calls %d, want 403 and no call", w.Code, previewer.calls)
+	}
+
+	// Admin with editable site access: 200.
+	previewer = &fakeMetricPreviewer{}
+	r = profileRouter(&fakeProfiles{}, devs, fakeSiteLevels{site: services.SiteAccessEditable}, &fakeAudit{}, true, previewer)
 	w := do(r, http.MethodPost, base, body)
 	if w.Code != http.StatusOK || previewer.calls != 1 {
-		t.Fatalf("admin readonly: %d calls %d, want 200 and 1 call, body %s", w.Code, previewer.calls, w.Body.String())
+		t.Fatalf("admin editable: %d calls %d, want 200 and 1 call, body %s", w.Code, previewer.calls, w.Body.String())
 	}
 	var resp struct {
 		Data struct {
@@ -190,13 +206,6 @@ func TestMetricPreviewRouteAccess(t *testing.T) {
 	if !resp.Data.OK {
 		t.Errorf("body %s, want ok:true", w.Body.String())
 	}
-
-	// Admin, no site access at all: 404, same as every other device route.
-	previewer = &fakeMetricPreviewer{}
-	r = profileRouter(&fakeProfiles{}, devs, fakeSiteLevels{}, &fakeAudit{}, true, previewer)
-	if w := do(r, http.MethodPost, base, body); w.Code != http.StatusNotFound || previewer.calls != 0 {
-		t.Errorf("no site access: %d calls %d, want 404 and no call", w.Code, previewer.calls)
-	}
 }
 
 func TestMetricPreviewRouteInvalidMetricIs400(t *testing.T) {
@@ -206,7 +215,7 @@ func TestMetricPreviewRouteInvalidMetricIs400(t *testing.T) {
 	base := "/api/v1/devices/" + dev.ID.String() + "/metric-preview"
 
 	previewer := &fakeMetricPreviewer{err: fmt.Errorf("%w: give the metric a name", services.ErrInvalidMetric)}
-	r := profileRouter(&fakeProfiles{}, devs, fakeSiteLevels{site: services.SiteAccessReadonly}, &fakeAudit{}, true, previewer)
+	r := profileRouter(&fakeProfiles{}, devs, fakeSiteLevels{site: services.SiteAccessEditable}, &fakeAudit{}, true, previewer)
 	w := do(r, http.MethodPost, base, map[string]any{"source": "scalar", "kind": "gauge", "oid": "1.3.6.1.2.1.1.3", "scale": 1})
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("invalid metric: %d, want 400, body %s", w.Code, w.Body.String())
@@ -224,7 +233,7 @@ func TestMetricPreviewRouteSNMPFailureIsA200(t *testing.T) {
 	body := map[string]any{"name": "Temp", "source": "scalar", "kind": "gauge", "oid": "1.3.6.1.2.1.1.3", "scale": 1}
 
 	previewer := &fakeMetricPreviewer{err: errors.New("request timeout")}
-	r := profileRouter(&fakeProfiles{}, devs, fakeSiteLevels{site: services.SiteAccessReadonly}, &fakeAudit{}, true, previewer)
+	r := profileRouter(&fakeProfiles{}, devs, fakeSiteLevels{site: services.SiteAccessEditable}, &fakeAudit{}, true, previewer)
 	w := do(r, http.MethodPost, base, body)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status %d, want 200", w.Code)
