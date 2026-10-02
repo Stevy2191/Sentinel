@@ -31,7 +31,7 @@ export default function WidgetSettingsPanel({ dashboardId, siteId, widget, error
       <WidgetSettings type={widget.type} config={widget.config} siteId={siteId} onChange={(config) => onChange({ config })} />
       <div className="space-y-1">
         <p className="text-xs uppercase tracking-widest text-slate-500">Preview</p>
-        <WidgetPreview dashboardId={dashboardId} type={widget.type} title={widget.title} config={widget.config} />
+        <WidgetPreview key={widget.key} dashboardId={dashboardId} type={widget.type} title={widget.title} config={widget.config} />
       </div>
     </aside>
   )
