@@ -348,7 +348,7 @@ func run() error {
 	api.RegisterSettingsRoutes(v1, settingsService, models.DefaultMonitorCheckInterval, authService, reportScheduler)
 	api.RegisterSSLCertificateRoutes(v1, sslChecker, authService)
 	api.RegisterAgentRoutes(v1, agentService, settingsService, authService)
-	api.RegisterBackupRoutes(v1, backupService, auditService, authService)
+	api.RegisterBackupRoutes(v1, backupService, auditService, authService, profileService)
 	api.RegisterSiteRoutes(v1, siteService, auditService, authService)
 	api.RegisterSNMPCredentialRoutes(v1, snmpCredentialService, siteService, auditService, authService)
 	api.RegisterDeviceRoutes(v1, deviceService, prober, siteService, auditService)

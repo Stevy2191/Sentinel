@@ -46,8 +46,18 @@ func TestDBMetricsWriteAndQueryRaw(t *testing.T) {
 		t.Errorf("sum: %+v %v", sum, err)
 	}
 
-	if err := m.Write(ctx, s.DeviceID, now, []SamplePoint{{Metric: "bogus", Instance: "1", Value: 1}}); err == nil {
-		t.Error("unknown metric accepted")
+	// An unknown metric (a custom key the registry does not know, e.g.
+	// right after a restore) is skipped, not allowed to sink the batch.
+	if err := m.Write(ctx, s.DeviceID, now, []SamplePoint{{Metric: "bogus", Instance: "1", Value: 1},
+		{Metric: MetricIfInBps, Instance: "7", Value: 42}}); err != nil {
+		t.Errorf("a batch with an unknown metric failed: %v", err)
+	}
+	var bogus, kept int64
+	testdb.Must(t, db.Raw(`SELECT count(*) FROM metrics.series WHERE metric = 'bogus'`).Scan(&bogus).Error)
+	testdb.Must(t, db.Raw(`SELECT count(*) FROM metrics.samples x JOIN metrics.series s ON s.id = x.series_id
+		WHERE s.metric = ? AND s.instance = '7'`, MetricIfInBps).Scan(&kept).Error)
+	if bogus != 0 || kept != 1 {
+		t.Errorf("unknown metric: %d bogus series, %d known samples kept", bogus, kept)
 	}
 }
 

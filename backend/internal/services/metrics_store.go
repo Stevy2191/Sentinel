@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"log"
 	"math"
 	"slices"
 	"strconv"
@@ -50,6 +51,9 @@ type MetricsStore struct {
 	db  *gorm.DB
 	mu  sync.Mutex
 	ids map[seriesKey]cachedSeries
+	// skipped is the unknown metric keys Write has already logged, so each
+	// is logged once rather than on every poll.
+	skipped map[string]bool
 
 	// retMu guards retentionDays, a cache of the raw-samples retention policy
 	// (in days) so Query does not read timescaledb_information.jobs on every
@@ -60,7 +64,7 @@ type MetricsStore struct {
 }
 
 func NewMetricsStore(db *gorm.DB) *MetricsStore {
-	return &MetricsStore{db: db, ids: map[seriesKey]cachedSeries{}}
+	return &MetricsStore{db: db, ids: map[seriesKey]cachedSeries{}, skipped: map[string]bool{}}
 }
 
 func (m *MetricsStore) seriesID(ctx context.Context, deviceID uuid.UUID, p SamplePoint) (int64, error) {
@@ -98,13 +102,22 @@ func (m *MetricsStore) seriesID(ctx context.Context, deviceID uuid.UUID, p Sampl
 	return row.ID, nil
 }
 
-// Write stores one poll's points for a device, in one batch. Unknown metrics
-// are an error; NaN and infinite values are dropped.
+// Write stores one poll's points for a device, in one batch. Points of an
+// unknown metric are skipped (logged once per key): a custom key the
+// registry does not know yet, or no longer knows, must not lose the rest of
+// the batch. NaN and infinite values are dropped.
 func (m *MetricsStore) Write(ctx context.Context, deviceID uuid.UUID, at time.Time, points []SamplePoint) error {
 	rows := make([]metricsSample, 0, len(points))
 	for _, p := range points {
 		if !KnownMetric(p.Metric) {
-			return fmt.Errorf("unknown metric %q", p.Metric)
+			m.mu.Lock()
+			first := !m.skipped[p.Metric]
+			m.skipped[p.Metric] = true
+			m.mu.Unlock()
+			if first {
+				log.Printf("[metrics] skipping samples of unknown metric %q", p.Metric)
+			}
+			continue
 		}
 		if math.IsNaN(p.Value) || math.IsInf(p.Value, 0) {
 			continue
