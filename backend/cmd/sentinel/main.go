@@ -300,7 +300,18 @@ func run() error {
 	}
 	// Dashboards (phase 4). The registry is shared by the service (to
 	// validate saves) and the resolver (to load widget data).
-	dashboardRegistry := dashboards.NewDefaultRegistry(dashboards.Deps{})
+	dashboardRegistry := dashboards.NewDefaultRegistry(dashboards.Deps{
+		Metrics: metricsStore,
+		Ports:   portService,
+		Devices: deviceService,
+		Health: func(ctx context.Context, d *services.DeviceView) (*services.DeviceHealthView, error) {
+			return profileService.DeviceHealth(ctx, d, metricsStore, incidentService)
+		},
+		Incidents: incidentService,
+		Monitors:  monitorService,
+		Checks:    checkService,
+		Agents:    agentService,
+	})
 	dashboardChecker := dashboards.NewDBChecker(db, siteService, monitorService)
 	dashboardService := dashboards.NewService(db, siteService, dashboardRegistry, dashboardChecker)
 	dashboardResolver := dashboards.NewResolver(dashboardRegistry, dashboardChecker)
