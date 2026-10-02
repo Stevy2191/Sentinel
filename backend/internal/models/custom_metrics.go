@@ -264,7 +264,7 @@ type MIBModule struct {
 	FileName   string      `json:"file_name" gorm:"column:file_name;not null"`
 	SizeBytes  int         `json:"size_bytes" gorm:"column:size_bytes;not null"`
 	SHA256     string      `json:"sha256" gorm:"column:sha256;not null"`
-	Content    string      `json:"content" gorm:"column:content;not null"`
+	Content    string      `json:"-" gorm:"column:content;not null"`
 	Imports    StringArray `json:"imports" gorm:"column:imports;type:text[]"`
 	Missing    StringArray `json:"missing" gorm:"column:missing;type:text[]"`
 	Status     string      `json:"status" gorm:"column:status;not null"`
