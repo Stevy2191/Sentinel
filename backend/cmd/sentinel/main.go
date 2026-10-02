@@ -23,6 +23,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/api"
+	"github.com/Stevy2191/Sentinel/backend/internal/dashboards"
 	"github.com/Stevy2191/Sentinel/backend/internal/database"
 	"github.com/Stevy2191/Sentinel/backend/internal/hoststats"
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
@@ -297,6 +298,13 @@ func run() error {
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
+	// Dashboards (phase 4). The registry is shared by the service (to
+	// validate saves) and the resolver (to load widget data).
+	dashboardRegistry := dashboards.NewDefaultRegistry(dashboards.Deps{})
+	dashboardChecker := dashboards.NewDBChecker(db, siteService, monitorService)
+	dashboardService := dashboards.NewService(db, siteService, dashboardRegistry, dashboardChecker)
+	dashboardResolver := dashboards.NewResolver(dashboardRegistry, dashboardChecker)
+
 	router := gin.New()
 	if err := router.SetTrustedProxies(resolveTrustedProxies()); err != nil {
 		return fmt.Errorf("setting trusted proxies: %w", err)
@@ -322,6 +330,8 @@ func run() error {
 	// Share-token report access: public by design, so outside the authenticated
 	// v1 group (same split as the public status pages above).
 	api.RegisterPublicReportRoutes(router, reportBuilder)
+	// Public dashboard links: no login, like status pages and shared reports.
+	api.RegisterPublicDashboardRoutes(router, dashboardService, dashboardResolver)
 	// Agents authenticate with their own token, so their ingest routes sit
 	// outside the group behind the user session middleware.
 	api.RegisterAgentIngestRoutes(router, agentService)
@@ -359,6 +369,7 @@ func run() error {
 	api.RegisterMIBRoutes(v1, mibLibrary, auditService, authService)
 	api.RegisterProfileRoutes(v1, profileService, deviceService, siteService, auditService, authService, deviceWalker)
 	api.RegisterDeviceHealthRoute(v1, profileService, metricsStore, incidentService, deviceService, siteService)
+	api.RegisterDashboardRoutes(v1, dashboardService, dashboardResolver, auditService, authService)
 	api.RegisterSystemRoutes(v1, hostSampler, version)
 	// Per-user theme (not admin-gated): only AuthMiddleware applies.
 	// Self password change (any authenticated user).
