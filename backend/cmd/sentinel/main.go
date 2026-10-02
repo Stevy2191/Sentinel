@@ -355,6 +355,7 @@ func run() error {
 	api.RegisterNetworkRoutes(v1, deviceService, portService, metricsStore, networkSettings, siteService, authService)
 	api.RegisterMIBRoutes(v1, mibLibrary, auditService, authService)
 	api.RegisterProfileRoutes(v1, profileService, deviceService, siteService, auditService, authService, deviceWalker)
+	api.RegisterDeviceHealthRoute(v1, profileService, metricsStore, incidentService, deviceService, siteService)
 	api.RegisterSystemRoutes(v1, hostSampler, version)
 	// Per-user theme (not admin-gated): only AuthMiddleware applies.
 	// Self password change (any authenticated user).
@@ -416,6 +417,7 @@ func run() error {
 	devicePoller := services.NewDevicePoller(deviceService, snmpClient, incidentService, notificationManager, pollWorkers)
 	devicePoller.SetPortStats(services.NewPortMonitor(portService, metricsStore, incidentService, notificationManager, snmpClient, settingsService))
 	devicePoller.SetUPS(services.NewUPSMonitor(metricsStore, incidentService, notificationManager, snmpClient, settingsService, portService))
+	devicePoller.SetProfiles(services.NewProfileMonitor(profileService, metricsStore, incidentService, notificationManager, snmpClient, portService))
 	go devicePoller.Start(loopCtx)
 	// A restored config may carry a different retention than the live policy.
 	if err := networkSettings.EnsureRetention(context.Background()); err != nil {

@@ -251,3 +251,40 @@ func TestMetricPreviewRouteSNMPFailureIsA200(t *testing.T) {
 		t.Errorf("body %+v", resp)
 	}
 }
+
+// Health follows site access: 404 without it, 200 for readonly.
+func TestDeviceHealthAccess(t *testing.T) {
+	site := uuid.New()
+	dev := services.DeviceView{Device: models.Device{ID: uuid.New(), SiteID: site}}
+	calls := 0
+	health := func(context.Context, *services.DeviceView) (*services.DeviceHealthView, error) {
+		calls++
+		return &services.DeviceHealthView{Profiles: []services.DeviceProfileView{}, Metrics: []services.HealthMetric{{Key: "cisco_fan_envmon"}}}, nil
+	}
+	router := func(levels fakeSiteLevels) *gin.Engine {
+		gin.SetMode(gin.TestMode)
+		r := gin.New()
+		r.Use(func(c *gin.Context) {
+			c.Set("user_id", uuid.New())
+			c.Set("username", "someone")
+			c.Set("is_admin", false)
+			c.Next()
+		})
+		r.GET("/api/v1/devices/:id/health", deviceHealthHandler(health, &fakeDevices{device: dev}, levels))
+		return r
+	}
+	path := "/api/v1/devices/" + dev.ID.String() + "/health"
+	if w := do(router(fakeSiteLevels{}), http.MethodGet, path, nil); w.Code != http.StatusNotFound || calls != 0 {
+		t.Errorf("no access: %d calls %d", w.Code, calls)
+	}
+	w := do(router(fakeSiteLevels{site: services.SiteAccessReadonly}), http.MethodGet, path, nil)
+	if w.Code != http.StatusOK || calls != 1 {
+		t.Fatalf("readonly: %d calls %d", w.Code, calls)
+	}
+	var body struct {
+		Data services.DeviceHealthView `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || len(body.Data.Metrics) != 1 || body.Data.Metrics[0].Key != "cisco_fan_envmon" {
+		t.Errorf("body %s (%v)", w.Body.String(), err)
+	}
+}

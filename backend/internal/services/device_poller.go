@@ -97,6 +97,11 @@ type UPSPoller interface {
 	ReconcileUPS(ctx context.Context, d models.Device)
 }
 
+// ProfilePoller runs a device's profile poll (ProfileMonitor).
+type ProfilePoller interface {
+	PollProfiles(ctx context.Context, d models.Device, t snmp.Target)
+}
+
 // DevicePoller polls every enabled device for reachability on a bounded
 // worker pool, and refreshes inventory when it is due.
 type DevicePoller struct {
@@ -107,6 +112,7 @@ type DevicePoller struct {
 	workers   int
 	stats     PortStatsPoller
 	ups       UPSPoller
+	profiles  ProfilePoller
 
 	// Replaceable in tests.
 	resolve func(ctx context.Context, host string) (net.IP, error)
@@ -164,6 +170,10 @@ func (p *DevicePoller) SetPortStats(s PortStatsPoller) { p.stats = s }
 // SetUPS makes every successful poll of an up device run its UPS poll when
 // it is a UPS, and tidy up UPS incidents when it no longer is.
 func (p *DevicePoller) SetUPS(u UPSPoller) { p.ups = u }
+
+// SetProfiles makes every successful poll of an up device run its profile
+// poll (custom metrics) too.
+func (p *DevicePoller) SetProfiles(pp ProfilePoller) { p.profiles = pp }
 
 // TargetFor builds the SNMP target for a device at a resolved address.
 func TargetFor(d models.Device, host string, cred snmp.Credential) snmp.Target {
@@ -295,6 +305,10 @@ func (p *DevicePoller) PollOnce(ctx context.Context, d models.Device) {
 		} else {
 			p.ups.ReconcileUPS(ctx, d)
 		}
+	}
+
+	if result == PollOK && tr.Status == models.DeviceStatusUp && p.profiles != nil {
+		p.profiles.PollProfiles(ctx, d, target)
 	}
 
 	if result == PollOK && (d.LastInventoryAt == nil || now.Sub(*d.LastInventoryAt) >= inventoryInterval) {
