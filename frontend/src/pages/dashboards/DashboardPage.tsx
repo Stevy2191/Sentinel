@@ -1,16 +1,18 @@
 import { useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Loader2, Pencil } from 'lucide-react'
 import { useDashboard } from '@/hooks/useDashboards'
 import type { MetricsRange } from '@/hooks/useMetrics'
 import DashboardGrid from '@/components/dashboards/DashboardGrid'
 import WidgetBody from '@/components/dashboards/WidgetBody'
+import DashboardEditor from '@/components/dashboards/DashboardEditor'
 import RangeOverride from '@/components/dashboards/RangeOverride'
 import { isTimeBased } from '@/utils/dashboards'
 
 export default function DashboardPage({ mode }: { mode: 'view' | 'edit' }) {
   const { id } = useParams()
-  const { dashboard, loading, notFound, error } = useDashboard(id)
+  const { dashboard, setDashboard, loading, notFound, error } = useDashboard(id)
+  const navigate = useNavigate()
   const [override, setOverride] = useState<MetricsRange | ''>('')
 
   if (loading) return <Loader2 className="h-6 w-6 animate-spin text-slate-500" />
@@ -25,8 +27,23 @@ export default function DashboardPage({ mode }: { mode: 'view' | 'edit' }) {
     )
   }
   if (mode === 'edit') {
-    // Task 23 replaces this branch with the editor.
-    return <p className="text-slate-400">The editor is not built yet.</p>
+    if (!dashboard.can_edit) {
+      return (
+        <p className="text-slate-400">
+          {dashboard.published ? 'This dashboard has a public link, so only an admin can change it.' : 'You can view this dashboard but not change it.'}
+        </p>
+      )
+    }
+    return (
+      <DashboardEditor
+        dashboard={dashboard}
+        onSaved={(d) => {
+          setDashboard(d)
+          navigate(`/dashboards/${d.id}`)
+        }}
+        onCancel={() => navigate(`/dashboards/${dashboard.id}`)}
+      />
+    )
   }
 
   const widgets = dashboard.widgets ?? []
