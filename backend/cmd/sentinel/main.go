@@ -144,6 +144,7 @@ func run() error {
 	portService := services.NewPortService(db, metricsStore, incidentService, settingsService)
 	networkSettings := services.NewNetworkSettingsService(settingsService, metricsStore)
 	mibLibrary := services.NewMIBLibrary(db)
+	profileService := services.NewProfileService(db)
 	snmpClient := snmp.GoSNMPClient{}
 	prober := services.NewProber(snmpCredentialService, snmpClient)
 	scanManager := services.NewScanManager(prober)
@@ -353,6 +354,7 @@ func run() error {
 	api.RegisterTestWalkRoutes(v1, deviceService, siteService, deviceWalker)
 	api.RegisterNetworkRoutes(v1, deviceService, portService, metricsStore, networkSettings, siteService, authService)
 	api.RegisterMIBRoutes(v1, mibLibrary, auditService, authService)
+	api.RegisterProfileRoutes(v1, profileService, deviceService, siteService, auditService, authService)
 	api.RegisterSystemRoutes(v1, hostSampler, version)
 	// Per-user theme (not admin-gated): only AuthMiddleware applies.
 	// Self password change (any authenticated user).
@@ -399,6 +401,16 @@ func run() error {
 	// the device poller - the primary job - must still start.
 	if err := mibLibrary.SyncBuiltins(context.Background()); err != nil {
 		log.Printf("[mib] syncing built-in MIBs: %v", err)
+	}
+	// The Cisco starter profile seeds once, by name, and is never overwritten;
+	// Load then registers every stored custom metric key (starter and
+	// user-defined) so MetricsStore.Write accepts them. Logged, not fatal: the
+	// device poller - the primary job - must still start.
+	if err := profileService.SeedStarter(context.Background()); err != nil {
+		log.Printf("[profiles] seeding the starter profile: %v", err)
+	}
+	if err := profileService.Load(context.Background()); err != nil {
+		log.Printf("[profiles] loading custom metric keys: %v", err)
 	}
 	pollWorkers := settingsService.GetInt(context.Background(), models.SettingSNMPPollWorkers, 16)
 	devicePoller := services.NewDevicePoller(deviceService, snmpClient, incidentService, notificationManager, pollWorkers)
