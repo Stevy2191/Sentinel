@@ -27,7 +27,9 @@ const nav = [
 const networkNav: { to: string; label: string; end?: boolean; adminOnly?: boolean }[] = [
   { to: '/network/sites', label: 'Sites' },
   { to: '/network/devices', label: 'Devices' },
+  { to: '/network/mibs/browse', label: 'MIB browser' },
   { to: '/network/credentials', label: 'Credentials', adminOnly: true },
+  { to: '/network/mibs', label: 'MIB library', end: true, adminOnly: true },
   { to: '/network/settings', label: 'Settings', adminOnly: true },
 ]
 
