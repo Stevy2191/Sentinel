@@ -42,6 +42,8 @@ export function useDashboards(siteId?: string) {
 
   useEffect(() => {
     let cancelled = false
+    setLoading(true)
+    setError(null)
     api
       .get<ApiResponse<Dashboard[]>>('/dashboards', { params: siteId ? { site_id: siteId } : {} })
       .then(({ data }) => {
@@ -74,8 +76,15 @@ export function useDashboard(id: string | undefined) {
   const refetch = useCallback(() => setVersion((v) => v + 1), [])
 
   useEffect(() => {
-    if (!id) return
+    if (!id) {
+      setLoading(false)
+      return
+    }
     let cancelled = false
+    setDashboard(null)
+    setNotFound(false)
+    setError(null)
+    setLoading(true)
     api
       .get<ApiResponse<DashboardDetail>>(`/dashboards/${id}`)
       .then(({ data }) => {
@@ -140,6 +149,7 @@ export function useDeviceMetrics(deviceId: string | undefined) {
   useEffect(() => {
     if (!deviceId) {
       setMetrics([])
+      setLoading(false)
       return
     }
     let cancelled = false
