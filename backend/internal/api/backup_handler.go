@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 	"path/filepath"
 
@@ -83,8 +84,20 @@ type restoreRequest struct {
 	Confirm bool `json:"confirm"`
 }
 
+// backupRestorer is the part of BackupService a restore needs.
+type backupRestorer interface {
+	Get(id string) (*services.BackupInfo, error)
+	Restore(ctx context.Context, id string) (*services.RestoreResult, error)
+}
+
+// registryLoader reloads in-memory state derived from restored tables: the
+// custom metric key registry (ProfileService.Load).
+type registryLoader interface {
+	Load(ctx context.Context) error
+}
+
 // RestoreBackupHandler handles POST /api/v1/backups/:backup_id/restore.
-func RestoreBackupHandler(backups *services.BackupService, audit auditRecorder) gin.HandlerFunc {
+func RestoreBackupHandler(backups backupRestorer, audit auditRecorder, registry registryLoader) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("backup_id")
 
@@ -109,6 +122,15 @@ func RestoreBackupHandler(backups *services.BackupService, audit auditRecorder) 
 		if err != nil {
 			respondError(c, restoreErrorStatus(err), err.Error())
 			return
+		}
+		// The restore replaced the profiles: reload the custom metric keys,
+		// or samples for restored keys would be refused (and keys that no
+		// longer exist still accepted) until the next restart. The restore
+		// itself succeeded, so a failure here is logged, not returned.
+		if registry != nil {
+			if err := registry.Load(c.Request.Context()); err != nil {
+				log.Printf("[backup] reloading custom metric keys after restoring %s: %v", id, err)
+			}
 		}
 		respondSuccess(c, http.StatusOK, gin.H{
 			"message":             "database restored from " + result.Restored,
@@ -168,11 +190,11 @@ func recordBackupAudit(c *gin.Context, audit auditRecorder, action, id, filename
 // Every one is admin-only, including the read-only listing: the filenames
 // alone say when a database was last dumped, and downloading one hands over
 // every credential it holds.
-func RegisterBackupRoutes(rg *gin.RouterGroup, backups *services.BackupService, audit auditRecorder, users adminChecker) {
+func RegisterBackupRoutes(rg *gin.RouterGroup, backups *services.BackupService, audit auditRecorder, users adminChecker, registry registryLoader) {
 	g := rg.Group("/backups", RequireAdmin(users))
 	g.POST("/create", CreateBackupHandler(backups, audit))
 	g.GET("", ListBackupsHandler(backups))
 	g.GET("/:backup_id/download", DownloadBackupHandler(backups, audit))
-	g.POST("/:backup_id/restore", RestoreBackupHandler(backups, audit))
+	g.POST("/:backup_id/restore", RestoreBackupHandler(backups, audit, registry))
 	g.DELETE("/:backup_id", DeleteBackupHandler(backups, audit))
 }
