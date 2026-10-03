@@ -8,6 +8,7 @@ import TopNSettings from '@/components/dashboards/settings/TopNSettings'
 import EventLogSettings from '@/components/dashboards/settings/EventLogSettings'
 import DeviceTableSettings from '@/components/dashboards/settings/DeviceTableSettings'
 import OpenIncidentsSettings from '@/components/dashboards/settings/OpenIncidentsSettings'
+import MonitorsSettings from '@/components/dashboards/settings/MonitorsSettings'
 
 interface Props {
   type: WidgetType
@@ -39,6 +40,8 @@ export default function WidgetSettings({ type, config, siteId, onChange }: Props
       return <DeviceTableSettings {...props} />
     case 'open_incidents':
       return <OpenIncidentsSettings {...props} />
+    case 'monitors':
+      return <MonitorsSettings {...props} />
     default:
       return <p className="text-sm text-slate-500">This widget has no settings form yet.</p>
   }

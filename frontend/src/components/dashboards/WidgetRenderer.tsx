@@ -1,8 +1,9 @@
-import type { DeviceHealthData, DeviceTableData, EventLogData, LabelData, OpenIncidentsData, PortGridData, SitePowerData, StatData, TimeseriesData, TopNData, WidgetType } from '@/types/dashboards'
+import type { DeviceHealthData, DeviceTableData, EventLogData, LabelData, MonitorsData, OpenIncidentsData, PortGridData, SitePowerData, StatData, TimeseriesData, TopNData, WidgetType } from '@/types/dashboards'
 import TopNWidget from '@/components/dashboards/widgets/TopNWidget'
 import EventLogWidget from '@/components/dashboards/widgets/EventLogWidget'
 import DeviceTableWidget from '@/components/dashboards/widgets/DeviceTableWidget'
 import OpenIncidentsWidget from '@/components/dashboards/widgets/OpenIncidentsWidget'
+import MonitorsWidget from '@/components/dashboards/widgets/MonitorsWidget'
 import PortGridWidget from '@/components/dashboards/widgets/PortGridWidget'
 import DeviceHealthWidget from '@/components/dashboards/widgets/DeviceHealthWidget'
 import SitePowerWidget from '@/components/dashboards/widgets/SitePowerWidget'
@@ -41,6 +42,8 @@ export default function WidgetRenderer({ type, data, linkable }: Props) {
       return <DeviceTableWidget data={data as DeviceTableData} linkable={linkable} />
     case 'open_incidents':
       return <OpenIncidentsWidget data={data as OpenIncidentsData} linkable={linkable} />
+    case 'monitors':
+      return <MonitorsWidget data={data as MonitorsData} linkable={linkable} />
     default:
       return <p className="text-sm text-slate-500">This version of Sentinel cannot show this widget.</p>
   }
