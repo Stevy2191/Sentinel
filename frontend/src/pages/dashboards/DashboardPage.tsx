@@ -1,19 +1,25 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Loader2, Pencil } from 'lucide-react'
+import { ArrowLeft, Globe2, Loader2, Pencil, Share2 } from 'lucide-react'
 import { useDashboard } from '@/hooks/useDashboards'
+import { useAuthContext } from '@/context/AuthContext'
 import type { MetricsRange } from '@/hooks/useMetrics'
 import DashboardGrid from '@/components/dashboards/DashboardGrid'
 import WidgetBody from '@/components/dashboards/WidgetBody'
 import DashboardEditor from '@/components/dashboards/DashboardEditor'
 import RangeOverride from '@/components/dashboards/RangeOverride'
+import DashboardSharingPanel from '@/components/dashboards/DashboardSharingPanel'
+import PublicLinkPanel from '@/components/dashboards/PublicLinkPanel'
 import { isTimeBased } from '@/utils/dashboards'
 
 export default function DashboardPage({ mode }: { mode: 'view' | 'edit' }) {
   const { id } = useParams()
-  const { dashboard, setDashboard, loading, notFound, error } = useDashboard(id)
+  const { dashboard, setDashboard, loading, notFound, error, refetch } = useDashboard(id)
   const navigate = useNavigate()
   const [override, setOverride] = useState<MetricsRange | ''>('')
+  const { currentUser } = useAuthContext()
+  const [sharing, setSharing] = useState(false)
+  const [linking, setLinking] = useState(false)
 
   if (loading) return <Loader2 className="h-6 w-6 animate-spin text-slate-500" />
   if (notFound || !dashboard) {
@@ -68,6 +74,16 @@ export default function DashboardPage({ mode }: { mode: 'view' | 'edit' }) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {widgets.some((w) => isTimeBased(w.type)) && <RangeOverride value={override} onChange={setOverride} />}
+          {dashboard.can_share && !dashboard.site_id && (
+            <button className="btn-secondary flex items-center gap-2" onClick={() => setSharing(true)}>
+              <Share2 className="h-4 w-4" /> Share
+            </button>
+          )}
+          {currentUser?.is_admin && (
+            <button className="btn-secondary flex items-center gap-2" onClick={() => setLinking(true)}>
+              <Globe2 className="h-4 w-4" /> {dashboard.published ? 'Public link' : 'Publish'}
+            </button>
+          )}
           {dashboard.can_edit && (
             <Link to={`/dashboards/${dashboard.id}/edit`} className="btn-secondary flex items-center gap-2">
               <Pencil className="h-4 w-4" /> Edit
@@ -91,6 +107,8 @@ export default function DashboardPage({ mode }: { mode: 'view' | 'edit' }) {
           )}
         />
       )}
+      {sharing && <DashboardSharingPanel dashboard={dashboard} onClose={() => setSharing(false)} />}
+      {linking && <PublicLinkPanel dashboardId={dashboard.id} onClose={() => setLinking(false)} onChanged={refetch} />}
     </div>
   )
 }
