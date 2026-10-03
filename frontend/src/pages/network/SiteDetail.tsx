@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { MapPin, Pencil, Plus, Radar, Trash2 } from 'lucide-react'
+import { LayoutDashboard, MapPin, Pencil, Plus, Radar, Trash2 } from 'lucide-react'
 import { siteAddressLines, useSite, useSiteActions } from '@/hooks/useSites'
 import { useDevices } from '@/hooks/useDevices'
+import { useDashboards } from '@/hooks/useDashboards'
 import SiteFormModal from '@/components/SiteFormModal'
 import SiteSharingPanel from '@/components/SiteSharingPanel'
+import NewDashboardModal from '@/components/dashboards/NewDashboardModal'
 import DeviceTable from '@/components/network/DeviceTable'
 import DeviceFilterBar from '@/components/network/DeviceFilterBar'
 import { filterDevices, NO_DEVICE_FILTERS } from '@/utils/devices'
@@ -55,6 +57,8 @@ export default function SiteDetail() {
   const [deviceFilters, setDeviceFilters] = useState(NO_DEVICE_FILTERS)
   const shownDevices = useMemo(() => filterDevices(devices, deviceFilters), [devices, deviceFilters])
   const [scanning, setScanning] = useState(false)
+  const { dashboards } = useDashboards(id)
+  const [newDashboard, setNewDashboard] = useState(false)
 
   if (loading) return <p className="text-sm text-slate-400">Loading…</p>
 
@@ -114,6 +118,12 @@ export default function SiteDetail() {
             </button>
             {confirmDelete ? (
               <>
+                {dashboards.length > 0 && (
+                  <span className="self-center text-sm text-amber-300">
+                    Its {dashboards.length} dashboard{dashboards.length === 1 ? '' : 's'}
+                    {dashboards.some((d) => d.published) && ` (${dashboards.filter((d) => d.published).length} with a public link)`} will be deleted too.
+                  </span>
+                )}
                 <button className="btn-secondary" onClick={() => setConfirmDelete(false)}>
                   Cancel
                 </button>
@@ -131,6 +141,31 @@ export default function SiteDetail() {
       </div>
 
       {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">{error}</div>}
+
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-light text-white">Dashboards</h2>
+          {canEdit && (
+            <button className="btn-secondary flex items-center gap-2" onClick={() => setNewDashboard(true)}>
+              <Plus className="h-4 w-4" /> New site dashboard
+            </button>
+          )}
+        </div>
+        {dashboards.length === 0 ? (
+          <p className="text-sm text-slate-500">No dashboards for this site yet.</p>
+        ) : (
+          <ul className="flex flex-wrap gap-2">
+            {dashboards.map((d) => (
+              <li key={d.id}>
+                <Link to={`/dashboards/${d.id}`} className="card inline-flex items-center gap-2 px-3 py-2 text-sm hover:bg-white/5">
+                  <LayoutDashboard className="h-4 w-4 text-teal-400" /> {d.name}
+                  {d.published && <span className="text-xs text-teal-300">public</span>}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -205,6 +240,9 @@ export default function SiteDetail() {
         <DeviceFormModal siteId={site.id} onClose={() => setAddingDevice(false)} onSaved={() => { setAddingDevice(false); void refetchDevices() }} />
       )}
       {scanning && <ScanModal siteId={site.id} onClose={() => setScanning(false)} onAdded={() => void refetchDevices()} />}
+      {newDashboard && (
+        <NewDashboardModal siteId={site.id} onClose={() => setNewDashboard(false)} onCreated={(d) => navigate(`/dashboards/${d.id}/edit`)} />
+      )}
     </div>
   )
 }
