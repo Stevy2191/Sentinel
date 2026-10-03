@@ -28,7 +28,12 @@ export default function StatSettings({ config, siteId, onChange }: SettingsProps
         <select
           className={inputCls}
           value={siteTotal ? 'site' : 'device'}
-          onChange={(e) => (e.target.value === 'site' ? set({ site_id: siteId, device_id: undefined, instance: undefined }) : set({ site_id: undefined }))}
+          onChange={(e) =>
+            e.target.value === 'site'
+              ? // A site total is of a port metric only, as on the timeseries form.
+                set({ site_id: siteId, device_id: undefined, instance: undefined, metric: metric.startsWith('if_') ? metric : undefined })
+              : set({ site_id: undefined })
+          }
         >
           <option value="device">One device</option>
           <option value="site">A whole site's total</option>

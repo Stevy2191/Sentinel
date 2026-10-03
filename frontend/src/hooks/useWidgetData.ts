@@ -15,10 +15,10 @@ const MAX_BACKOFF_MS = 5 * 60 * 1000
 async function fetchWidget<T>(src: WidgetSource, signal: AbortSignal): Promise<WidgetResponse<T>> {
   if (src.kind === 'public') {
     // A bare axios call: the public page has no session and must not trigger
-    // the app's auth handling.
+    // the app's auth handling. The timeout turns a hung request into a retry.
     const res = await axios.get<ApiResponse<WidgetResponse<T>>>(
       `/api/v1/public/dashboards/${src.token}/widgets/${src.widgetId}/data`,
-      { signal },
+      { signal, timeout: 60000 },
     )
     return res.data.data
   }

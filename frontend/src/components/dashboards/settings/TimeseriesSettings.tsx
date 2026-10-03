@@ -68,7 +68,10 @@ export default function TimeseriesSettings({ config, siteId, onChange }: Setting
               <DevicePicker siteId={siteId} value={devices} onChange={(ids) => set({ devices: ids, instances: [] })} />
             </Field>
           )}
-          <Field label="Metrics" hint={siteTotal ? 'Site totals add up the ports of every device.' : 'Up to 10, listed from the first device.'}>
+          <Field
+            label="Metrics"
+            hint={siteTotal ? "Site totals combine every device's physical ports: traffic and errors add up, percentages are averaged." : 'Up to 10, listed from the first device.'}
+          >
             <MetricPicker deviceId={devices[0]} portOnly={siteTotal} value={metrics} onChange={(m) => set({ metrics: m, instances: [] })} />
           </Field>
           {!siteTotal && devices.length === 1 && metrics.length === 1 && (

@@ -45,6 +45,10 @@ export function isTimeBased(t: WidgetType): boolean {
   return widgetInfo(t).timeBased
 }
 
+/** Shown by every Fullscreen button: the browser drops fullscreen when the
+ *  wall display reloads itself, and only a user gesture can bring it back. */
+export const KIOSK_HINT = "For a TV, use the browser's kiosk mode or F11 — fullscreen can't survive a reload."
+
 /** A widget being edited. key is its id, or "new-N" until it is saved. */
 export interface DraftWidget {
   key: string
