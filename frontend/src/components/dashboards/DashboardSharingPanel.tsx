@@ -77,7 +77,7 @@ export default function DashboardSharingPanel({ dashboard, onClose }: { dashboar
             <option value="readonly">Can view</option>
             <option value="editable">Can edit</option>
           </select>
-          <button className="btn-primary" disabled={!userId} onClick={() => void run(async () => { await actions.share(dashboard.id, userId, permission); setUserId('') })}>
+          <button className="btn-primary" disabled={!userId} onClick={() => void run(async () => { await actions.share(dashboard.id, userId, permission); if (mounted.current) setUserId('') })}>
             Share
           </button>
         </div>
