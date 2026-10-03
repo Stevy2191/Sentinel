@@ -153,3 +153,29 @@ func (r *Report) PeriodLabel(now time.Time, loc *time.Location) string {
 	}
 	return fmt.Sprintf("Last %d days", r.TimeRangeDays)
 }
+
+// PreviousPeriod returns the window a report compares itself with: the
+// previous calendar unit for a calendar period ("August" for "September",
+// and whole even while this one is still running), otherwise the same length
+// immediately before start. start and end are what ResolvePeriod returned.
+// Calendar arithmetic runs in loc, so a month boundary stays at local midnight
+// across a DST change. nil loc is UTC.
+func (r *Report) PreviousPeriod(start, end time.Time, loc *time.Location) (time.Time, time.Time) {
+	if loc == nil {
+		loc = time.UTC
+	}
+	start = start.In(loc)
+	if r.PeriodKind == PeriodCalendar {
+		switch r.PeriodUnit {
+		case UnitWeek:
+			return start.AddDate(0, 0, -7), start
+		case UnitMonth:
+			return start.AddDate(0, -1, 0), start
+		case UnitQuarter:
+			return start.AddDate(0, -3, 0), start
+		case UnitYear:
+			return start.AddDate(-1, 0, 0), start
+		}
+	}
+	return start.Add(-end.Sub(start)), start
+}

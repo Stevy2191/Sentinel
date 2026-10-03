@@ -22,13 +22,55 @@ const (
 	ScopeTypeTypes = "types"
 )
 
+// Network scope types, for metrics reports: what a report on network data
+// covers.
+const (
+	// ScopeTypePorts covers the chosen ports (device_interfaces ids).
+	ScopeTypePorts = "ports"
+	// ScopeTypePortRoles covers every port with one of the chosen roles on a
+	// device in the chosen sites, worked out again at every run.
+	ScopeTypePortRoles = "port_roles"
+	// ScopeTypeDevices covers the chosen devices.
+	ScopeTypeDevices = "devices"
+	// ScopeTypeSites covers the chosen sites: their totals and every port of
+	// every device in them, worked out again at every run.
+	ScopeTypeSites = "sites"
+)
+
+// Limits of a metrics report.
+const (
+	// MaxReportSubjects bounds the ports or devices one metrics report
+	// covers after resolution; a larger port_roles or sites scope keeps the
+	// busiest this many.
+	MaxReportSubjects = 500
+	// MaxReportMetrics bounds the metrics one metrics report lists.
+	MaxReportMetrics = 10
+)
+
 // ValidScopeTypes lists the accepted scope_type values.
 var ValidScopeTypes = map[string]bool{
-	ScopeTypeMonitors: true,
-	ScopeTypeTags:     true,
-	ScopeTypeGroups:   true,
-	ScopeTypeTypes:    true,
+	ScopeTypeMonitors:  true,
+	ScopeTypeTags:      true,
+	ScopeTypeGroups:    true,
+	ScopeTypeTypes:     true,
+	ScopeTypePorts:     true,
+	ScopeTypePortRoles: true,
+	ScopeTypeDevices:   true,
+	ScopeTypeSites:     true,
 }
+
+// monitorScopeTypes are the scopes of uptime and incident reports.
+var monitorScopeTypes = map[string]bool{
+	ScopeTypeMonitors: true, ScopeTypeTags: true, ScopeTypeGroups: true, ScopeTypeTypes: true,
+}
+
+// networkScopeTypes are the scopes of metrics reports.
+var networkScopeTypes = map[string]bool{
+	ScopeTypePorts: true, ScopeTypePortRoles: true, ScopeTypeDevices: true, ScopeTypeSites: true,
+}
+
+// IsNetworkScope reports whether scopeType is one of the four network scopes.
+func IsNetworkScope(scopeType string) bool { return networkScopeTypes[scopeType] }
 
 // Report types. Every report is exactly one of these - there is no template
 // system to configure sections from.
@@ -39,12 +81,17 @@ const (
 	// ReportTypeIncident renders the full incident list for the scope, with
 	// root cause and resolution detail.
 	ReportTypeIncident = "incident"
+	// ReportTypeMetrics renders network statistics (traffic, busy, errors,
+	// UPS readings, profile and custom metrics) for ports, devices and sites,
+	// compared with the period before.
+	ReportTypeMetrics = "metrics"
 )
 
 // ValidReportTypes lists the accepted report_type values.
 var ValidReportTypes = map[string]bool{
 	ReportTypeUptime:   true,
 	ReportTypeIncident: true,
+	ReportTypeMetrics:  true,
 }
 
 // Report access types.
@@ -53,8 +100,9 @@ const (
 	AccessTypeViewer = "viewer"
 )
 
-// ReportScope is the JSONB payload on reports.scope_data. Exactly one field is
-// populated, matching the row's scope_type.
+// ReportScope is the JSONB payload on reports.scope_data. A monitor scope
+// fills the one field its scope_type names; a network scope fills its
+// subject fields and Metrics.
 //
 // This is a concrete struct rather than a generic JSON container so the scope
 // can be resolved without re-parsing untyped maps at every call site.
@@ -64,6 +112,18 @@ type ReportScope struct {
 	GroupIDs   []uuid.UUID `json:"group_ids,omitempty"`
 	// Types holds monitor check types: http, tcp, ping, dns.
 	Types []string `json:"types,omitempty"`
+
+	// PortIDs are device_interfaces ids (scope_type ports).
+	PortIDs []uuid.UUID `json:"port_ids,omitempty"`
+	// SiteIDs are the sites of a port_roles or sites scope.
+	SiteIDs []uuid.UUID `json:"site_ids,omitempty"`
+	// DeviceIDs are the devices of a devices scope.
+	DeviceIDs []uuid.UUID `json:"device_ids,omitempty"`
+	// Roles are port roles (models.ValidPortRoles) for port_roles.
+	Roles []string `json:"roles,omitempty"`
+	// Metrics are the metric keys a metrics report shows, 1 to 10, in
+	// order; the first ranks the rows.
+	Metrics []string `json:"metrics,omitempty"`
 }
 
 // Value serializes the scope to JSON for storage.
@@ -88,6 +148,12 @@ func (s *ReportScope) Scan(value any) error {
 // scope is rejected: a report covering nothing is a configuration mistake, and
 // silently producing an empty report hides it.
 func (s ReportScope) Validate(scopeType string) error {
+	if IsNetworkScope(scopeType) {
+		if err := s.ValidateSubjects(scopeType); err != nil {
+			return err
+		}
+		return s.validateMetrics()
+	}
 	switch scopeType {
 	case ScopeTypeMonitors:
 		if len(s.MonitorIDs) == 0 {
@@ -115,6 +181,71 @@ func (s ReportScope) Validate(scopeType string) error {
 		}
 	default:
 		return errors.New("unknown scope_type: " + scopeType)
+	}
+	return nil
+}
+
+// ValidateSubjects checks the subject fields of a network scope: the ids and
+// roles its type requires, within the limits. It leaves the metrics alone, so
+// a scope can be sized before any metric is chosen. Whether each subject
+// exists and is visible is netreport's job: it needs the database.
+func (s ReportScope) ValidateSubjects(scopeType string) error {
+	switch scopeType {
+	case ScopeTypePorts:
+		return checkSubjectCount("port_ids", len(s.PortIDs), scopeType, "ports")
+	case ScopeTypeDevices:
+		return checkSubjectCount("device_ids", len(s.DeviceIDs), scopeType, "devices")
+	case ScopeTypePortRoles:
+		if len(s.SiteIDs) == 0 {
+			return errors.New(`scope_data.site_ids is required when scope_type is "port_roles"`)
+		}
+		if len(s.Roles) == 0 {
+			return errors.New(`scope_data.roles is required when scope_type is "port_roles"`)
+		}
+		for _, r := range s.Roles {
+			if !ValidPortRoles[r] {
+				return fmt.Errorf("unknown port role in scope_data.roles: %q (allowed: wan, uplink, access)", r)
+			}
+		}
+	case ScopeTypeSites:
+		if len(s.SiteIDs) == 0 {
+			return errors.New(`scope_data.site_ids is required when scope_type is "sites"`)
+		}
+	default:
+		return errors.New("unknown network scope_type: " + scopeType)
+	}
+	return nil
+}
+
+// checkSubjectCount requires 1 to MaxReportSubjects ids in field.
+func checkSubjectCount(field string, n int, scopeType, noun string) error {
+	if n == 0 {
+		return fmt.Errorf("scope_data.%s is required when scope_type is %q", field, scopeType)
+	}
+	if n > MaxReportSubjects {
+		return fmt.Errorf("scope_data.%s can name at most %d %s", field, MaxReportSubjects, noun)
+	}
+	return nil
+}
+
+// validateMetrics requires 1 to MaxReportMetrics distinct, non-empty keys.
+// Whether each key exists, and is one a report can show, is netreport's job.
+func (s ReportScope) validateMetrics() error {
+	if len(s.Metrics) == 0 {
+		return errors.New("scope_data.metrics is required for a metrics report")
+	}
+	if len(s.Metrics) > MaxReportMetrics {
+		return fmt.Errorf("scope_data.metrics can list at most %d metrics", MaxReportMetrics)
+	}
+	seen := make(map[string]bool, len(s.Metrics))
+	for _, k := range s.Metrics {
+		if k == "" {
+			return errors.New("scope_data.metrics has an empty metric key")
+		}
+		if seen[k] {
+			return fmt.Errorf("scope_data.metrics lists %s twice", k)
+		}
+		seen[k] = true
 	}
 	return nil
 }
@@ -155,10 +286,17 @@ func (r *Report) Validate() error {
 		return errors.New("report name is required")
 	}
 	if !ValidReportTypes[r.ReportType] {
-		return errors.New("report_type must be one of: uptime, incident")
+		return errors.New("report_type must be one of: uptime, incident, metrics")
 	}
-	if !ValidScopeTypes[r.ScopeType] {
-		return errors.New("scope_type must be one of: monitors, tags, groups")
+	// Each report type has its own scopes: a metrics report covers network
+	// subjects, the others cover monitors. The message names what is allowed
+	// for this report type.
+	if r.ReportType == ReportTypeMetrics {
+		if !networkScopeTypes[r.ScopeType] {
+			return errors.New("scope_type must be one of: ports, port_roles, devices, sites for a metrics report")
+		}
+	} else if !monitorScopeTypes[r.ScopeType] {
+		return errors.New("scope_type must be one of: monitors, tags, groups, types for an uptime or incident report")
 	}
 	if err := r.ValidatePeriod(); err != nil {
 		return err
