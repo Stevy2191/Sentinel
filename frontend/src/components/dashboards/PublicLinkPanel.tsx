@@ -18,6 +18,7 @@ export default function PublicLinkPanel({ dashboardId, onClose, onChanged }: Pro
   const [info, setInfo] = useState<PublicLinkInfo | null>(null)
   const [confirm, setConfirm] = useState<'regenerate' | 'revoke' | null>(null)
   const [copied, setCopied] = useState(false)
+  const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [version, setVersion] = useState(0)
   const mounted = useRef(true)
@@ -51,12 +52,19 @@ export default function PublicLinkPanel({ dashboardId, onClose, onChanged }: Pro
     setError(null)
     setConfirm(null)
     setCopied(false)
+    setBusy(true)
     try {
       await fn()
-      if (mounted.current) setVersion((v) => v + 1)
+      if (mounted.current) {
+        // Drop the old link until the reload brings the new state, so a dead URL can't be copied.
+        setInfo(null)
+        setVersion((v) => v + 1)
+      }
       onChanged()
     } catch (err) {
       if (mounted.current) setError((err as ApiError).message || 'That did not work')
+    } finally {
+      if (mounted.current) setBusy(false)
     }
   }
 
@@ -97,12 +105,15 @@ export default function PublicLinkPanel({ dashboardId, onClose, onChanged }: Pro
           </div>
         )}
         {error && <p className="text-sm text-red-400">{error}</p>}
-        {!info ? null : url ? (
+        {busy ? (
+          <p className="text-sm text-slate-400">Updating…</p>
+        ) : !info ? null : url ? (
           <>
             <div className="flex gap-2">
               <input ref={inputRef} className={inputCls} readOnly value={url} onFocus={(e) => e.target.select()} />
               <button
                 className="btn-secondary flex items-center gap-1"
+                disabled={busy}
                 onClick={() => void copy(url)}
               >
                 <Copy className="h-4 w-4" /> {copied ? 'Copied' : 'Copy'}
@@ -113,11 +124,12 @@ export default function PublicLinkPanel({ dashboardId, onClose, onChanged }: Pro
                 <span className="text-amber-300">
                   {confirm === 'revoke' ? 'Turn the link off? Screens using it go blank.' : 'Make a new link? The current one stops working at once.'}
                 </span>
-                <button className="btn-secondary" onClick={() => setConfirm(null)}>
+                <button className="btn-secondary" disabled={busy} onClick={() => setConfirm(null)}>
                   Keep it
                 </button>
                 <button
                   className="btn bg-red-600 text-white hover:bg-red-700"
+                  disabled={busy}
                   onClick={() => void run(() => (confirm === 'revoke' ? actions.revokePublicLink(dashboardId) : actions.createPublicLink(dashboardId)))}
                 >
                   {confirm === 'revoke' ? 'Turn off' : 'Make a new link'}
@@ -125,17 +137,17 @@ export default function PublicLinkPanel({ dashboardId, onClose, onChanged }: Pro
               </div>
             ) : (
               <div className="flex gap-2">
-                <button className="btn-secondary" onClick={() => setConfirm('regenerate')}>
+                <button className="btn-secondary" disabled={busy} onClick={() => setConfirm('regenerate')}>
                   New link
                 </button>
-                <button className="btn-secondary text-red-400" onClick={() => setConfirm('revoke')}>
+                <button className="btn-secondary text-red-400" disabled={busy} onClick={() => setConfirm('revoke')}>
                   Turn off
                 </button>
               </div>
             )}
           </>
         ) : (
-          <button className="btn-primary" onClick={() => void run(() => actions.createPublicLink(dashboardId))}>
+          <button className="btn-primary" disabled={busy} onClick={() => void run(() => actions.createPublicLink(dashboardId))}>
             Create a public link
           </button>
         )}
