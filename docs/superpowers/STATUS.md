@@ -19,16 +19,25 @@ Roadmap: `docs/superpowers/specs/2026-09-28-network-monitoring-roadmap.md`. Each
 | 2 | Ports and bandwidth: metrics store, faceplate, port events and alerts, roles, site traffic | Done (`dev`); follow-ups in `plans/2026-09-30-network-phase2-followups.md` |
 | — | UPS monitoring (UPS-MIB readings, Power panel, on-battery/low-battery/high-load alerts) | Done (`dev`); spec `specs/2026-10-01-ups-monitoring-design.md` |
 | 3 | MIB library and custom metrics: upload/browse/test-walk MIBs, profiles, Cisco switch health, Health section, metric-rule alerts | Done (`dev`, 2026-10-02); follow-ups in `plans/2026-10-02-network-phase3-followups.md` |
-| 4 | Custom dashboards (includes the **site power widget**: every UPS in a site at a glance) | **Next** — not designed yet |
-| 5 | Metric reports | Not started |
-| 6 | Live site maps (LLDP, SSE push) — needs phase 4 | Not started |
-| 7 | UniFi controller source | Not started |
+| 4 | Custom dashboards: grid editor, 11 widget types (incl. site power), sharing, fullscreen wall display, admin public links | Done (`feature/network-phase4`, awaiting merge to `dev`); follow-ups in `plans/2026-10-02-network-phase4-followups.md` |
+| 5 | Metric reports | **Next** (or 7) — ask the owner which comes first |
+| 6 | Live site maps (LLDP, SSE push) — needs phase 4 | Not started; unblocked by phase 4 |
+| 7 | UniFi controller source | **Next** (or 5) — ask the owner which comes first |
 
-Phases 4, 5 and 7 depend only on phase 2 and can go in any order; 6 needs 4.
+Phases 5 and 7 depend only on phase 2 and can go in either order; 6 needed 4, which is now done.
 
-## To be checked by the owner on real equipment
+## To be checked by the owner
 
-Phase 3 was verified against the SNMP simulator and in the sandbox, not yet on real switches. After rebuilding the work install from `dev`:
+Phase 4 (after updating the work install from `dev`; the browser and visual checks were not done by Claude, so 5-7 are yours):
+1. Create a site dashboard with the standard widgets; every widget shows data within a minute.
+2. Leave it fullscreen on a screen for a day; it is still updating the next morning (no Stale markers).
+3. As an admin, create a public link, open it in a private window, then turn the link off; the page says the link is no longer available.
+4. Stop the backend for a few minutes; the widgets show Stale, then recover on their own.
+5. In the editor, add, drag and resize widgets and save. Opening the editor on a dashboard without changes must not show "Discard your changes?" on Cancel.
+6. Open a public link signed out in a private window, on a phone-width screen as well. Widgets stack and no link into Sentinel is clickable.
+7. Every widget type renders on a site dashboard, and the settings forms save without errors.
+
+Phase 3 (not yet confirmed on real equipment; verified against the SNMP simulator and in the sandbox):
 1. MIB library lists 14 built-in modules as Ready; upload the 8 Cisco files linked on that page (needed only for names in the browser).
 2. MIB browser → test-walk a 3850 (e.g. the ENTITY-SENSOR or ENVMON tables) shows real rows.
 3. A 3850 and a 4500-X show the Health section within two minutes: CPU per switch, temperatures with sensible values, fans and power supplies with states.
