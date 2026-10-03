@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { inputCls, num, str, strs, type SettingsProps } from '@/utils/dashboards'
 import Field from '@/components/dashboards/settings/Field'
 import SitePicker from '@/components/dashboards/pickers/SitePicker'
@@ -6,18 +7,22 @@ import RangeSelect from '@/components/dashboards/pickers/RangeSelect'
 
 export default function TopNSettings({ config, siteId, onChange }: SettingsProps) {
   const set = (patch: Record<string, unknown>) => onChange({ ...config, ...patch })
-  const bySite = 'site_id' in config && config.site_id !== undefined
+  const [bySite, setBySite] = useState(typeof config.site_id === 'string')
   return (
     <div className="space-y-3">
       <Field label="Ports of">
-        <select className={inputCls} value={bySite ? 'site' : 'devices'} onChange={(e) => (e.target.value === 'site' ? set({ site_id: siteId, devices: [] }) : set({ site_id: undefined, devices: [] }))}>
+        <select className={inputCls} value={bySite ? 'site' : 'devices'} onChange={(e) => {
+            const toSite = e.target.value === 'site'
+            setBySite(toSite)
+            set({ site_id: toSite ? (siteId ?? undefined) : undefined, devices: [] })
+          }}>
           <option value="site">A site</option>
           <option value="devices">Chosen devices</option>
         </select>
       </Field>
       {bySite ? (
-        <Field label="Site">
-          <SitePicker value={str(config, 'site_id') || null} onChange={(id) => set({ site_id: id })} />
+        <Field label="Site" hint={str(config, 'site_id') ? undefined : 'Choose a site to rank its ports.'}>
+          <SitePicker value={str(config, 'site_id') || null} onChange={(id) => set({ site_id: id ?? undefined })} />
         </Field>
       ) : (
         <Field label="Devices">
