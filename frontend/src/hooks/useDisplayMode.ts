@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 const RELOAD_EVERY_MS = 6 * 60 * 60 * 1000
+const RELOAD_RETRY_MS = 60 * 1000
 
 interface WakeLockLike {
   release(): Promise<void>
@@ -9,7 +10,9 @@ type NavigatorWithWakeLock = Navigator & { wakeLock?: { request(type: 'screen'):
 
 /** What an unattended screen needs. While enabled it keeps the screen awake
  *  (where the browser supports it) and reloads the page every 6 hours, to
- *  pick up new versions of Sentinel and free memory. */
+ *  pick up new versions of Sentinel and free memory. It reloads only once
+ *  Sentinel answers its health check, so a TV never lands on the browser's
+ *  error page while the server is down. */
 export function useDisplayMode(enabled: boolean) {
   const [fullscreen, setFullscreen] = useState(() => document.fullscreenElement != null)
 
@@ -42,7 +45,21 @@ export function useDisplayMode(enabled: boolean) {
       if (document.visibilityState === 'visible') void request()
     }
     document.addEventListener('visibilitychange', onVisible)
-    const reload = window.setTimeout(() => window.location.reload(), RELOAD_EVERY_MS)
+    let reload: number | undefined
+    const reloadWhenUp = async () => {
+      try {
+        const res = await fetch('/api/health', { cache: 'no-store' })
+        if (stopped) return
+        if (res.ok) {
+          window.location.reload()
+          return
+        }
+      } catch {
+        // Unreachable: keep showing the last data and try again shortly.
+      }
+      if (!stopped) reload = window.setTimeout(() => void reloadWhenUp(), RELOAD_RETRY_MS)
+    }
+    reload = window.setTimeout(() => void reloadWhenUp(), RELOAD_EVERY_MS)
     return () => {
       stopped = true
       document.removeEventListener('visibilitychange', onVisible)

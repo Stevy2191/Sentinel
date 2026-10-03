@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Maximize2, X } from 'lucide-react'
+import { KIOSK_HINT } from '@/utils/dashboards'
 
 interface Props {
   title: string
@@ -31,7 +32,7 @@ export default function DisplayShell({ title, lastUpdated, fullscreen, onFullscr
           {lastUpdated ? `Updated ${clock(lastUpdated)}` : 'Loading…'} · {clock(now)}
         </span>
         {!fullscreen && (
-          <button className="btn-secondary flex items-center gap-2" onClick={onFullscreen}>
+          <button className="btn-secondary flex items-center gap-2" onClick={onFullscreen} title={KIOSK_HINT}>
             <Maximize2 className="h-4 w-4" /> Fullscreen
           </button>
         )}

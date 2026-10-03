@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Globe2, Loader2, Maximize2, Pencil, Share2 } from 'lucide-react'
 import { useDashboard } from '@/hooks/useDashboards'
 import { useDisplayMode } from '@/hooks/useDisplayMode'
@@ -12,7 +12,7 @@ import DashboardEditor from '@/components/dashboards/DashboardEditor'
 import RangeOverride from '@/components/dashboards/RangeOverride'
 import DashboardSharingPanel from '@/components/dashboards/DashboardSharingPanel'
 import PublicLinkPanel from '@/components/dashboards/PublicLinkPanel'
-import { isTimeBased } from '@/utils/dashboards'
+import { isTimeBased, KIOSK_HINT } from '@/utils/dashboards'
 
 export default function DashboardPage({ mode }: { mode: 'view' | 'edit' }) {
   const { id } = useParams()
@@ -22,7 +22,20 @@ export default function DashboardPage({ mode }: { mode: 'view' | 'edit' }) {
   const { currentUser } = useAuthContext()
   const [sharing, setSharing] = useState(false)
   const [linking, setLinking] = useState(false)
-  const [display, setDisplay] = useState(false)
+  // The wall display lives in the URL (?display=1), so its 6-hourly reload
+  // comes back to it.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const display = searchParams.get('display') === '1'
+  const setDisplay = (on: boolean) =>
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        if (on) next.set('display', '1')
+        else next.delete('display')
+        return next
+      },
+      { replace: !on },
+    )
   const [lastUpdated, setLastUpdated] = useState<number | null>(null)
   const { fullscreen, enter, exit } = useDisplayMode(display)
   const onUpdated = useCallback((t: number) => setLastUpdated((prev) => (prev != null && prev > t ? prev : t)), [])
@@ -75,7 +88,13 @@ export default function DashboardPage({ mode }: { mode: 'view' | 'edit' }) {
           items={widgets}
           editing={false}
           render={(w) => (
-            <WidgetBody widget={w} display onUpdated={onUpdated} linkable source={{ kind: 'dashboard', dashboardId: dashboard.id, widgetId: w.id, override }} />
+            <WidgetBody
+              widget={w}
+              display
+              onUpdated={onUpdated}
+              linkable
+              source={{ kind: 'dashboard', dashboardId: dashboard.id, widgetId: w.id, override: isTimeBased(w.type) ? override : '' }}
+            />
           )}
         />
       </DisplayShell>
@@ -114,7 +133,7 @@ export default function DashboardPage({ mode }: { mode: 'view' | 'edit' }) {
           )}
           <button
             className="btn-secondary flex items-center gap-2"
-            title="For a screen that stays up for days, use a public link: a signed-in session ends after 24 hours"
+            title={`For a screen that stays up for days, use a public link: a signed-in session ends after 24 hours. ${KIOSK_HINT}`}
             onClick={() => {
               setDisplay(true)
               void enter()
@@ -141,7 +160,7 @@ export default function DashboardPage({ mode }: { mode: 'view' | 'edit' }) {
           items={widgets}
           editing={false}
           render={(w) => (
-            <WidgetBody widget={w} linkable source={{ kind: 'dashboard', dashboardId: dashboard.id, widgetId: w.id, override }} />
+            <WidgetBody widget={w} linkable source={{ kind: 'dashboard', dashboardId: dashboard.id, widgetId: w.id, override: isTimeBased(w.type) ? override : '' }} />
           )}
         />
       )}

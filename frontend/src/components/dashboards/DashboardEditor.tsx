@@ -41,6 +41,7 @@ export default function DashboardEditor({ dashboard, onSaved, onCancel }: Props)
     if (!dirty) return
     const warn = (e: BeforeUnloadEvent) => {
       e.preventDefault()
+      e.returnValue = '' // older browsers ask only when this is set
     }
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)

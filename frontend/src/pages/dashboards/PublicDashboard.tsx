@@ -26,7 +26,7 @@ export default function PublicDashboardPage() {
     let cancelled = false
     const load = () =>
       axios
-        .get<ApiResponse<PublicLayout>>(`/api/v1/public/dashboards/${token}`)
+        .get<ApiResponse<PublicLayout>>(`/api/v1/public/dashboards/${token}`, { timeout: 60000 })
         .then((res) => {
           if (cancelled) return
           setLayout(res.data.data)

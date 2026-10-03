@@ -2,7 +2,10 @@ import { Link } from 'react-router-dom'
 import type { MonitorsData, UptimeBucket } from '@/types/dashboards'
 import { timeAgo } from '@/utils/network'
 
-const DOT: Record<string, string> = { online: 'bg-emerald-400', offline: 'bg-red-400', paused: 'bg-slate-500', unknown: 'bg-slate-500', pending: 'bg-slate-500' }
+const UNKNOWN_DOT = 'bg-slate-500'
+const MONITOR_DOT: Record<string, string> = { online: 'bg-emerald-400', offline: 'bg-red-400', paused: UNKNOWN_DOT, unknown: UNKNOWN_DOT, pending: UNKNOWN_DOT }
+// Server agents have their own statuses: pending, active or offline.
+const AGENT_DOT: Record<string, string> = { active: MONITOR_DOT.online, offline: MONITOR_DOT.offline, pending: UNKNOWN_DOT }
 const BAR: Record<UptimeBucket['status'], string> = {
   up: 'bg-emerald-500/80',
   partial: 'bg-amber-400/80',
@@ -25,7 +28,7 @@ export default function MonitorsWidget({ data, linkable }: { data: MonitorsData;
     <ul className="space-y-1.5">
       {(data.monitors ?? []).map((m, i) => (
         <li key={m.monitor_id ?? `m-${i}`} className="flex items-center gap-2">
-          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${DOT[m.status] ?? DOT.unknown}`} aria-label={m.status} />
+          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${MONITOR_DOT[m.status] ?? UNKNOWN_DOT}`} aria-label={m.status} />
           {linkable && m.monitor_id ? (
             <Link to={`/monitors/${m.monitor_id}`} className="w-40 shrink-0 truncate text-slate-200 hover:text-primary-400">
               {m.name}
@@ -44,7 +47,7 @@ export default function MonitorsWidget({ data, linkable }: { data: MonitorsData;
       ))}
       {(data.agents ?? []).map((a, i) => (
         <li key={a.agent_id ?? `a-${i}`} className="flex items-center gap-2">
-          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${DOT[a.status] ?? DOT.unknown}`} aria-label={a.status} />
+          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${AGENT_DOT[a.status] ?? UNKNOWN_DOT}`} aria-label={a.status} />
           <span className="w-40 shrink-0 truncate text-slate-200">{a.name}</span>
           <span className="flex-1 text-right text-xs text-slate-500">
             {a.status} · {a.last_heartbeat ? timeAgo(a.last_heartbeat) : 'never reported'}
