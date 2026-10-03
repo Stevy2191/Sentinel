@@ -28,7 +28,7 @@ export default function WidgetSettingsPanel({ dashboardId, siteId, widget, error
         <span className="text-sm text-slate-300">Title</span>
         <input className={inputCls} maxLength={100} value={widget.title} placeholder={widgetInfo(widget.type).label} onChange={(e) => onChange({ title: e.target.value })} />
       </label>
-      <WidgetSettings type={widget.type} config={widget.config} siteId={siteId} onChange={(config) => onChange({ config })} />
+      <WidgetSettings key={widget.key} type={widget.type} config={widget.config} siteId={siteId} onChange={(config) => onChange({ config })} />
       <div className="space-y-1">
         <p className="text-xs uppercase tracking-widest text-slate-500">Preview</p>
         <WidgetPreview key={widget.key} dashboardId={dashboardId} type={widget.type} title={widget.title} config={widget.config} />
