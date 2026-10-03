@@ -194,10 +194,17 @@ type MetricsQuery struct {
 	// InterfaceIDs restricts to series of these interfaces; empty = all.
 	InterfaceIDs []uuid.UUID
 	From, To     time.Time
-	// Sum adds up every selected series per metric and step (device and site
-	// totals). Min and Max then equal Avg: a peak of a sum cannot be derived
-	// from per-series rollups.
+	// Sum combines every selected series into one per metric and step (device
+	// and site totals): added up, or averaged for the metrics in Average. Min
+	// and Max then equal Avg: a peak of a total cannot be derived from
+	// per-series rollups.
 	Sum bool
+	// Average, with Sum, lists the metrics whose series are averaged instead
+	// of added up: units such as %, °C or V, whose sum means nothing.
+	Average []string
+	// PerDevice, with Sum, keeps devices apart: one total per device, metric
+	// and step instead of one per metric and step.
+	PerDevice bool
 }
 
 type MetricPoint struct {
@@ -312,9 +319,20 @@ func (m *MetricsStore) Query(ctx context.Context, q MetricsQuery) (*MetricsResul
 
 	sql := inner + " ORDER BY 1, 2, 3, 4"
 	if q.Sum {
-		sql = `SELECT NULL::uuid AS device_id, metric, '' AS instance, t,
-			sum(avg) AS avg, sum(avg) AS min, sum(avg) AS max
-			FROM (` + inner + `) b GROUP BY metric, t ORDER BY metric, t`
+		device, group := "NULL::uuid", "metric, t"
+		if q.PerDevice {
+			device, group = "device_id", "device_id, metric, t"
+		}
+		total := "sum(avg)"
+		if len(q.Average) > 0 {
+			// This placeholder comes before the inner query's in the text.
+			total = "CASE WHEN metric IN ? THEN avg(avg) ELSE sum(avg) END"
+			args = append([]any{q.Average}, args...)
+		}
+		sql = `SELECT device_id, metric, '' AS instance, t, v AS avg, v AS min, v AS max
+			FROM (SELECT ` + device + ` AS device_id, metric, t, ` + total + ` AS v
+				FROM (` + inner + `) b GROUP BY ` + group + `) c
+			ORDER BY device_id, metric, t`
 	}
 
 	var rows []struct {

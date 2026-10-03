@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Stevy2191/Sentinel/backend/internal/services"
 	"github.com/Stevy2191/Sentinel/backend/internal/testdb"
 )
 
@@ -84,6 +85,32 @@ func TestDBTimeseriesSumsPortsPerDevice(t *testing.T) {
 	lines := data.(TimeseriesData).Lines
 	if len(lines) != 1 || len(lines[0].Points) != 2 || lines[0].Points[0].Avg != 350 || lines[0].Points[1].Avg != 450 {
 		t.Errorf("two ports summed per timestamp: %+v, want points 350 and 450", lines)
+	}
+}
+
+// A device total of a percentage averages the device's physical ports at
+// each time; a virtual interface is left out.
+func TestDBTimeseriesDeviceTotalAveragesPercent(t *testing.T) {
+	db := testdb.Open(t)
+	d := realDeps(t, db)
+	w := timeseriesWidget{metrics: d.Metrics, ports: d.Ports, devices: d.Devices}
+	dev := newDevice(t, db, newSite(t, db, "HQ"), "core", "10.0.0.1")
+	p1, p2 := newPort(t, db, dev, 1, "Gi1/0/1", ""), newPort(t, db, dev, 2, "Gi1/0/2", "")
+	vlan := newPort(t, db, dev, 100, "Vlan10", "")
+	now := time.Now().UTC()
+	t1, t2 := now.Add(-30*time.Minute), now.Add(-10*time.Minute)
+	writePortMetric(t, d, dev, p1, 1, t1, services.MetricIfInUtilPct, 40)
+	writePortMetric(t, d, dev, p2, 2, t1, services.MetricIfInUtilPct, 60)
+	writePortMetric(t, d, dev, p1, 1, t2, services.MetricIfInUtilPct, 10)
+	writePortMetric(t, d, dev, p2, 2, t2, services.MetricIfInUtilPct, 30)
+	writePortMetric(t, d, dev, vlan, 100, t1, services.MetricIfInUtilPct, 100)
+	writePortMetric(t, d, dev, vlan, 100, t2, services.MetricIfInUtilPct, 100)
+	data, err := resolveWidget(t, w, fmt.Sprintf(`{"metrics":["if_in_util_pct"],"devices":["%s"],"range":"1h"}`, dev),
+		ResolveInput{Visible: Subjects{Devices: []uuid.UUID{dev}}, Now: now})
+	testdb.Must(t, err)
+	lines := data.(TimeseriesData).Lines
+	if len(lines) != 1 || len(lines[0].Points) != 2 || lines[0].Points[0].Avg != 50 || lines[0].Points[1].Avg != 20 {
+		t.Errorf("busy in over two ports = %+v, want points 50 and 20 (averaged, Vlan10 left out)", lines)
 	}
 }
 
