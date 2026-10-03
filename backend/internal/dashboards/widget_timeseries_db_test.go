@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -216,18 +217,33 @@ func TestDBTimeseriesSiteTrafficEastWest(t *testing.T) {
 	}
 }
 
+// catalogueMetrics is a MetricsReader that only describes the built-in
+// metrics, which is all Validate reads.
+type catalogueMetrics struct{ MetricsReader }
+
+func (catalogueMetrics) Describe(_ context.Context, keys []string) (map[string]services.MetricDef, error) {
+	out := map[string]services.MetricDef{}
+	for _, d := range services.MetricCatalogue {
+		if slices.Contains(keys, d.Key) {
+			out[d.Key] = d
+		}
+	}
+	return out, nil
+}
+
 func TestTimeseriesValidate(t *testing.T) {
-	w := timeseriesWidget{}
+	w := timeseriesWidget{metrics: catalogueMetrics{}}
 	dev, site := uuid.New(), uuid.New()
 	for raw, field := range map[string]string{
 		`{"metrics":[],"devices":["` + dev.String() + `"]}`:                                              "metrics",
 		`{"metrics":["nope"],"devices":["` + dev.String() + `"]}`:                                        "metrics",
+		`{"metrics":["if_in_bps","if_in_util_pct"],"devices":["` + dev.String() + `"]}`:                  "metrics",
 		`{"metrics":["if_in_bps"]}`:                                                                      "devices",
 		`{"metrics":["if_in_bps"],"devices":["` + dev.String() + `"],"site_id":"` + site.String() + `"}`: "devices",
 		`{"metrics":["if_in_bps"],"devices":["` + dev.String() + `"],"range":"2h"}`:                      "range",
 		`{"source":"site_traffic"}`:                                                                      "site_id",
 		`{"source":"site_traffic","site_id":"` + site.String() + `","view":"sideways"}`:                  "view",
-		`{"source":"weather"}`:                                                                           "source",
+		`{"source":"weather"}`: "source",
 	} {
 		_, err := w.Validate(context.Background(), json.RawMessage(raw))
 		var fe *FieldError
@@ -243,5 +259,15 @@ func TestTimeseriesValidate(t *testing.T) {
 	_ = json.Unmarshal(got, &c)
 	if c.Source != "metrics" || c.Range != "24h" || len(c.Metrics) != 1 || len(c.Devices) != 1 {
 		t.Errorf("normalised = %s, want defaults filled and duplicates dropped", got)
+	}
+
+	// One chart, one unit.
+	_, err = w.Validate(context.Background(), json.RawMessage(`{"metrics":["if_in_bps","if_out_util_pct"],"site_id":"`+site.String()+`"}`))
+	var fe *FieldError
+	if !errors.As(err, &fe) || fe.Field != "metrics" || fe.Msg != "choose metrics with the same unit" {
+		t.Errorf("bps with %%: err = %v, want metrics: choose metrics with the same unit", err)
+	}
+	if _, err := w.Validate(context.Background(), json.RawMessage(`{"metrics":["if_in_bps","if_out_bps","if_speed_bps"],"devices":["`+dev.String()+`"]}`)); err != nil {
+		t.Errorf("three bps metrics: %v", err)
 	}
 }

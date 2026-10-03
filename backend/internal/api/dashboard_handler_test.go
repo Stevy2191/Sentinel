@@ -24,6 +24,8 @@ type fakeDashboards struct {
 	mutations   int
 	lastViewer  dashboards.Viewer
 	dashboardID uuid.UUID
+	// hasLink: the dashboard has a public link, so creating one replaces it.
+	hasLink bool
 }
 
 func (f *fakeDashboards) detail() *dashboards.DashboardDetail {
@@ -76,9 +78,11 @@ func (f *fakeDashboards) RemoveShare(context.Context, dashboards.Viewer, uuid.UU
 func (f *fakeDashboards) PublicLink(context.Context, dashboards.Viewer, uuid.UUID) (*dashboards.LinkView, error) {
 	return &dashboards.LinkView{}, f.err
 }
-func (f *fakeDashboards) CreatePublicLink(context.Context, dashboards.Viewer, uuid.UUID) (*models.DashboardPublicLink, error) {
+func (f *fakeDashboards) CreatePublicLink(context.Context, dashboards.Viewer, uuid.UUID) (*models.DashboardPublicLink, bool, error) {
 	f.mutations++
-	return &models.DashboardPublicLink{Token: strings.Repeat("t", 43)}, f.err
+	replaced := f.hasLink
+	f.hasLink = true
+	return &models.DashboardPublicLink{Token: strings.Repeat("t", 43)}, replaced, f.err
 }
 func (f *fakeDashboards) RevokePublicLink(context.Context, dashboards.Viewer, uuid.UUID) error {
 	f.mutations++
@@ -128,6 +132,10 @@ func (r *fakeWidgetResolver) Preview(context.Context, dashboards.Viewer, string,
 }
 
 func dashboardRouter(store *fakeDashboards, res *fakeWidgetResolver, isAdmin bool) *gin.Engine {
+	return dashboardRouterAudited(store, res, isAdmin, &fakeAudit{})
+}
+
+func dashboardRouterAudited(store *fakeDashboards, res *fakeWidgetResolver, isAdmin bool, audit *fakeAudit) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	RegisterPublicDashboardRoutes(r, store, res)
@@ -138,7 +146,7 @@ func dashboardRouter(store *fakeDashboards, res *fakeWidgetResolver, isAdmin boo
 		c.Set("is_admin", isAdmin)
 		c.Next()
 	})
-	RegisterDashboardRoutes(v1, store, res, &fakeAudit{}, stubUsers{user: &models.User{IsAdmin: isAdmin}})
+	RegisterDashboardRoutes(v1, store, res, audit, stubUsers{user: &models.User{IsAdmin: isAdmin}})
 	return r
 }
 
@@ -189,6 +197,27 @@ func TestDashboardPublicLinkRoutesAreAdminOnly(t *testing.T) {
 	w := do(dashboardRouter(store, &fakeWidgetResolver{}, true), http.MethodPost, "/api/v1/dashboards/"+id+"/public-link", nil)
 	if w.Code != http.StatusOK || store.mutations != 1 {
 		t.Errorf("POST by an admin: status %d, mutations %d", w.Code, store.mutations)
+	}
+}
+
+// The audit log tells a regenerated link from a new one.
+func TestCreatePublicLinkAuditsRegeneration(t *testing.T) {
+	id := uuid.New().String()
+	store, audit := &fakeDashboards{}, &fakeAudit{}
+	r := dashboardRouterAudited(store, &fakeWidgetResolver{}, true, audit)
+	for i := 0; i < 2; i++ {
+		if w := do(r, http.MethodPost, "/api/v1/dashboards/"+id+"/public-link", nil); w.Code != http.StatusOK {
+			t.Fatalf("POST %d: status %d", i+1, w.Code)
+		}
+	}
+	if len(audit.changes) != 2 {
+		t.Fatalf("audit entries = %d, want 2", len(audit.changes))
+	}
+	if _, ok := audit.changes[0].Summary["regenerated"]; ok {
+		t.Errorf("first link's summary = %v, want no regenerated flag", audit.changes[0].Summary)
+	}
+	if audit.changes[1].Summary["regenerated"] != true {
+		t.Errorf("replacing link's summary = %v, want regenerated: true", audit.changes[1].Summary)
 	}
 }
 

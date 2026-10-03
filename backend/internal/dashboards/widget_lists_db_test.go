@@ -68,6 +68,29 @@ func TestDBEventLogMergesIncidentsAndPortEvents(t *testing.T) {
 	}
 }
 
+// A long outage that closed a minute ago is the newest event, even when more
+// incidents than the limit holds have started since it began.
+func TestDBEventLogKeepsRecentClosingOfOldIncident(t *testing.T) {
+	db := testdb.Open(t)
+	d := realDeps(t, db)
+	w := eventLogWidget{ports: d.Ports, incidents: d.Incidents}
+	site := newSite(t, db, "HQ")
+	dev := newDevice(t, db, site, "core", "10.0.0.1")
+	now := time.Now().UTC()
+	testdb.Exec(t, db, `INSERT INTO incidents (device_id, start_time, end_time, severity) VALUES (?, ?, ?, 'high')`,
+		dev, now.Add(-48*time.Hour), now.Add(-time.Minute))
+	for i := 0; i < 10; i++ {
+		testdb.Exec(t, db, `INSERT INTO incidents (device_id, start_time, end_time, severity) VALUES (?, ?, ?, 'low')`,
+			dev, now.Add(-3*time.Hour+time.Duration(i)*time.Minute), now.Add(-time.Hour))
+	}
+	data, err := resolveWidget(t, w, fmt.Sprintf(`{"site_id":"%s","limit":10}`, site), ResolveInput{Visible: Subjects{Sites: []uuid.UUID{site}}, Now: now})
+	testdb.Must(t, err)
+	items := data.(EventLogData).Items
+	if len(items) != 10 || items[0].Kind != "incident_closed" || items[0].Severity != "high" {
+		t.Errorf("items = %+v, want 10 with the long outage's closing first", items)
+	}
+}
+
 func TestDBDeviceTableAndOpenIncidents(t *testing.T) {
 	db := testdb.Open(t)
 	d := realDeps(t, db)

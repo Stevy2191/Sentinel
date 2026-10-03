@@ -83,13 +83,16 @@ func (m *MetricsStore) TopN(ctx context.Context, q TopNQuery) ([]TopNRow, error)
 	}
 	inner += " AND s.interface_id IS NOT NULL GROUP BY s.device_id, s.interface_id, s.metric"
 
+	// The order ends with the ids, so ports that tie never swap places
+	// between refreshes. di.id is one per (device, ifIndex): grouping by it
+	// changes nothing.
 	sql := `SELECT x.device_id, d.name AS device_name, di.if_index, di.name AS port_name, di.alias,
 			` + combine + `(x.avg) AS value
 		FROM (` + inner + `) x
 		JOIN devices d ON d.id = x.device_id
 		JOIN device_interfaces di ON di.id = x.interface_id
-		GROUP BY x.device_id, d.name, di.if_index, di.name, di.alias` + having + `
-		ORDER BY value DESC, d.name, di.if_index
+		GROUP BY x.device_id, di.id, d.name, di.if_index, di.name, di.alias` + having + `
+		ORDER BY value DESC, d.name, di.if_index, x.device_id, di.id
 		LIMIT ?`
 	args = append(args, q.N)
 
