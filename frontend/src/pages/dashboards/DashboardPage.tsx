@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Globe2, Loader2, Pencil, Share2 } from 'lucide-react'
+import { ArrowLeft, Globe2, Loader2, Maximize2, Pencil, Share2 } from 'lucide-react'
 import { useDashboard } from '@/hooks/useDashboards'
+import { useDisplayMode } from '@/hooks/useDisplayMode'
 import { useAuthContext } from '@/context/AuthContext'
 import type { MetricsRange } from '@/hooks/useMetrics'
+import DisplayShell from '@/components/dashboards/DisplayShell'
 import DashboardGrid from '@/components/dashboards/DashboardGrid'
 import WidgetBody from '@/components/dashboards/WidgetBody'
 import DashboardEditor from '@/components/dashboards/DashboardEditor'
@@ -20,6 +22,10 @@ export default function DashboardPage({ mode }: { mode: 'view' | 'edit' }) {
   const { currentUser } = useAuthContext()
   const [sharing, setSharing] = useState(false)
   const [linking, setLinking] = useState(false)
+  const [display, setDisplay] = useState(false)
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null)
+  const { fullscreen, enter, exit } = useDisplayMode(display)
+  const onUpdated = useCallback((t: number) => setLastUpdated((prev) => (prev != null && prev > t ? prev : t)), [])
 
   if (loading) return <Loader2 className="h-6 w-6 animate-spin text-slate-500" />
   if (notFound || !dashboard) {
@@ -53,6 +59,28 @@ export default function DashboardPage({ mode }: { mode: 'view' | 'edit' }) {
   }
 
   const widgets = dashboard.widgets ?? []
+  if (display) {
+    return (
+      <DisplayShell
+        title={dashboard.name}
+        lastUpdated={lastUpdated}
+        fullscreen={fullscreen}
+        onFullscreen={() => void enter()}
+        onExit={() => {
+          void exit()
+          setDisplay(false)
+        }}
+      >
+        <DashboardGrid
+          items={widgets}
+          editing={false}
+          render={(w) => (
+            <WidgetBody widget={w} display onUpdated={onUpdated} linkable source={{ kind: 'dashboard', dashboardId: dashboard.id, widgetId: w.id, override }} />
+          )}
+        />
+      </DisplayShell>
+    )
+  }
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -84,6 +112,16 @@ export default function DashboardPage({ mode }: { mode: 'view' | 'edit' }) {
               <Globe2 className="h-4 w-4" /> {dashboard.published ? 'Public link' : 'Publish'}
             </button>
           )}
+          <button
+            className="btn-secondary flex items-center gap-2"
+            title="For a screen that stays up for days, use a public link: a signed-in session ends after 24 hours"
+            onClick={() => {
+              setDisplay(true)
+              void enter()
+            }}
+          >
+            <Maximize2 className="h-4 w-4" /> Fullscreen
+          </button>
           {dashboard.can_edit && (
             <Link to={`/dashboards/${dashboard.id}/edit`} className="btn-secondary flex items-center gap-2">
               <Pencil className="h-4 w-4" /> Edit

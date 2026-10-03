@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useWidgetData, type WidgetSource } from '@/hooks/useWidgetData'
 import type { WidgetType } from '@/types/dashboards'
 import { widgetInfo } from '@/utils/dashboards'
@@ -9,11 +10,15 @@ interface Props {
   source: WidgetSource
   linkable: boolean
   display?: boolean
+  onUpdated?: (t: number) => void
 }
 
 /** One widget on a dashboard: loads its data and draws it in its frame. */
-export default function WidgetBody({ widget, source, linkable, display }: Props) {
-  const { response, error, stale } = useWidgetData<unknown>(source)
+export default function WidgetBody({ widget, source, linkable, display, onUpdated }: Props) {
+  const { response, error, lastSuccess, stale } = useWidgetData<unknown>(source)
+  useEffect(() => {
+    if (lastSuccess != null) onUpdated?.(lastSuccess)
+  }, [lastSuccess, onUpdated])
   return (
     <WidgetFrame
       title={widget.title}

@@ -1,0 +1,72 @@
+import { useCallback, useEffect, useState } from 'react'
+
+const RELOAD_EVERY_MS = 6 * 60 * 60 * 1000
+
+interface WakeLockLike {
+  release(): Promise<void>
+}
+type NavigatorWithWakeLock = Navigator & { wakeLock?: { request(type: 'screen'): Promise<WakeLockLike> } }
+
+/** What an unattended screen needs. While enabled it keeps the screen awake
+ *  (where the browser supports it) and reloads the page every 6 hours, to
+ *  pick up new versions of Sentinel and free memory. */
+export function useDisplayMode(enabled: boolean) {
+  const [fullscreen, setFullscreen] = useState(() => document.fullscreenElement != null)
+
+  useEffect(() => {
+    const onChange = () => setFullscreen(document.fullscreenElement != null)
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
+  }, [])
+
+  useEffect(() => {
+    if (!enabled) return
+    let lock: WakeLockLike | null = null
+    let stopped = false
+    const request = async () => {
+      try {
+        const next = (await (navigator as NavigatorWithWakeLock).wakeLock?.request('screen')) ?? null
+        if (stopped) {
+          // Disabled or unmounted while the request was in flight.
+          void next?.release().catch(() => undefined)
+          return
+        }
+        lock = next
+      } catch {
+        lock = null // refused (battery saver, unsupported): the page still works
+      }
+    }
+    void request()
+    // A wake lock is dropped whenever the tab is hidden; take it again on return.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void request()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    const reload = window.setTimeout(() => window.location.reload(), RELOAD_EVERY_MS)
+    return () => {
+      stopped = true
+      document.removeEventListener('visibilitychange', onVisible)
+      window.clearTimeout(reload)
+      void lock?.release().catch(() => undefined)
+    }
+  }, [enabled])
+
+  const enter = useCallback(async () => {
+    try {
+      await document.documentElement.requestFullscreen?.()
+    } catch {
+      // The browser refused (no user gesture, or a kiosk policy): the display
+      // shell still covers the app, just not the browser's own chrome.
+    }
+  }, [])
+
+  const exit = useCallback(async () => {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen()
+    } catch {
+      // Already left, or unsupported: nothing to undo.
+    }
+  }, [])
+
+  return { fullscreen, enter, exit }
+}
