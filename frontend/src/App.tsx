@@ -42,6 +42,7 @@ const Profiles = lazy(() => import('@/pages/network/Profiles'))
 const ProfileDetail = lazy(() => import('@/pages/network/ProfileDetail'))
 const SavedReports = lazy(() => import('@/pages/SavedReports'))
 const SavedReportDetail = lazy(() => import('@/pages/SavedReportDetail'))
+const PublicDashboardPage = lazy(() => import('@/pages/dashboards/PublicDashboard'))
 const PublicReport = lazy(() => import('@/pages/PublicReport'))
 const StatusPages = lazy(() => import('@/pages/StatusPages'))
 const Notifications = lazy(() => import('@/pages/Notifications'))
@@ -73,6 +74,7 @@ export default function App() {
             <Route path="/register" element={<Auth mode="register" />} />
             <Route path="/invitation/:token" element={<InvitationAccept />} />
             <Route path="/public/status/:slug" element={<PublicStatus />} />
+            <Route path="/public/dashboards/:token" element={<PublicDashboardPage />} />
             {/* Shared reports are reachable by token without signing in. */}
             <Route path="/reports/share/:token" element={<PublicReport />} />
 
