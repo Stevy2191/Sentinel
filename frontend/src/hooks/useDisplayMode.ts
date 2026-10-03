@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 const RELOAD_EVERY_MS = 6 * 60 * 60 * 1000
 const RELOAD_RETRY_MS = 60 * 1000
+const HEALTH_TIMEOUT_MS = 10 * 1000
 
 interface WakeLockLike {
   release(): Promise<void>
@@ -46,16 +47,27 @@ export function useDisplayMode(enabled: boolean) {
     }
     document.addEventListener('visibilitychange', onVisible)
     let reload: number | undefined
+    // The health check in flight and its timeout. An AbortController and a
+    // timer, not AbortSignal.timeout, which older TV browsers lack.
+    let check: AbortController | null = null
+    let checkTimer: number | undefined
     const reloadWhenUp = async () => {
+      const ac = new AbortController()
+      check = ac
+      checkTimer = window.setTimeout(() => ac.abort(), HEALTH_TIMEOUT_MS)
       try {
-        const res = await fetch('/api/health', { cache: 'no-store' })
+        const res = await fetch('/api/health', { cache: 'no-store', signal: ac.signal })
         if (stopped) return
         if (res.ok) {
           window.location.reload()
           return
         }
       } catch {
-        // Unreachable: keep showing the last data and try again shortly.
+        // Unreachable, or no answer in time (aborted): keep showing the last
+        // data and try again shortly.
+      } finally {
+        window.clearTimeout(checkTimer)
+        check = null
       }
       if (!stopped) reload = window.setTimeout(() => void reloadWhenUp(), RELOAD_RETRY_MS)
     }
@@ -64,6 +76,8 @@ export function useDisplayMode(enabled: boolean) {
       stopped = true
       document.removeEventListener('visibilitychange', onVisible)
       window.clearTimeout(reload)
+      window.clearTimeout(checkTimer)
+      check?.abort()
       void lock?.release().catch(() => undefined)
     }
   }, [enabled])
