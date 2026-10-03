@@ -233,10 +233,14 @@ func (q *ReportJobQueue) render(ctx context.Context, job *models.ReportJob) (*Ge
 // not against arbitrary third-party error text, so it stays reliable as those
 // call sites evolve.
 func classifyJobError(err error) string {
+	// Already user-facing and free of server detail: shown as it is.
+	if errors.Is(err, ErrReportTooLarge) {
+		return ErrReportTooLarge.Error()
+	}
 	msg := err.Error()
 	switch {
 	case strings.Contains(msg, "aggregating report data"):
-		return "could not gather monitor data for this report"
+		return "could not gather the data for this report"
 	case strings.Contains(msg, "rendering report PDF"):
 		return "PDF rendering failed on the server"
 	case strings.Contains(msg, "saving report generation"):
@@ -248,12 +252,19 @@ func classifyJobError(err error) string {
 	}
 }
 
+// permanentJobError reports a failure another attempt cannot fix: the same
+// report over the same data hits the same statement timeout. Such a job
+// fails at once instead of spending two more five-minute runs.
+func permanentJobError(err error) bool {
+	return errors.Is(err, ErrReportTooLarge)
+}
+
 // finishFailed records a failure, requeueing while attempts remain.
 func (q *ReportJobQueue) finishFailed(job *models.ReportJob, runErr error) {
 	now := time.Now()
 
 	updates := map[string]interface{}{"error": classifyJobError(runErr)}
-	if job.Attempts < models.MaxJobAttempts {
+	if job.Attempts < models.MaxJobAttempts && !permanentJobError(runErr) {
 		// Transient causes (a locked file, a brief database blip) deserve
 		// another pass; the attempt counter stops it becoming a loop.
 		updates["status"] = models.JobQueued
@@ -263,8 +274,8 @@ func (q *ReportJobQueue) finishFailed(job *models.ReportJob, runErr error) {
 	} else {
 		updates["status"] = models.JobFailed
 		updates["finished_at"] = now
-		q.logger.Printf("[report-jobs] job %s failed permanently after %d attempts: %v",
-			job.ID, job.Attempts, runErr)
+		q.logger.Printf("[report-jobs] job %s failed permanently on attempt %d/%d: %v",
+			job.ID, job.Attempts, models.MaxJobAttempts, runErr)
 	}
 
 	if err := q.db.Model(&models.ReportJob{}).Where("id = ?", job.ID).
