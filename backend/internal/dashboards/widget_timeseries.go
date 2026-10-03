@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -137,8 +136,13 @@ func (w timeseriesWidget) Resolve(ctx context.Context, raw json.RawMessage, in R
 		return nil, ErrNoData
 	}
 	q := services.MetricsQuery{Metrics: keys, From: from, To: to}
+	defs, err := w.metrics.Describe(ctx, keys)
+	if err != nil {
+		return nil, err
+	}
 	siteTotal := c.SiteID != nil
-	if siteTotal {
+	switch {
+	case siteTotal:
 		if !slices.Contains(in.Visible.Sites, *c.SiteID) {
 			return nil, ErrNoData
 		}
@@ -149,31 +153,26 @@ func (w timeseriesWidget) Resolve(ctx context.Context, raw json.RawMessage, in R
 		if len(ids) == 0 {
 			return nil, ErrNoData
 		}
-		q.DeviceIDs, q.Sum = ids, true
-		if allPortMetrics(keys) {
-			ifs, err := w.ports.PhysicalInterfaceIDs(ctx, ids)
-			if err != nil {
-				return nil, err
-			}
-			if len(ifs) == 0 {
-				return nil, ErrNoData
-			}
-			q.InterfaceIDs = ifs
+		q.DeviceIDs = ids
+		if err := setTotals(ctx, w.ports, &q, defs, false); err != nil {
+			return nil, err
 		}
-	} else {
+	case len(c.Instances) > 0:
 		q.DeviceIDs, q.Instances = in.Visible.Devices, c.Instances
+	default:
+		// No rows chosen: one line per device and metric, the device's total
+		// over its rows (its ports, say), as on the device page.
+		q.DeviceIDs = in.Visible.Devices
+		if len(q.DeviceIDs) == 0 {
+			return nil, ErrNoData
+		}
+		if err := setTotals(ctx, w.ports, &q, defs, true); err != nil {
+			return nil, err
+		}
 	}
 	res, err := w.metrics.Query(ctx, q)
 	if err != nil {
 		return nil, err
-	}
-	defs, err := w.metrics.Describe(ctx, keys)
-	if err != nil {
-		return nil, err
-	}
-	series := res.Series
-	if !siteTotal && len(c.Instances) == 0 {
-		series = sumPerDeviceMetric(series)
 	}
 	names := map[uuid.UUID]string{}
 	labels := map[services.InstanceKey]string{}
@@ -186,7 +185,7 @@ func (w timeseriesWidget) Resolve(ctx context.Context, raw json.RawMessage, in R
 		}
 	}
 	data := TimeseriesData{Range: rng, Resolution: res.Resolution, StepSeconds: res.StepSeconds, Lines: []SeriesLine{}}
-	for _, s := range series {
+	for _, s := range res.Series {
 		def := defs[s.Metric]
 		metricLabel := def.Label
 		if metricLabel == "" {
@@ -251,47 +250,6 @@ func (w timeseriesWidget) siteTraffic(ctx context.Context, c timeseriesConfig, r
 		return nil, ErrNoData
 	}
 	return data, nil
-}
-
-// sumPerDeviceMetric adds up each device's instances of a metric (a
-// device's ports) into one line per device and metric, as the device page's
-// traffic chart does. Min and Max then equal Avg.
-func sumPerDeviceMetric(in []services.MetricSeries) []services.MetricSeries {
-	type key struct {
-		device uuid.UUID
-		metric string
-	}
-	sums := map[key]map[time.Time]float64{}
-	var order []key
-	for _, s := range in {
-		if s.DeviceID == nil {
-			continue
-		}
-		k := key{*s.DeviceID, s.Metric}
-		if sums[k] == nil {
-			sums[k] = map[time.Time]float64{}
-			order = append(order, k)
-		}
-		for _, p := range s.Points {
-			sums[k][p.Time] += p.Avg
-		}
-	}
-	out := make([]services.MetricSeries, 0, len(order))
-	for _, k := range order {
-		times := make([]time.Time, 0, len(sums[k]))
-		for t := range sums[k] {
-			times = append(times, t)
-		}
-		sort.Slice(times, func(i, j int) bool { return times[i].Before(times[j]) })
-		pts := make([]services.MetricPoint, len(times))
-		for i, t := range times {
-			v := sums[k][t]
-			pts[i] = services.MetricPoint{Time: t, Avg: v, Min: v, Max: v}
-		}
-		dev := k.device
-		out = append(out, services.MetricSeries{DeviceID: &dev, Metric: k.metric, Points: pts})
-	}
-	return out
 }
 
 func noPoints(lines []SeriesLine) bool {

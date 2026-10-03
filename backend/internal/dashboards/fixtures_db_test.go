@@ -127,6 +127,15 @@ func writePortBps(t *testing.T, d Deps, deviceID, portID uuid.UUID, ifIndex int,
 	}))
 }
 
+// writePortMetric writes one value of a port metric for a port at at.
+func writePortMetric(t *testing.T, d Deps, deviceID, portID uuid.UUID, ifIndex int, at time.Time, metric string, v float64) {
+	t.Helper()
+	m := d.Metrics.(*services.MetricsStore)
+	testdb.Must(t, m.Write(context.Background(), deviceID, at, []services.SamplePoint{
+		{Metric: metric, Instance: strconv.Itoa(ifIndex), InterfaceID: &portID, Value: v},
+	}))
+}
+
 // resolveWidget validates cfg with w, then resolves it with in (Now defaults
 // to now).
 func resolveWidget(t *testing.T, w Widget, cfg string, in ResolveInput) (any, error) {

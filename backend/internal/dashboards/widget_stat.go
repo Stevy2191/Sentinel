@@ -137,9 +137,14 @@ func (w statWidget) Resolve(ctx context.Context, raw json.RawMessage, in Resolve
 	}
 	rng := effectiveRange(c.Range, in.Override)
 	to := in.Now.UTC()
-	q := services.MetricsQuery{Metrics: []string{c.Metric}, From: to.Add(-rangeSpan(rng)), To: to, Sum: true}
+	q := services.MetricsQuery{Metrics: []string{c.Metric}, From: to.Add(-rangeSpan(rng)), To: to}
+	defs, err := w.metrics.Describe(ctx, q.Metrics)
+	if err != nil {
+		return nil, err
+	}
 	var parts []string
-	if c.SiteID != nil {
+	switch {
+	case c.SiteID != nil:
 		if !slices.Contains(in.Visible.Sites, *c.SiteID) {
 			return nil, ErrNoData
 		}
@@ -151,31 +156,26 @@ func (w statWidget) Resolve(ctx context.Context, raw json.RawMessage, in Resolve
 			return nil, ErrNoData
 		}
 		q.DeviceIDs = ids
-		if allPortMetrics(q.Metrics) {
-			ifs, err := w.ports.PhysicalInterfaceIDs(ctx, ids)
-			if err != nil {
-				return nil, err
-			}
-			if len(ifs) == 0 {
-				return nil, ErrNoData
-			}
-			q.InterfaceIDs = ifs
+		if err := setTotals(ctx, w.ports, &q, defs, false); err != nil {
+			return nil, err
 		}
 		parts = append(parts, "Site total")
-	} else {
-		if len(in.Visible.Devices) == 0 {
-			return nil, ErrNoData
+	case len(in.Visible.Devices) == 0:
+		return nil, ErrNoData
+	case c.Instance != "":
+		q.DeviceIDs, q.Instances = in.Visible.Devices[:1], []string{c.Instance}
+		labels, err := w.metrics.InstanceLabels(ctx, q.DeviceIDs, q.Metrics)
+		if err != nil {
+			return nil, err
 		}
+		if l := labels[services.InstanceKey{DeviceID: q.DeviceIDs[0], Metric: c.Metric, Instance: c.Instance}]; l != "" {
+			parts = append(parts, l)
+		}
+	default:
+		// No row chosen: the device's total over its rows (its ports, say).
 		q.DeviceIDs = in.Visible.Devices[:1]
-		if c.Instance != "" {
-			q.Instances = []string{c.Instance}
-			labels, err := w.metrics.InstanceLabels(ctx, q.DeviceIDs, q.Metrics)
-			if err != nil {
-				return nil, err
-			}
-			if l := labels[services.InstanceKey{DeviceID: q.DeviceIDs[0], Metric: c.Metric, Instance: c.Instance}]; l != "" {
-				parts = append(parts, l)
-			}
+		if err := setTotals(ctx, w.ports, &q, defs, false); err != nil {
+			return nil, err
 		}
 	}
 	res, err := w.metrics.Query(ctx, q)
@@ -193,10 +193,6 @@ func (w statWidget) Resolve(ctx context.Context, raw json.RawMessage, in Resolve
 			sum += p.Avg
 		}
 		value = sum / float64(len(pts))
-	}
-	defs, err := w.metrics.Describe(ctx, q.Metrics)
-	if err != nil {
-		return nil, err
 	}
 	def := defs[c.Metric]
 	label := def.Label

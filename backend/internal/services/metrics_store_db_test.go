@@ -45,6 +45,17 @@ func TestDBMetricsWriteAndQueryRaw(t *testing.T) {
 	if err != nil || len(sum.Series) != 1 || sum.Series[0].Points[2].Avg != 310 {
 		t.Errorf("sum: %+v %v", sum, err)
 	}
+	avg, err := m.Query(ctx, MetricsQuery{DeviceIDs: []uuid.UUID{s.DeviceID}, Metrics: []string{MetricIfInBps},
+		From: now.Add(-time.Hour), To: now, Sum: true, Average: []string{MetricIfInBps}})
+	if err != nil || len(avg.Series) != 1 || avg.Series[0].Points[2].Avg != 155 || avg.Series[0].Points[2].Max != 155 {
+		t.Errorf("sum with Average: %+v %v, want the last point averaged to 155", avg, err)
+	}
+	per, err := m.Query(ctx, MetricsQuery{DeviceIDs: []uuid.UUID{s.DeviceID}, Metrics: []string{MetricIfInBps},
+		From: now.Add(-time.Hour), To: now, Sum: true, PerDevice: true})
+	if err != nil || len(per.Series) != 1 || per.Series[0].DeviceID == nil || *per.Series[0].DeviceID != s.DeviceID ||
+		per.Series[0].Instance != "" || per.Series[0].Points[2].Avg != 310 {
+		t.Errorf("sum per device: %+v %v, want one series for the device with 310", per, err)
+	}
 
 	// An unknown metric (a custom key the registry does not know, e.g.
 	// right after a restore) is skipped, not allowed to sink the batch.
