@@ -20,7 +20,8 @@ const (
 
 // MaxJobAttempts bounds retries. A job that has failed this many times is left
 // failed rather than cycling forever: the usual causes (a deleted monitor, an
-// unwritable output directory) do not fix themselves.
+// unwritable output directory) do not fix themselves. A failure no retry can
+// fix (services.ErrReportTooLarge) fails on its first attempt.
 const MaxJobAttempts = 3
 
 // ReportJob is one queued request to render a report.
