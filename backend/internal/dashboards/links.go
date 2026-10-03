@@ -81,24 +81,37 @@ func (s *Service) PublicLink(ctx context.Context, v Viewer, id uuid.UUID) (*Link
 }
 
 // CreatePublicLink gives a dashboard a public link, replacing any existing
-// one (the old token stops working at once).
-func (s *Service) CreatePublicLink(ctx context.Context, v Viewer, id uuid.UUID) (*models.DashboardPublicLink, error) {
+// one (the old token stops working at once); replaced reports that there was
+// one, for the audit log.
+func (s *Service) CreatePublicLink(ctx context.Context, v Viewer, id uuid.UUID) (link *models.DashboardPublicLink, replaced bool, err error) {
 	if _, err := s.adminDashboard(ctx, v, id); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	token, err := newToken()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	link := models.DashboardPublicLink{DashboardID: id, Token: token, CreatedBy: v.UserID, CreatedAt: time.Now().UTC()}
-	err = s.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "dashboard_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"token", "created_by", "created_at"}),
-	}).Create(&link).Error
+	link = &models.DashboardPublicLink{DashboardID: id, Token: token, CreatedBy: v.UserID, CreatedAt: time.Now().UTC()}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Locking the dashboard row orders concurrent creates, so the second
+		// one sees the first one's link and reports replacing it.
+		if err := tx.Exec(`SELECT 1 FROM dashboards WHERE id = ? FOR UPDATE`, id).Error; err != nil {
+			return err
+		}
+		var n int64
+		if err := tx.Model(&models.DashboardPublicLink{}).Where("dashboard_id = ?", id).Count(&n).Error; err != nil {
+			return err
+		}
+		replaced = n > 0
+		return tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "dashboard_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"token", "created_by", "created_at"}),
+		}).Create(link).Error
+	})
 	if err != nil {
-		return nil, fmt.Errorf("creating public link: %w", err)
+		return nil, false, fmt.Errorf("creating public link: %w", err)
 	}
-	return &link, nil
+	return link, replaced, nil
 }
 
 // RevokePublicLink deletes a dashboard's public link.

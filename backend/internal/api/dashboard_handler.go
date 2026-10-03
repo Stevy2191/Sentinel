@@ -24,7 +24,7 @@ type dashboardStore interface {
 	UpsertShare(ctx context.Context, v dashboards.Viewer, id, userID uuid.UUID, permission string) error
 	RemoveShare(ctx context.Context, v dashboards.Viewer, id, userID uuid.UUID) error
 	PublicLink(ctx context.Context, v dashboards.Viewer, id uuid.UUID) (*dashboards.LinkView, error)
-	CreatePublicLink(ctx context.Context, v dashboards.Viewer, id uuid.UUID) (*models.DashboardPublicLink, error)
+	CreatePublicLink(ctx context.Context, v dashboards.Viewer, id uuid.UUID) (*models.DashboardPublicLink, bool, error)
 	RevokePublicLink(ctx context.Context, v dashboards.Viewer, id uuid.UUID) error
 	Widget(ctx context.Context, v dashboards.Viewer, dashboardID, widgetID uuid.UUID) (*models.DashboardWidget, *dashboards.DashboardView, error)
 	ResolveToken(ctx context.Context, token string) (*models.Dashboard, error)
@@ -409,14 +409,18 @@ func createPublicLinkHandler(store dashboardStore, audit auditRecorder) gin.Hand
 		if !ok {
 			return
 		}
-		link, err := store.CreatePublicLink(c.Request.Context(), v, id)
+		link, replaced, err := store.CreatePublicLink(c.Request.Context(), v, id)
 		if err != nil {
 			respondDashboardError(c, "createPublicLink", err)
 			return
 		}
 		// The token itself is never written to the audit log.
+		summary := map[string]any{"dashboard_id": id}
+		if replaced {
+			summary["regenerated"] = true
+		}
 		audit.Record(c.Request.Context(), actorFrom(c), models.ActionDashboardLinkCreated, models.ResourceDashboard,
-			&id, models.AuditChanges{Summary: map[string]any{"dashboard_id": id}})
+			&id, models.AuditChanges{Summary: summary})
 		respondSuccess(c, http.StatusOK, link)
 	}
 }

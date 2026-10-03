@@ -525,6 +525,18 @@ func (s *CheckService) GetRecentChecks(ctx context.Context, monitorID uuid.UUID,
 // pagination. A non-positive limit or offset is treated as unset. An empty
 // result set is returned as an empty slice with a nil error.
 func (s *CheckService) GetChecksInRange(ctx context.Context, monitorID uuid.UUID, start, end time.Time, limit, offset int) ([]models.Check, error) {
+	checks, err := s.ChecksInRange(ctx, monitorID, start, end, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	s.logger.Printf("[check] retrieved %d checks for monitor %s from %s to %s",
+		len(checks), monitorID, start.Format(time.RFC3339), end.Format(time.RFC3339))
+	return checks, nil
+}
+
+// ChecksInRange is GetChecksInRange without the log line: a dashboard's
+// monitors widget asks for up to 50 monitors' checks on every refresh.
+func (s *CheckService) ChecksInRange(ctx context.Context, monitorID uuid.UUID, start, end time.Time, limit, offset int) ([]models.Check, error) {
 	query := s.db.WithContext(ctx).
 		Where("monitor_id = ? AND timestamp >= ? AND timestamp <= ?", monitorID, start, end).
 		Order("timestamp DESC")
@@ -539,9 +551,6 @@ func (s *CheckService) GetChecksInRange(ctx context.Context, monitorID uuid.UUID
 	if err := query.Find(&checks).Error; err != nil {
 		return nil, fmt.Errorf("querying checks in range for monitor %s: %w", monitorID, err)
 	}
-
-	s.logger.Printf("[check] retrieved %d checks for monitor %s from %s to %s",
-		len(checks), monitorID, start.Format(time.RFC3339), end.Format(time.RFC3339))
 	return checks, nil
 }
 

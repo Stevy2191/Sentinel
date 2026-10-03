@@ -2,7 +2,9 @@ package services
 
 import (
 	"context"
+	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,5 +56,40 @@ func TestDBTopN(t *testing.T) {
 	}
 	if _, err := m.TopN(ctx, TopNQuery{DeviceIDs: []uuid.UUID{s.DeviceID}, Measure: "nope", From: now.Add(-time.Hour), To: now, N: 5}); err == nil {
 		t.Error("an unknown measure was accepted")
+	}
+}
+
+// Ports that tie on value, device name and ifIndex keep one order from one
+// refresh to the next: the tie-break ends with the device and interface ids.
+func TestDBTopNTieBreakIsTotal(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	m := NewMetricsStore(db)
+	first := seedDevice(t, db, "HQ", "10.0.0.2")
+	devices := []uuid.UUID{first.DeviceID}
+	for i := 3; i <= 8; i++ {
+		devices = append(devices, seedDeviceInSite(t, db, first.SiteID, "10.0.0."+strconv.Itoa(i)))
+	}
+	testdb.Exec(t, db, `UPDATE devices SET name = 'switch' WHERE id IN ?`, devices)
+	now := time.Now().UTC()
+	for _, dev := range devices {
+		port := seedPort(t, db, dev, 1, "Gi1", "")
+		testdb.Must(t, m.Write(ctx, dev, now.Add(-10*time.Minute), []SamplePoint{
+			{Metric: MetricIfInBps, Instance: "1", InterfaceID: &port, Value: 500},
+			{Metric: MetricIfOutBps, Instance: "1", InterfaceID: &port, Value: 500},
+		}))
+	}
+	want := slices.Clone(devices)
+	slices.SortFunc(want, func(a, b uuid.UUID) int { return strings.Compare(a.String(), b.String()) })
+	for run := 0; run < 3; run++ {
+		rows, err := m.TopN(ctx, TopNQuery{DeviceIDs: devices, Measure: TopNTraffic, From: now.Add(-time.Hour), To: now, N: len(devices)})
+		testdb.Must(t, err)
+		got := make([]uuid.UUID, len(rows))
+		for i, r := range rows {
+			got[i] = r.DeviceID
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("run %d: devices in order %v, want them by id %v", run, got, want)
+		}
 	}
 }

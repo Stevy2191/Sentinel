@@ -59,9 +59,10 @@ type MonitorReader interface {
 	GetMaintenanceHistory(ctx context.Context, monitorID uuid.UUID, start, end time.Time) ([]models.MaintenanceHistory, error)
 }
 
-// CheckReader is the part of services.CheckService widgets use.
+// CheckReader is the part of services.CheckService widgets use: the variant
+// that does not log every call.
 type CheckReader interface {
-	GetChecksInRange(ctx context.Context, monitorID uuid.UUID, start, end time.Time, limit, offset int) ([]models.Check, error)
+	ChecksInRange(ctx context.Context, monitorID uuid.UUID, start, end time.Time, limit, offset int) ([]models.Check, error)
 }
 
 // AgentReader is the part of services.AgentService widgets use.

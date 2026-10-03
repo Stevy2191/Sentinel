@@ -342,7 +342,9 @@ type IncidentListOptions struct {
 	Subject string
 	// Search matches the subject's name.
 	Search string
-	// SortBy is "started" (default) or "duration".
+	// SortBy is "started" (default), "duration", or "changed": by the latest
+	// opening or closing, COALESCE(end_time, start_time), so an old incident
+	// that closed recently sorts as recent (the dashboard event log).
 	SortBy string
 	Desc   bool
 }
@@ -477,11 +479,14 @@ func (s *IncidentService) ListIncidents(ctx context.Context, opts IncidentListOp
 		dir = "DESC"
 	}
 	order := "i.start_time " + dir
-	if opts.SortBy == "duration" {
+	switch opts.SortBy {
+	case "duration":
 		// An ongoing incident has no stored duration, so it is measured from
 		// its start instead; otherwise every open incident would sort as zero,
 		// which is the opposite of the truth.
 		order = "COALESCE(i.duration_seconds, EXTRACT(EPOCH FROM (now() - i.start_time))::int) " + dir
+	case "changed":
+		order = "COALESCE(i.end_time, i.start_time) " + dir
 	}
 
 	var rows []IncidentWithMonitor

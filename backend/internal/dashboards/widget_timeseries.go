@@ -55,7 +55,7 @@ type timeseriesWidget struct {
 
 func (timeseriesWidget) Type() string { return "timeseries" }
 
-func (timeseriesWidget) Validate(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
+func (w timeseriesWidget) Validate(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 	var c timeseriesConfig
 	if err := decodeConfig(raw, &c); err != nil {
 		return nil, err
@@ -68,6 +68,9 @@ func (timeseriesWidget) Validate(_ context.Context, raw json.RawMessage) (json.R
 	case "", sourceMetrics:
 		c.Source, c.View = sourceMetrics, ""
 		if c.Metrics, err = validateMetricKeys(c.Metrics, 1, maxMetrics); err != nil {
+			return nil, err
+		}
+		if err := w.sameUnit(ctx, c.Metrics); err != nil {
 			return nil, err
 		}
 		c.Devices = dedupe(c.Devices)
@@ -101,6 +104,23 @@ func (timeseriesWidget) Validate(_ context.Context, raw json.RawMessage) (json.R
 		return nil, fieldErr("source", "must be metrics or site_traffic")
 	}
 	return json.Marshal(c)
+}
+
+// sameUnit refuses metrics of different units: one chart has one axis.
+func (w timeseriesWidget) sameUnit(ctx context.Context, keys []string) error {
+	if len(keys) < 2 {
+		return nil
+	}
+	defs, err := w.metrics.Describe(ctx, keys)
+	if err != nil {
+		return err
+	}
+	for _, k := range keys[1:] {
+		if defs[k].Unit != defs[keys[0]].Unit {
+			return fieldErr("metrics", "choose metrics with the same unit")
+		}
+	}
+	return nil
 }
 
 func (timeseriesWidget) Subjects(raw json.RawMessage) Subjects {

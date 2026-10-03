@@ -15,10 +15,13 @@ func TestDBPublicLinkLifecycle(t *testing.T) {
 	ctx := context.Background()
 	admin := w.viewer(w.admin)
 
-	link, err := w.svc.CreatePublicLink(ctx, admin, w.siteDash)
+	link, replaced, err := w.svc.CreatePublicLink(ctx, admin, w.siteDash)
 	testdb.Must(t, err)
 	if len(link.Token) != 43 {
 		t.Errorf("token %q has %d chars, want 43 (32 bytes base64url)", link.Token, len(link.Token))
+	}
+	if replaced {
+		t.Error("the first link reports replacing one")
 	}
 	d, err := w.svc.ResolveToken(ctx, link.Token)
 	testdb.Must(t, err)
@@ -26,10 +29,13 @@ func TestDBPublicLinkLifecycle(t *testing.T) {
 		t.Errorf("token resolves to %s, want %s", d.ID, w.siteDash)
 	}
 
-	again, err := w.svc.CreatePublicLink(ctx, admin, w.siteDash)
+	again, replaced, err := w.svc.CreatePublicLink(ctx, admin, w.siteDash)
 	testdb.Must(t, err)
 	if again.Token == link.Token {
 		t.Error("regenerating kept the old token")
+	}
+	if !replaced {
+		t.Error("regenerating does not report replacing the old link")
 	}
 	if _, err := w.svc.ResolveToken(ctx, link.Token); !errors.Is(err, ErrNotFound) {
 		t.Errorf("old token after regenerating err = %v, want ErrNotFound", err)
@@ -47,7 +53,7 @@ func TestDBPublicLinkLifecycle(t *testing.T) {
 func TestDBResolveTokenCreatorDemoted(t *testing.T) {
 	w := newAccessWorld(t)
 	ctx := context.Background()
-	link, err := w.svc.CreatePublicLink(ctx, w.viewer(w.admin), w.siteDash)
+	link, _, err := w.svc.CreatePublicLink(ctx, w.viewer(w.admin), w.siteDash)
 	testdb.Must(t, err)
 	testdb.Exec(t, w.db, `UPDATE users SET is_admin = false, role = 'user' WHERE id = ?`, w.admin)
 	if _, err := w.svc.ResolveToken(ctx, link.Token); !errors.Is(err, ErrNotFound) {
@@ -58,7 +64,7 @@ func TestDBResolveTokenCreatorDemoted(t *testing.T) {
 func TestDBPublicLinkRefusesNonAdmins(t *testing.T) {
 	w := newAccessWorld(t)
 	ctx := context.Background()
-	if _, err := w.svc.CreatePublicLink(ctx, w.viewer(w.siteRW), w.siteDash); !errors.Is(err, ErrForbidden) {
+	if _, _, err := w.svc.CreatePublicLink(ctx, w.viewer(w.siteRW), w.siteDash); !errors.Is(err, ErrForbidden) {
 		t.Errorf("editor creating a link err = %v, want ErrForbidden", err)
 	}
 	for _, token := range []string{"", "short", "x' OR '1'='1"} {

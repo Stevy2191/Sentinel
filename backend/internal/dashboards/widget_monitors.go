@@ -167,14 +167,14 @@ func (w monitorsWidget) Resolve(ctx context.Context, raw json.RawMessage, in Res
 // and the monitor page use.
 func (w monitorsWidget) buckets(ctx context.Context, m *models.Monitor, window string, now time.Time) ([]UptimeBucket, error) {
 	if window == "90d" {
-		checks, err := w.checks.GetChecksInRange(ctx, m.ID, now.AddDate(0, 0, -services.UptimeDailyDays), now, 0, 0)
+		checks, err := w.checks.ChecksInRange(ctx, m.ID, now.AddDate(0, 0, -services.UptimeDailyDays), now, 0, 0)
 		if err != nil {
 			return nil, err
 		}
 		return toBuckets(services.DailyUptimeBuckets(checks, now), "date"), nil
 	}
 	start := now.Add(-24 * time.Hour)
-	checks, err := w.checks.GetChecksInRange(ctx, m.ID, start, now, 0, 0)
+	checks, err := w.checks.ChecksInRange(ctx, m.ID, start, now, 0, 0)
 	if err != nil {
 		return nil, err
 	}

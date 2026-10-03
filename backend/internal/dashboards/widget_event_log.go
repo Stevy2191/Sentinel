@@ -86,9 +86,11 @@ func (w eventLogWidget) Resolve(ctx context.Context, raw json.RawMessage, in Res
 	// The subject comes from the access-filtered set, never the raw config.
 	// Every incident of a visible site or device is visible to its viewer.
 	filter := services.PortEventFilter{Page: 1, Limit: c.Limit}
+	// By latest change, not start: the closing of a long outage is recent
+	// news even when many incidents have started since it began.
 	opts := services.IncidentListOptions{
 		Viewer: &services.IncidentViewer{IsAdmin: true},
-		Page:   1, Limit: c.Limit, Subject: "device", Desc: true,
+		Page:   1, Limit: c.Limit, Subject: "device", SortBy: "changed", Desc: true,
 	}
 	switch {
 	case c.SiteID != nil:

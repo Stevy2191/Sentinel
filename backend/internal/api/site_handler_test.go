@@ -68,10 +68,14 @@ func (f *fakeSites) RemoveShare(context.Context, uuid.UUID, uuid.UUID) error {
 	return nil
 }
 
-type fakeAudit struct{ entries []string }
+type fakeAudit struct {
+	entries []string
+	changes []models.AuditChanges
+}
 
-func (a *fakeAudit) Record(_ context.Context, _ services.Actor, action, _ string, _ *uuid.UUID, _ models.AuditChanges) {
+func (a *fakeAudit) Record(_ context.Context, _ services.Actor, action, _ string, _ *uuid.UUID, changes models.AuditChanges) {
 	a.entries = append(a.entries, action)
+	a.changes = append(a.changes, changes)
 }
 
 // siteRouter mounts the site routes as a signed-in user with the given admin
