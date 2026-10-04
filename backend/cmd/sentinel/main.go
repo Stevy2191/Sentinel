@@ -168,6 +168,8 @@ func run() error {
 	reportJobs := services.NewReportJobQueue(db, services.NewReportGenerator(db, reportAggregator, pdfRenderer, settingsService), cfg.ReportWorkers)
 	reportBuilder.SetJobQueue(reportJobs)
 	reportBuilder.SetAudit(auditService)
+	// Metrics reports: create-time scope checks and the editor's scope preview.
+	reportBuilder.SetNetworkScopes(networkReports)
 	reportGenerator := services.NewReportGenerator(db, reportAggregator, pdfRenderer, settingsService)
 	// Scheduled delivery sends through the same SMTP configuration as the email
 	// notification channel, so it inherits its connection-security settings.
