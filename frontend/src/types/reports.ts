@@ -2,16 +2,51 @@
 // the templates that shape them. These mirror the backend models in
 // internal/models/report.go and report_schedule.go.
 
-export type ReportScopeType = 'monitors' | 'tags' | 'groups' | 'types'
+import type { PortRole } from '@/hooks/useDevices'
+
+/** What an Uptime or Incident report covers. */
+export type MonitorScopeType = 'monitors' | 'tags' | 'groups' | 'types'
+/** What a Metrics report covers (models.ScopeTypePorts and its siblings). */
+export type NetworkScopeType = 'ports' | 'port_roles' | 'devices' | 'sites'
+export type ReportScopeType = MonitorScopeType | NetworkScopeType
 export type ScheduleType = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'custom'
 
-/** The two fixed report types. No template system, no section picker. */
-export type ReportType = 'uptime' | 'incident'
+/** The three fixed report types. No template system, no section picker. */
+export type ReportType = 'uptime' | 'incident' | 'metrics'
+
+/** The types in the order the builders offer them. */
+export const REPORT_TYPES: ReportType[] = ['uptime', 'incident', 'metrics']
 
 export const REPORT_TYPE_LABEL: Record<ReportType, string> = {
   uptime: 'Uptime Report',
   incident: 'Incident Report',
+  metrics: 'Metrics Report',
 }
+
+/** One line under each type's card, in both builders. */
+export const REPORT_TYPE_BLURB: Record<ReportType, string> = {
+  uptime: 'Uptime vs. SLA, with a cumulative-uptime graph and a per-monitor breakdown.',
+  incident: 'Every incident in scope, with root cause and resolution detail.',
+  metrics:
+    'Traffic, busy %, errors and device health for ports, devices or sites: 95th percentiles, totals, and the change from the previous period.',
+}
+
+/** A scope type in words, where only the kind of scope is shown. */
+export const SCOPE_TYPE_LABEL: Record<ReportScopeType, string> = {
+  monitors: 'Monitors',
+  tags: 'Tags',
+  groups: 'Groups',
+  types: 'Types',
+  ports: 'Ports',
+  port_roles: 'Port roles',
+  devices: 'Devices',
+  sites: 'Sites',
+}
+
+/** At most this many ports or devices in a Metrics report (models.MaxReportSubjects). */
+export const MAX_REPORT_SUBJECTS = 500
+/** At most this many metrics in a Metrics report (models.MaxReportMetrics). */
+export const MAX_REPORT_METRICS = 10
 
 export interface IncidentSummary {
   id: string
@@ -48,6 +83,8 @@ export interface SavedReport {
   name: string
   report_type: ReportType
   scope_type: ReportScopeType
+  /** What the report covers. Absent on a share-link response. */
+  scope_data?: ReportScopeData
   time_range_days: number
   /** The window in words — "August 2026", "Q2 2026", "Last 7 days". */
   period_label?: string
@@ -80,11 +117,24 @@ export interface ReportSchedule {
   updated_at: string
 }
 
-/** Scope payload; exactly one field is set, matching scope_type. */
+/**
+ * Scope payload, matching scope_type: a monitor scope sets its one field; a
+ * network scope sets its ids (and roles for port_roles) plus metrics.
+ */
 export interface ReportScopeData {
   monitor_ids?: string[]
   tags?: string[]
   group_ids?: string[]
+  /** Monitor check types: http, dns, ping, tcp. */
+  types?: string[]
+  /** device_interfaces ids, 1-500. */
+  port_ids?: string[]
+  site_ids?: string[]
+  /** 1-500. */
+  device_ids?: string[]
+  roles?: PortRole[]
+  /** Metric keys, 1-10, in order: the first ranks the rows. */
+  metrics?: string[]
 }
 
 export interface CreateReportPayload {
@@ -182,4 +232,29 @@ export interface ReportPeriod {
   /** Custom only, RFC3339. */
   period_start?: string
   period_end?: string
+}
+
+/** Where a metric is defined: Sentinel's catalogue, a device profile, or a custom MIB metric. */
+export type MetricSource = 'builtin' | 'profile' | 'custom'
+
+/** One metric a Metrics report can include. Mirrors netreport.MetricChoice. */
+export interface MetricChoice {
+  key: string
+  label: string
+  unit: string
+  source: MetricSource
+}
+
+/**
+ * POST /reports/scope-preview: how big a network scope is right now and the
+ * metrics it offers. Mirrors netreport.Preview.
+ */
+export interface ScopePreview {
+  ports: number
+  devices: number
+  /** Over 500 ports or devices: the report keeps the 500 busiest. */
+  capped: boolean
+  metrics: MetricChoice[]
+  /** The metrics a report on this scope starts with, in order. */
+  defaults: string[]
 }
