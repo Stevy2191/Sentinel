@@ -186,7 +186,7 @@ export function portChoiceName(
   p: { name: string; label: string; number: number; alias: string },
 ): string {
   const port = p.name || p.label || String(p.number)
-  return `${deviceName} · ${port}${p.alias ? ` (${p.alias})` : ''}`
+  return `${deviceName} · ${port}${p.alias && p.alias !== port ? ` (${p.alias})` : ''}`
 }
 
 const DAY_MS = 86_400_000
