@@ -22,12 +22,24 @@ const (
 
 // drawPDFMetricsReport assembles the fixed Metrics report layout.
 func drawPDFMetricsReport(pdf *fpdf.Fpdf, data *ReportData) {
-	if data.Network == nil {
+	n := data.Network
+	switch {
+	case n == nil:
 		drawPDFNotice(pdf, "No network data was gathered for this report.", pdfWarning)
+		return
+	case n.Empty:
+		// Every subject is gone or hidden: one page that says so.
+		drawMetricsTitle(pdf, data)
+		drawPDFNotice(pdf, metricsEmptyMessage, pdfWarning)
 		return
 	}
 	drawMetricsHeadline(pdf, data)
+	if n.NoData {
+		return
+	}
 	drawMetricsCharts(pdf, data)
+	drawMetricsTables(pdf, data)
+	drawMetricsRowCharts(pdf, data)
 }
 
 // drawMetricsTitle writes the scope in words and the period with the one it
@@ -109,6 +121,11 @@ func windowLabel(start, end time.Time, loc *time.Location) string {
 func drawMetricsHeadline(pdf *fpdf.Fpdf, data *ReportData) {
 	n := data.Network
 	drawMetricsTitle(pdf, data)
+	if n.NoData {
+		drawPDFNotice(pdf, "No data for this period", pdfMuted)
+		drawMetricsNotes(pdf, n)
+		return
+	}
 	prev := windowLabel(n.PrevStart, n.PrevEnd, data.ReportLocation())
 	drawMetricsTiles(pdf, n.Tiles, n.Tables, prev)
 	drawMetricsRunningHot(pdf, n.RunningHot)
