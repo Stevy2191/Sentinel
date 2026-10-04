@@ -315,9 +315,13 @@ func countSubjects(data *services.MetricsReportData, res *resolved, keep map[str
 // roleNames are the port roles as the scope label writes them.
 var roleNames = map[string]string{models.PortRoleWAN: "WAN", models.PortRoleUplink: "Uplink", models.PortRoleAccess: "Access"}
 
-// noAvailableSites labels a port_roles or sites scope none of whose sites
-// the owner can see: never "All of" nothing.
-const noAvailableSites = "No available sites"
+// The labels of a scope none of whose chosen ports, devices or sites the
+// owner can see: never "0 ports" or "All of" nothing.
+const (
+	noAvailablePorts   = "No available ports"
+	noAvailableDevices = "No available devices"
+	noAvailableSites   = "No available sites"
+)
 
 // scopeLabel names the scope in words, naming only what the owner can see:
 // "WAN, Uplink ports at HQ, Annex", "All of HQ", "core-sw1 · Gi1/0/1",
@@ -325,12 +329,18 @@ const noAvailableSites = "No available sites"
 func scopeLabel(scopeType string, scope models.ReportScope, res *resolved) string {
 	switch scopeType {
 	case models.ScopeTypePorts:
-		if len(res.ports) == 1 {
+		switch len(res.ports) {
+		case 0:
+			return noAvailablePorts
+		case 1:
 			return res.ports[0].Name
 		}
 		return plural(len(res.ports), "port")
 	case models.ScopeTypeDevices:
-		if len(res.devices) == 1 {
+		switch len(res.devices) {
+		case 0:
+			return noAvailableDevices
+		case 1:
 			return res.devices[0].Name
 		}
 		return plural(len(res.devices), "device")

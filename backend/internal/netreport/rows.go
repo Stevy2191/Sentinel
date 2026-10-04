@@ -96,7 +96,9 @@ type row struct {
 // Then a port metric has a line per port (on a devices scope, a total per
 // device over its physical ports), and a device metric a line per instance
 // of each device that has one (a stack member's CPU, a sensor). A port with
-// no series still gets its line, which shows "No data".
+// no series still gets its line, which shows "No data"; so does a device
+// chosen on a devices scope that has no series of a device metric (a sites
+// scope lists only the devices that have it).
 func rowsFor(res *resolved, m metricInfo, idx *seriesIndex) []row {
 	var out []row
 	for _, s := range res.sites {
@@ -129,6 +131,11 @@ func rowsFor(res *resolved, m metricInfo, idx *seriesIndex) []row {
 		}
 	default:
 		for _, d := range res.devices {
+			if len(idx.byDevice[d.ID][m.Key]) == 0 && res.scopeType == models.ScopeTypeDevices {
+				// A chosen device without the metric keeps its line: "No data".
+				out = append(out, row{key: "i:" + d.ID.String() + ":", subject: "d:" + d.ID.String(), name: d.Name})
+				continue
+			}
 			for _, s := range idx.byDevice[d.ID][m.Key] {
 				out = append(out, row{key: "i:" + d.ID.String() + ":" + s.Instance, subject: "d:" + d.ID.String(),
 					name: instanceName(d.Name, s), series: []int64{s.ID}})

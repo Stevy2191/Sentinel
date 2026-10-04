@@ -403,6 +403,55 @@ func TestDBBuildCalendarPreviousCustomMetricAndBool(t *testing.T) {
 	if tile := data.Tiles[1]; tile.Kind != "other" || !near(tile.First, 0.55) {
 		t.Errorf("battery tile = %+v, want 0.55", tile)
 	}
+	// A chart's reference line is its 95th. A bool chart has none: its
+	// ranking figure is the share of time true, not a 95th.
+	if len(data.Charts) != 2 || data.Charts[0].Reference == nil || *data.Charts[0].Reference != 30 || data.Charts[1].Reference != nil {
+		t.Errorf("charts = %+v, want the temperature's 95th (30) and no line on the battery chart", data.Charts)
+	}
+	if len(data.RowCharts) != 1 || data.RowCharts[0].Reference == nil || *data.RowCharts[0].Reference != 30 {
+		t.Errorf("row charts = %+v, want ups1 · Rack A with its 95th (30)", data.RowCharts)
+	}
+	// With the bool metric first, its row charts have no reference line either.
+	report.ScopeData.Metrics = []string{services.MetricUPSOnBattery, "lab_temp"}
+	data, err = newBuilder(db).Build(ctx, report, admin, start, end, time.UTC)
+	testdb.Must(t, err)
+	if data.RankLabel != "On battery" || len(data.RowCharts) != 1 || data.RowCharts[0].Title != "ups1" ||
+		data.RowCharts[0].Reference != nil || len(data.Charts) != 2 || data.Charts[0].Reference != nil {
+		t.Errorf("battery first: rank %q, charts %+v, row charts %+v; want no reference line on a bool chart",
+			data.RankLabel, data.Charts, data.RowCharts)
+	}
+}
+
+// A chosen device without series of a device metric (a switch in a UPS
+// report) still has its line, which says "No data": it counts among the
+// report's devices, as the label does, and ranks after every device with data.
+func TestDBBuildChosenDeviceWithoutTheMetricShowsNoData(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	admin := testdb.NewUser(t, db, true)
+	hq := newSite(t, db, "HQ")
+	ups, sw := newDevice(t, db, hq, "ups1"), newDevice(t, db, hq, "core-sw1")
+	start, end := buildWindow()
+	steady(t, db, newSeries(t, db, ups, services.MetricUPSLoadPct, "", nil, ""), start, 12, 40)
+	refresh(t, db)
+	report := metricsReport(admin, models.ScopeTypeDevices, models.ReportScope{DeviceIDs: []uuid.UUID{ups, sw},
+		Metrics: []string{services.MetricUPSLoadPct}})
+
+	data, err := newBuilder(db).Build(ctx, report, admin, start, end, time.UTC)
+	testdb.Must(t, err)
+
+	rows := data.Tables[0].Rows
+	if want := []string{"ups1", "core-sw1"}; !slices.Equal(rowNames(rows), want) {
+		t.Fatalf("load lines = %v, want %v", rowNames(rows), want)
+	}
+	if rows[0].NoData || rows[0].In == nil || rows[0].In.Avg != 40 || !rows[1].NoData || rows[1].In != nil {
+		t.Errorf("lines = %+v / %+v, want ups1 at 40%% and core-sw1 with no data", rows[0], rows[1])
+	}
+	if data.Rows != 2 || data.Devices != 2 || data.ScopeLabel != "2 devices" || data.NoData || data.Unavailable != 0 ||
+		!slices.Equal(data.Busiest, []string{"ups1"}) || len(data.RowCharts) != 1 {
+		t.Errorf("rows %d, devices %d, label %q, no data %v, unavailable %d, busiest %v, row charts %d",
+			data.Rows, data.Devices, data.ScopeLabel, data.NoData, data.Unavailable, data.Busiest, len(data.RowCharts))
+	}
 }
 
 // Every chosen subject hidden: a one-page report that says so. A metric
@@ -416,41 +465,67 @@ func TestDBBuildEmptySkippedAndNoData(t *testing.T) {
 	hq, annex := newSite(t, db, "HQ"), newSite(t, db, "Annex")
 	shareSite(t, db, hq, user, "readonly")
 	far := newDevice(t, db, annex, "annex-sw1")
+	farPort := newPort(t, db, far, 1, "Gi1", gigabit)
 	start, end := buildWindow()
+	// Annex is busy and running hot; none of it may reach the user's reports.
+	steady(t, db, portSeries(t, db, far, farPort, 1, services.MetricIfInBps), start, 12, 500)
+	steady(t, db, portSeries(t, db, far, farPort, 1, services.MetricIfInUtilPct), start, 12, 95)
+	refresh(t, db)
 	b := newBuilder(db)
 
-	data, err := b.Build(ctx, metricsReport(user, models.ScopeTypeDevices,
-		models.ReportScope{DeviceIDs: []uuid.UUID{far}, Metrics: []string{services.MetricIfInBps}}), user, start, end, time.UTC)
-	testdb.Must(t, err)
-	if !data.Empty || data.Unavailable != 1 || len(data.Tables) != 0 || data.ScopeType != models.ScopeTypeDevices {
-		t.Errorf("hidden device: empty %v, unavailable %d, tables %d", data.Empty, data.Unavailable, len(data.Tables))
+	// Every chosen subject hidden: Empty, and the label names nothing.
+	for _, c := range []struct {
+		scopeType string
+		scope     models.ReportScope
+		label     string
+	}{
+		{models.ScopeTypePorts, models.ReportScope{PortIDs: []uuid.UUID{farPort}}, "No available ports"},
+		{models.ScopeTypeDevices, models.ReportScope{DeviceIDs: []uuid.UUID{far}}, "No available devices"},
+		{models.ScopeTypePortRoles, models.ReportScope{SiteIDs: []uuid.UUID{annex}, Roles: []string{models.PortRoleWAN}}, "No available sites"},
+		{models.ScopeTypeSites, models.ReportScope{SiteIDs: []uuid.UUID{annex}}, "No available sites"},
+	} {
+		c.scope.Metrics = []string{services.MetricIfInBps}
+		data, err := b.Build(ctx, metricsReport(user, c.scopeType, c.scope), user, start, end, time.UTC)
+		testdb.Must(t, err)
+		if !data.Empty || data.Unavailable != 1 || len(data.Tables) != 0 || data.ScopeType != c.scopeType || data.ScopeLabel != c.label {
+			t.Errorf("hidden %s: empty %v, unavailable %d, tables %d, type %q, label %q; want empty, 1, 0, %q",
+				c.scopeType, data.Empty, data.Unavailable, len(data.Tables), data.ScopeType, data.ScopeLabel, c.label)
+		}
 	}
 	// The run resolves the scope as the user it is given, whoever made the report.
-	data, err = b.Build(ctx, metricsReport(admin, models.ScopeTypeDevices,
+	data, err := b.Build(ctx, metricsReport(admin, models.ScopeTypeDevices,
 		models.ReportScope{DeviceIDs: []uuid.UUID{far}, Metrics: []string{services.MetricIfInBps}}), user, start, end, time.UTC)
 	testdb.Must(t, err)
 	if !data.Empty || data.Unavailable != 1 {
 		t.Errorf("an admin's report run for the user: empty %v, unavailable %d; want the user's view", data.Empty, data.Unavailable)
 	}
-	// No visible site: the label never reads "All of" or "ports at" nothing.
-	for _, scopeType := range []string{models.ScopeTypeSites, models.ScopeTypePortRoles} {
-		scope := models.ReportScope{SiteIDs: []uuid.UUID{annex}, Metrics: []string{services.MetricIfInBps}}
-		if scopeType == models.ScopeTypePortRoles {
-			scope.Roles = []string{models.PortRoleWAN}
-		}
-		data, err = b.Build(ctx, metricsReport(user, scopeType, scope), user, start, end, time.UTC)
-		testdb.Must(t, err)
-		if !data.Empty || data.Unavailable != 1 || data.ScopeLabel != "No available sites" {
-			t.Errorf("%s at a hidden site: empty %v, unavailable %d, label %q; want \"No available sites\"",
-				scopeType, data.Empty, data.Unavailable, data.ScopeLabel)
+	// Only the sites the user may see are named, and nothing of the others
+	// reaches a line, the busiest, running hot or a tile.
+	data, err = b.Build(ctx, metricsReport(user, models.ScopeTypeSites, models.ReportScope{SiteIDs: []uuid.UUID{hq, annex},
+		Metrics: []string{services.MetricIfInBps, services.MetricIfInUtilPct}}), user, start, end, time.UTC)
+	testdb.Must(t, err)
+	if data.Empty || data.Unavailable != 1 || data.ScopeLabel != "All of HQ" || len(data.Tables) != 2 || len(data.Tiles) != 2 {
+		t.Fatalf("HQ and a hidden Annex: empty %v, unavailable %d, label %q, %d tables; want \"All of HQ\" and 2 tables",
+			data.Empty, data.Unavailable, data.ScopeLabel, len(data.Tables))
+	}
+	var names []string
+	for _, tb := range data.Tables {
+		names = append(names, rowNames(tb.Rows)...)
+	}
+	names = append(names, data.Busiest...)
+	for _, h := range data.RunningHot {
+		names = append(names, h.Name)
+	}
+	for _, c := range data.RowCharts {
+		names = append(names, c.Title)
+	}
+	for _, n := range names {
+		if strings.Contains(strings.ToLower(n), "annex") {
+			t.Errorf("%q names the hidden Annex (all names: %v)", n, names)
 		}
 	}
-	// Only the sites the user may see are named.
-	data, err = b.Build(ctx, metricsReport(user, models.ScopeTypeSites,
-		models.ReportScope{SiteIDs: []uuid.UUID{hq, annex}, Metrics: []string{services.MetricIfInBps}}), user, start, end, time.UTC)
-	testdb.Must(t, err)
-	if data.Empty || data.Unavailable != 1 || data.ScopeLabel != "All of HQ" {
-		t.Errorf("HQ and a hidden Annex: empty %v, unavailable %d, label %q; want \"All of HQ\"", data.Empty, data.Unavailable, data.ScopeLabel)
+	if !data.Tiles[0].NoData || !data.Tiles[1].NoData || len(data.RunningHot) != 0 {
+		t.Errorf("tiles %+v, running hot %v; want no data: HQ has none, Annex's is hidden", data.Tiles, data.RunningHot)
 	}
 
 	sw := newDevice(t, db, hq, "core-sw1")

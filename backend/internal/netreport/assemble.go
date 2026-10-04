@@ -39,11 +39,7 @@ func (b *Builder) assemble(ctx context.Context, data *services.MetricsReportData
 		}
 		data.Tables = append(data.Tables, mt)
 		data.Tiles = append(data.Tiles, tileFor(t.group, t.scopeCur, t.scopePrev))
-		var ref *float64
-		if v, ok := rankOf(t.group, t.scopeCur); ok {
-			ref = &v
-		}
-		c, err := b.chart(ctx, t.group.title, t.group, t.scope, ref, start, end)
+		c, err := b.chart(ctx, t.group.title, t.group, t.scope, reference(t.group, t.scopeCur), start, end)
 		if err != nil {
 			return err
 		}
@@ -68,16 +64,14 @@ func (b *Builder) assemble(ctx context.Context, data *services.MetricsReportData
 
 	first := tables[0]
 	for _, l := range first.lines {
-		v, ok := rankOf(first.group, l.cur)
-		if l.site || !ok {
+		if _, ok := rankOf(first.group, l.cur); l.site || !ok {
 			continue
 		}
 		if len(data.Busiest) < busiestCount {
 			data.Busiest = append(data.Busiest, l.name)
 		}
 		if len(data.RowCharts) < rowChartCount {
-			ref := v
-			c, err := b.chart(ctx, l.name, first.group, l.sides, &ref, start, end)
+			c, err := b.chart(ctx, l.name, first.group, l.sides, reference(first.group, l.cur), start, end)
 			if err != nil {
 				return err
 			}
@@ -100,6 +94,17 @@ func sortLines(t *table) {
 		yv, yok := rankOf(t.group, y.cur)
 		return lessBusy(xok, xv, x.name, yok, yv, y.name)
 	})
+}
+
+// reference is a chart's reference line: the 95th (billable for traffic) of
+// these statistics; nil without data, and for a bool metric, whose ranking
+// figure is its share of time true, not a 95th.
+func reference(g group, st [2]services.SeriesStat) *float64 {
+	v, ok := rankOf(g, st)
+	if !ok || g.unit() == "bool" {
+		return nil
+	}
+	return &v
 }
 
 // chart draws a group over [from, to): one line per side from these series,
