@@ -67,6 +67,64 @@ func TestDBResolvePortsAsTheOwner(t *testing.T) {
 	}
 }
 
+func deviceIDsOf(ds []device) []uuid.UUID {
+	out := make([]uuid.UUID, len(ds))
+	for i, d := range ds {
+		out[i] = d.ID
+	}
+	return out
+}
+
+// A scheduled run carries on past unavailable subjects, so resolve itself is
+// the access gate: on every scope type a non-admin gets only what a site
+// share (readonly or editable) lets them see, and the hidden site's subjects
+// are counted, never listed.
+func TestDBResolveEveryScopeAsANonAdmin(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	hq, annex := newSite(t, db, "HQ"), newSite(t, db, "Annex")
+	sw, far := newDevice(t, db, hq, "core-sw1"), newDevice(t, db, annex, "annex-sw1")
+	hqUp := newPort(t, db, sw, 1, "Gi1", gigabit)
+	setRole(t, db, hqUp, models.PortRoleUplink)
+	hqAcc := newPort(t, db, sw, 2, "Gi2", gigabit)
+	farUp := newPort(t, db, far, 1, "Gi1", gigabit)
+	setRole(t, db, farUp, models.PortRoleUplink)
+	b := newBuilder(db)
+
+	for _, permission := range []string{"readonly", "editable"} {
+		user := testdb.NewUser(t, db, false)
+		shareSite(t, db, hq, user, permission)
+		cases := []struct {
+			name, scopeType string
+			scope           models.ReportScope
+			ports, devices  []uuid.UUID
+			siteNames       []string
+		}{
+			{"sites", models.ScopeTypeSites, models.ReportScope{SiteIDs: []uuid.UUID{hq, annex}},
+				[]uuid.UUID{hqUp, hqAcc}, []uuid.UUID{sw}, []string{"HQ"}},
+			{"port roles", models.ScopeTypePortRoles,
+				models.ReportScope{SiteIDs: []uuid.UUID{hq, annex}, Roles: []string{models.PortRoleUplink}},
+				[]uuid.UUID{hqUp}, []uuid.UUID{}, []string{"HQ"}},
+			{"devices", models.ScopeTypeDevices, models.ReportScope{DeviceIDs: []uuid.UUID{sw, far}},
+				[]uuid.UUID{}, []uuid.UUID{sw}, []string{}},
+		}
+		for _, c := range cases {
+			res, err := b.resolve(ctx, user, c.scopeType, c.scope)
+			testdb.Must(t, err)
+			if !slices.Equal(portIDsOf(res.ports), c.ports) || !slices.Equal(deviceIDsOf(res.devices), c.devices) ||
+				!slices.Equal(res.siteNames, c.siteNames) || res.unavailable != 1 {
+				t.Errorf("%s share, %s: ports %v, devices %v, sites %v, unavailable %d; want ports %v, devices %v, sites %v, unavailable 1",
+					permission, c.name, portIDsOf(res.ports), deviceIDsOf(res.devices), res.siteNames, res.unavailable,
+					c.ports, c.devices, c.siteNames)
+			}
+			if c.scopeType == models.ScopeTypeSites && (len(res.sites) != 1 || res.sites[0].ID != hq ||
+				!slices.Equal(res.sites[0].Devices, []uuid.UUID{sw})) {
+				t.Errorf("%s share, sites: totals %+v, want HQ's alone, of core-sw1", permission, res.sites)
+			}
+		}
+	}
+}
+
 // port_roles is expanded at each run: a role set after the report was made
 // counts; ports the poll does not read, or that left the device, do not.
 func TestDBResolvePortRolesAtRunTime(t *testing.T) {
