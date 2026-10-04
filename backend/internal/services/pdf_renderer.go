@@ -381,11 +381,6 @@ func drawPDFUptimeGraph(pdf *fpdf.Fpdf, series []UptimeSeriesPoint, slaTarget fl
 
 	drawSectionHeading(pdf, "Uptime vs. SLA target")
 
-	const axisLabelW = 14.0
-	x0 := pdfMarginLeft + axisLabelW
-	chartW := pdfContentW - axisLabelW
-	y0 := pdf.GetY()
-
 	// The floor is the lowest value actually on the chart rather than always
 	// zero: uptime rarely drops below the high nineties, and a 0-100 axis would
 	// draw every report as a flat line pinned to the top, hiding the one thing
@@ -404,76 +399,40 @@ func drawPDFUptimeGraph(pdf *fpdf.Fpdf, series []UptimeSeriesPoint, slaTarget fl
 	if hi <= lo {
 		hi = lo + 1
 	}
-	// A small top pad keeps a genuine 100% value's line visually separated
-	// from the axis box's own top border. Without it, a flat 100% record
-	// (the common "everything's fine" case) draws its line exactly on top of
-	// the box's top edge - two things at the same coordinate read as one,
-	// which looks like the graph never rendered at all. Applied through the
-	// same yFor every reader (gridlines, the SLA line, the uptime line) goes
-	// through, so nothing drifts out of alignment with anything else.
-	const topPad = 3.0
-	usableH := chartH - topPad
-	yFor := func(pct float64) float64 {
-		frac := (pct - lo) / (hi - lo)
-		if frac < 0 {
-			frac = 0
-		} else if frac > 1 {
-			frac = 1
-		}
-		return y0 + topPad + usableH*(1-frac)
-	}
 
-	pdf.SetFont("Helvetica", "", 7)
-	for i := 0; i <= 4; i++ {
-		frac := float64(i) / 4
-		val := lo + (hi-lo)*frac
-		y := yFor(val)
-		setColor(pdf, pdfRule, true)
-		pdf.Rect(x0, y, chartW, 0.15, "F")
-		setColor(pdf, pdfMuted, false)
-		pdf.SetXY(pdfMarginLeft, y-2)
-		pdf.CellFormat(axisLabelW-1, 4, fmt.Sprintf("%.0f%%", val), "", 0, "R", false, 0, "")
-	}
-	setDrawColor(pdf, pdfRule)
-	pdf.SetLineWidth(0.2)
-	pdf.Rect(x0, y0, chartW, chartH, "D")
-
-	// SLA reference line: a thin flat bar the full width of the chart.
-	setColor(pdf, pdfWarning, true)
-	pdf.Rect(x0, yFor(slaTarget)-0.25, chartW, 0.5, "F")
-	pdf.SetXY(x0+2, yFor(slaTarget)-5)
-	pdf.SetFont("Helvetica", "B", 7)
-	setColor(pdf, pdfWarning, false)
-	pdf.CellFormat(60, 4, pdfText(fmt.Sprintf("SLA target %.2f%%", slaTarget)), "", 0, "L", false, 0, "")
-
-	// The cumulative-uptime line: one segment between each pair of consecutive
-	// samples.
-	setDrawColor(pdf, pdfAccent)
-	pdf.SetLineWidth(0.6)
 	n := len(series)
-	for i := 0; i < n-1; i++ {
-		x1 := x0 + chartW*float64(i)/float64(n-1)
-		x2 := x0 + chartW*float64(i+1)/float64(n-1)
-		pdf.Line(x1, yFor(series[i].Uptime), x2, yFor(series[i+1].Uptime))
+	line := chartLine{X: make([]float64, n), Y: make([]float64, n), Color: pdfAccent, Width: 0.6}
+	for i, p := range series {
+		line.X[i] = float64(i) / float64(n-1)
+		line.Y[i] = p.Uptime
 	}
-	pdf.SetLineWidth(0.2)
-
-	// X-axis date labels: first, middle, and last sample only, so the axis
+	// X-axis date labels: first, last, and middle sample only, so the axis
 	// stays readable instead of crowding thirty overlapping labels.
-	pdf.SetFont("Helvetica", "", 7)
-	setColor(pdf, pdfMuted, false)
-	label := func(i int, align string) {
-		x := x0 + chartW*float64(i)/float64(n-1)
-		pdf.SetXY(x-15, y0+chartH+1.5)
-		pdf.CellFormat(30, 4, series[i].Date.In(loc).Format("Jan 2"), "", 0, align, false, 0, "")
+	dateLabel := func(i int, align string) chartXLabel {
+		return chartXLabel{At: float64(i) / float64(n-1), Text: series[i].Date.In(loc).Format("Jan 2"), Align: align}
 	}
-	label(0, "L")
-	label(n-1, "R")
+	labels := []chartXLabel{dateLabel(0, "L"), dateLabel(n-1, "R")}
 	if mid := (n - 1) / 2; mid > 0 && mid < n-1 {
-		label(mid, "C")
+		labels = append(labels, dateLabel(mid, "C"))
 	}
 
-	pdf.SetY(y0 + chartH + 9)
+	drawLineChart(pdf, lineChart{
+		Height:     chartH,
+		AxisLabelW: 14,
+		Lo:         lo,
+		Hi:         hi,
+		// A small top pad keeps a genuine 100% value's line visually separated
+		// from the axis box's own top border. Without it, a flat 100% record
+		// (the common "everything's fine" case) draws its line exactly on top
+		// of the box's top edge - two things at the same coordinate read as
+		// one, which looks like the graph never rendered at all.
+		TopPad:    3,
+		Ticks:     4,
+		TickLabel: func(v float64) string { return fmt.Sprintf("%.0f%%", v) },
+		Ref:       &chartRef{Value: slaTarget, Label: fmt.Sprintf("SLA target %.2f%%", slaTarget), Color: pdfWarning},
+		Lines:     []chartLine{line},
+		XLabels:   labels,
+	})
 }
 
 func drawPDFSLASection(pdf *fpdf.Fpdf, data *ReportData) {
