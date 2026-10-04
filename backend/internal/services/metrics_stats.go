@@ -162,3 +162,129 @@ func (m *MetricsStore) SeriesStats(ctx context.Context, q StatsQuery) ([]SeriesS
 	}
 	return out, nil
 }
+
+// CombinedQuery selects series to combine into one series, per 5-minute
+// bucket: added up (bps, per_min: four ports moving 10 Mbps move 40), or
+// averaged (%, °C, V: four ports 50 % busy are 50 % busy).
+type CombinedQuery struct {
+	SeriesIDs []int64
+	From, To  time.Time
+	Average   bool // false = sum per bucket (bps, per_min); true = average per bucket
+}
+
+// combineFunc is the SQL aggregate that combines series in a bucket.
+func combineFunc(average bool) string {
+	if average {
+		return "avg"
+	}
+	return "sum"
+}
+
+// CombinedStats combines the series per bucket, then computes one SeriesStat (SeriesID 0).
+// Its figures are the combined series': Avg its mean, Min and Peak its lowest
+// and highest 5-minute value (raw peaks of different series do not line up,
+// so a peak of a total cannot be read from them), P95 its 95th percentile.
+func (m *MetricsStore) CombinedStats(ctx context.Context, q CombinedQuery) (SeriesStat, error) {
+	stats, err := m.GroupedStats(ctx, [][]int64{q.SeriesIDs}, q.From, q.To, q.Average)
+	if err != nil {
+		return SeriesStat{}, err
+	}
+	return stats[0], nil
+}
+
+// GroupedStats is CombinedStats for many groups in one query: one SeriesStat
+// per group, in order, its SeriesID the group's index. A report reads every
+// device or site total of a metric this way, one query per metric and
+// period however many totals there are. An empty group, or one without data,
+// has Buckets 0; a series listed twice in a group counts once.
+func (m *MetricsStore) GroupedStats(ctx context.Context, groups [][]int64, from, to time.Time, average bool) ([]SeriesStat, error) {
+	lo, hi, expected := statsWindow(from, to, m.clock(), statsBucket)
+	out := make([]SeriesStat, len(groups))
+	var ids, grp models.Int64Array
+	for i, g := range groups {
+		out[i] = SeriesStat{SeriesID: int64(i), Expected: expected}
+		seen := make(map[int64]bool, len(g))
+		for _, id := range g {
+			if !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+				grp = append(grp, int64(i))
+			}
+		}
+	}
+	if len(ids) == 0 || expected == 0 {
+		return out, nil
+	}
+	var rows []statRow
+	err := m.withStatementTimeout(ctx, func(tx *gorm.DB) error {
+		return tx.Raw(`WITH member AS (SELECT * FROM unnest(?::bigint[], ?::bigint[]) AS u(series_id, grp)),
+			b AS (SELECT member.grp, r.bucket, `+combineFunc(average)+`(r.vsum / r.n) AS v
+				FROM metrics.samples_5m r JOIN member ON member.series_id = r.series_id
+				WHERE r.series_id = ANY(?::bigint[]) AND r.bucket >= ? AND r.bucket < ?
+				GROUP BY member.grp, r.bucket)
+			SELECT grp AS id, avg(v) AS avg, min(v) AS min, max(v) AS peak,
+				percentile_cont(0.95) WITHIN GROUP (ORDER BY v) AS p95,
+				sum(v) AS bucket_sum, count(*) AS buckets
+			FROM b GROUP BY grp ORDER BY grp`, ids, grp, ids, lo, hi).Scan(&rows).Error
+	})
+	if err != nil {
+		return nil, fmt.Errorf("reading combined statistics: %w", err)
+	}
+	for _, r := range rows {
+		out[r.ID] = r.stat(expected)
+	}
+	return out, nil
+}
+
+// chartResolution picks a report chart's rollup and step. The rollup follows
+// PickResolution's split (the 5-minute rollup up to 7 days, hourly beyond);
+// rawSince = to keeps it off the raw table, as a report reads whole buckets
+// only. The step is a multiple of the rollup's bucket that keeps the chart to
+// about maxPoints points.
+func chartResolution(from, to time.Time, maxPoints int) (table string, base, step time.Duration) {
+	table, base = "metrics.samples_5m", statsBucket
+	if source, _ := PickResolution(from, to, to); source == "1h" {
+		table, base = "metrics.samples_1h", time.Hour
+	}
+	if maxPoints < 1 {
+		maxPoints = 1
+	}
+	step = base
+	if n := to.Sub(from) / time.Duration(maxPoints); n > step {
+		step = ((n + base - 1) / base) * base
+	}
+	return table, base, step
+}
+
+// CombinedSeries returns about maxPoints chart points for the combined series,
+// from samples_5m for windows up to 7 days and samples_1h beyond.
+// Series combine per rollup bucket as in CombinedStats; each point is the
+// mean of the combined buckets in its step. Only whole buckets that have
+// ended are read.
+func (m *MetricsStore) CombinedSeries(ctx context.Context, q CombinedQuery, maxPoints int) ([]ChartPoint, error) {
+	out := []ChartPoint{}
+	table, base, step := chartResolution(q.From, q.To, maxPoints)
+	lo, hi, n := statsWindow(q.From, q.To, m.clock(), base)
+	if len(q.SeriesIDs) == 0 || n == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		T time.Time `gorm:"column:t"`
+		V float64   `gorm:"column:v"`
+	}
+	err := m.withStatementTimeout(ctx, func(tx *gorm.DB) error {
+		return tx.Raw(`SELECT time_bucket(make_interval(secs => ?), b.bucket) AS t, avg(b.v) AS v
+			FROM (SELECT r.bucket, `+combineFunc(q.Average)+`(r.vsum / r.n) AS v
+				FROM `+table+` r
+				WHERE r.series_id = ANY(?::bigint[]) AND r.bucket >= ? AND r.bucket < ?
+				GROUP BY r.bucket) b
+			GROUP BY 1 ORDER BY 1`, step.Seconds(), models.Int64Array(q.SeriesIDs), lo, hi).Scan(&rows).Error
+	})
+	if err != nil {
+		return nil, fmt.Errorf("reading chart series: %w", err)
+	}
+	for _, r := range rows {
+		out = append(out, ChartPoint{T: r.T.UTC(), V: r.V})
+	}
+	return out, nil
+}

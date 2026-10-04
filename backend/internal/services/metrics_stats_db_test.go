@@ -166,3 +166,120 @@ func TestDBStatsTimeoutIsTooLarge(t *testing.T) {
 		t.Errorf("the timeout leaked out of its transaction: %v", err)
 	}
 }
+
+// Two series over four buckets, by hand (bucket averages):
+//
+//	        b0    b1        b2    b3
+//	A       100   150,250   300   -
+//	        100   200       300
+//	B       50    -         100   40
+//
+// Summed: 150, 200, 400, 40. Avg 790/4 = 197.5, min 40, peak 400, bucket sum 790,
+// 95th of [40 150 200 400] at 0.95 x 3 = 2.85: 200 + 0.85 x 200 = 370.
+// Averaged: 75, 200, 200, 40. Avg 515/4 = 128.75, min 40, peak 200,
+// bucket sum 515, 95th 200 + 0.85 x 0 = 200.
+func TestDBCombinedStats(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	m := NewMetricsStore(db)
+	t0 := time.Now().UTC().Add(-3 * time.Hour).Truncate(time.Hour)
+	m.now = func() time.Time { return t0.Add(time.Hour) }
+	a, b := statsSeries(t, db, MetricIfInBps), statsSeries(t, db, MetricIfInBps)
+	minute := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Minute) }
+	for _, s := range []struct {
+		series int64
+		n      int
+		v      float64
+	}{{a, 1, 100}, {a, 6, 150}, {a, 7, 250}, {a, 11, 300}, {b, 1, 50}, {b, 11, 100}, {b, 16, 40}} {
+		insertSample(t, db, s.series, minute(s.n), s.v)
+	}
+	refreshRollups(t, db)
+	q := CombinedQuery{SeriesIDs: []int64{a, b}, From: t0, To: minute(20)}
+
+	sum, err := m.CombinedStats(ctx, q)
+	testdb.Must(t, err)
+	if sum.SeriesID != 0 || !closeTo(sum.Avg, 197.5) || sum.Min != 40 || sum.Peak != 400 || !closeTo(sum.P95, 370) ||
+		!closeTo(sum.BucketSum, 790) || sum.Buckets != 4 || sum.Expected != 4 {
+		t.Errorf("summed = %+v, want avg 197.5, min 40, peak 400, p95 370, bucket sum 790, 4 of 4", sum)
+	}
+	q.Average = true
+	avg, err := m.CombinedStats(ctx, q)
+	testdb.Must(t, err)
+	if !closeTo(avg.Avg, 128.75) || avg.Min != 40 || avg.Peak != 200 || !closeTo(avg.P95, 200) ||
+		!closeTo(avg.BucketSum, 515) || avg.Buckets != 4 {
+		t.Errorf("averaged = %+v, want avg 128.75, min 40, peak 200, p95 200, bucket sum 515", avg)
+	}
+	none, err := m.CombinedStats(ctx, CombinedQuery{From: t0, To: minute(20)})
+	testdb.Must(t, err)
+	if none.Buckets != 0 || none.Expected != 4 {
+		t.Errorf("no series = %+v, want 0 of 4 buckets", none)
+	}
+
+	// Several groups in one query. [A] alone: 100, 200, 300, so avg 200, peak
+	// 300, 95th 200 + 0.9 x 100 = 290. [B, B] counts B once: 50, 100, 40, so
+	// avg 190/3, 95th of [40 50 100] = 50 + 0.9 x 50 = 95.
+	groups, err := m.GroupedStats(ctx, [][]int64{{a}, {a, b}, {}, {b, b}}, t0, minute(20), false)
+	testdb.Must(t, err)
+	if len(groups) != 4 {
+		t.Fatalf("got %d groups, want 4", len(groups))
+	}
+	g0, g1, g2, g3 := groups[0], groups[1], groups[2], groups[3]
+	if g0.SeriesID != 0 || !closeTo(g0.Avg, 200) || g0.Min != 100 || g0.Peak != 300 || !closeTo(g0.P95, 290) ||
+		!closeTo(g0.BucketSum, 600) || g0.Buckets != 3 || g0.Expected != 4 {
+		t.Errorf("group [A] = %+v", g0)
+	}
+	if g1.SeriesID != 1 || !closeTo(g1.P95, 370) || !closeTo(g1.BucketSum, 790) || g1.Buckets != 4 {
+		t.Errorf("group [A, B] = %+v, want the summed figures", g1)
+	}
+	if g2.SeriesID != 2 || g2.Buckets != 0 || g2.Expected != 4 {
+		t.Errorf("empty group = %+v", g2)
+	}
+	if g3.SeriesID != 3 || !closeTo(g3.Avg, 190.0/3) || !closeTo(g3.P95, 95) || !closeTo(g3.BucketSum, 190) || g3.Buckets != 3 {
+		t.Errorf("group [B, B] = %+v, want B counted once", g3)
+	}
+}
+
+// A chart combines its series per bucket and keeps to about maxPoints
+// points: 5-minute buckets for a short window, hourly ones for a long one.
+func TestDBCombinedSeries(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	m := NewMetricsStore(db)
+	c, d := statsSeries(t, db, MetricIfInBps), statsSeries(t, db, MetricIfInBps)
+	t1 := time.Now().UTC().Add(-4 * time.Hour).Truncate(time.Hour)
+	fillSamples(t, db, c, t1, t1.Add(2*time.Hour), time.Minute, 100)
+	fillSamples(t, db, d, t1, t1.Add(2*time.Hour), time.Minute, 50)
+	e, f := statsSeries(t, db, MetricIfInBps), statsSeries(t, db, MetricIfInBps)
+	t2 := time.Now().UTC().Truncate(24 * time.Hour).Add(-12 * 24 * time.Hour)
+	fillSamples(t, db, e, t2, t2.Add(10*24*time.Hour), statsBucket, 10)
+	fillSamples(t, db, f, t2, t2.Add(10*24*time.Hour), statsBucket, 30)
+	refreshRollups(t, db)
+
+	for _, tc := range []struct {
+		average bool
+		want    float64
+	}{{false, 150}, {true, 75}} {
+		pts, err := m.CombinedSeries(ctx, CombinedQuery{SeriesIDs: []int64{c, d}, From: t1, To: t1.Add(2 * time.Hour),
+			Average: tc.average}, 12)
+		testdb.Must(t, err)
+		if len(pts) != 12 || !pts[0].T.Equal(t1) || !pts[11].T.Equal(t1.Add(110*time.Minute)) {
+			t.Fatalf("average=%v: %d points %v, want 12 ten-minute points from %v", tc.average, len(pts), pts, t1)
+		}
+		for _, p := range pts {
+			if !closeTo(p.V, tc.want) {
+				t.Errorf("average=%v: point %v = %v, want %v", tc.average, p.T, p.V, tc.want)
+			}
+		}
+	}
+
+	// Ten days: the hourly rollup, one point a day.
+	pts, err := m.CombinedSeries(ctx, CombinedQuery{SeriesIDs: []int64{e, f}, From: t2, To: t2.Add(10 * 24 * time.Hour)}, 10)
+	testdb.Must(t, err)
+	if len(pts) != 10 || !pts[0].T.Equal(t2) || !closeTo(pts[0].V, 40) || !closeTo(pts[9].V, 40) {
+		t.Errorf("ten days = %+v, want 10 daily points of 40 from %v", pts, t2)
+	}
+
+	if none, err := m.CombinedSeries(ctx, CombinedQuery{From: t1, To: t1.Add(time.Hour)}, 12); err != nil || none == nil || len(none) != 0 {
+		t.Errorf("no series: %v, %v; want an empty, non-nil slice", none, err)
+	}
+}
