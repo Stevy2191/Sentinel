@@ -1,6 +1,6 @@
 # Where Sentinel stands
 
-Updated 2026-10-02. Read this first when picking the work up on another machine.
+Updated 2026-10-04. Read this first when picking the work up on another machine.
 
 ## Branches
 
@@ -19,12 +19,27 @@ Roadmap: `docs/superpowers/specs/2026-09-28-network-monitoring-roadmap.md`. Each
 | 2 | Ports and bandwidth: metrics store, faceplate, port events and alerts, roles, site traffic | Done (`dev`); follow-ups in `plans/2026-09-30-network-phase2-followups.md` |
 | — | UPS monitoring (UPS-MIB readings, Power panel, on-battery/low-battery/high-load alerts) | Done (`dev`); spec `specs/2026-10-01-ups-monitoring-design.md` |
 | 3 | MIB library and custom metrics: upload/browse/test-walk MIBs, profiles, Cisco switch health, Health section, metric-rule alerts | Done (`dev`, 2026-10-02); follow-ups in `plans/2026-10-02-network-phase3-followups.md` |
-| 4 | Custom dashboards: grid editor, 11 widget types (incl. site power), sharing, fullscreen wall display, admin public links | Done (`feature/network-phase4`, awaiting merge to `dev`); follow-ups in `plans/2026-10-02-network-phase4-followups.md` |
-| 5 | Metric reports | **Next** (or 7) — ask the owner which comes first |
+| 4 | Custom dashboards: grid editor, 11 widget types (incl. site power), sharing, fullscreen wall display, admin public links | Done (`dev`, 2026-10-03); follow-ups in `plans/2026-10-02-network-phase4-followups.md` |
+| 5 | Metric reports: a Metrics report type (ports, port roles, devices, sites), exact 95th percentiles, totals, previous-period comparison | **In progress** (`feature/network-phase5`); spec `specs/2026-10-03-network-phase5-metric-reports-design.md`, plan `plans/2026-10-03-network-phase5-metric-reports.md` |
 | 6 | Live site maps (LLDP, SSE push) — needs phase 4 | Not started; unblocked by phase 4 |
-| 7 | UniFi controller source | **Next** (or 5) — ask the owner which comes first |
+| 7 | UniFi controller source | Not started |
 
-Phases 5 and 7 depend only on phase 2 and can go in either order; 6 needed 4, which is now done.
+Phases 6 and 7 can go in either order after phase 5; 6 needed 4, which is done.
+
+## Tools and security track
+
+Roadmap: `docs/superpowers/specs/2026-10-04-tools-and-security-roadmap.md` (agreed 2026-10-04; nothing designed yet). Phases are numbered S1–S6 to stay distinct from the network phases. Every phase is admin-only (or a granted permission), limited to an allowlist of target subnets, rate limited and audited.
+
+| Phase | What | State |
+|---|---|---|
+| S1 | Network tools: ping, traceroute (MTR-style), DNS lookup, port check/quick scan — from Sentinel or any server agent, streamed live | Not started |
+| S2 | nmap: bundled scan profiles (quick, full TCP, service/version, OS, NSE categories), guarded raw mode, parsed results, history and diff — needs S1 | Not started |
+| S3 | Attack surface: scheduled scans, open ports and exposed services per host, change alerts, CVE-based vulnerability overview, inside (agent) vs outside view — needs S2 | Not started |
+| S4 | Flow analysis: NetFlow/IPFIX/sFlow collector, top talkers, protocols, who-talks-to-whom per site and interface — needs network phase 2 only | Not started |
+| S5 | Per-server traffic: connections and traffic per process from the agents, live on the server page — needs S1 | Not started |
+| S6 | Packet capture: bounded on-demand capture, protocol breakdown, .pcap download — needs S1; last | Not started |
+
+S1 → S2 → S3 is one chain; S4 can go at any point; S5 follows S1; S6 is last. Where the track sits against network phases 6 and 7 is the owner's call.
 
 ## To be checked by the owner
 
