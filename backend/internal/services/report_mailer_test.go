@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Stevy2191/Sentinel/backend/internal/models"
 )
 
 // The attachment is the whole point of scheduled delivery, and the original
@@ -37,6 +39,9 @@ func TestBuildMIMEAttachesThePDF(t *testing.T) {
 	}
 	if !strings.Contains(msg, `filename="Weekly Report.pdf"`) {
 		t.Errorf("attachment filename missing or wrong:\n%s", headOf(msg, 800))
+	}
+	if !strings.Contains(msg, "Content-Transfer-Encoding: 8bit") {
+		t.Error("text/plain and text/html parts must have Content-Transfer-Encoding: 8bit")
 	}
 
 	// Recover the base64 payload and confirm it round-trips to the real bytes.
@@ -152,19 +157,23 @@ func TestSummaryLinesMetrics(t *testing.T) {
 		data MetricsReportData
 		want []string
 	}{
-		{"traffic", MetricsReportData{Ports: 12, Tiles: []MetricsTile{traffic}},
+		{"traffic", MetricsReportData{Ports: 12, Tiles: []MetricsTile{traffic}, Tables: []MetricsTable{{Billable: true}}},
 			[]string{"12 ports · billable 95th 640 Mbps (+18%) · 2.1 TB moved"}},
 		{"traffic first even when listed second", MetricsReportData{Ports: 1, Tiles: []MetricsTile{
-			{Label: "Busy", Unit: "%", Kind: "percent", First: 12.34}, traffic}},
+			{Label: "Busy", Unit: "%", Kind: "percent", First: 12.34}, traffic}, Tables: []MetricsTable{{}, {Billable: true}}},
 			[]string{"1 port · billable 95th 640 Mbps (+18%) · 2.1 TB moved"}},
 		{"traffic new, no volume", MetricsReportData{Ports: 2, Tiles: []MetricsTile{
-			{Label: "Traffic", Unit: "bps", Kind: "traffic", First: 1.25e9, New: true}}},
+			{Label: "Traffic", Unit: "bps", Kind: "traffic", First: 1.25e9, New: true}}, Tables: []MetricsTable{{Billable: true}}},
 			[]string{"2 ports · billable 95th 1.25 Gbps (new)"}},
+		{"single traffic metric (non-billable)", MetricsReportData{Ports: 12, Tiles: []MetricsTile{traffic}, Tables: []MetricsTable{{Title: "Traffic in", Unit: "bps"}}},
+			[]string{"12 ports · 95th 640 Mbps (+18%) · 2.1 TB moved"}},
 		{"no traffic: the first metric's average", MetricsReportData{Devices: 3, Tiles: []MetricsTile{
 			{Label: "CPU", Unit: "%", Kind: "percent", NoData: true},
 			{Label: "Memory used", Unit: "%", Kind: "percent", First: 23, Change: f64(-3.46)}}},
 			[]string{"3 devices · Memory used average 23% (-3.5%)"}},
-		{"running hot", MetricsReportData{Ports: 12, Tiles: []MetricsTile{traffic}, RunningHot: []HotPort{{}, {}}},
+		{"devices scope", MetricsReportData{ScopeType: models.ScopeTypeDevices, Devices: 3, Ports: 40, Tiles: []MetricsTile{traffic}, Tables: []MetricsTable{{Billable: true}}},
+			[]string{"3 devices · billable 95th 640 Mbps (+18%) · 2.1 TB moved"}},
+		{"running hot", MetricsReportData{Ports: 12, Tiles: []MetricsTile{traffic}, Tables: []MetricsTable{{Billable: true}}, RunningHot: []HotPort{{}, {}}},
 			[]string{"12 ports · billable 95th 640 Mbps (+18%) · 2.1 TB moved", "2 ports running hot (95th busy at or above 80%)"}},
 		{"no data", MetricsReportData{Ports: 3, NoData: true}, []string{"3 ports · No data for this period"}},
 		{"empty", MetricsReportData{Empty: true}, []string{metricsEmptyMessage}},

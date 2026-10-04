@@ -207,11 +207,13 @@ func (m *ReportMailer) buildMIME(from string, email ReportEmail) (string, error)
 
 	writeAlternative := func() {
 		fmt.Fprintf(&b, "--%s\r\n", altBoundary)
-		b.WriteString("Content-Type: text/plain; charset=\"UTF-8\"\r\n\r\n")
+		b.WriteString("Content-Type: text/plain; charset=\"UTF-8\"\r\n")
+		b.WriteString("Content-Transfer-Encoding: 8bit\r\n\r\n")
 		b.WriteString(normalizeCRLF(textBody))
 		b.WriteString("\r\n")
 		fmt.Fprintf(&b, "--%s\r\n", altBoundary)
-		b.WriteString("Content-Type: text/html; charset=\"UTF-8\"\r\n\r\n")
+		b.WriteString("Content-Type: text/html; charset=\"UTF-8\"\r\n")
+		b.WriteString("Content-Transfer-Encoding: 8bit\r\n\r\n")
 		b.WriteString(normalizeCRLF(htmlBody))
 		b.WriteString("\r\n")
 		fmt.Fprintf(&b, "--%s--\r\n", altBoundary)
@@ -395,7 +397,7 @@ func metricsSummaryLines(n *MetricsReportData) []string {
 	if n.NoData {
 		return []string{strings.Join(append(parts, "No data for this period"), " · ")}
 	}
-	parts = append(parts, headlineFigures(n.Tiles)...)
+	parts = append(parts, headlineFigures(n.Tiles, n.Tables)...)
 	if len(parts) == 0 {
 		return []string{"No data for this period"}
 	}
@@ -406,19 +408,33 @@ func metricsSummaryLines(n *MetricsReportData) []string {
 	return lines
 }
 
+// trafficCaption returns "billable 95th" when table is non-nil and has Billable true,
+// otherwise "95th".
+func trafficCaption(table *MetricsTable) string {
+	if table != nil && table.Billable {
+		return "billable 95th"
+	}
+	return "95th"
+}
+
 // headlineFigures picks the summary's figures from the tiles: the first
-// traffic tile's billable 95th and volume, or else the first tile with
-// data's average. The change on the previous period follows in brackets.
-func headlineFigures(tiles []MetricsTile) []string {
+// traffic tile's billable 95th and volume (or just 95th for single traffic),
+// or else the first tile with data's average. The change on the previous
+// period follows in brackets.
+func headlineFigures(tiles []MetricsTile, tables []MetricsTable) []string {
 	change := func(t MetricsTile) string {
 		if c := formatChange(t.Change, t.New); c != "" {
 			return " (" + c + ")"
 		}
 		return ""
 	}
-	for _, t := range tiles {
+	for i, t := range tiles {
 		if t.Kind == "traffic" && !t.NoData {
-			out := []string{"billable 95th " + formatValue(t.First, t.Unit) + change(t)}
+			var table *MetricsTable
+			if i < len(tables) {
+				table = &tables[i]
+			}
+			out := []string{trafficCaption(table) + " " + formatValue(t.First, t.Unit) + change(t)}
 			if t.Second != nil {
 				out = append(out, formatBytes(*t.Second)+" moved")
 			}
