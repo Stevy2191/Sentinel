@@ -13,7 +13,9 @@ const msgNetworkScopeTypes = "scope_type must be one of: ports, port_roles, devi
 
 // ValidateScope checks a network scope as requester: shape (counts, roles),
 // every named subject visible (one FieldError for hidden and missing), and the
-// metrics (known, not enum, 1..10).
+// metrics: 1 to 10, each known and allowedOn the scope, so not an enum or
+// status metric, not link speed, and not a device metric on a ports or
+// port_roles scope.
 func (b *Builder) ValidateScope(ctx context.Context, requester uuid.UUID, scopeType string, scope models.ReportScope) error {
 	if !models.IsNetworkScope(scopeType) {
 		return &FieldError{Field: "scope_type", Message: msgNetworkScopeTypes}
