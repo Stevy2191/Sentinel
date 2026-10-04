@@ -200,11 +200,7 @@ func tileFigures(t MetricsTile, table *MetricsTable) (value, caption string) {
 	value = formatValue(t.First, t.Unit)
 	switch t.Kind {
 	case "traffic":
-		caption = "95th"
-		// In/out pairs show "billable 95th"; single metrics show "95th"
-		if table != nil && table.Billable {
-			caption = "billable 95th"
-		}
+		caption = trafficCaption(table)
 		if t.Second != nil {
 			caption += ", " + formatBytes(*t.Second) + " moved"
 		}
