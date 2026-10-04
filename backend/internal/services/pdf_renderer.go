@@ -60,8 +60,8 @@ func NewPDFRendererService(outputDir string) (*PDFRendererService, error) {
 
 // RenderReportToPDF draws data to a PDF and returns the generated file's base
 // name (not its path - callers store the name and resolve it via GetPDFPath).
-// reportType selects the fixed layout: models.ReportTypeUptime or
-// models.ReportTypeIncident.
+// reportType selects the fixed layout: models.ReportTypeUptime,
+// models.ReportTypeIncident or models.ReportTypeMetrics.
 func (s *PDFRendererService) RenderReportToPDF(data *ReportData, reportType string, nameHint string) (string, error) {
 	if data == nil {
 		return "", fmt.Errorf("report data is nil")
@@ -77,6 +77,8 @@ func (s *PDFRendererService) RenderReportToPDF(data *ReportData, reportType stri
 	switch reportType {
 	case models.ReportTypeIncident:
 		drawPDFIncidentReport(pdf, data)
+	case models.ReportTypeMetrics:
+		drawPDFMetricsReport(pdf, data)
 	default:
 		// Uptime is also the fallback for an unrecognized value, which
 		// Report.Validate already prevents from ever being stored.
