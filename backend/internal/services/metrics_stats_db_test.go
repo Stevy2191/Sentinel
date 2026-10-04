@@ -282,4 +282,22 @@ func TestDBCombinedSeries(t *testing.T) {
 	if none, err := m.CombinedSeries(ctx, CombinedQuery{From: t1, To: t1.Add(time.Hour)}, 12); err != nil || none == nil || len(none) != 0 {
 		t.Errorf("no series: %v, %v; want an empty, non-nil slice", none, err)
 	}
+
+	// Chart buckets aligned to the window start. From = t1 + 5m with 10-minute
+	// step. The first point is at the origin (t1 + 5m), not before From.
+	misalignedFrom := t1.Add(5 * time.Minute)
+	pts, err = m.CombinedSeries(ctx, CombinedQuery{SeriesIDs: []int64{c, d}, From: misalignedFrom, To: t1.Add(2 * time.Hour)}, 12)
+	testdb.Must(t, err)
+	if len(pts) == 0 {
+		t.Fatalf("misaligned: got 0 points, want some")
+	}
+	if pts[0].T.Before(misalignedFrom) {
+		t.Errorf("misaligned: first point %v is before From %v", pts[0].T, misalignedFrom)
+	}
+	if !pts[0].T.Equal(misalignedFrom) {
+		t.Errorf("misaligned: first point %v, want %v (aligned to window start)", pts[0].T, misalignedFrom)
+	}
+	if len(pts) > 1 && !pts[1].T.Equal(pts[0].T.Add(10*time.Minute)) {
+		t.Errorf("misaligned: second point %v, want %v (10-minute step)", pts[1].T, pts[0].T.Add(10*time.Minute))
+	}
 }
