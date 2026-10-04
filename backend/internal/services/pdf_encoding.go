@@ -16,9 +16,15 @@ import (
 // files on disk. It is built once and reused: the returned function is a pure
 // string transform with no tie to the document it came from, and parsing the
 // table per call would be wasteful.
+//
+// The translator fpdf returns writes into one buffer it keeps between calls,
+// so it is not safe to call from two goroutines at once, and reports render
+// concurrently (the job queue's workers and the scheduler). pdfTranslatorMu
+// serialises the calls.
 var (
 	pdfTranslatorOnce sync.Once
 	pdfTranslator     func(string) string
+	pdfTranslatorMu   sync.Mutex
 )
 
 func pdfTranslate() func(string) string {
@@ -44,6 +50,8 @@ func pdfText(s string) string {
 	}
 	s = foldToLatin(s)
 	if tr := pdfTranslate(); tr != nil {
+		pdfTranslatorMu.Lock()
+		defer pdfTranslatorMu.Unlock()
 		return tr(s)
 	}
 	// No translator: strip what cannot be drawn rather than emit raw UTF-8,
