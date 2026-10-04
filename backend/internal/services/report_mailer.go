@@ -349,8 +349,13 @@ func (m *ReportMailer) htmlBody(email ReportEmail) string {
 }
 
 // SummaryLines condenses report data into the bullet list an email can carry
-// when the schedule asks for a summary in the body.
+// when the schedule asks for a summary in the body. A Metrics report (one
+// with network data) gets its own summary; Uptime and Incident reports share
+// the monitor summary below.
 func SummaryLines(data *ReportData) []string {
+	if data != nil && data.Network != nil {
+		return metricsSummaryLines(data.Network)
+	}
 	if data == nil || len(data.Metrics) == 0 {
 		return []string{"No monitors were in scope for this report."}
 	}
@@ -373,6 +378,59 @@ func SummaryLines(data *ReportData) []string {
 		}
 	}
 	return lines
+}
+
+// metricsSummaryLines condenses a Metrics report from the figures it has:
+// "12 ports · billable 95th 640 Mbps (+18%) · 2.1 TB moved" when it carries
+// traffic, otherwise the first metric's average ("3 devices · CPU average
+// 23% (new)"), and a second line when ports are running hot.
+func metricsSummaryLines(n *MetricsReportData) []string {
+	if n.Empty {
+		return []string{metricsEmptyMessage}
+	}
+	var parts []string
+	if subjects := metricsSubjects(n); subjects != "" {
+		parts = append(parts, subjects)
+	}
+	if n.NoData {
+		return []string{strings.Join(append(parts, "No data for this period"), " · ")}
+	}
+	parts = append(parts, headlineFigures(n.Tiles)...)
+	if len(parts) == 0 {
+		return []string{"No data for this period"}
+	}
+	lines := []string{strings.Join(parts, " · ")}
+	if len(n.RunningHot) > 0 {
+		lines = append(lines, countNoun(len(n.RunningHot), "port", "ports")+" running hot (95th busy at or above 80%)")
+	}
+	return lines
+}
+
+// headlineFigures picks the summary's figures from the tiles: the first
+// traffic tile's billable 95th and volume, or else the first tile with
+// data's average. The change on the previous period follows in brackets.
+func headlineFigures(tiles []MetricsTile) []string {
+	change := func(t MetricsTile) string {
+		if c := formatChange(t.Change, t.New); c != "" {
+			return " (" + c + ")"
+		}
+		return ""
+	}
+	for _, t := range tiles {
+		if t.Kind == "traffic" && !t.NoData {
+			out := []string{"billable 95th " + formatValue(t.First, t.Unit) + change(t)}
+			if t.Second != nil {
+				out = append(out, formatBytes(*t.Second)+" moved")
+			}
+			return out
+		}
+	}
+	for _, t := range tiles {
+		if !t.NoData {
+			return []string{t.Label + " average " + formatValue(t.First, t.Unit) + change(t)}
+		}
+	}
+	return nil
 }
 
 // reportBaseURL returns the base URL for building share links, falling back to

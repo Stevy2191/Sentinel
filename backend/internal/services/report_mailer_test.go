@@ -144,3 +144,50 @@ func headOf(s string, n int) string {
 func staticBaseURL(u string) BaseURLFunc {
 	return func() string { return u }
 }
+
+func TestSummaryLinesMetrics(t *testing.T) {
+	traffic := MetricsTile{Label: "Traffic", Unit: "bps", Kind: "traffic", First: 640e6, Second: f64(2.1e12), Change: f64(18)}
+	cases := []struct {
+		name string
+		data MetricsReportData
+		want []string
+	}{
+		{"traffic", MetricsReportData{Ports: 12, Tiles: []MetricsTile{traffic}},
+			[]string{"12 ports · billable 95th 640 Mbps (+18%) · 2.1 TB moved"}},
+		{"traffic first even when listed second", MetricsReportData{Ports: 1, Tiles: []MetricsTile{
+			{Label: "Busy", Unit: "%", Kind: "percent", First: 12.34}, traffic}},
+			[]string{"1 port · billable 95th 640 Mbps (+18%) · 2.1 TB moved"}},
+		{"traffic new, no volume", MetricsReportData{Ports: 2, Tiles: []MetricsTile{
+			{Label: "Traffic", Unit: "bps", Kind: "traffic", First: 1.25e9, New: true}}},
+			[]string{"2 ports · billable 95th 1.25 Gbps (new)"}},
+		{"no traffic: the first metric's average", MetricsReportData{Devices: 3, Tiles: []MetricsTile{
+			{Label: "CPU", Unit: "%", Kind: "percent", NoData: true},
+			{Label: "Memory used", Unit: "%", Kind: "percent", First: 23, Change: f64(-3.46)}}},
+			[]string{"3 devices · Memory used average 23% (-3.5%)"}},
+		{"running hot", MetricsReportData{Ports: 12, Tiles: []MetricsTile{traffic}, RunningHot: []HotPort{{}, {}}},
+			[]string{"12 ports · billable 95th 640 Mbps (+18%) · 2.1 TB moved", "2 ports running hot (95th busy at or above 80%)"}},
+		{"no data", MetricsReportData{Ports: 3, NoData: true}, []string{"3 ports · No data for this period"}},
+		{"empty", MetricsReportData{Empty: true}, []string{metricsEmptyMessage}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			data := c.data
+			got := SummaryLines(&ReportData{Network: &data})
+			if strings.Join(got, "\n") != strings.Join(c.want, "\n") {
+				t.Errorf("got %q\nwant %q", got, c.want)
+			}
+		})
+	}
+}
+
+// Uptime and Incident reports keep the monitor summary, word for word.
+func TestSummaryLinesMonitorReportsUnchanged(t *testing.T) {
+	got := SummaryLines(&ReportData{Metrics: []ReportMetrics{
+		{MonitorName: "api", Uptime: 99, IncidentCount: 1, SLATarget: f64(99.5), SLAMet: false},
+		{MonitorName: "web", Uptime: 97, IncidentCount: 0, SLATarget: f64(95), SLAMet: true},
+	}})
+	want := []string{"2 services, 98.00% average uptime, 1 incidents", "api missed its 99.50% SLA at 99.00%"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("got %q\nwant %q", got, want)
+	}
+}
