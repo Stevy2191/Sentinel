@@ -300,3 +300,33 @@ func TestMetricsRowCoverageFormatting(t *testing.T) {
 		t.Errorf("coverage note should print as '89.6%% data', not '%.0f'", 89.6)
 	}
 }
+
+// TestMetricsTableHeaderColumnName verifies that the first column header is "Port"
+// for port scopes and "Name" for other scopes.
+func TestMetricsTableHeaderColumnName(t *testing.T) {
+	// Port_roles scope (from sampleMetricsData) should show "Port"
+	data := sampleMetricsData()
+	text, _ := renderMetrics(t, data)
+	// The traffic table header should have "Port" as the first column
+	if !strings.Contains(text, "Port") || !strings.Contains(text, "95th in") {
+		t.Error("port_roles scope should show 'Port' in the table header")
+	}
+
+	// Devices scope should show "Name"
+	deviceData := sampleMetricsData()
+	deviceData.Network.ScopeType = models.ScopeTypeDevices
+	deviceData.Network.Ports = 0
+	deviceData.Network.Devices = 3
+	deviceText, _ := renderMetrics(t, deviceData)
+	// Find the traffic table and verify it has "Name" instead of "Port" as first column
+	// The header should appear as "Name\n95th in" or similar
+	if !strings.Contains(deviceText, "Name") || !strings.Contains(deviceText, "95th in") {
+		t.Error("devices scope should show 'Name' in the table header")
+	}
+	// Make sure "Port" doesn't appear where the first column should be
+	// Check that the drawn text doesn't have "Port" followed by "95th in" which would
+	// indicate the port header
+	if strings.Contains(deviceText, "Port\n95th in") || strings.Contains(deviceText, "Port 95th in") {
+		t.Error("devices scope should not show 'Port' as the first column header")
+	}
+}

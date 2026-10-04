@@ -4,6 +4,8 @@ import (
 	"math"
 
 	"github.com/go-pdf/fpdf"
+
+	"github.com/Stevy2191/Sentinel/backend/internal/models"
 )
 
 // The Metrics report's tables (one per metric or in/out pair, every row,
@@ -144,7 +146,7 @@ func drawMetricsTable(pdf *fpdf.Fpdf, t MetricsTable, scopeType string) {
 
 	// First column header: "Port" for port scopes, "Name" otherwise
 	nameHeader := "Name"
-	if scopeType == "ports" || scopeType == "port_roles" {
+	if scopeType == models.ScopeTypePorts || scopeType == models.ScopeTypePortRoles {
 		nameHeader = "Port"
 	}
 
