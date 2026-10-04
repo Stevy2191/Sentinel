@@ -30,7 +30,7 @@ func sampleMetricsData() *ReportData {
 		TimeRangeEnd:   end,
 		Location:       time.UTC,
 		Network: &MetricsReportData{
-			ScopeType:  models.ScopeTypePorts,
+			ScopeType:  models.ScopeTypePortRoles,
 			ScopeLabel: "WAN, Uplink ports at HQ, Annex",
 			PrevStart:  time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC),
 			PrevEnd:    start,
@@ -117,7 +117,7 @@ func TestMetricsPDFHeadline(t *testing.T) {
 		"Running hot", "in 92.5%, out 41%",
 		"Busiest 2 by Traffic", "edge-sw2",
 		"1 row with data for less than 90% of the period, marked in the tables.",
-		"Left out 140 ports beyond the 500-port limit; the report includes the 500 busiest.",
+		"Left out 140 ports beyond the limit of 500 ports; the report includes the 500 busiest.",
 		"Left out 2 chosen ports, devices or sites that are no longer available to you.",
 		"Left out metrics that no longer exist: old_metric.",
 	} {
@@ -202,10 +202,30 @@ func TestMetricsPDFDevicesScopeLabel(t *testing.T) {
 	data := sampleMetricsData()
 	data.Network.ScopeType = models.ScopeTypeDevices
 	data.Network.Devices = 5
-	data.Network.Ports = 0
+	data.Network.Ports = 48 // Real device reports have physical port counts too
 	text, _ := renderMetrics(t, data)
 	if !strings.Contains(text, "5 devices") {
-		t.Errorf("devices scope should say '5 devices', but missing in: %s", text)
+		t.Errorf("devices scope should say '5 devices'")
+	}
+	// Verify the period line shows "5 devices · September" (subject comes before period)
+	if !strings.Contains(text, "5 devices") || !strings.Contains(text, "September 2026") {
+		t.Errorf("devices scope should show device count in period line")
+	}
+	// Make sure Ports count is not shown as the subject
+	if strings.Contains(text, "48 ports") {
+		t.Errorf("devices scope should not show port count as subject")
+	}
+}
+
+func TestMetricsPDFSitesScopeShowsPortCount(t *testing.T) {
+	data := sampleMetricsData()
+	data.Network.ScopeType = models.ScopeTypeSites
+	data.Network.ScopeLabel = "All of HQ"
+	data.Network.Ports = 47
+	data.Network.Devices = 0
+	text, _ := renderMetrics(t, data)
+	if !strings.Contains(text, "47 ports") || !strings.Contains(text, "September 2026") {
+		t.Errorf("sites scope should show port count when available: %s", text)
 	}
 }
 
@@ -216,8 +236,8 @@ func TestMetricsPDFSitesScopeCapNote(t *testing.T) {
 	data.Network.Devices = 0
 	data.Network.CappedOut = 10
 	text, _ := renderMetrics(t, data)
-	if !strings.Contains(text, "ports or devices") {
-		t.Errorf("sites scope cap note should mention 'ports or devices'")
+	if !strings.Contains(text, "Left out 10 ports or devices beyond the limit of 500 ports or devices; the report includes the 500 busiest.") {
+		t.Errorf("sites scope cap note has incorrect wording")
 	}
 }
 
@@ -231,10 +251,22 @@ func TestMetricsPDFSingleTrafficTileNoBillable(t *testing.T) {
 		{Title: "Traffic In", Unit: "bps", Paired: false, Billable: false, HasTotal: true, Rows: []MetricsRow{}},
 	}
 	text, _ := renderMetrics(t, data)
-	if strings.Contains(text, "billable 95th") {
-		t.Errorf("single traffic tile should not say 'billable 95th'")
+	// The tile itself must have "95th, 2.1 TB moved" (not "billable 95th")
+	if !hasLine(text, "95th, 2.1 TB moved") {
+		t.Errorf("single traffic tile should have '95th, 2.1 TB moved'")
 	}
-	if !strings.Contains(text, "95th") {
-		t.Errorf("single traffic tile should say '95th'")
+	// Make sure "billable" doesn't appear on its own (would be part of "billable 95th")
+	tileStart := strings.Index(text, "TRAFFIC IN")
+	if tileStart >= 0 {
+		tileEnd := strings.Index(text[tileStart:], "ERRORS IN")
+		if tileEnd < 0 {
+			tileEnd = len(text)
+		} else {
+			tileEnd += tileStart
+		}
+		tileText := text[tileStart:tileEnd]
+		if strings.Contains(tileText, "billable") {
+			t.Errorf("single traffic tile should not contain 'billable'")
+		}
 	}
 }

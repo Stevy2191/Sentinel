@@ -60,20 +60,21 @@ func metricsPeriodLine(data *ReportData) string {
 }
 
 // metricsSubjects counts what the report covers: "214 ports" or "3 devices".
-// The wording depends on ScopeType to match the controller ruling.
+// For devices scope, shows device count. For all other scopes (ports, port_roles,
+// sites), shows port count when available, otherwise device count.
 func metricsSubjects(n *MetricsReportData) string {
-	switch n.ScopeType {
-	case models.ScopeTypeDevices:
+	if n.ScopeType == models.ScopeTypeDevices {
 		if n.Devices > 0 {
 			return countNoun(n.Devices, "device", "devices")
 		}
-	case models.ScopeTypeSites:
-		// On sites scope, don't show the count as subject (rely on ScopeLabel)
-		return ""
-	default:
-		// ports and port_roles both show as "N ports"
+	} else {
+		// ports, port_roles, and sites all show port count when available
 		if n.Ports > 0 {
 			return countNoun(n.Ports, "port", "ports")
+		}
+		// If no ports, show device count (for sites scope)
+		if n.Devices > 0 {
+			return countNoun(n.Devices, "device", "devices")
 		}
 	}
 	return ""
@@ -170,11 +171,11 @@ func drawMetricsTile(pdf *fpdf.Fpdf, x, y, w float64, t MetricsTile, table *Metr
 	pdf.CellFormat(textW, 4, fitText(pdf, tileChange(t, prev), textW-2), "", 0, "L", false, 0, "")
 }
 
-// tileFigures is a tile's big number and the line under it. Traffic shows
-// the billable 95th and the volume moved; a percentage its average and 95th;
-// anything else its average. Kind values are the contract's: "traffic",
-// "percent", "other".
-// Controller ruling P5: billable caption only when the table has Billable true.
+// tileFigures is a tile's big number and the line under it. For traffic
+// metrics, shows "billable 95th" when the table is an in/out pair (Billable=true),
+// otherwise "95th"; also shows volume moved. For percentage metrics shows average
+// and 95th. For all other metrics shows average. Kind values are the contract's:
+// "traffic", "percent", "other".
 func tileFigures(t MetricsTile, table *MetricsTable) (value, caption string) {
 	if t.NoData {
 		return "No data", ""
@@ -183,7 +184,7 @@ func tileFigures(t MetricsTile, table *MetricsTable) (value, caption string) {
 	switch t.Kind {
 	case "traffic":
 		caption = "95th"
-		// Only say "billable" if the table exists and has Billable set to true
+		// In/out pairs show "billable 95th"; single metrics show "95th"
 		if table != nil && table.Billable {
 			caption = "billable 95th"
 		}
@@ -254,8 +255,9 @@ func drawMetricsBusiest(pdf *fpdf.Fpdf, n *MetricsReportData) {
 }
 
 // metricsNotes says what the report left out or could not measure fully.
-// Unavailable subjects are counted, never named.
-// Controller ruling P3: cap note uses ScopeType for its noun.
+// Unavailable subjects are counted, never named. Cap note wording depends on
+// ScopeType: uses "device/devices" for devices scope, "port or device/ports
+// or devices" for sites scope, and "port/ports" for port scopes.
 func metricsNotes(n *MetricsReportData) []string {
 	var notes []string
 	if n.LowCoverage > 0 {
@@ -263,18 +265,18 @@ func metricsNotes(n *MetricsReportData) []string {
 			countNoun(n.LowCoverage, "row", "rows")))
 	}
 	if n.CappedOut > 0 {
-		var singular, plural, limit string
+		var singular, plural, limitPlural string
 		switch n.ScopeType {
 		case models.ScopeTypeDevices:
-			singular, plural, limit = "device", "devices", "device"
+			singular, plural, limitPlural = "device", "devices", "devices"
 		case models.ScopeTypeSites:
-			singular, plural, limit = "port or device", "ports or devices", "port or device"
+			singular, plural, limitPlural = "port or device", "ports or devices", "ports or devices"
 		default:
 			// ports and port_roles
-			singular, plural, limit = "port", "ports", "port"
+			singular, plural, limitPlural = "port", "ports", "ports"
 		}
-		notes = append(notes, fmt.Sprintf("Left out %s beyond the %d-%s limit; the report includes the %d busiest.",
-			countNoun(n.CappedOut, singular, plural), models.MaxReportSubjects, limit, models.MaxReportSubjects))
+		notes = append(notes, fmt.Sprintf("Left out %s beyond the limit of %d %s; the report includes the %d busiest.",
+			countNoun(n.CappedOut, singular, plural), models.MaxReportSubjects, limitPlural, models.MaxReportSubjects))
 	}
 	if n.Unavailable > 0 {
 		verb := "are"
