@@ -227,3 +227,76 @@ func TestPDFFooterDoesNotAddAPage(t *testing.T) {
 		t.Error("the footer is gone")
 	}
 }
+
+// TestMetricsColumnsHeadersByTableKind verifies the exact header order for
+// each table type on different scopes.
+func TestMetricsColumnsHeadersByTableKind(t *testing.T) {
+	cases := []struct {
+		name  string
+		table MetricsTable
+		want  []string
+	}{
+		{
+			name:  "traffic pair on ports scope",
+			table: MetricsTable{Title: "Traffic", Unit: "bps", Paired: true, Billable: true, HasTotal: true},
+			want:  []string{"95th in", "95th out", "Billable 95th", "Peak", "Total in", "Total out", "Change"},
+		},
+		{
+			name:  "traffic pair on devices scope",
+			table: MetricsTable{Title: "Traffic", Unit: "bps", Paired: true, Billable: true, HasTotal: true},
+			want:  []string{"95th in", "95th out", "Billable 95th", "Peak", "Total in", "Total out", "Change"},
+		},
+		{
+			name:  "busy pair",
+			table: MetricsTable{Title: "Busy", Unit: "%", Paired: true},
+			want:  []string{"Avg in", "Avg out", "95th in", "95th out", "Peak", "Change"},
+		},
+		{
+			name:  "errors pair with totals",
+			table: MetricsTable{Title: "Errors", Unit: "per_min", Paired: true, HasTotal: true},
+			want:  []string{"Avg in", "Avg out", "95th in", "95th out", "Peak", "Total in", "Total out", "Change"},
+		},
+		{
+			name:  "single metric with total",
+			table: MetricsTable{Title: "Temperature", Unit: "°C", HasTotal: true},
+			want:  []string{"Average", "95th", "Peak", "Total", "Change"},
+		},
+		{
+			name:  "single metric without total",
+			table: MetricsTable{Title: "Fan speed", Unit: "rpm"},
+			want:  []string{"Average", "95th", "Peak", "Change"},
+		},
+		{
+			name:  "bool table",
+			table: MetricsTable{Title: "On battery", Unit: "bool"},
+			want:  []string{"Share of time", "Time true", "Change"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cols := metricsColumns(c.table)
+			if len(cols) != len(c.want) {
+				t.Errorf("got %d columns, want %d", len(cols), len(c.want))
+			}
+			for i, col := range cols {
+				if i < len(c.want) && col.header != c.want[i] {
+					t.Errorf("column %d: got %q, want %q", i, col.header, c.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestMetricsRowCoverageFormatting verifies that coverage notes use formatPercent.
+func TestMetricsRowCoverageFormatting(t *testing.T) {
+	data := sampleMetricsData()
+	data.Network.Tables = []MetricsTable{
+		{Title: "Test", Unit: "bps", Rows: []MetricsRow{
+			{Name: "row1", In: &RowStats{P95: 100}, Coverage: 89.6, LowCoverage: true},
+		}},
+	}
+	text, _ := renderMetrics(t, data)
+	if !hasLine(text, "89.6% data") {
+		t.Errorf("coverage note should print as '89.6%% data', not '%.0f'", 89.6)
+	}
+}

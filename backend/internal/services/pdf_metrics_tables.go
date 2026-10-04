@@ -1,7 +1,6 @@
 package services
 
 import (
-	"fmt"
 	"math"
 
 	"github.com/go-pdf/fpdf"
@@ -123,13 +122,13 @@ func drawMetricsTables(pdf *fpdf.Fpdf, data *ReportData) {
 	}
 	pdf.AddPage()
 	for _, t := range tables {
-		drawMetricsTable(pdf, t)
+		drawMetricsTable(pdf, t, data.Network.ScopeType)
 	}
 }
 
 // drawMetricsTable draws one table, repeating its header on every page it
 // runs onto.
-func drawMetricsTable(pdf *fpdf.Fpdf, t MetricsTable) {
+func drawMetricsTable(pdf *fpdf.Fpdf, t MetricsTable, scopeType string) {
 	cols := metricsColumns(t)
 	numW := math.Min(metricsMaxNumW, (pdfContentW-metricsMinNameW)/float64(len(cols)))
 	nameW := pdfContentW - numW*float64(len(cols))
@@ -142,12 +141,19 @@ func drawMetricsTable(pdf *fpdf.Fpdf, t MetricsTable) {
 		pdf.AddPage()
 	}
 	drawSectionHeading(pdf, t.Title)
+
+	// First column header: "Port" for port scopes, "Name" otherwise
+	nameHeader := "Name"
+	if scopeType == "ports" || scopeType == "port_roles" {
+		nameHeader = "Port"
+	}
+
 	header := func() {
 		pdf.SetFont("Helvetica", "B", 7)
 		setColor(pdf, pdfPanel, true)
 		setColor(pdf, pdfInk, false)
 		pdf.SetX(pdfMarginLeft)
-		pdf.CellFormat(nameW, metricsHeaderH, "Name", "", 0, "L", true, 0, "")
+		pdf.CellFormat(nameW, metricsHeaderH, nameHeader, "", 0, "L", true, 0, "")
 		for _, c := range cols {
 			pdf.CellFormat(numW, metricsHeaderH, fitText(pdf, c.header, numW-2), "", 0, "R", true, 0, "")
 		}
@@ -172,8 +178,8 @@ func drawMetricsRow(pdf *fpdf.Fpdf, r MetricsRow, cols []metricsColumn, nameW, n
 	pdf.SetFont("Helvetica", "", 7)
 	setColor(pdf, pdfInk, false)
 	pdf.SetX(pdfMarginLeft)
-	if r.LowCoverage {
-		note := fmt.Sprintf("%.0f%% data", r.Coverage)
+	if r.LowCoverage && !r.NoData {
+		note := formatPercent(r.Coverage) + " data"
 		noteW := pdf.GetStringWidth(note) + 3
 		pdf.CellFormat(nameW-noteW, metricsRowH, fitText(pdf, r.Name, nameW-noteW-2), "B", 0, "L", false, 0, "")
 		setColor(pdf, pdfWarning, false)
