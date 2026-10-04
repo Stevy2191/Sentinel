@@ -1,7 +1,8 @@
 // Package services - metrics_stats.go computes the Metrics report's figures
 // from the 5-minute rollup (metrics.samples_5m, kept forever): per series,
-// per combined group of series, and chart lines. Only whole 5-minute buckets
-// that have ended count (see statsWindow).
+// per combined group of series, and chart lines. Charts over 7 days read the
+// hourly rollup (metrics.samples_1h) in whole hours. Only whole buckets that
+// have ended count (see statsWindow).
 package services
 
 import (
@@ -228,6 +229,9 @@ func (m *MetricsStore) GroupedStats(ctx context.Context, groups [][]int64, from,
 			FROM b GROUP BY grp ORDER BY grp`, ids, grp, ids, lo, hi).Scan(&rows).Error
 	})
 	if err != nil {
+		if errors.Is(err, ErrReportTooLarge) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("reading combined statistics: %w", err)
 	}
 	for _, r := range rows {
@@ -273,14 +277,17 @@ func (m *MetricsStore) CombinedSeries(ctx context.Context, q CombinedQuery, maxP
 		V float64   `gorm:"column:v"`
 	}
 	err := m.withStatementTimeout(ctx, func(tx *gorm.DB) error {
-		return tx.Raw(`SELECT time_bucket(make_interval(secs => ?), b.bucket) AS t, avg(b.v) AS v
+		return tx.Raw(`SELECT time_bucket(make_interval(secs => ?), b.bucket, ?::timestamptz) AS t, avg(b.v) AS v
 			FROM (SELECT r.bucket, `+combineFunc(q.Average)+`(r.vsum / r.n) AS v
 				FROM `+table+` r
 				WHERE r.series_id = ANY(?::bigint[]) AND r.bucket >= ? AND r.bucket < ?
 				GROUP BY r.bucket) b
-			GROUP BY 1 ORDER BY 1`, step.Seconds(), models.Int64Array(q.SeriesIDs), lo, hi).Scan(&rows).Error
+			GROUP BY 1 ORDER BY 1`, step.Seconds(), lo, models.Int64Array(q.SeriesIDs), lo, hi).Scan(&rows).Error
 	})
 	if err != nil {
+		if errors.Is(err, ErrReportTooLarge) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("reading chart series: %w", err)
 	}
 	for _, r := range rows {
