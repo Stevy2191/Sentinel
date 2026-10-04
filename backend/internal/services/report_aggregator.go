@@ -5,6 +5,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -22,11 +23,21 @@ type ReportAggregatorService struct {
 	// tolerated (keeping the service usable in tests): timezone falls back to
 	// UTC, SLA target falls back to models.DefaultSLATargetPercent.
 	settings *SettingsService
+	// network builds Metrics reports (netreport.Builder, set by main.go).
+	// Nil leaves metrics reports unavailable; uptime and incident reports do
+	// not use it.
+	network NetworkReportBuilder
 }
 
 // NewReportAggregatorService returns a service bound to db.
 func NewReportAggregatorService(db *gorm.DB, settings *SettingsService) *ReportAggregatorService {
 	return &ReportAggregatorService{db: db, settings: settings}
+}
+
+// SetNetworkBuilder wires in the Metrics report builder after construction:
+// it lives in a package that imports this one.
+func (s *ReportAggregatorService) SetNetworkBuilder(b NetworkReportBuilder) {
+	s.network = b
 }
 
 // reportLocation is the configured report zone, or UTC.
@@ -137,6 +148,9 @@ type ReportData struct {
 	// PDF and its HTML equivalent cannot disagree about what time it was.
 	// Renderers must use ReportLocation(), which falls back to UTC when unset.
 	Location *time.Location `json:"-"`
+	// Network is a Metrics report's content; nil for uptime and incident
+	// reports, whose fields above it leaves untouched.
+	Network *MetricsReportData `json:"network,omitempty"`
 }
 
 // ReportLocation is the zone a report renders in, defaulting to UTC.
@@ -159,6 +173,12 @@ func (s *ReportAggregatorService) AggregateReportData(ctx context.Context, repor
 	}
 	if err := report.ValidatePeriod(); err != nil {
 		return nil, fmt.Errorf("report period: %w", err)
+	}
+
+	// A Metrics report covers network subjects, not monitors: none of the
+	// monitor path below applies to it.
+	if report.ReportType == models.ReportTypeMetrics {
+		return s.aggregateNetwork(ctx, report, requestedBy)
 	}
 
 	// A report's scope can name monitors, groups, or tags the requester does
@@ -254,6 +274,31 @@ func (s *ReportAggregatorService) AggregateReportData(ctx context.Context, repor
 	}
 
 	return data, nil
+}
+
+// aggregateNetwork assembles a Metrics report. The network builder does the
+// work over the report's period, resolved in the report timezone, as the
+// report's owner. The monitor fields stay empty, and its notes stay on
+// data.Network (the PDF prints them on the headline page), not in Warnings.
+func (s *ReportAggregatorService) aggregateNetwork(ctx context.Context, report *models.Report, requestedBy uuid.UUID) (*ReportData, error) {
+	if s.network == nil {
+		return nil, errors.New("metrics reports are not available: no network report builder is set")
+	}
+	loc := s.reportLocation(ctx)
+	start, end := report.ResolvePeriod(time.Now(), loc)
+	network, err := s.network.Build(ctx, report, requestedBy, start, end, loc)
+	if err != nil {
+		return nil, err
+	}
+	return &ReportData{
+		ReportName:        report.Name,
+		CustomTitle:       report.CustomTitle,
+		CustomDescription: report.CustomDescription,
+		TimeRangeStart:    start,
+		TimeRangeEnd:      end,
+		Metrics:           []ReportMetrics{},
+		Network:           network,
+	}, nil
 }
 
 // getMonitorIDsForScope resolves a report's scope to the monitor IDs it covers.
