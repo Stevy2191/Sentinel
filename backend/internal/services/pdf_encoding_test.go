@@ -3,10 +3,12 @@ package services
 import (
 	"bytes"
 	"compress/zlib"
+	"fmt"
 	"io"
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -123,5 +125,36 @@ func TestPDFText(t *testing.T) {
 			t.Errorf("CJK left a high byte in %q", got)
 			break
 		}
+	}
+}
+
+// Reports render concurrently (job workers and the scheduler), and fpdf's
+// translator reuses one buffer between calls: unguarded, two goroutines mix
+// each other's text.
+func TestPDFTextIsSafeConcurrently(t *testing.T) {
+	inputs := make([]string, 8)
+	want := make([]string, len(inputs))
+	for i := range inputs {
+		inputs[i] = strings.Repeat(fmt.Sprintf("Café Müller %d · ", i), 20)
+		want[i] = pdfText(inputs[i])
+	}
+	var wg sync.WaitGroup
+	errs := make(chan string, len(inputs))
+	for i := range inputs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for n := 0; n < 2000; n++ {
+				if got := pdfText(inputs[i]); got != want[i] {
+					errs <- fmt.Sprintf("goroutine %d got text mixed with another's: %.40q", i, got)
+					return
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for e := range errs {
+		t.Error(e)
 	}
 }
