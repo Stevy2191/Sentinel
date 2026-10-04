@@ -559,9 +559,9 @@ func drawPDFFooter(pdf *fpdf.Fpdf) {
 	// The footer sits inside the bottom margin, below the page-break line.
 	// With auto page break on, drawing there started a new page holding
 	// nothing but the footer, so every report ended on a blank page.
-	_, _, _, bottom := pdf.GetMargins()
-	pdf.SetAutoPageBreak(false, bottom)
-	defer pdf.SetAutoPageBreak(true, bottom)
+	auto, m := pdf.GetAutoPageBreak()
+	pdf.SetAutoPageBreak(false, m)
+	defer pdf.SetAutoPageBreak(auto, m)
 	pdf.SetY(-15)
 	pdf.SetFont("Helvetica", "I", 8)
 	setColor(pdf, pdfMuted, false)
