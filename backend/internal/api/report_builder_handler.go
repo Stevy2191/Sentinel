@@ -41,6 +41,9 @@ type ReportBuilder struct {
 	// settings supplies the report timezone, which period labels are resolved
 	// in so the list agrees with the rendered report.
 	settings *services.SettingsService
+	// scopes checks and sizes Metrics report scopes as the caller
+	// (report_scope_handler.go).
+	scopes NetworkScopes
 }
 
 // NewReportBuilder returns a handler set bound to its dependencies.
@@ -95,8 +98,8 @@ func actorFrom(c *gin.Context) services.Actor {
 // GenerateReportRequest creates a report definition and renders it immediately.
 type GenerateReportRequest struct {
 	Name       string             `json:"name" binding:"required"`
-	ReportType string             `json:"report_type" binding:"required,oneof=uptime incident"`
-	ScopeType  string             `json:"scope_type" binding:"required,oneof=monitors tags groups types"`
+	ReportType string             `json:"report_type" binding:"required,oneof=uptime incident metrics"`
+	ScopeType  string             `json:"scope_type" binding:"required,oneof=monitors tags groups types ports port_roles devices sites"`
 	ScopeData  models.ReportScope `json:"scope_data" binding:"required"`
 	// TimeRangeDays is required only for a rolling period, which is the default
 	// and what every caller sent before calendar periods existed.
@@ -209,6 +212,9 @@ func (h *ReportBuilder) GenerateReport(c *gin.Context) {
 	// that can only ever render as blank.
 	if err := report.Validate(); err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !h.checkNetworkScope(c, userID, &report) {
 		return
 	}
 
@@ -939,6 +945,11 @@ func RegisterReportBuilderRoutes(rg *gin.RouterGroup, builder *ReportBuilder) {
 	// expensive authenticated call in the API: 5 a minute per user.
 	generateLimit := NewRateLimiter(5, time.Minute, 5).Middleware("report-generate", ByUser)
 	reports.POST("/generate", generateLimit, builder.GenerateReport)
+	// The Metrics editor sizes its scope about 400 ms after each change, so
+	// the preview has its own, looser bucket and never uses up the generate
+	// allowance.
+	previewLimit := NewRateLimiter(60, time.Minute, 20).Middleware("report-scope-preview", ByUser)
+	reports.POST("/scope-preview", previewLimit, builder.ScopePreview)
 	reports.GET("", builder.ListReports)
 	reports.GET("/:id/download/:generation_id", builder.DownloadReport)
 	reports.POST("/:id/share", builder.ShareReport)
