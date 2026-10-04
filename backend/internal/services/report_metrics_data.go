@@ -3,13 +3,24 @@
 package services
 
 import (
+	"context"
 	"errors"
 	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/Stevy2191/Sentinel/backend/internal/models"
 )
 
 // ErrReportTooLarge is returned when a statistics query hits its timeout; the
 // job queue does not retry it. Its text is shown to the user as it is.
 var ErrReportTooLarge = errors.New("This report is too large to build: narrow the scope or shorten the period")
+
+// NetworkReportBuilder builds the Metrics part of a report. netreport.Builder implements it.
+// It lives behind an interface because netreport imports services.
+type NetworkReportBuilder interface {
+	Build(ctx context.Context, report *models.Report, requestedBy uuid.UUID, start, end time.Time, loc *time.Location) (*MetricsReportData, error)
+}
 
 // ChartPoint is one point of a report chart.
 type ChartPoint struct {
@@ -97,7 +108,7 @@ type MetricsChart struct {
 	Title     string
 	Unit      string
 	Lines     []ChartLine // 1 line, or 2 for an in/out pair
-	Reference *float64    // the 95th (billable for traffic)
+	Reference *float64    // the 95th (billable for traffic); nil for bool metrics and when there is no data
 }
 
 // ChartLine is one line of a chart.

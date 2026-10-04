@@ -15,6 +15,9 @@ import (
 	"github.com/Stevy2191/Sentinel/backend/internal/services"
 )
 
+// Check that Builder implements services.NetworkReportBuilder.
+var _ services.NetworkReportBuilder = (*Builder)(nil)
+
 // line is one table line: its row, its series per side (0: in or the single
 // metric, 1: out), and its statistics in the period and the one before.
 type line struct {

@@ -27,6 +27,7 @@ import (
 	"github.com/Stevy2191/Sentinel/backend/internal/database"
 	"github.com/Stevy2191/Sentinel/backend/internal/hoststats"
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
+	"github.com/Stevy2191/Sentinel/backend/internal/netreport"
 	"github.com/Stevy2191/Sentinel/backend/internal/notifications"
 	"github.com/Stevy2191/Sentinel/backend/internal/services"
 	"github.com/Stevy2191/Sentinel/backend/internal/snmp"
@@ -142,6 +143,11 @@ func run() error {
 	// device id reused by a restored backup must resolve fresh series, not
 	// write to ones already queued for the nightly cleanup to remove.
 	deviceService.SetMetricsStore(metricsStore)
+	// Metrics reports are built by netreport. The report pipeline reaches it
+	// through services.NetworkReportBuilder (services cannot import it), and
+	// the API's scope checks use the same builder (Task 14).
+	networkReports := netreport.NewBuilder(db, metricsStore)
+	reportAggregator.SetNetworkBuilder(networkReports)
 	portService := services.NewPortService(db, metricsStore, incidentService, settingsService)
 	networkSettings := services.NewNetworkSettingsService(settingsService, metricsStore)
 	mibLibrary := services.NewMIBLibrary(db)
