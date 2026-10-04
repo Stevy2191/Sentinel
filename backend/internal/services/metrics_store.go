@@ -61,6 +61,12 @@ type MetricsStore struct {
 	// lazily loads it via RetentionDays otherwise.
 	retMu         sync.Mutex
 	retentionDays int
+
+	// now is the clock the report statistics read (time.Now when nil); tests
+	// pin it to put "the bucket still filling" where they need it.
+	now func() time.Time
+	// statsTimeout bounds each statistics query (statsStatementTimeout when 0).
+	statsTimeout time.Duration
 }
 
 func NewMetricsStore(db *gorm.DB) *MetricsStore {
