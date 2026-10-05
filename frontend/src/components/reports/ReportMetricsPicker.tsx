@@ -1,8 +1,8 @@
 import { ChevronDown, ChevronUp, X } from 'lucide-react'
-import { MAX_REPORT_METRICS, type MetricChoice, type MetricSource } from '@/types/reports'
+import { MAX_REPORT_METRICS, type MetricChoice } from '@/types/reports'
 import { colors } from '@/utils/colors'
 import { inputCls } from '@/utils/dashboards'
-import { METRIC_SOURCE_LABEL, moveItem } from '@/utils/reportScope'
+import { METRIC_SOURCE_LABEL, METRIC_SOURCES, moveItem } from '@/utils/reportScope'
 
 interface Props {
   /** What the scope offers, from the latest preview. */
@@ -13,12 +13,6 @@ interface Props {
   /** Labels of metrics a scope change removed, for the note. */
   dropped: string[]
 }
-
-const GROUPS: { source: MetricSource; label: string }[] = [
-  { source: 'builtin', label: 'Built-in' },
-  { source: 'profile', label: 'From device profiles' },
-  { source: 'custom', label: 'Custom (MIB)' },
-]
 
 const iconBtn = 'rounded p-1 text-slate-400 hover:bg-white/5 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent'
 
@@ -113,10 +107,10 @@ export default function ReportMetricsPicker({ choices, value, onChange, dropped 
         onChange={(e) => e.target.value && onChange([...value, e.target.value])}
       >
         <option value="">{addLabel}</option>
-        {GROUPS.map((g) => {
-          const items = remaining.filter((c) => c.source === g.source)
+        {METRIC_SOURCES.map((source) => {
+          const items = remaining.filter((c) => c.source === source)
           return items.length === 0 ? null : (
-            <optgroup key={g.source} label={g.label}>
+            <optgroup key={source} label={METRIC_SOURCE_LABEL[source]}>
               {items.map((c) => (
                 <option key={c.key} value={c.key}>
                   {c.label}
