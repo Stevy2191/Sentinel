@@ -17,7 +17,7 @@ import ReportMetricsPicker from '@/components/reports/ReportMetricsPicker'
 import { colors } from '@/utils/colors'
 import { REPORT_TYPE_BLURB, REPORT_TYPE_LABEL, REPORT_TYPES } from '@/types/reports'
 import type { MonitorScopeType, ReportPeriod, ReportScopeData, ReportScopeType, ReportType } from '@/types/reports'
-import { REPORTABLE_MONITOR_TYPES, describeScope, monitorScopeData } from '@/utils/reportScope'
+import { REPORTABLE_MONITOR_TYPES, comparisonLabel, describeScope, monitorScopeData } from '@/utils/reportScope'
 
 /** What a report covers, when the caller already knows — a monitor's own page. */
 export interface FixedScope {
@@ -348,6 +348,9 @@ export default function GenerateReportModal({
             <fieldset>
               <legend className="mb-2 text-sm font-medium text-white">Period</legend>
               <PeriodSelector value={period} onChange={setPeriod} />
+              {isMetrics && comparisonLabel(period) && (
+                <p className="mt-2 text-xs text-slate-400">{comparisonLabel(period)}</p>
+              )}
             </fieldset>
 
             <p className="rounded-lg border border-white/10 bg-slate-800/40 p-3 text-xs text-slate-400">

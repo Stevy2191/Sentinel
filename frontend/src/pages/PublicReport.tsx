@@ -6,6 +6,7 @@ import {
   formatFileSize,
   usePublicReport,
 } from '@/hooks/useReportBuilder'
+import { SCOPE_TYPE_LABEL } from '@/types/reports'
 
 /**
  * PublicReport renders a report shared by token. It is reachable without
@@ -55,7 +56,7 @@ export default function PublicReport() {
               <Calendar className="h-4 w-4" />
               {report.time_range_days} day window
             </span>
-            <span className="capitalize">{report.scope_type}</span>
+            <span>{SCOPE_TYPE_LABEL[report.scope_type] ?? report.scope_type}</span>
             <span>
               {report.last_generated
                 ? `Generated ${new Date(report.last_generated).toLocaleString()}`

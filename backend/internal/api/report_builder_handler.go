@@ -117,11 +117,15 @@ type GenerateReportRequest struct {
 
 // ReportResponse is a report definition plus its generation history.
 type ReportResponse struct {
-	ID            uuid.UUID `json:"id"`
-	Name          string    `json:"name"`
-	ReportType    string    `json:"report_type"`
-	ScopeType     string    `json:"scope_type"`
-	TimeRangeDays int       `json:"time_range_days"`
+	ID         uuid.UUID `json:"id"`
+	Name       string    `json:"name"`
+	ReportType string    `json:"report_type"`
+	ScopeType  string    `json:"scope_type"`
+	// ScopeData is what the report covers, so the report pages can describe a
+	// Metrics scope in words. Only signed-in responses carry it: a share link
+	// is read by anyone holding it and stays limited to name, period and files.
+	ScopeData     *models.ReportScope `json:"scope_data,omitempty"`
+	TimeRangeDays int                 `json:"time_range_days"`
 	// PeriodLabel names the window in words — "August 2026", "Q2 2026",
 	// "Last 7 days" — so the list does not have to reconstruct it from the
 	// period fields to show what a report actually covers.
@@ -573,7 +577,7 @@ func (h *ReportBuilder) serveGeneration(c *gin.Context, reportID, generationID u
 
 // buildReportResponse assembles a report with its report type and generations.
 // shareToken, when non-empty, produces public download URLs instead of
-// authenticated ones.
+// authenticated ones and leaves scope_data out.
 func (h *ReportBuilder) buildReportResponse(ctx context.Context, report *models.Report, shareToken string) (ReportResponse, error) {
 	var generations []models.ReportGeneration
 	if err := h.db.WithContext(ctx).Where("report_id = ?", report.ID).
@@ -601,11 +605,18 @@ func (h *ReportBuilder) buildReportResponse(ctx context.Context, report *models.
 		})
 	}
 
+	var scope *models.ReportScope
+	if shareToken == "" {
+		s := report.ScopeData
+		scope = &s
+	}
+
 	return ReportResponse{
 		ID:            report.ID,
 		Name:          report.Name,
 		ReportType:    report.ReportType,
 		ScopeType:     report.ScopeType,
+		ScopeData:     scope,
 		TimeRangeDays: report.TimeRangeDays,
 		// Resolved in the report timezone, so a calendar label in the list
 		// matches the one printed inside the rendered report.

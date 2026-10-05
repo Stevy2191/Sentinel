@@ -15,7 +15,7 @@ import MetricsScopePicker from '@/components/reports/MetricsScopePicker'
 import ReportMetricsPicker from '@/components/reports/ReportMetricsPicker'
 import { REPORT_TYPE_BLURB, REPORT_TYPE_LABEL, REPORT_TYPES } from '@/types/reports'
 import type { MonitorScopeType, ReportPeriod, ReportType } from '@/types/reports'
-import { REPORTABLE_MONITOR_TYPES, describeScope, monitorScopeData } from '@/utils/reportScope'
+import { REPORTABLE_MONITOR_TYPES, comparisonLabel, describeScope, monitorScopeData } from '@/utils/reportScope'
 
 type StepId = 'type' | 'scope' | 'metrics' | 'period' | 'details'
 
@@ -337,6 +337,11 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
               offer different periods, or a report built one way cannot be
               reproduced the other. */}
           <PeriodSelector value={period} onChange={setPeriod} />
+          {isMetrics && comparisonLabel(period) && (
+            <p className="text-sm" style={{ color: 'var(--vs-text-dim)' }}>
+              {comparisonLabel(period)}
+            </p>
+          )}
         </div>
       )}
 
