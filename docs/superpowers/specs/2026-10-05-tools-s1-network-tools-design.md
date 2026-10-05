@@ -558,3 +558,28 @@ monitors onto `nettools`.
   agent and Sentinel would cut polls short; the agent treats that as an
   empty poll and re-polls, so it degrades to slower pickup rather than
   failing.
+
+## Amendments made while planning (2026-10-05)
+
+Found while reading the code for the implementation plan; they override the
+text above where the two differ.
+
+1. **Old agents are detected by a missing flag, not by version.** CI stamps
+   the agent binary with the image's version, which is the branch name
+   (`dev`, `main`) for branch builds, so no version comparison is possible.
+   `agents.tools_local` is therefore nullable: NULL means the agent has never
+   reported the flag (too old to run tools), false means a current agent with
+   `ENABLE_TOOLS` off, true means enabled. The agent form says "This agent's
+   version can't run tools — update it" instead of naming versions.
+2. **`target_ip` is TEXT** (canonical dotted IPv4), not INET: only equality
+   is needed, and TEXT avoids driver-specific INET scanning.
+3. **`tool_runs.agent_ref TEXT`** snapshots the agent's readable id
+   (`agent_…`), which the API returns as `agent_id` for links and "Run
+   again"; `tool_runs.agent_id` stays the UUID foreign key.
+4. **The agent toggle has its own endpoint**, `PUT /agents/:agent_id/tools`
+   (`{enabled}`), instead of a new field on `PATCH /agents/:agent_id`, so the
+   change is audited without touching the general agent update.
+5. **`GET /tools/vantages` also returns `allowlist_empty`**, because grant
+   holders cannot read the admin settings but the Tools page needs to show
+   the empty-allowlist banner.
+6. **The Linux agent's config file is `/etc/sentinel/agent.conf`.**
