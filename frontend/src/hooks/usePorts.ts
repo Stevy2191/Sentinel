@@ -211,6 +211,35 @@ export function useDevicePorts(deviceId: string | undefined) {
   return useResource<DevicePorts>(deviceId ? `/devices/${deviceId}/ports` : null, undefined, LIVE_MS)
 }
 
+/**
+ * A device's present ports for a picker, fetched once per device. An answer
+ * for a device no longer chosen is dropped, so a slow response can never list
+ * one device's ports under another's name. ports is null while loading, with
+ * no device, or after an error.
+ */
+export function usePortChoices(deviceId: string | undefined) {
+  const [answer, setAnswer] = useState<{ deviceId: string; ports: PortView[]; error: string | null } | null>(null)
+
+  useEffect(() => {
+    if (!deviceId) return
+    let cancelled = false
+    api
+      .get<ApiResponse<DevicePorts>>(`/devices/${deviceId}/ports`)
+      .then(({ data }) => {
+        if (!cancelled) setAnswer({ deviceId, ports: data.data?.ports ?? [], error: null })
+      })
+      .catch((err: ApiError) => {
+        if (!cancelled) setAnswer({ deviceId, ports: [], error: err.message || 'Could not load the ports' })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [deviceId])
+
+  const current = answer && answer.deviceId === deviceId ? answer : null
+  return { ports: current && !current.error ? current.ports : null, error: current?.error ?? null }
+}
+
 /** GET /devices/:id/ups: latest UPS-MIB readings (metric key -> value,
  *  absent when not reported recently), open UPS conditions, thresholds. */
 export interface UPSStatus {
