@@ -1,6 +1,6 @@
 # Where Sentinel stands
 
-Updated 2026-10-04. Read this first when picking the work up on another machine.
+Updated 2026-10-05. Read this first when picking the work up on another machine.
 
 ## Branches
 
@@ -20,11 +20,11 @@ Roadmap: `docs/superpowers/specs/2026-09-28-network-monitoring-roadmap.md`. Each
 | — | UPS monitoring (UPS-MIB readings, Power panel, on-battery/low-battery/high-load alerts) | Done (`dev`); spec `specs/2026-10-01-ups-monitoring-design.md` |
 | 3 | MIB library and custom metrics: upload/browse/test-walk MIBs, profiles, Cisco switch health, Health section, metric-rule alerts | Done (`dev`, 2026-10-02); follow-ups in `plans/2026-10-02-network-phase3-followups.md` |
 | 4 | Custom dashboards: grid editor, 11 widget types (incl. site power), sharing, fullscreen wall display, admin public links | Done (`dev`, 2026-10-03); follow-ups in `plans/2026-10-02-network-phase4-followups.md` |
-| 5 | Metric reports: a Metrics report type (ports, port roles, devices, sites), exact 95th percentiles, totals, previous-period comparison | **In progress** (`feature/network-phase5`); spec `specs/2026-10-03-network-phase5-metric-reports-design.md`, plan `plans/2026-10-03-network-phase5-metric-reports.md` |
+| 5 | Metric reports: a Metrics report type (ports, port roles, devices, sites), exact 95th percentiles, totals, previous-period comparison, scheduled and shared like the other reports | Done (`feature/network-phase5`, awaiting merge to `dev`); follow-ups in `plans/2026-10-03-network-phase5-followups.md` |
 | 6 | Live site maps (LLDP, SSE push) — needs phase 4 | Not started; unblocked by phase 4 |
-| 7 | UniFi controller source | Not started |
+| 7 | UniFi controller source | **Next** |
 
-Phases 6 and 7 can go in either order after phase 5; 6 needed 4, which is done.
+Phase 7 is next; phase 6 is unblocked (it needed phase 4, which is done) and can follow. Where both sit against the tools and security track below is the owner's call.
 
 ## Tools and security track
 
@@ -42,6 +42,19 @@ Roadmap: `docs/superpowers/specs/2026-10-04-tools-and-security-roadmap.md` (agre
 S1 → S2 → S3 is one chain; S4 can go at any point; S5 follows S1; S6 is last. Where the track sits against network phases 6 and 7 is the owner's call.
 
 ## To be checked by the owner
+
+Phase 5 (after updating the work install from `dev`; Claude had no browser, so none of these has been run in one, and 6-11 come from the code reviews):
+1. Create a Metrics report for the two WAN ports, period last month; the PDF shows 95th in/out, the billable 95th and the total moved, and the numbers look right against the ISP's portal.
+2. Create a Metrics report for a whole site with a schedule; the email arrives with the "ports · billable 95th · moved" summary line.
+3. A Port roles scope picks up a port given the Uplink role after the report was created (run it again).
+4. Create a report for a scope larger than 500 ports (if one exists) or check the wizard's size line on the biggest site; the PDF says how many were left out.
+5. The wizard: Type → Scope → Metrics → Period; Uptime and Incident reports still build exactly as before.
+6. In the wizard on a slow network, the size line shows "Sizing the scope…" and the port picker never shows another device's ports.
+7. A member with access to one site sees only that site's devices and ports in the pickers.
+8. A hidden or removed subject (e.g. a port deleted after it was picked) shows the red "A chosen port, device or site is not available" message, and Next stays disabled.
+9. On the Metrics step, no more than 10 metrics can be chosen; changing the scope before editing the list brings in the new scope's defaults, and after editing keeps your list (naming any metric the new scope dropped); the PDF follows the chosen order.
+10. Leaving the wizard while a report generates does not pull you back to it when the report finishes.
+11. In the browser's devtools, `GET /reports` carries `scope_data` and the share-link response does not.
 
 Phase 4 (after updating the work install from `dev`; the browser and visual checks were not done by Claude, so 5-7 are yours):
 1. Create a site dashboard with the standard widgets; every widget shows data within a minute.
