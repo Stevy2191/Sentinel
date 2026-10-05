@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Check, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
 import { useMonitors } from '@/hooks/useMonitors'
@@ -64,6 +64,18 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
   // switching it never strands the wizard on a step the other list lacks.
   const steps = isMetrics ? METRICS_STEPS : MONITOR_STEPS
   const step = steps[stepIndex]
+
+  // generate waits for the render: two minutes, or METRICS_WAIT_MS for a
+  // Metrics report. If the user leaves the wizard meanwhile, the result must not pull them back to the report or
+  // raise an error on a page they have left. Set again in the effect body so
+  // StrictMode's mount, unmount, mount ends mounted.
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
 
   // Tags are fetched once, not on every step change.
   useEffect(() => {
@@ -141,6 +153,8 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
         custom_title: customTitle.trim() || undefined,
         custom_description: customDescription.trim() || undefined,
       })
+      // Left already: the report is saved and renders on the server anyway.
+      if (!mounted.current) return
 
       // The report exists now; its first PDF is still rendering. Wait for the
       // job so the detail page does not open on an empty generation list.
@@ -148,23 +162,30 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
       try {
         await waitForReportJob(result.job_id, {
           timeoutMs: isMetrics ? METRICS_WAIT_MS : undefined,
-          onProgress: (job) =>
-            setProgress(job.status === 'running' ? 'Rendering…' : 'Queued…'),
+          onProgress: (job) => {
+            if (mounted.current) setProgress(job.status === 'running' ? 'Rendering…' : 'Queued…')
+          },
         })
       } catch (jobErr) {
         // The definition was saved even though the render failed, so send the
         // user to it rather than losing their work, and say what happened.
-        onError?.(
-          (jobErr as { message?: string }).message ??
-            'The report was saved but its PDF could not be generated'
-        )
+        if (mounted.current) {
+          onError?.(
+            (jobErr as { message?: string }).message ??
+              'The report was saved but its PDF could not be generated'
+          )
+        }
       }
-      navigate(`/reports/${result.id}`)
+      if (mounted.current) navigate(`/reports/${result.id}`)
     } catch (err) {
-      onError?.((err as { message?: string }).message ?? 'Could not generate the report')
+      if (mounted.current) {
+        onError?.((err as { message?: string }).message ?? 'Could not generate the report')
+      }
     } finally {
-      setGenerating(false)
-      setProgress(null)
+      if (mounted.current) {
+        setGenerating(false)
+        setProgress(null)
+      }
     }
   }
 
@@ -362,7 +383,7 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
           type="button"
           className="rd-btn rd-btn-secondary"
           onClick={() => setStepIndex((i) => Math.max(0, i - 1))}
-          disabled={stepIndex === 0}
+          disabled={stepIndex === 0 || generating}
         >
           <ChevronLeft className="h-4 w-4" /> Back
         </button>
