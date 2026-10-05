@@ -98,6 +98,13 @@ export async function getReportJob(jobID: string): Promise<ReportJob> {
 }
 
 /**
+ * How long the builders wait for a Metrics report's first PDF: such a render
+ * can take up to the five-minute job limit, so the default two minutes would
+ * give up on a report that is still on its way.
+ */
+export const METRICS_WAIT_MS = 330_000
+
+/**
  * waitForReportJob polls a render job until it reaches a terminal state.
  *
  * Rendering is off the request path now, so "the report was created" and "its

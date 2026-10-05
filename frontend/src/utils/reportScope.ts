@@ -61,6 +61,13 @@ export const METRIC_SOURCE_LABEL: Record<MetricSource, string> = {
   custom: 'custom',
 }
 
+/**
+ * The monitor check types an Uptime or Incident report may be scoped to, in
+ * the order the builders show them. Webhook is absent: it receives rather than
+ * checks, so it has no incidents.
+ */
+export const REPORTABLE_MONITOR_TYPES: readonly string[] = ['http', 'dns', 'ping', 'tcp']
+
 function plural(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`
 }
