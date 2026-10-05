@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FileText, Loader2, Download, ExternalLink, Check, AlertTriangle } from 'lucide-react'
 import {
+  METRICS_WAIT_MS,
   useSavedReports,
   useMonitorTags,
   waitForReportJob,
@@ -9,22 +10,21 @@ import {
 } from '@/hooks/useReportBuilder'
 import { useMonitors } from '@/hooks/useMonitors'
 import { useMonitorGroups } from '@/hooks/useMonitorGroups'
+import { useMetricsReportDraft } from '@/hooks/useMetricsReportDraft'
 import PeriodSelector, { DEFAULT_PERIOD, describePeriod } from '@/components/PeriodSelector'
-import { REPORT_TYPE_LABEL } from '@/types/reports'
-import type { ReportPeriod, ReportScopeType, ReportType } from '@/types/reports'
+import { REPORT_TYPE_BLURB, REPORT_TYPE_LABEL, REPORT_TYPES } from '@/types/reports'
+import type { MonitorScopeType, ReportPeriod, ReportScopeData, ReportScopeType, ReportType } from '@/types/reports'
+import { REPORTABLE_MONITOR_TYPES, describeScope, monitorScopeData } from '@/utils/reportScope'
 
 /** What a report covers, when the caller already knows — a monitor's own page. */
 export interface FixedScope {
-  scope_type: ReportScopeType
+  scope_type: MonitorScopeType
   ids: string[]
   /** How to describe it in the dialog, e.g. the monitor's name. */
   label: string
 }
 
-// Webhook is absent: it receives rather than checks, so it has no incidents.
-const REPORTABLE_TYPES = ['http', 'dns', 'ping', 'tcp']
-
-const SCOPE_TABS: { value: ReportScopeType; label: string }[] = [
+const SCOPE_TABS: { value: MonitorScopeType; label: string }[] = [
   { value: 'monitors', label: 'Monitors' },
   { value: 'groups', label: 'Groups' },
   { value: 'tags', label: 'Tags' },
@@ -38,11 +38,13 @@ type Phase =
   | { kind: 'error'; message: string; reportID?: string }
 
 /**
- * Generates a report in one dialog.
+ * Generates a report in one dialog, in the wizard's order: type, what to
+ * cover, metrics (Metrics reports only), period.
  *
  * Most of the time the question is "last month, these services, that report",
  * and that fits in one screen. Given a fixedScope — a monitor's own page — the
- * scope picker is dropped entirely, since it is already answered.
+ * scope picker is dropped entirely, since it is already answered, and so is
+ * the Metrics type, which cannot cover a monitor.
  */
 export default function GenerateReportModal({
   isOpen,
@@ -61,9 +63,14 @@ export default function GenerateReportModal({
 
   const [reportType, setReportType] = useState<ReportType>('uptime')
   const [period, setPeriod] = useState<ReportPeriod>(DEFAULT_PERIOD)
-  const [scopeType, setScopeType] = useState<ReportScopeType>('monitors')
+  const [scopeType, setScopeType] = useState<MonitorScopeType>('monitors')
   const [selection, setSelection] = useState<string[]>([])
   const [phase, setPhase] = useState<Phase>({ kind: 'form' })
+
+  const typeChoices = fixedScope ? REPORT_TYPES.filter((t) => t !== 'metrics') : REPORT_TYPES
+  const isMetrics = reportType === 'metrics'
+  const draft = useMetricsReportDraft(isOpen && isMetrics)
+  const resetDraft = draft.reset
 
   useEffect(() => {
     if (!isOpen || fixedScope) return
@@ -75,8 +82,9 @@ export default function GenerateReportModal({
     if (isOpen) {
       setPhase({ kind: 'form' })
       setSelection([])
+      resetDraft()
     }
-  }, [isOpen])
+  }, [isOpen, resetDraft])
 
   // Options for the active scope tab. A tag is its own identity — there is no
   // separate id — so its value and label are the same string.
@@ -88,9 +96,9 @@ export default function GenerateReportModal({
       // builds a report that is empty for a reason the reader cannot see.
       const counts = new Map<string, number>()
       for (const m of monitors) {
-        if (REPORTABLE_TYPES.includes(m.type)) counts.set(m.type, (counts.get(m.type) ?? 0) + 1)
+        if (REPORTABLE_MONITOR_TYPES.includes(m.type)) counts.set(m.type, (counts.get(m.type) ?? 0) + 1)
       }
-      return REPORTABLE_TYPES.filter((t) => counts.has(t)).map((t) => ({
+      return REPORTABLE_MONITOR_TYPES.filter((t) => counts.has(t)).map((t) => ({
         id: t,
         name: `${t.toUpperCase()} (${counts.get(t)})`,
       }))
@@ -117,44 +125,64 @@ export default function GenerateReportModal({
         }
       : null
 
+  // What the report covers, in words and as the API's scope fields; null
+  // until something is chosen.
+  const target: { label: string; scope_type: ReportScopeType; scope_data: ReportScopeData } | null = isMetrics
+    ? draft.scopeError === null
+      ? {
+          label: describeScope(draft.scope.scopeType, draft.scopeData, draft.names),
+          scope_type: draft.scope.scopeType,
+          scope_data: draft.payloadData,
+        }
+      : null
+    : effectiveScope
+      ? {
+          label: effectiveScope.label,
+          scope_type: effectiveScope.scope_type,
+          scope_data: monitorScopeData(effectiveScope.scope_type, effectiveScope.ids),
+        }
+      : null
+
   const periodValid =
     period.period_kind !== 'custom' || (!!period.period_start && !!period.period_end)
-  const canGenerate = !!effectiveScope && periodValid
+  // Why Generate is not available yet, or null when it is.
+  const blocker = !target
+    ? isMetrics
+      ? draft.scopeError
+      : 'Choose at least one thing to report on.'
+    : !periodValid
+      ? 'Choose both dates for a custom period.'
+      : isMetrics && draft.preview.error
+        ? draft.preview.error
+        : isMetrics && !draft.scopeReady
+          ? 'Checking the scope…'
+          : isMetrics && draft.metricsError
+            ? draft.metricsError
+            : null
+  const canGenerate = blocker === null
 
   if (!isOpen) return null
 
-  const scopeData = (scope: FixedScope) => {
-    switch (scope.scope_type) {
-      case 'monitors':
-        return { monitor_ids: scope.ids }
-      case 'groups':
-        return { group_ids: scope.ids }
-      case 'tags':
-        return { tags: scope.ids }
-      default:
-        return { types: scope.ids }
-    }
-  }
-
   const generate = async () => {
-    if (!effectiveScope || !periodValid) return
+    if (!target || !canGenerate) return
     setPhase({ kind: 'working', message: 'Creating the report…' })
     let reportID: string | undefined
     try {
       const label = REPORT_TYPE_LABEL[reportType]
       const result = await createReport({
-        name: `${effectiveScope.label} — ${label}`,
+        name: `${target.label} — ${label}`,
         report_type: reportType,
-        scope_type: effectiveScope.scope_type,
-        scope_data: scopeData(effectiveScope),
+        scope_type: target.scope_type,
+        scope_data: target.scope_data,
         ...period,
-        custom_title: `${effectiveScope.label}: ${label}`,
+        custom_title: `${target.label}: ${label}`,
         custom_description: describePeriod(period),
       })
       reportID = result.id
 
       setPhase({ kind: 'working', message: 'Queued…' })
       const job = await waitForReportJob(result.job_id, {
+        timeoutMs: isMetrics ? METRICS_WAIT_MS : undefined,
         onProgress: (j) =>
           setPhase({
             kind: 'working',
@@ -175,7 +203,7 @@ export default function GenerateReportModal({
 
   const download = async (url: string) => {
     const stamp = new Date().toISOString().slice(0, 10)
-    await downloadReportPDF(url, `${effectiveScope?.label ?? 'report'}-${stamp}.pdf`)
+    await downloadReportPDF(url, `${target?.label ?? 'report'}-${stamp}.pdf`)
   }
 
   const toggle = (id: string) =>
@@ -205,66 +233,10 @@ export default function GenerateReportModal({
 
         {phase.kind === 'form' && (
           <div className="mt-5 space-y-5">
-            {!fixedScope && (
-              <fieldset>
-                <legend className="mb-2 text-sm font-medium text-white">What to cover</legend>
-                <div className="mb-2 flex flex-wrap gap-1">
-                  {SCOPE_TABS.map((t) => (
-                    <button
-                      key={t.value}
-                      type="button"
-                      onClick={() => {
-                        setScopeType(t.value)
-                        setSelection([])
-                      }}
-                      className={`rounded-lg px-3 py-1.5 text-sm transition ${
-                        scopeType === t.value
-                          ? 'bg-primary-500/15 text-white'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
-                </div>
-                {optionsLoading ? (
-                  <div className="flex items-center gap-2 text-sm text-slate-400">
-                    <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-                  </div>
-                ) : options.length === 0 ? (
-                  <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300">
-                    No {scopeType} available.
-                    {scopeType === 'tags' && ' Tag a monitor first to scope a report by tag.'}
-                  </p>
-                ) : (
-                  <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-white/10 bg-slate-800/40 p-2">
-                    {options.map((o) => (
-                      <label
-                        key={o.id}
-                        className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm text-slate-200 hover:bg-white/5"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selection.includes(o.id)}
-                          onChange={() => toggle(o.id)}
-                        />
-                        {o.name}
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </fieldset>
-            )}
-
-            <fieldset>
-              <legend className="mb-2 text-sm font-medium text-white">Period</legend>
-              <PeriodSelector value={period} onChange={setPeriod} />
-            </fieldset>
-
             <fieldset>
               <legend className="mb-2 text-sm font-medium text-white">Report type</legend>
               <div className="space-y-2">
-                {(['uptime', 'incident'] as const).map((t) => (
+                {typeChoices.map((t) => (
                   <label
                     key={t}
                     className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition ${
@@ -284,29 +256,92 @@ export default function GenerateReportModal({
                       <span className="block text-sm font-medium text-white">
                         {REPORT_TYPE_LABEL[t]}
                       </span>
-                      <span className="block text-xs text-slate-400">
-                        {t === 'uptime'
-                          ? 'Uptime vs. SLA, with a cumulative-uptime graph and a per-monitor breakdown.'
-                          : 'Every incident in scope, with root cause and resolution detail.'}
-                      </span>
+                      <span className="block text-xs text-slate-400">{REPORT_TYPE_BLURB[t]}</span>
                     </span>
                   </label>
                 ))}
               </div>
             </fieldset>
 
+            {!fixedScope && (
+              <fieldset>
+                <legend className="mb-2 text-sm font-medium text-white">What to cover</legend>
+                {isMetrics ? (
+                  <p className="text-sm text-slate-400">Ports, port roles, devices and sites are chosen here.</p>
+                ) : (
+                  <>
+                    <div className="mb-2 flex flex-wrap gap-1">
+                      {SCOPE_TABS.map((t) => (
+                        <button
+                          key={t.value}
+                          type="button"
+                          onClick={() => {
+                            setScopeType(t.value)
+                            setSelection([])
+                          }}
+                          className={`rounded-lg px-3 py-1.5 text-sm transition ${
+                            scopeType === t.value
+                              ? 'bg-primary-500/15 text-white'
+                              : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {t.label}
+                        </button>
+                      ))}
+                    </div>
+                    {optionsLoading ? (
+                      <div className="flex items-center gap-2 text-sm text-slate-400">
+                        <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+                      </div>
+                    ) : options.length === 0 ? (
+                      <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300">
+                        No {scopeType} available.
+                        {scopeType === 'tags' && ' Tag a monitor first to scope a report by tag.'}
+                      </p>
+                    ) : (
+                      <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-white/10 bg-slate-800/40 p-2">
+                        {options.map((o) => (
+                          <label
+                            key={o.id}
+                            className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm text-slate-200 hover:bg-white/5"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selection.includes(o.id)}
+                              onChange={() => toggle(o.id)}
+                            />
+                            {o.name}
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </fieldset>
+            )}
+
+            {isMetrics && (
+              <fieldset>
+                <legend className="mb-2 text-sm font-medium text-white">Metrics</legend>
+                <p className="text-sm text-slate-400">{draft.selection.metrics.join(', ') || 'No metrics yet.'}</p>
+              </fieldset>
+            )}
+
+            <fieldset>
+              <legend className="mb-2 text-sm font-medium text-white">Period</legend>
+              <PeriodSelector value={period} onChange={setPeriod} />
+            </fieldset>
+
             <p className="rounded-lg border border-white/10 bg-slate-800/40 p-3 text-xs text-slate-400">
-              {canGenerate && effectiveScope ? (
+              {canGenerate && target ? (
                 <>
                   <span className="text-slate-200">{REPORT_TYPE_LABEL[reportType]}</span> for{' '}
-                  <span className="text-slate-200">{effectiveScope.label}</span>,{' '}
+                  <span className="text-slate-200">{target.label}</span>,{' '}
                   {describePeriod(period).toLowerCase()}. Saved under Reports, where it can be
                   shared or scheduled.
                 </>
-              ) : !effectiveScope ? (
-                'Choose at least one thing to report on.'
               ) : (
-                'Choose both dates for a custom period.'
+                blocker
               )}
             </p>
 
