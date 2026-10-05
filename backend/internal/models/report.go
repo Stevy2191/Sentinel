@@ -196,21 +196,25 @@ func (s ReportScope) ValidateSubjects(scopeType string) error {
 	case ScopeTypeDevices:
 		return checkSubjectCount("device_ids", len(s.DeviceIDs), scopeType, "devices")
 	case ScopeTypePortRoles:
-		if len(s.SiteIDs) == 0 {
-			return errors.New(`scope_data.site_ids is required when scope_type is "port_roles"`)
+		if err := checkSubjectCount("site_ids", len(s.SiteIDs), scopeType, "sites"); err != nil {
+			return err
 		}
 		if len(s.Roles) == 0 {
 			return errors.New(`scope_data.roles is required when scope_type is "port_roles"`)
 		}
+		// Distinct valid roles: three at most.
+		seen := make(map[string]bool, len(s.Roles))
 		for _, r := range s.Roles {
 			if !ValidPortRoles[r] {
 				return fmt.Errorf("unknown port role in scope_data.roles: %q (allowed: wan, uplink, access)", r)
 			}
+			if seen[r] {
+				return fmt.Errorf("scope_data.roles lists %s twice", r)
+			}
+			seen[r] = true
 		}
 	case ScopeTypeSites:
-		if len(s.SiteIDs) == 0 {
-			return errors.New(`scope_data.site_ids is required when scope_type is "sites"`)
-		}
+		return checkSubjectCount("site_ids", len(s.SiteIDs), scopeType, "sites")
 	default:
 		return errors.New("unknown network scope_type: " + scopeType)
 	}

@@ -84,6 +84,10 @@ func TestChange(t *testing.T) {
 		{"zero to zero", 0, 0, true, true, ptr(0), false},
 		{"no data before", 10, 0, true, false, nil, true},
 		{"no data now", 0, 100, false, true, nil, false},
+		// A negative figure (a dBm-style custom metric): the sign follows
+		// the direction of the move, not the sign of the previous value.
+		{"negative, falling", -7, -5, true, true, ptr(-40), false},
+		{"negative, rising", -3, -5, true, true, ptr(40), false},
 	}
 	for _, c := range cases {
 		got, isNew := change(c.cur, c.prev, c.hasCur, c.hasPrev)
