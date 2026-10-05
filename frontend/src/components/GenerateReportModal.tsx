@@ -12,6 +12,7 @@ import { useMonitors } from '@/hooks/useMonitors'
 import { useMonitorGroups } from '@/hooks/useMonitorGroups'
 import { useMetricsReportDraft } from '@/hooks/useMetricsReportDraft'
 import PeriodSelector, { DEFAULT_PERIOD, describePeriod } from '@/components/PeriodSelector'
+import MetricsScopePicker from '@/components/reports/MetricsScopePicker'
 import { REPORT_TYPE_BLURB, REPORT_TYPE_LABEL, REPORT_TYPES } from '@/types/reports'
 import type { MonitorScopeType, ReportPeriod, ReportScopeData, ReportScopeType, ReportType } from '@/types/reports'
 import { REPORTABLE_MONITOR_TYPES, describeScope, monitorScopeData } from '@/utils/reportScope'
@@ -267,7 +268,7 @@ export default function GenerateReportModal({
               <fieldset>
                 <legend className="mb-2 text-sm font-medium text-white">What to cover</legend>
                 {isMetrics ? (
-                  <p className="text-sm text-slate-400">Ports, port roles, devices and sites are chosen here.</p>
+                  <MetricsScopePicker value={draft.scope} onChange={draft.setScope} preview={draft.preview} />
                 ) : (
                   <>
                     <div className="mb-2 flex flex-wrap gap-1">

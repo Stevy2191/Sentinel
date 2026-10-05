@@ -11,6 +11,7 @@ import {
 } from '@/hooks/useReportBuilder'
 import { useMetricsReportDraft } from '@/hooks/useMetricsReportDraft'
 import PeriodSelector, { DEFAULT_PERIOD, describePeriod } from '@/components/PeriodSelector'
+import MetricsScopePicker from '@/components/reports/MetricsScopePicker'
 import { REPORT_TYPE_BLURB, REPORT_TYPE_LABEL, REPORT_TYPES } from '@/types/reports'
 import type { MonitorScopeType, ReportPeriod, ReportType } from '@/types/reports'
 import { REPORTABLE_MONITOR_TYPES, describeScope, monitorScopeData } from '@/utils/reportScope'
@@ -257,7 +258,7 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
           <div>
             <span className="vs-eyebrow mb-2 block">Scope</span>
             {isMetrics ? (
-              <p className="text-sm text-slate-400">Ports, port roles, devices and sites are chosen here.</p>
+              <MetricsScopePicker value={draft.scope} onChange={draft.setScope} preview={draft.preview} />
             ) : (
               <>
                 <div className="mb-3 flex gap-1 border-b" style={{ borderColor: 'var(--vs-line)' }}>
