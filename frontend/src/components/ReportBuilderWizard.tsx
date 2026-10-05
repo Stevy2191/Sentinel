@@ -12,6 +12,7 @@ import {
 import { useMetricsReportDraft } from '@/hooks/useMetricsReportDraft'
 import PeriodSelector, { DEFAULT_PERIOD, describePeriod } from '@/components/PeriodSelector'
 import MetricsScopePicker from '@/components/reports/MetricsScopePicker'
+import ReportMetricsPicker from '@/components/reports/ReportMetricsPicker'
 import { REPORT_TYPE_BLURB, REPORT_TYPE_LABEL, REPORT_TYPES } from '@/types/reports'
 import type { MonitorScopeType, ReportPeriod, ReportType } from '@/types/reports'
 import { REPORTABLE_MONITOR_TYPES, describeScope, monitorScopeData } from '@/utils/reportScope'
@@ -320,7 +321,12 @@ export default function ReportBuilderWizard({ onError }: ReportBuilderWizardProp
       {step === 'metrics' && (
         <div className="rd-card space-y-3 p-5">
           <span className="vs-eyebrow block">Metrics</span>
-          <p className="text-sm text-slate-400">{draft.selection.metrics.join(', ') || 'No metrics yet.'}</p>
+          <ReportMetricsPicker
+            choices={draft.selection.choices}
+            value={draft.selection.metrics}
+            dropped={draft.selection.dropped}
+            onChange={draft.setMetrics}
+          />
         </div>
       )}
 
