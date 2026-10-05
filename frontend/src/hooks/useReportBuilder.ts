@@ -98,9 +98,12 @@ export async function getReportJob(jobID: string): Promise<ReportJob> {
 }
 
 /**
- * How long the builders wait for a Metrics report's first PDF: such a render
- * can take up to the five-minute job limit, so the default two minutes would
- * give up on a report that is still on its way.
+ * How long the builders wait for a Metrics report's first PDF. It tracks
+ * jobRunTimeout (5 minutes) in backend/internal/services/report_job_queue.go:
+ * a render may run that long, so the default two minutes would give up on a
+ * report that is still on its way. Change the two together. It covers the run
+ * only, not time the job spends queued behind other renders, so a busy queue
+ * can still outlast it; the job then finishes in the background.
  */
 export const METRICS_WAIT_MS = 330_000
 
