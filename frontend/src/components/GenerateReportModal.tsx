@@ -13,6 +13,7 @@ import { useMonitorGroups } from '@/hooks/useMonitorGroups'
 import { useMetricsReportDraft } from '@/hooks/useMetricsReportDraft'
 import PeriodSelector, { DEFAULT_PERIOD, describePeriod } from '@/components/PeriodSelector'
 import MetricsScopePicker from '@/components/reports/MetricsScopePicker'
+import ReportMetricsPicker from '@/components/reports/ReportMetricsPicker'
 import { REPORT_TYPE_BLURB, REPORT_TYPE_LABEL, REPORT_TYPES } from '@/types/reports'
 import type { MonitorScopeType, ReportPeriod, ReportScopeData, ReportScopeType, ReportType } from '@/types/reports'
 import { REPORTABLE_MONITOR_TYPES, describeScope, monitorScopeData } from '@/utils/reportScope'
@@ -324,7 +325,12 @@ export default function GenerateReportModal({
             {isMetrics && (
               <fieldset>
                 <legend className="mb-2 text-sm font-medium text-white">Metrics</legend>
-                <p className="text-sm text-slate-400">{draft.selection.metrics.join(', ') || 'No metrics yet.'}</p>
+                <ReportMetricsPicker
+                  choices={draft.selection.choices}
+                  value={draft.selection.metrics}
+                  dropped={draft.selection.dropped}
+                  onChange={draft.setMetrics}
+                />
               </fieldset>
             )}
 
