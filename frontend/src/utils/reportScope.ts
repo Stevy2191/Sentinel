@@ -55,10 +55,13 @@ export const REPORT_ROLES: { value: PortRole; label: string }[] = [
   { value: 'access', label: 'Access' },
 ]
 
+/** Metric sources in the order they are offered and named. */
+export const METRIC_SOURCES: readonly MetricSource[] = ['builtin', 'profile', 'custom']
+
 export const METRIC_SOURCE_LABEL: Record<MetricSource, string> = {
-  builtin: 'built-in',
-  profile: 'profile',
-  custom: 'custom',
+  builtin: 'Built-in',
+  profile: 'From device profiles',
+  custom: 'Custom (MIB)',
 }
 
 /**
