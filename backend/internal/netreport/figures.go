@@ -151,7 +151,8 @@ func basis(in, out *services.RowStats, unit string) (float64, bool) {
 // change compares a figure with the previous period's: the change in
 // percent, or isNew when the previous period had no data or was zero (never
 // a division by zero). Zero to zero is no change. Without current data there
-// is neither.
+// is neither. The divisor is |prev|, so the sign follows the move even for a
+// negative figure (a dBm-style custom metric): -5 to -7 is -40%.
 func change(cur, prev float64, hasCur, hasPrev bool) (*float64, bool) {
 	switch {
 	case !hasCur:
@@ -164,7 +165,7 @@ func change(cur, prev float64, hasCur, hasPrev bool) (*float64, bool) {
 	case prev == 0:
 		return nil, true
 	}
-	v := (cur - prev) / prev * 100
+	v := (cur - prev) / math.Abs(prev) * 100
 	return &v, false
 }
 
