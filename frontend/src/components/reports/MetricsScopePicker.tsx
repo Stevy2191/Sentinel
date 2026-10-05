@@ -61,7 +61,8 @@ function Checklist({
   }
   return (
     <div className="space-y-2">
-      {items.length > 8 && (
+      {/* Kept while a filter is typed, so it can be cleared after the list shrinks. */}
+      {(items.length > 8 || filter !== '') && (
         <input className={inputCls} placeholder="Filter…" value={filter} onChange={(e) => setFilter(e.target.value)} />
       )}
       <div className="max-h-56 space-y-1 overflow-auto rounded-md border border-white/10 p-2">
@@ -106,7 +107,10 @@ function SizeLine({ scopeType, preview }: { scopeType: NetworkScopeType; preview
     )
   }
   if (!preview.data) return null
-  const nothing = (scopeType === 'devices' ? preview.data.devices : preview.data.ports) === 0
+  const { ports, devices } = preview.data
+  // Sites with devices but no ports (UPSes, say) still take device metrics.
+  const nothing =
+    scopeType === 'devices' ? devices === 0 : scopeType === 'sites' ? ports === 0 && devices === 0 : ports === 0
   return (
     <p className={`text-sm ${preview.data.capped || nothing ? colors.warning.text : 'text-slate-300'}`}>
       {previewSizeLine(scopeType, preview.data)}
