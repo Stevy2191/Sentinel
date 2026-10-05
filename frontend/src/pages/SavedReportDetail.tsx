@@ -25,7 +25,10 @@ import {
   useSavedReports,
   useShareLinks,
 } from '@/hooks/useReportBuilder'
+import { useDevices } from '@/hooks/useDevices'
+import { useSites } from '@/hooks/useSites'
 import { REPORT_TYPE_LABEL, type ReportSchedule } from '@/types/reports'
+import { describeScope, scopeNames } from '@/utils/reportScope'
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
@@ -100,6 +103,12 @@ export default function SavedReportDetail() {
   }, [listJobs])
 
   const report = useMemo(() => reports.find((r) => r.id === id), [reports, id])
+  // Names for a Metrics scope; a site or device the user cannot see is
+  // counted, never shown.
+  const isMetrics = report?.report_type === 'metrics'
+  const { sites } = useSites()
+  const { devices } = useDevices({ skip: !isMetrics })
+  const names = useMemo(() => scopeNames(sites, devices), [sites, devices])
   // Resolved from the live list rather than copied into state, so the modal
   // always opens on current values.
   const editingSchedule = useMemo(
@@ -206,7 +215,9 @@ export default function SavedReportDetail() {
         <div>
           <h1 className="vs-title text-2xl">{report.name}</h1>
           <p className="mt-1 text-sm" style={{ color: 'var(--vs-text-dim)' }}>
-            {REPORT_TYPE_LABEL[report.report_type]} · {report.scope_type} · {report.time_range_days} day window
+            {REPORT_TYPE_LABEL[report.report_type]} ·{' '}
+            {isMetrics ? describeScope(report.scope_type, report.scope_data, names) : report.scope_type} ·{' '}
+            {report.time_range_days} day window
           </p>
         </div>
         <button className="rd-btn rd-btn-secondary" onClick={() => navigate('/reports')}>

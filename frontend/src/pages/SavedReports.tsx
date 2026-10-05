@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { BarChart3, Download, FileText, Loader2, Plus, Share2, Trash2 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
@@ -10,7 +10,10 @@ import {
   formatFileSize,
   useSavedReports,
 } from '@/hooks/useReportBuilder'
+import { useDevices } from '@/hooks/useDevices'
+import { useSites } from '@/hooks/useSites'
 import { REPORT_TYPE_LABEL, type SavedReport } from '@/types/reports'
+import { describeScope, scopeNames } from '@/utils/reportScope'
 
 interface SavedReportsProps {
   /** 'list' is the hub; 'create' shows the builder wizard. */
@@ -29,6 +32,13 @@ export default function SavedReports({ mode = 'list' }: SavedReportsProps) {
   const [generateOpen, setGenerateOpen] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [confirmId, setConfirmId] = useState<string | null>(null)
+
+  // Names for Metrics scopes. Devices are only fetched when a Metrics report
+  // is listed; a name the user cannot see is counted, never shown.
+  const hasMetrics = reports.some((r) => r.report_type === 'metrics')
+  const { sites } = useSites()
+  const { devices } = useDevices({ skip: !hasMetrics })
+  const names = useMemo(() => scopeNames(sites, devices), [sites, devices])
 
   useEffect(() => {
     if (mode === 'list') listReports()
@@ -104,7 +114,7 @@ export default function SavedReports({ mode = 'list' }: SavedReportsProps) {
             Reports
           </h1>
           <p className="mt-1 text-sm" style={{ color: 'var(--vs-text-dim)' }}>
-            Generate, schedule, and share uptime reports.
+            Generate, schedule, and share uptime, incident and metrics reports.
           </p>
         </div>
         <div className="flex gap-2">
@@ -160,7 +170,11 @@ export default function SavedReports({ mode = 'list' }: SavedReportsProps) {
                   style={{ color: 'var(--vs-text-dim)' }}
                 >
                   <span>{report.time_range_days}d window</span>
-                  <span className="capitalize">{report.scope_type}</span>
+                  {report.report_type === 'metrics' ? (
+                    <span>{describeScope(report.scope_type, report.scope_data, names)}</span>
+                  ) : (
+                    <span className="capitalize">{report.scope_type}</span>
+                  )}
                   <span>{REPORT_TYPE_LABEL[report.report_type]}</span>
                   {report.last_generated && (
                     <span>
