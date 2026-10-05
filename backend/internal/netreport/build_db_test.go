@@ -117,7 +117,7 @@ func TestDBBuildPortsTrafficBusyAndRunningHot(t *testing.T) {
 	if gi3Busy := busyTable.Rows[2]; !gi3Busy.NoData || gi3Busy.In != nil || gi3Busy.Out != nil {
 		t.Errorf("Gi3 busy = %+v, want no data", gi3Busy)
 	}
-	if !slices.Equal(data.RunningHot, []services.HotPort{{Name: "core-sw1 · Gi1", P95In: 10, P95Out: 85}}) {
+	if !slices.Equal(data.RunningHot, []services.HotPort{{Name: "core-sw1 · Gi1", P95In: 10, P95Out: 85, HasIn: true, HasOut: true}}) {
 		t.Errorf("running hot = %+v, want Gi1 only", data.RunningHot)
 	}
 	if want := []string{"core-sw1 · Gi3", "core-sw1 · Gi1", "core-sw1 · Gi2"}; !slices.Equal(data.Busiest, want) {

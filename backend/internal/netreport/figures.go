@@ -309,7 +309,8 @@ func isBusy(g group) bool {
 
 // hotPort reports a port running hot: its 95th busy in either direction at
 // or above 80%. g is the busy table. A port with no busy data (its speed is
-// unknown, so no busy % is ever recorded) is never hot.
+// unknown, so no busy % is ever recorded) is never hot. A direction without
+// data (only the other busy metric was chosen) has HasIn or HasOut false.
 func hotPort(g group, name string, cur [2]services.SeriesStat) (services.HotPort, bool) {
 	in, out := cur[0], cur[1]
 	switch {
@@ -321,11 +322,11 @@ func hotPort(g group, name string, cur [2]services.SeriesStat) (services.HotPort
 	h := services.HotPort{Name: name}
 	hot := false
 	if in.Buckets > 0 {
-		h.P95In = in.P95
+		h.P95In, h.HasIn = in.P95, true
 		hot = hot || in.P95 >= hotThreshold
 	}
 	if out.Buckets > 0 {
-		h.P95Out = out.P95
+		h.P95Out, h.HasOut = out.P95, true
 		hot = hot || out.P95 >= hotThreshold
 	}
 	return h, hot

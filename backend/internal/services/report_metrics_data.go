@@ -56,11 +56,14 @@ type MetricsReportData struct {
 }
 
 // MetricsTile is one headline tile: a table's figures for the whole scope.
+// For an in/out pair the larger direction stands for both, figure by figure:
+// a percent pair's tile shows the larger average and the larger 95th, which
+// can come from different directions.
 type MetricsTile struct {
 	Label  string   // "Traffic", "Busy", "CPU", ...
 	Unit   string   // "bps", "%", ...
 	Kind   string   // "traffic" | "percent" | "other"
-	First  float64  // traffic: billable 95th; percent: average; other: average
+	First  float64  // traffic: 95th (billable for an in/out traffic pair); percent: average; other: average
 	Second *float64 // traffic: total bytes; percent: 95th; other: nil
 	Change *float64 // percent change of First vs the previous period; nil with New or no data
 	New    bool     // no data (or zero) in the previous period
@@ -83,7 +86,7 @@ type MetricsRow struct {
 	In          *RowStats // single metric: In only; nil without data
 	Out         *RowStats // nil without data, and for a single metric
 	Billable    *float64  // traffic pair: max(95th in, 95th out)
-	Change      *float64  // on the billable 95th (traffic), else on the average
+	Change      *float64  // traffic: on the 95th (billable for an in/out traffic pair); else on the average
 	New         bool      // no data, or zero, in the previous period
 	Coverage    float64   // 0-100
 	LowCoverage bool      // has data, but for under 90% of the period
@@ -101,6 +104,7 @@ type RowStats struct {
 type HotPort struct {
 	Name          string
 	P95In, P95Out float64 // percent; 0 where that direction has no data
+	HasIn, HasOut bool    // that direction has busy data; one is false when only one busy metric was chosen
 }
 
 // MetricsChart is one chart: a table for the whole scope, or one busy line.
@@ -108,7 +112,7 @@ type MetricsChart struct {
 	Title     string
 	Unit      string
 	Lines     []ChartLine // 1 line, or 2 for an in/out pair
-	Reference *float64    // the 95th (billable for traffic); nil for bool metrics and when there is no data
+	Reference *float64    // the 95th (billable for an in/out traffic pair); nil for bool metrics and when there is no data
 }
 
 // ChartLine is one line of a chart.

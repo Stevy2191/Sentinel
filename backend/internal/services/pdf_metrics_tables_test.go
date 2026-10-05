@@ -167,7 +167,7 @@ func bigMetricsData() *ReportData {
 	n.Busiest = []string{name(0), name(1), name(2), name(3), name(4)}
 	n.RunningHot = nil
 	for i := 0; i < 30; i++ {
-		n.RunningHot = append(n.RunningHot, HotPort{Name: name(i), P95In: 95, P95Out: 81})
+		n.RunningHot = append(n.RunningHot, HotPort{Name: name(i), P95In: 95, P95Out: 81, HasIn: true, HasOut: true})
 	}
 	n.Rows, n.Ports = 500, 500
 	return data

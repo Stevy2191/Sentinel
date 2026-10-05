@@ -32,6 +32,8 @@ func trimZeros(s string) string {
 }
 
 // formatSig prints v with about three significant digits: 640, 12.5, 2.1, 0.25.
+// Below 0.01 it keeps two significant digits (0.004, 0.00049), so a small
+// rate such as errors per minute never prints as "0"; exact zero is "0".
 func formatSig(v float64) string {
 	if !finite(v) {
 		return "-"
@@ -42,6 +44,9 @@ func formatSig(v float64) string {
 		prec = 0
 	case a >= 9.995:
 		prec = 1
+	case a > 0 && a < 0.01:
+		// The first significant digit is the -floor(log10 a)th decimal.
+		prec = 1 - int(math.Floor(math.Log10(a)))
 	}
 	return trimZeros(strconv.FormatFloat(v, 'f', prec, 64))
 }
