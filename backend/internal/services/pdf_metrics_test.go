@@ -60,7 +60,7 @@ func sampleMetricsData() *ReportData {
 				}},
 			},
 			Busiest:    []string{core, edge2},
-			RunningHot: []HotPort{{Name: core, P95In: 92.5, P95Out: 41}},
+			RunningHot: []HotPort{{Name: core, P95In: 92.5, P95Out: 41, HasIn: true, HasOut: true}},
 			Charts: []MetricsChart{
 				{Title: "Traffic", Unit: "bps", Reference: f64(640e6), Lines: []ChartLine{
 					{Label: "In", Points: pts(100e6, 640e6, 300e6, 200e6)}, {Label: "Out", Points: pts(50e6, 300e6, 100e6, 80e6)}}},
@@ -129,6 +129,77 @@ func TestMetricsPDFHeadline(t *testing.T) {
 	for _, want := range []string{"new", "No data"} {
 		if !hasLine(text, want) {
 			t.Errorf("headline is missing a tile reading %q", want)
+		}
+	}
+}
+
+// With one busy metric chosen, the other direction has no data: running hot
+// prints "-" for it, never "0%".
+func TestMetricsPDFRunningHotOneDirection(t *testing.T) {
+	data := sampleMetricsData()
+	data.Network.RunningHot = []HotPort{
+		{Name: "core-sw1 · Gi1", P95In: 92.5, HasIn: true},
+		{Name: "edge-sw2 · Gi0/48", P95Out: 88, HasOut: true},
+	}
+	text, _ := renderMetrics(t, data)
+	for _, want := range []string{"in 92.5%, out -", "in -, out 88%"} {
+		if !hasLine(text, want) {
+			t.Errorf("running hot is missing %q", want)
+		}
+	}
+	for _, bad := range []string{"in 0%", "out 0%"} {
+		if strings.Contains(text, bad) {
+			t.Errorf("running hot prints %q for a direction with no data", bad)
+		}
+	}
+}
+
+// A rolling 30-day report names the previous period by its length on the
+// tiles ("vs the previous 30 days"): its two ends do not fit. The period line
+// under the scope still gives both windows' ends.
+func TestMetricsPDFRollingTileCaption(t *testing.T) {
+	data := sampleMetricsData()
+	end := time.Date(2026, 10, 4, 13, 22, 0, 0, time.UTC)
+	start := end.AddDate(0, 0, -30)
+	data.TimeRangeStart, data.TimeRangeEnd = start, end
+	data.Network.PrevStart, data.Network.PrevEnd = start.AddDate(0, 0, -30), start
+	text, _ := renderMetrics(t, data)
+	for _, want := range []string{"+18% vs the previous 30 days", "-25% vs the previous 30 days"} {
+		if !hasLine(text, want) {
+			t.Errorf("tiles are missing a caption reading %q", want)
+		}
+	}
+	if !strings.Contains(text, "Sep 4, 2026 13:22 to Oct 4, 2026 13:22, compared with Aug 5, 2026 13:22 to Sep 4, 2026 13:22") {
+		t.Error("the period line should still give both windows' ends")
+	}
+}
+
+func TestComparedWith(t *testing.T) {
+	chicago, err := time.LoadLocation("America/Chicago")
+	if err != nil {
+		t.Fatal(err)
+	}
+	utc := func(m time.Month, d, h, mi int) time.Time { return time.Date(2026, m, d, h, mi, 0, 0, time.UTC) }
+	cases := []struct {
+		name       string
+		start, end time.Time
+		loc        *time.Location
+		want       string
+	}{
+		{"a calendar month", utc(8, 1, 0, 0), utc(9, 1, 0, 0), time.UTC, "August 2026"},
+		{"a calendar quarter", utc(4, 1, 0, 0), utc(7, 1, 0, 0), time.UTC, "Q2 2026"},
+		{"rolling 30 days", utc(8, 5, 13, 22), utc(9, 4, 13, 22), time.UTC, "the previous 30 days"},
+		// 721 hours: the 30 days before a window that ends after DST ends.
+		{"rolling 30 days across DST", time.Date(2026, 10, 16, 18, 0, 0, 0, chicago), time.Date(2026, 11, 15, 18, 0, 0, 0, chicago),
+			chicago, "the previous 30 days"},
+		// A custom range, midnight to midnight, that is not a calendar unit.
+		{"custom 10 days", utc(8, 31, 0, 0), utc(9, 10, 0, 0), time.UTC, "the previous 10 days"},
+		{"rolling 1 day", utc(9, 3, 13, 22), utc(9, 4, 13, 22), time.UTC, "the previous 24 hours"},
+		{"12 hours", utc(9, 4, 1, 0), utc(9, 4, 13, 0), time.UTC, "the previous 12 hours"},
+	}
+	for _, c := range cases {
+		if got := comparedWith(c.start, c.end, c.loc); got != c.want {
+			t.Errorf("%s: comparedWith = %q, want %q", c.name, got, c.want)
 		}
 	}
 }

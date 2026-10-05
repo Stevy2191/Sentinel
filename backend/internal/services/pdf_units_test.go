@@ -20,6 +20,14 @@ func TestFormatValue(t *testing.T) {
 		{2.5e12, "bps", "2500 Gbps"},
 		{1.5, "per_min", "1.5/min"},
 		{0.25, "per_min", "0.25/min"},
+		// Under 0.01: two significant digits, never "0". Zero stays "0".
+		{0.004, "per_min", "0.004/min"},
+		{0.00049, "per_min", "0.00049/min"},
+		{0.0123, "per_min", "0.01/min"}, // 0.01 and up keeps two decimals
+		{0, "per_min", "0/min"},
+		{0.004, "V", "0.004 V"},
+		{-0.00049, "V", "-0.00049 V"},
+		{0.0049, "", "0.0049"},
 		{12.34, "%", "12.3%"},
 		{40, "%", "40%"},
 		{92.5, "%", "92.5%"},

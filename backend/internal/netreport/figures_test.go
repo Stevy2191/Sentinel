@@ -204,7 +204,7 @@ func TestHotPort(t *testing.T) {
 		t.Error("the busy pair is not recognised")
 	}
 	h, hot := hotPort(pair, "core-sw1 · Gi1", [2]services.SeriesStat{full(10, 10, 120), full(85, 85, 1020)})
-	if !hot || h != (services.HotPort{Name: "core-sw1 · Gi1", P95In: 10, P95Out: 85}) {
+	if !hot || h != (services.HotPort{Name: "core-sw1 · Gi1", P95In: 10, P95Out: 85, HasIn: true, HasOut: true}) {
 		t.Errorf("hot = %v, %+v; want running hot at 85%% out", hot, h)
 	}
 	// A port of unknown speed has no busy data, so it is never hot.
@@ -212,12 +212,17 @@ func TestHotPort(t *testing.T) {
 		t.Error("a port without busy data is running hot")
 	}
 	outOnly := group{title: "Busy out", in: info(t, services.MetricIfOutUtilPct)}
-	if h, hot := hotPort(outOnly, "y", [2]services.SeriesStat{full(80, 80, 960)}); !hot || h.P95Out != 80 || h.P95In != 0 {
-		t.Errorf("out only = %v, %+v; want hot at exactly 80%% out", hot, h)
+	// One busy metric chosen: the other direction is marked as having no
+	// data, so the PDF prints "-" for it rather than "0%".
+	if h, hot := hotPort(outOnly, "y", [2]services.SeriesStat{full(80, 80, 960)}); !hot || h.P95Out != 80 || h.P95In != 0 || h.HasIn || !h.HasOut {
+		t.Errorf("out only = %v, %+v; want hot at exactly 80%% out, no in side", hot, h)
 	}
 	inOnly := group{title: "Busy in", in: info(t, services.MetricIfInUtilPct)}
 	if _, hot := hotPort(inOnly, "z", [2]services.SeriesStat{full(79.9, 79.9, 958.8)}); hot {
 		t.Error("79.9% is running hot")
+	}
+	if h, hot := hotPort(inOnly, "w", [2]services.SeriesStat{full(90, 90, 1080)}); !hot || h.P95In != 90 || !h.HasIn || h.HasOut {
+		t.Errorf("in only = %v, %+v; want hot at 90%% in, no out side", hot, h)
 	}
 	if isBusy(group{title: "Traffic in", in: info(t, services.MetricIfInBps)}) {
 		t.Error("traffic is not the busy table")

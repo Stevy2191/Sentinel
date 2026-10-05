@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -92,29 +93,59 @@ func metricsSubjects(n *MetricsReportData) string {
 	return ""
 }
 
+// midnight reports whether t is exactly midnight in its own location.
+func midnight(t time.Time) bool {
+	return t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0 && t.Nanosecond() == 0
+}
+
+// calendarLabel names a window that is one calendar unit in loc: "September
+// 2026", "Q3 2026", "2026" or "Week of September 7, 2026"; false otherwise.
+func calendarLabel(start, end time.Time, loc *time.Location) (string, bool) {
+	s, e := start.In(loc), end.In(loc)
+	if !midnight(s) {
+		return "", false
+	}
+	switch {
+	case s.Day() == 1 && s.Month() == time.January && e.Equal(s.AddDate(1, 0, 0)):
+		return s.Format("2006"), true
+	case s.Day() == 1 && (s.Month()-1)%3 == 0 && e.Equal(s.AddDate(0, 3, 0)):
+		return fmt.Sprintf("Q%d %d", (int(s.Month())-1)/3+1, s.Year()), true
+	case s.Day() == 1 && e.Equal(s.AddDate(0, 1, 0)):
+		return s.Format("January 2006"), true
+	case e.Equal(s.AddDate(0, 0, 7)):
+		return "Week of " + s.Format("January 2, 2006"), true
+	}
+	return "", false
+}
+
 // windowLabel names a reporting window: "September 2026", "Q3 2026",
 // "2026", "Week of September 7, 2026", or its two ends.
 func windowLabel(start, end time.Time, loc *time.Location) string {
-	s, e := start.In(loc), end.In(loc)
-	midnight := func(t time.Time) bool {
-		return t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0 && t.Nanosecond() == 0
+	if label, ok := calendarLabel(start, end, loc); ok {
+		return label
 	}
-	if midnight(s) {
-		switch {
-		case s.Day() == 1 && s.Month() == time.January && e.Equal(s.AddDate(1, 0, 0)):
-			return s.Format("2006")
-		case s.Day() == 1 && (s.Month()-1)%3 == 0 && e.Equal(s.AddDate(0, 3, 0)):
-			return fmt.Sprintf("Q%d %d", (int(s.Month())-1)/3+1, s.Year())
-		case s.Day() == 1 && e.Equal(s.AddDate(0, 1, 0)):
-			return s.Format("January 2006")
-		case e.Equal(s.AddDate(0, 0, 7)):
-			return "Week of " + s.Format("January 2, 2006")
-		}
-		if midnight(e) {
-			return s.Format("January 2, 2006") + " to " + e.Format("January 2, 2006")
-		}
+	s, e := start.In(loc), end.In(loc)
+	if midnight(s) && midnight(e) {
+		return s.Format("January 2, 2006") + " to " + e.Format("January 2, 2006")
 	}
 	return s.Format("Jan 2, 2006 15:04") + " to " + e.Format("Jan 2, 2006 15:04")
+}
+
+// comparedWith names the previous period on a tile's change line: the
+// calendar unit when it is one ("August 2026"), otherwise its length ("the
+// previous 30 days"), since a rolling or custom window's two ends do not fit
+// on a tile. A run of days counts as days though a DST change adds or drops
+// an hour; one day is "24 hours", and a window that is not whole days is
+// counted in hours.
+func comparedWith(start, end time.Time, loc *time.Location) string {
+	if label, ok := calendarLabel(start, end, loc); ok {
+		return label
+	}
+	hours := end.Sub(start).Hours()
+	if days := math.Round(hours / 24); days >= 2 && math.Abs(hours-days*24) <= 1 {
+		return fmt.Sprintf("the previous %d days", int(days))
+	}
+	return "the previous " + countNoun(max(1, int(math.Round(hours))), "hour", "hours")
 }
 
 // drawMetricsHeadline draws page one after the shared header.
@@ -126,7 +157,7 @@ func drawMetricsHeadline(pdf *fpdf.Fpdf, data *ReportData) {
 		drawMetricsNotes(pdf, n)
 		return
 	}
-	prev := windowLabel(n.PrevStart, n.PrevEnd, data.ReportLocation())
+	prev := comparedWith(n.PrevStart, n.PrevEnd, data.ReportLocation())
 	drawMetricsTiles(pdf, n.Tiles, n.Tables, prev)
 	drawMetricsRunningHot(pdf, n.RunningHot)
 	drawMetricsBusiest(pdf, n)
@@ -215,7 +246,8 @@ func tileFigures(t MetricsTile, table *MetricsTable) (value, caption string) {
 	return value, caption
 }
 
-// tileChange is "+18% vs August 2026", "new", or nothing.
+// tileChange is "+18% vs August 2026", "+18% vs the previous 30 days", "new",
+// or nothing. prev is comparedWith's name for the previous period.
 func tileChange(t MetricsTile, prev string) string {
 	switch {
 	case t.NoData:
@@ -247,8 +279,21 @@ func drawMetricsRunningHot(pdf *fpdf.Fpdf, hot []HotPort) {
 		setColor(pdf, pdfInk, false)
 		pdf.CellFormat(pdfContentW-figuresW, 5, fitText(pdf, h.Name, pdfContentW-figuresW-2), "", 0, "L", false, 0, "")
 		setColor(pdf, pdfDanger, false)
-		pdf.CellFormat(figuresW, 5, fmt.Sprintf("in %s, out %s", formatPercent(h.P95In), formatPercent(h.P95Out)), "", 1, "R", false, 0, "")
+		pdf.CellFormat(figuresW, 5, hotFigures(h), "", 1, "R", false, 0, "")
 	}
+}
+
+// hotFigures is a running-hot port's 95th busy each way, "in 92.5%, out 41%".
+// A direction with no busy data (only the other busy metric was chosen)
+// reads "-", not "0%".
+func hotFigures(h HotPort) string {
+	side := func(p95 float64, has bool) string {
+		if !has {
+			return "-"
+		}
+		return formatPercent(p95)
+	}
+	return fmt.Sprintf("in %s, out %s", side(h.P95In, h.HasIn), side(h.P95Out, h.HasOut))
 }
 
 func drawMetricsBusiest(pdf *fpdf.Fpdf, n *MetricsReportData) {
