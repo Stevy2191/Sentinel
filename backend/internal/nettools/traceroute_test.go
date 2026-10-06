@@ -206,6 +206,144 @@ func TestTracerouteSplitPathAndNames(t *testing.T) {
 	}
 }
 
+// Names are looked up for the table's rows, with the row's TTL: round 1's
+// parallel probes past the destination answer first here, yet the
+// destination's name carries its own TTL, and an address seen only past the
+// end is never looked up.
+func TestTracerouteNamesFollowTheTable(t *testing.T) {
+	f := &fakeProber{canTrace: true, script: func(_, ttl, _ int) fakeReply {
+		switch {
+		case ttl == 1:
+			return fakeReply{from: "10.0.0.1", kind: ReplyTimeExceeded, rtt: time.Millisecond}
+		case ttl == 2:
+			return fakeReply{from: "10.0.0.2", kind: ReplyTimeExceeded, rtt: 2 * time.Millisecond}
+		case ttl == 3: // the destination's own TTL answers after the probes past it
+			return fakeReply{from: "192.0.2.10", kind: ReplyEcho, rtt: 3 * time.Millisecond, delay: 30 * time.Millisecond}
+		case ttl <= 6:
+			return fakeReply{from: "192.0.2.10", kind: ReplyEcho, rtt: 3 * time.Millisecond}
+		}
+		// A stray answer past the destination.
+		return fakeReply{from: "10.9.9.9", kind: ReplyTimeExceeded, rtt: 9 * time.Millisecond}
+	}}
+	var mu sync.Mutex
+	asked := map[string]int{}
+	names := map[string]string{"10.0.0.1": "gw.lab", "10.0.0.2": "r2.lab", "192.0.2.10": "target.lab", "10.9.9.9": "stray.lab"}
+	lookup := func(_ context.Context, addr string) (string, error) {
+		mu.Lock()
+		asked[addr]++
+		mu.Unlock()
+		return names[addr], nil
+	}
+	var r recorder
+	sum, err := traceroute(context.Background(), f, traceSpec(8, 2), r.emit, lookup, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sum.Reached || sum.HopCount != 3 {
+		t.Fatalf("summary %+v", sum)
+	}
+	mu.Lock()
+	wantAsked := map[string]int{"10.0.0.1": 1, "10.0.0.2": 1, "192.0.2.10": 1}
+	if !reflect.DeepEqual(asked, wantAsked) {
+		t.Errorf("lookups %v, want one per address in the table %v", asked, wantAsked)
+	}
+	mu.Unlock()
+	got := map[string]HopName{}
+	for _, d := range r.ofType(EventHopName) {
+		n := d.(HopName)
+		if n.TTL < 1 || n.TTL > sum.HopCount {
+			t.Errorf("hop_name %+v: TTL outside the table's %d rows", n, sum.HopCount)
+		}
+		got[n.Addr] = n
+	}
+	if want := (HopName{TTL: 3, Addr: "192.0.2.10", Name: "target.lab"}); got["192.0.2.10"] != want {
+		t.Errorf("destination's hop_name %+v, want %+v", got["192.0.2.10"], want)
+	}
+	if len(got) != 3 {
+		t.Errorf("hop_name events %v, want the three table addresses", got)
+	}
+	if sum.Hops[2].Name != "target.lab" {
+		t.Errorf("destination row name %q", sum.Hops[2].Name)
+	}
+}
+
+// A probe that fails to send is reported with its error and counts as lost;
+// the run goes on.
+func TestTracerouteProbeError(t *testing.T) {
+	sendErr := errors.New("sendto: no buffer space available")
+	path := route("192.0.2.10", "10.0.0.1", "10.0.0.2")
+	f := &fakeProber{canTrace: true, script: func(call, ttl, round int) fakeReply {
+		if ttl == 2 {
+			return fakeReply{err: sendErr}
+		}
+		return path(call, ttl, round)
+	}}
+	var r recorder
+	sum, err := traceroute(context.Background(), f, traceSpec(30, 2), r.emit, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sum.Reached || sum.HopCount != 3 {
+		t.Fatalf("summary %+v", sum)
+	}
+	if h := sum.Hops[1]; h.Sent != 2 || h.Received != 0 || h.LossPct != 100 || len(h.Addrs) != 0 {
+		t.Errorf("hop 2: %+v, want 2 sent and none answered", h)
+	}
+	ttl2 := 0
+	for _, p := range hopProbes(&r) {
+		switch {
+		case p.TTL == 2:
+			ttl2++
+			if p.Error != sendErr.Error() || p.Addr != "" || p.RTTMS != nil {
+				t.Errorf("TTL 2 probe %+v, want the send error and no answer", p)
+			}
+		case p.Error != "":
+			t.Errorf("probe %+v carries an error", p)
+		}
+	}
+	if ttl2 != 2 {
+		t.Errorf("%d hop events for TTL 2, want 2", ttl2)
+	}
+}
+
+// When every probe of round 1 fails to send, the trace fails with the error
+// instead of reading as 100 % loss.
+func TestTracerouteAllProbesFail(t *testing.T) {
+	sendErr := errors.New("sendto: operation not permitted")
+	f := &fakeProber{canTrace: true, script: func(int, int, int) fakeReply { return fakeReply{err: sendErr} }}
+	var r recorder
+	_, err := traceroute(context.Background(), f, traceSpec(5, 3), r.emit, nil, 0)
+	if !errors.Is(err, sendErr) {
+		t.Fatalf("err = %v, want %v", err, sendErr)
+	}
+	probes := hopProbes(&r)
+	if len(probes) != 5 || f.totalCalls() != 5 {
+		t.Errorf("%d hop events, %d probes; want round 1's 5 and no more rounds", len(probes), f.totalCalls())
+	}
+	for _, p := range probes {
+		if p.Error != sendErr.Error() {
+			t.Errorf("probe %+v, want the send error", p)
+		}
+	}
+	if n := len(roundDones(&r)); n != 0 {
+		t.Errorf("%d round_done events for a failed trace", n)
+	}
+
+	// Errors mixed with plain timeouts are not a failure: the path may just
+	// be silent.
+	f = &fakeProber{canTrace: true, script: func(_, ttl, _ int) fakeReply {
+		if ttl == 1 {
+			return fakeReply{err: sendErr}
+		}
+		return fakeReply{}
+	}}
+	r = recorder{}
+	sum, err := traceroute(context.Background(), f, traceSpec(5, 2), r.emit, nil, 0)
+	if err != nil || sum.Reached || len(roundDones(&r)) != 2 {
+		t.Errorf("errors and timeouts: %+v, %v, %d rounds", sum, err, len(roundDones(&r)))
+	}
+}
+
 func TestTracerouteNeedsRawICMP(t *testing.T) {
 	f := &fakeProber{canTrace: false, script: route("192.0.2.10")}
 	var r recorder

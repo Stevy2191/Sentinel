@@ -101,13 +101,15 @@ type PingSummary struct {
 }
 
 // HopProbe is one traceroute probe: what answered the probe sent with TTL in
-// Round. Addr is empty and RTTMS nil when nothing answered.
+// Round. Addr is empty and RTTMS nil when nothing answered; Error is set when
+// the probe itself failed (e.g. it could not be sent) rather than timing out.
 type HopProbe struct {
 	Round   int      `json:"round"`
 	TTL     int      `json:"ttl"`
 	Addr    string   `json:"addr,omitempty"`
 	RTTMS   *float64 `json:"rtt_ms,omitempty"`
 	Reached bool     `json:"reached"`
+	Error   string   `json:"error,omitempty"`
 }
 
 // HopStats is one row of the MTR table: every probe sent with one TTL.

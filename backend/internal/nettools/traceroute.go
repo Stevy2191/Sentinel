@@ -3,6 +3,7 @@ package nettools
 import (
 	"bytes"
 	"context"
+	"errors"
 	"math"
 	"net"
 	"sort"
@@ -46,8 +47,12 @@ type traceState struct {
 // which means the probe went no further); later rounds probe only up to it
 // and rows past it are dropped. Without an end, rows run to the last TTL
 // that ever answered + 1 (at most max hops). After each round a RoundDone
-// carries the cumulative table. Hop names are looked up once per address in
-// the background. s must be normalized and TargetIP an IPv4 address.
+// carries the cumulative table; then the names of the table's addresses not
+// yet asked about are looked up in the background, once per address, each
+// with its row's TTL. A probe that fails (rather than timing out) is reported
+// with its error and counts as lost; when every probe of round 1 fails, the
+// trace fails with the first error. s must be normalized and TargetIP an
+// IPv4 address.
 func traceroute(ctx context.Context, p Prober, s Spec, emit Emitter, lookup lookupFunc, gap time.Duration) (TraceSummary, error) {
 	if !p.CanTrace() {
 		return TraceSummary{}, ErrICMPUnavailable
@@ -62,7 +67,7 @@ func traceroute(ctx context.Context, p Prober, s Spec, emit Emitter, lookup look
 	var lookups sync.WaitGroup
 	asked := map[string]bool{}
 	lookUp := func(ttl int, addr string) {
-		if lookup == nil || addr == "" || asked[addr] {
+		if lookup == nil || asked[addr] {
 			return
 		}
 		asked[addr] = true
@@ -99,6 +104,8 @@ func traceroute(ctx context.Context, p Prober, s Spec, emit Emitter, lookup look
 				results <- result{ttl, r, err}
 			}()
 		}
+		var probeErr error // the round's first probe failure (not a timeout)
+		failed := 0
 		for left := limit; left > 0; {
 			select {
 			case n := <-names:
@@ -110,24 +117,43 @@ func traceroute(ctx context.Context, p Prober, s Spec, emit Emitter, lookup look
 				}
 				probe := HopProbe{Round: round, TTL: res.ttl}
 				sample := hopSample{}
-				if res.err == nil {
+				switch {
+				case res.err == nil:
 					ms := durationMS(res.reply.RTT)
 					sample = hopSample{addr: res.reply.From.String(), rtt: &ms}
 					probe.Addr, probe.RTTMS = sample.addr, sample.rtt
 					probe.Reached = res.reply.Kind == ReplyEcho || res.reply.From.Equal(dst)
 					st.answered(res.ttl, probe.Reached || res.reply.Kind == ReplyUnreachable, probe.Reached)
+				case !errors.Is(res.err, ErrNoReply):
+					// Sent-and-unanswered in the stats, but the event says why.
+					probe.Error = res.err.Error()
+					failed++
+					if probeErr == nil {
+						probeErr = res.err
+					}
 				}
 				st.samples[res.ttl] = append(st.samples[res.ttl], sample)
 				if st.stopTTL == 0 || res.ttl <= st.stopTTL {
 					emit(Event{Type: EventHop, Data: probe})
 				}
-				lookUp(res.ttl, sample.addr)
 			}
 		}
 		if err := ctx.Err(); err != nil {
 			return st.summary(), err
 		}
-		emit(Event{Type: EventRoundDone, Data: RoundDone{Round: round, Hops: st.rows()}})
+		if round == 1 && probeErr != nil && failed == limit {
+			// Not one probe got anywhere: a failure, not a silent path.
+			return TraceSummary{}, probeErr
+		}
+		rows := st.rows()
+		emit(Event{Type: EventRoundDone, Data: RoundDone{Round: round, Hops: rows}})
+		// Name the table's addresses with their row's TTL; an address seen
+		// only past the end of the path is never looked up.
+		for _, h := range rows {
+			for _, a := range h.Addrs {
+				lookUp(h.TTL, a)
+			}
+		}
 		if round < s.Params.Rounds {
 			wait := time.NewTimer(time.Until(roundStart.Add(gap)))
 			for waiting := true; waiting; {
