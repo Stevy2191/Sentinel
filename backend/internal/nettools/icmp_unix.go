@@ -97,7 +97,7 @@ func (p *unixProber) readLoop() {
 			continue
 		}
 		at := time.Now()
-		msg, ok := parseICMPv4(buf[:n])
+		msg, ok := parseICMPv4(readPayload(buf, n))
 		if !ok {
 			continue
 		}
@@ -118,6 +118,17 @@ func (p *unixProber) readLoop() {
 		}
 		ch <- r // buffered: never blocks
 	}
+}
+
+// readPayload is the part of buf that a read of n bytes filled, clamped to
+// buf. On a raw socket, x/net's ipv4.PacketConn.ReadFrom (v0.57.0,
+// ipv4/payload_cmsg.go) subtracts only the bytes past 20 of an IPv4 header
+// with options, so its n is 20 too high and can exceed len(buf). Any datagram
+// with IP options and a full-size payload would otherwise panic the reader.
+// A bigger buffer would only move the threshold (n stays 20 too high), so the
+// clamp is the fix.
+func readPayload(buf []byte, n int) []byte {
+	return buf[:max(0, min(n, len(buf)))]
 }
 
 func addrIP(a net.Addr) net.IP {
