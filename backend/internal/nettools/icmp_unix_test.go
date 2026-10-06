@@ -37,6 +37,25 @@ func skipIfDenied(t *testing.T, err error) {
 	}
 }
 
+// x/net's raw-socket ReadFrom overstates n by 20 when the IPv4 header carries
+// options, so n can exceed the buffer; the reader must never slice past it.
+func TestReadPayloadClampsLength(t *testing.T) {
+	buf := make([]byte, 1500)
+	for _, c := range []struct{ n, want int }{
+		{0, 0}, {28, 28}, {1500, 1500}, {1516, 1500}, {1540, 1500}, {-1, 0},
+	} {
+		if got := len(readPayload(buf, c.n)); got != c.want {
+			t.Errorf("n %d: %d bytes, want %d", c.n, got, c.want)
+		}
+	}
+	// A full buffer read with an overstated n still parses as what it is.
+	copy(buf, []byte{0, 0, 0xab, 0xcd, 0x12, 0x34, 0x00, 0x07})
+	got, ok := parseICMPv4(readPayload(buf, len(buf)+16))
+	if want := (parsedICMP{kind: ReplyEcho, id: 0x1234, seq: 7}); !ok || got != want {
+		t.Errorf("parsed %+v, %v; want %+v, true", got, ok, want)
+	}
+}
+
 func TestProberLoopbackEcho(t *testing.T) {
 	p := openProber(t)
 	for i := 0; i < 2; i++ {
