@@ -105,6 +105,10 @@ export default function NetToolsSettings({ push }: Props) {
           </ul>
         )}
         <p className="text-xs text-slate-500">
+          A host-name or wildcard entry allows whatever address the name resolves to, even one outside every subnet
+          listed here (always-blocked addresses excepted).
+        </p>
+        <p className="text-xs text-slate-500">
           Cloud metadata addresses, 0.0.0.0/8, multicast and broadcast are always blocked. Saving never affects runs
           already in progress.
         </p>

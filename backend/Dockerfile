@@ -24,7 +24,7 @@ ENV GOPROXY=${GOPROXY}     GOSUMDB=${GOSUMDB}     GOFLAGS=-mod=mod
 # self-reported version always matches the image it shipped in).
 #
 # AGENT_VERSION previously had no matching ARG declaration, so the
-# `${AGENT_VERSION:-1.1.0}` below was dead: the shell variable was never set,
+# `${AGENT_VERSION:-1.0.0}` below was dead: the shell variable was never set,
 # and the fallback silently won every time regardless of what was passed in.
 ARG SENTINEL_VERSION=dev
 ARG AGENT_VERSION=1.1.0
