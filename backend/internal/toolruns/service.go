@@ -121,8 +121,7 @@ func New(d Deps) *Service {
 		runner = &nettools.Runner{}
 	}
 	s.runTool = runner.Run
-	// Replaced by the local launcher in Task 9.
-	s.launch = func(*models.ToolRun, nettools.Spec) {}
+	s.launch = s.launchLocal
 	return s
 }
 
