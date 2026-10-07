@@ -13,9 +13,11 @@ import {
 } from 'recharts'
 import { format, parseISO } from 'date-fns'
 import { Download, ArrowUpDown } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import { useMonitors } from '@/hooks/useMonitors'
 import { useTimeline, useSummaryReport } from '@/hooks/useReports'
 import { formatResponseTime } from '@/utils/formatters'
+import { pickReportMonitor } from '@/utils/reportMonitor'
 import type { SummaryMonitor, TimelineGranularity } from '@/types'
 
 type Tab = 'timeline' | 'summary'
@@ -57,6 +59,8 @@ function download(filename: string, content: string) {
 
 export default function Reports() {
   const { monitors } = useMonitors({ limit: 500 })
+  const [searchParams] = useSearchParams()
+  const requestedMonitor = searchParams.get('monitor_id')
   const [tab, setTab] = useState<Tab>('timeline')
 
   // Draft filters (edited by the user) and applied filters (used by hooks).
@@ -76,13 +80,15 @@ export default function Reports() {
     granularity: 'hourly' as TimelineGranularity,
   })
 
-  // Default the timeline monitor to the first one once loaded.
+  // Default the timeline monitor once loaded: the one an alert's "View
+  // Report" link names (?monitor_id=), otherwise the first.
   useEffect(() => {
     if (!draftMonitor && monitors.length > 0) {
-      setDraftMonitor(monitors[0].id)
-      setApplied((a) => ({ ...a, monitor: monitors[0].id }))
+      const id = pickReportMonitor(monitors.map((m) => m.id), requestedMonitor)
+      setDraftMonitor(id)
+      setApplied((a) => ({ ...a, monitor: id }))
     }
-  }, [monitors, draftMonitor])
+  }, [monitors, draftMonitor, requestedMonitor])
 
   const apply = () => {
     setApplied({
