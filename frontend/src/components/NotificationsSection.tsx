@@ -108,7 +108,7 @@ export default function NotificationsSection({
                 <p className="mt-1 text-xs text-amber-300">
                   No notification channels configured.{' '}
                   <Link
-                    to="/settings"
+                    to="/settings/notifications"
                     onClick={onNavigateAway}
                     className="underline underline-offset-2"
                   >

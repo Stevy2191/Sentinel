@@ -48,7 +48,13 @@ const PublicDashboardPage = lazy(() => import('@/pages/dashboards/PublicDashboar
 const PublicReport = lazy(() => import('@/pages/PublicReport'))
 const StatusPages = lazy(() => import('@/pages/StatusPages'))
 const Notifications = lazy(() => import('@/pages/Notifications'))
-const Settings = lazy(() => import('@/pages/Settings'))
+const SettingsLayout = lazy(() => import('@/pages/settings/SettingsLayout'))
+const SettingsIndex = lazy(() => import('@/pages/settings/SettingsIndex'))
+const GeneralSettings = lazy(() => import('@/pages/settings/GeneralSettings'))
+const BackupsSettings = lazy(() => import('@/pages/settings/BackupsSettings'))
+const AboutSettings = lazy(() => import('@/pages/settings/AboutSettings'))
+const NetworkToolsSection = lazy(() => import('@/pages/settings/NetworkToolsSection'))
+const NotificationSettings = lazy(() => import('@/pages/NotificationSettings'))
 const Profile = lazy(() => import('@/pages/Profile'))
 const AdminUsers = lazy(() => import('@/pages/AdminUsers'))
 const PublicStatus = lazy(() => import('@/pages/PublicStatus'))
@@ -141,11 +147,20 @@ export default function App() {
               <Route path="/status-pages/:slug/detail" element={<StatusPages mode="detail" />} />
               <Route path="/status-pages/:slug/edit" element={<StatusPages mode="edit" />} />
               <Route path="/notifications" element={<Notifications />} />
-              <Route path="/settings" element={<Settings />} />
+              {/* One Settings area: the layout holds the section menu, each
+                  section is a child route at its own address. */}
+              <Route path="/settings" element={<SettingsLayout />}>
+                <Route index element={<SettingsIndex />} />
+                <Route path="general" element={<GeneralSettings />} />
+                <Route path="notifications" element={<NotificationSettings />} />
+                <Route path="backups" element={<BackupsSettings />} />
+                <Route path="network-tools" element={<NetworkToolsSection />} />
+                <Route path="about" element={<AboutSettings />} />
+                {/* The profile page used to be Settings → Security. */}
+                <Route path="security" element={<Navigate to="/profile" replace />} />
+                <Route path="*" element={<SettingsIndex />} />
+              </Route>
               <Route path="/profile" element={<Profile />} />
-              {/* The profile page used to be Settings → Security. Kept as a
-                  redirect so existing links and bookmarks still land. */}
-              <Route path="/settings/security" element={<Navigate to="/profile" replace />} />
               {/* Admin-only page; AdminUsers itself redirects non-admins to /dashboard. */}
               <Route path="/admin/users" element={<AdminUsers />} />
             </Route>
