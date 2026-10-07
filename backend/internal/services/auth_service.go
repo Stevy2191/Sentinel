@@ -381,6 +381,20 @@ func (s *AuthService) UpdateUserTheme(ctx context.Context, userID uuid.UUID, pri
 	return nil
 }
 
+// SetNetTools grants or removes a user's "Network tools" permission. An
+// unknown user is an error wrapping gorm.ErrRecordNotFound.
+func (s *AuthService) SetNetTools(ctx context.Context, userID uuid.UUID, enabled bool) (*models.User, error) {
+	res := s.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", userID).
+		Updates(map[string]interface{}{"net_tools": enabled, "updated_at": time.Now().UTC()})
+	if res.Error != nil {
+		return nil, fmt.Errorf("setting network tools for user %s: %w", userID, res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return nil, fmt.Errorf("user %s not found: %w", userID, gorm.ErrRecordNotFound)
+	}
+	return s.GetUserByID(ctx, userID)
+}
+
 // GenerateMFAToken issues a short-lived (5-minute) token used to complete an
 // MFA challenge after a correct password. It carries an mfa_pending claim and
 // grants no API access on its own.

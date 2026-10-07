@@ -38,6 +38,10 @@ type User struct {
 	ThemeMode         string    `json:"-" gorm:"column:theme_mode;default:auto"`
 	CreatedAt         time.Time `json:"created_at" gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt         time.Time `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
+
+	// NetTools grants the network tools to a non-admin; admins may always use
+	// them, whatever it says. No gorm default, for the reason IsAdmin has none.
+	NetTools bool `json:"net_tools" gorm:"column:net_tools"`
 }
 
 // TableName tells GORM which table backs the User model.

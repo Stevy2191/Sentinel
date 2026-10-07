@@ -118,6 +118,14 @@ type Agent struct {
 	GoVersion       *string `json:"go_version" gorm:"column:go_version"`
 	DockerAvailable *bool   `json:"docker_available" gorm:"column:docker_available"`
 
+	// ---- Network tools ---------------------------------------------------
+	// ToolsEnabled is the admin's switch in Sentinel. ToolsLocal is the
+	// agent's own ENABLE_TOOLS flag as its heartbeat last reported it; nil
+	// means the agent has never reported it, so it is too old to run tools.
+	// Both must be on before a run can use the agent.
+	ToolsEnabled bool  `json:"tools_enabled" gorm:"column:tools_enabled"`
+	ToolsLocal   *bool `json:"tools_local" gorm:"column:tools_local"`
+
 	CreatedAt time.Time `json:"created_at" gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt time.Time `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
 }

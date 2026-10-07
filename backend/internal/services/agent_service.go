@@ -291,6 +291,20 @@ func (s *AgentService) Update(ctx context.Context, agentID string, settings Agen
 	return s.Get(ctx, agentID)
 }
 
+// SetToolsEnabled flips the admin's network-tools switch for an agent.
+// ErrAgentNotFound when no agent has that readable id.
+func (s *AgentService) SetToolsEnabled(ctx context.Context, agentID string, enabled bool) (*models.Agent, error) {
+	res := s.db.WithContext(ctx).Model(&models.Agent{}).Where("agent_id = ?", agentID).
+		Updates(map[string]interface{}{"tools_enabled": enabled, "updated_at": time.Now().UTC()})
+	if res.Error != nil {
+		return nil, fmt.Errorf("setting tools for agent %s: %w", agentID, res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return nil, ErrAgentNotFound
+	}
+	return s.Get(ctx, agentID)
+}
+
 // Delete unregisters an agent. Its metrics and container rows go with it via
 // the foreign keys.
 func (s *AgentService) Delete(ctx context.Context, agentID string) error {
@@ -319,6 +333,9 @@ type AgentSystemInfo struct {
 	MemoryTotalMB   int64
 	GoVersion       string
 	DockerAvailable *bool
+	// ToolsLocal is the agent's ENABLE_TOOLS flag. nil (an agent too old to
+	// send it) is stored as NULL, so Sentinel can tell "too old" from "off".
+	ToolsLocal *bool
 }
 
 // Heartbeat records that an agent is alive and refreshes what it reports about
@@ -359,6 +376,9 @@ func (s *AgentService) Heartbeat(ctx context.Context, agent *models.Agent, info 
 	if info.DockerAvailable != nil {
 		updates["docker_available"] = *info.DockerAvailable
 	}
+	// Written every time, absent included: an agent downgraded to a version
+	// without tools must stop counting as able to run them.
+	updates["tools_local"] = info.ToolsLocal
 
 	if err := s.db.WithContext(ctx).Model(&models.Agent{}).
 		Where("id = ?", agent.ID).Updates(updates).Error; err != nil {
