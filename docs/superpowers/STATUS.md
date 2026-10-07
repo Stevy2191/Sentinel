@@ -20,7 +20,7 @@ Roadmap: `docs/superpowers/specs/2026-09-28-network-monitoring-roadmap.md`. Each
 | — | UPS monitoring (UPS-MIB readings, Power panel, on-battery/low-battery/high-load alerts) | Done (`dev`); spec `specs/2026-10-01-ups-monitoring-design.md` |
 | 3 | MIB library and custom metrics: upload/browse/test-walk MIBs, profiles, Cisco switch health, Health section, metric-rule alerts | Done (`dev`, 2026-10-02); follow-ups in `plans/2026-10-02-network-phase3-followups.md` |
 | 4 | Custom dashboards: grid editor, 11 widget types (incl. site power), sharing, fullscreen wall display, admin public links | Done (`dev`, 2026-10-03); follow-ups in `plans/2026-10-02-network-phase4-followups.md` |
-| 5 | Metric reports: a Metrics report type (ports, port roles, devices, sites), exact 95th percentiles, totals, previous-period comparison, scheduled and shared like the other reports | Done (`feature/network-phase5`, awaiting merge to `dev`); follow-ups in `plans/2026-10-03-network-phase5-followups.md` |
+| 5 | Metric reports: a Metrics report type (ports, port roles, devices, sites), exact 95th percentiles, totals, previous-period comparison, scheduled and shared like the other reports | Done (`dev`, 2026-10-05); follow-ups in `plans/2026-10-03-network-phase5-followups.md` |
 | 6 | Live site maps (LLDP, SSE push) — needs phase 4 | Not started; unblocked by phase 4 |
 | 7 | UniFi controller source | **Next** |
 
@@ -32,7 +32,7 @@ Roadmap: `docs/superpowers/specs/2026-10-04-tools-and-security-roadmap.md` (agre
 
 | Phase | What | State |
 |---|---|---|
-| S1 | Network tools: ping, traceroute (MTR-style), DNS lookup, port check/quick scan — from Sentinel or any server agent, streamed live | Done (`feature/tools-s1`, awaiting merge to `dev`); follow-ups in `plans/2026-10-05-tools-s1-followups.md` |
+| S1 | Network tools: ping, traceroute (MTR-style), DNS lookup, port check/quick scan — from Sentinel or any server agent, streamed live | Done (`dev`, 2026-10-07); follow-ups in `plans/2026-10-05-tools-s1-followups.md` |
 | S2 | nmap: bundled scan profiles (quick, full TCP, service/version, OS, NSE categories), guarded raw mode, parsed results, history and diff — needs S1 | Not started; unblocked by S1 |
 | S3 | Attack surface: scheduled scans, open ports and exposed services per host, change alerts, CVE-based vulnerability overview, inside (agent) vs outside view — needs S2 | Not started |
 | S4 | Flow analysis: NetFlow/IPFIX/sFlow collector, top talkers, protocols, who-talks-to-whom per site and interface — needs network phase 2 only | Not started |
@@ -41,7 +41,28 @@ Roadmap: `docs/superpowers/specs/2026-10-04-tools-and-security-roadmap.md` (agre
 
 S1 → S2 → S3 is one chain; S4 can go at any point; S5 follows S1; S6 is last. Where the track sits against network phases 6 and 7 is the owner's call.
 
+## UX reorganization
+
+Spec: `docs/superpowers/specs/2026-10-07-ux-reorganization-design.md` (agreed 2026-10-07). Four pieces, in this order; each gets its own plan.
+
+| Piece | What | State |
+|---|---|---|
+| 1 | Navigation and Settings: one grouped sidebar (Network folded in, Dashboards and Status Pages as one entry), one Settings area with a section menu, old addresses redirect | Done (`feature/ux-piece1`, awaiting merge to `dev`); plan `plans/2026-10-07-ux-reorg-piece1-navigation-settings.md` |
+| 2 | Combined Monitoring list: uptime checks, network devices and server agents on one page with filters and one "+ Add" | Not started |
+| 3 | Site profiles: address, network information, ISPs and circuits per site | Not started |
+| 4 | Dashboards and status pages merged: status pages become publishable dashboards | Not started |
+
 ## To be checked by the owner
+
+### UX reorganization piece 1 (on the dev stack)
+
+1. The sidebar reads Overview, Dashboards, then Monitor (Uptime, Servers, Devices, Sites, SSL & Domains), Respond (Incidents, Reports) and Tools (Network Tools, MIB Browser); opening a device or site no longer swaps the menu.
+2. Each entry stays highlighted on its child pages: a monitor, a server, a device's port, a site, an incident, a report, a tool run, a status page's editor.
+3. Dashboards shows Dashboards / Status pages tabs; "+ New" creates a dashboard or a status page, from either tab.
+4. Every Settings section opens at its own address and works as before: save a General setting, add a notification channel, view notification history and retry a failed one, invite a user, download a backup, add an SNMP credential, open a device profile, upload a MIB, change a polling threshold, edit the network tools allowlist.
+5. Old addresses land in the new place: `/admin/users`, `/notifications`, `/network/credentials`, `/network/profiles` (and a profile's page), `/network/mibs`, `/network/settings`, `/settings?tab=nettools`. The MIB browser's "add as metric" still opens the profile picker with the OID filled in.
+6. As a non-admin, the Settings menu shows only Notifications → History and About, and an admin-only address (e.g. `/settings/users`) sends you to About.
+7. At phone width, the sidebar drawer works and the Settings section select switches sections.
 
 Tools S1 (after updating the work install from `dev`; Claude had no browser, so none of these has been run in one):
 1. With the allowlist empty, a ping to any address (e.g. 8.8.8.8) runs, while the Ports tab shows "No port-check targets are allowed yet. An admin adds subnets and hosts in Settings → Network tools" and a port check is refused with "… is not on the network tools allowlist". A ping to 169.254.169.254 is refused with "… is an address network tools never contact".
