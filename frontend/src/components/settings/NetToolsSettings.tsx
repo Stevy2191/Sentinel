@@ -76,7 +76,7 @@ export default function NetToolsSettings({ push }: Props) {
     <div className="space-y-6">
       <p className="text-sm text-slate-400">
         Admins can always run network tools; other users need it granted on the{' '}
-        <Link className="text-primary-400 hover:underline" to="/admin/users">
+        <Link className="text-primary-400 hover:underline" to="/settings/users">
           Users
         </Link>{' '}
         page. Each server agent is allowed from its Edit form.

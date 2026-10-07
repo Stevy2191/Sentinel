@@ -100,7 +100,7 @@ export default function MibLibrary() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-4xl font-light text-white">MIB library</h1>
+        <h2 className="text-2xl font-light text-white">MIB library</h2>
         <p className="mt-2 text-sm text-slate-400">
           The MIB modules Sentinel knows. Upload vendor MIBs (or a zip of them) to add names, descriptions and tables to the browser and to custom metrics.
         </p>

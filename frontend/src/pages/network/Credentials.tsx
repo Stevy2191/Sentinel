@@ -26,7 +26,7 @@ export default function Credentials() {
     <div className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-4xl font-light text-white">Credentials</h1>
+          <h2 className="text-2xl font-light text-white">SNMP credentials</h2>
           <p className="mt-2 text-sm text-slate-400">
             SNMP credential profiles. Secrets are stored encrypted and never shown again after saving.
           </p>

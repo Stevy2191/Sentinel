@@ -47,7 +47,7 @@ export default function NetworkSettings() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-4xl font-light text-white">Network settings</h1>
+        <h2 className="text-2xl font-light text-white">Polling &amp; thresholds</h2>
         <p className="mt-2 text-sm text-slate-400">Defaults for every port. Each port can override its thresholds on its own page.</p>
       </div>
       <form className="card max-w-2xl space-y-5 p-6" onSubmit={(e) => void submit(e)}>

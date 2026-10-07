@@ -5,6 +5,7 @@ import { AuthProvider } from '@/context/AuthContext'
 import { AppConfigProvider } from '@/context/AppConfigContext'
 import RequireAuth from '@/components/RequireAuth'
 import Layout from '@/components/Layout'
+import LegacyRedirect from '@/components/LegacyRedirect'
 import Auth from '@/pages/Auth'
 
 // Route components load on demand. The app shipped as one ~950 KB chunk, so a
@@ -118,12 +119,13 @@ export default function App() {
               <Route path="/network/devices" element={<Devices />} />
               <Route path="/network/devices/:id" element={<DeviceDetail />} />
               <Route path="/network/devices/:id/ports/:ifIndex" element={<PortDetail />} />
-              <Route path="/network/credentials" element={<Credentials />} />
-              <Route path="/network/settings" element={<NetworkSettings />} />
-              <Route path="/network/mibs" element={<MibLibrary />} />
+              {/* Network's setup pages moved into Settings; the old addresses
+                  redirect so bookmarks and links still land. */}
+              <Route path="/network/credentials" element={<LegacyRedirect from="/network/credentials" to="/settings/network/credentials" />} />
+              <Route path="/network/settings" element={<LegacyRedirect from="/network/settings" to="/settings/network/polling" />} />
+              <Route path="/network/mibs" element={<LegacyRedirect from="/network/mibs" to="/settings/network/mibs" />} />
               <Route path="/network/mibs/browse" element={<MibBrowser />} />
-              <Route path="/network/profiles" element={<Profiles />} />
-              <Route path="/network/profiles/:id" element={<ProfileDetail />} />
+              <Route path="/network/profiles/*" element={<LegacyRedirect from="/network/profiles" to="/settings/network/profiles" />} />
               {/* Network tools. The page itself tells anyone without the
                   grant that it is not for them; the API refuses them too. */}
               <Route path="/tools" element={<NetworkTools />} />
@@ -146,13 +148,20 @@ export default function App() {
               <Route path="/status-pages/create" element={<StatusPages mode="create" />} />
               <Route path="/status-pages/:slug/detail" element={<StatusPages mode="detail" />} />
               <Route path="/status-pages/:slug/edit" element={<StatusPages mode="edit" />} />
-              <Route path="/notifications" element={<Notifications />} />
+              <Route path="/notifications" element={<LegacyRedirect from="/notifications" to="/settings/notifications/history" />} />
               {/* One Settings area: the layout holds the section menu, each
                   section is a child route at its own address. */}
               <Route path="/settings" element={<SettingsLayout />}>
                 <Route index element={<SettingsIndex />} />
                 <Route path="general" element={<GeneralSettings />} />
                 <Route path="notifications" element={<NotificationSettings />} />
+                <Route path="notifications/history" element={<Notifications />} />
+                <Route path="users" element={<AdminUsers />} />
+                <Route path="network/credentials" element={<Credentials />} />
+                <Route path="network/profiles" element={<Profiles />} />
+                <Route path="network/profiles/:id" element={<ProfileDetail />} />
+                <Route path="network/mibs" element={<MibLibrary />} />
+                <Route path="network/polling" element={<NetworkSettings />} />
                 <Route path="backups" element={<BackupsSettings />} />
                 <Route path="network-tools" element={<NetworkToolsSection />} />
                 <Route path="about" element={<AboutSettings />} />
@@ -161,8 +170,8 @@ export default function App() {
                 <Route path="*" element={<SettingsIndex />} />
               </Route>
               <Route path="/profile" element={<Profile />} />
-              {/* Admin-only page; AdminUsers itself redirects non-admins to /dashboard. */}
-              <Route path="/admin/users" element={<AdminUsers />} />
+              {/* Users moved into Settings → Users & access. */}
+              <Route path="/admin/users" element={<LegacyRedirect from="/admin/users" to="/settings/users" />} />
             </Route>
             </Routes>
           </Suspense>

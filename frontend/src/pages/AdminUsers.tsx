@@ -203,7 +203,7 @@ export default function AdminUsers() {
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <div>
-        <h1 className="vs-title text-4xl">Users</h1>
+        <h2 className="text-2xl font-light text-white">Users &amp; access</h2>
         <p className="text-sm text-slate-400">Create, invite, and manage who can use this instance</p>
       </div>
 
