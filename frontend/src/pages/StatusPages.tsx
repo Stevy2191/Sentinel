@@ -18,6 +18,7 @@ import MonitorList from '@/components/MonitorList'
 import { formatDate } from '@/utils/formatters'
 import type { StatusPageInput } from '@/types'
 import ShimmerStatCard from '@/components/ShimmerStatCard'
+import DashboardsHeader from '@/components/DashboardsHeader'
 import { useCardShimmer } from '@/hooks/useCardShimmer'
 
 type Mode = 'list' | 'create' | 'detail' | 'edit'
@@ -56,17 +57,7 @@ function StatusPageList() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="vs-title text-4xl">Status pages</h1>
-          <p className="text-sm text-slate-400">
-            Create and manage public status dashboards
-          </p>
-        </div>
-        <button className="btn-primary" onClick={() => navigate('/status-pages/create')}>
-          <Plus className="h-4 w-4" /> Create New Status Page
-        </button>
-      </div>
+      <DashboardsHeader active="status" />
 
       {/* Overview. Counts come from the pages already loaded, so the figures
           always agree with the list below rather than a second query. */}
