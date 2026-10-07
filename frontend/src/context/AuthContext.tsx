@@ -22,6 +22,8 @@ export interface CurrentUser {
   mfa_enabled: boolean
   last_login: string | null
   theme?: UserTheme
+  /** Granted network tools. Admins may always use them, whatever this says. */
+  net_tools?: boolean
 }
 
 interface AuthContextValue {

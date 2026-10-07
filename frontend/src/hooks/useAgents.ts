@@ -40,6 +40,11 @@ export interface Agent {
   go_version: string | null
   /** null until the agent has reported, so it stays distinct from "no Docker". */
   docker_available: boolean | null
+  /** The admin switch in Sentinel: tools may run from this agent. */
+  tools_enabled: boolean
+  /** ENABLE_TOOLS on the host, as the agent last reported it; null when it
+   *  never has (a version too old to run tools). */
+  tools_local: boolean | null
 
   created_at: string
   updated_at: string

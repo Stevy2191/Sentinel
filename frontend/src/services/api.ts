@@ -5,11 +5,13 @@ import type { ApiResponseError } from '@/types'
 // - VITE_API_URL, else REACT_APP_API_URL if set.
 // - Otherwise '/api/v1', which the Vite dev server proxies to the backend so
 //   the browser makes same-origin requests (avoids CORS).
-const baseURL =
+// Exported for clients axios cannot serve, such as the EventSource that
+// follows a network tool run.
+export const apiBaseURL: string =
   import.meta.env.VITE_API_URL || import.meta.env.REACT_APP_API_URL || '/api/v1'
 
 export const api: AxiosInstance = axios.create({
-  baseURL,
+  baseURL: apiBaseURL,
   headers: { 'Content-Type': 'application/json' },
   timeout: 120000,
   // The auth token lives in an httpOnly cookie set by the backend, scoped to
