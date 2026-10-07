@@ -1,27 +1,35 @@
 // View models for the run result panels, built from a run's events. Pure, so
 // the live Tools page, the run detail page and the throwaway checks agree.
+//
+// Event data arrives as unknown JSON. Each view model reads only events whose
+// data is an object carrying the fields it uses, with the right types, and
+// skips the rest: a null or malformed event must never crash a panel.
 
 import { colors } from '@/utils/colors'
 import { formatDuration } from '@/utils/formatters'
 import { NUMBER_FIELDS } from '@/utils/netTools'
 import type {
   DNSAnswer,
-  HopName,
-  HopProbe,
+  DNSRecord,
   HopStats,
   NetTool,
-  PingError,
-  PingReply,
   PingSummary,
-  PingTimeout,
   PortResult,
-  RoundDone,
-  ScanStart,
   ToolParams,
   ToolRun,
   ToolRunEvent,
   TraceSummary,
 } from '@/types/netTools'
+
+type Fields = Record<string, unknown>
+
+/** data as an object, or null when it is not one (null, a string, a list…). */
+function fields(data: unknown): Fields | null {
+  return typeof data === 'object' && data !== null && !Array.isArray(data) ? (data as Fields) : null
+}
+
+const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+const isStr = (v: unknown): v is string => typeof v === 'string'
 
 /** Stored events plus streamed ones, by seq, without duplicates. */
 export function mergeEvents(stored: ToolRunEvent[], live: ToolRunEvent[]): ToolRunEvent[] {
@@ -59,14 +67,15 @@ export interface PingView {
 export function pingView(events: ToolRunEvent[]): PingView {
   const rows: PingRow[] = []
   for (const e of events) {
+    const d = fields(e.data)
+    if (!d || !isNum(d.seq)) continue
     if (e.type === 'reply') {
-      const d = e.data as PingReply
+      if (!isNum(d.rtt_ms) || !isNum(d.ttl) || !isStr(d.from)) continue
       rows.push({ seq: d.seq, kind: 'reply', rtt_ms: d.rtt_ms, ttl: d.ttl, from: d.from, message: null })
     } else if (e.type === 'timeout') {
-      const d = e.data as PingTimeout
       rows.push({ seq: d.seq, kind: 'timeout', rtt_ms: null, ttl: null, from: null, message: null })
     } else if (e.type === 'error') {
-      const d = e.data as PingError
+      if (!isStr(d.message)) continue
       rows.push({ seq: d.seq, kind: 'error', rtt_ms: null, ttl: null, from: null, message: d.message })
     }
   }
@@ -100,34 +109,61 @@ export interface TraceView {
 /** The MTR table: the summary's hops once the run is over, else the latest
  *  round_done's cumulative hops (ruling 4), with hop_name names filled in. */
 export function traceView(events: ToolRunEvent[], summary: TraceSummary | null): TraceView {
-  let latest: RoundDone | null = null
+  let latest: { round: number; hops: unknown[] } | null = null
   let reached = false
   const names = new Map<string, string>()
   for (const e of events) {
+    const d = fields(e.data)
+    if (!d) continue
     if (e.type === 'round_done') {
-      const d = e.data as RoundDone
-      if (!latest || d.round > latest.round) latest = d
+      if (!isNum(d.round) || !Array.isArray(d.hops)) continue
+      if (!latest || d.round > latest.round) latest = { round: d.round, hops: d.hops }
     } else if (e.type === 'hop') {
-      if ((e.data as HopProbe).reached) reached = true
+      if (d.reached === true) reached = true
     } else if (e.type === 'hop_name') {
-      const d = e.data as HopName
-      names.set(d.addr, d.name)
+      if (isStr(d.addr) && isStr(d.name)) names.set(d.addr, d.name)
     }
   }
-  const base = (summary ? summary.hops : latest?.hops) ?? []
-  const hops = base.map((h) => {
-    if (h.name) return h
-    const name = (h.addrs ?? []).map((a) => names.get(a)).find((n) => !!n)
-    return name ? { ...h, name } : h
-  })
+  const base: unknown[] = (summary ? summary.hops : latest?.hops) ?? []
+  const hops: HopStats[] = []
+  for (const raw of base) {
+    // A row needs its TTL and counts; addrs that is not a list reads as
+    // none, and a name that is not a string as no name.
+    const h = fields(raw)
+    if (!h || !isNum(h.ttl) || !isNum(h.sent) || !isNum(h.received) || !isNum(h.loss_pct)) continue
+    const addrs = Array.isArray(h.addrs) ? h.addrs.filter(isStr) : []
+    const name = (isStr(h.name) && h.name) || addrs.map((a) => names.get(a)).find((n) => !!n)
+    hops.push({ ...(h as unknown as HopStats), addrs, name })
+  }
   return { round: latest?.round ?? 0, hops, reached: summary ? summary.reached : reached }
 }
 
 // ---- dns
 
+/** A record section as a list of well-formed records: anything else reads
+ *  as empty, and a malformed record is dropped. */
+function dnsRecords(v: unknown): DNSRecord[] {
+  if (!Array.isArray(v)) return []
+  return v.filter((x): x is DNSRecord => {
+    const r = fields(x)
+    return !!r && isStr(r.name) && isStr(r.type) && isNum(r.ttl) && isStr(r.data)
+  })
+}
+
+/** The first well-formed answer event: who answered, and its sections. */
 export function dnsView(events: ToolRunEvent[]): DNSAnswer | null {
-  const e = events.find((x) => x.type === 'answer')
-  return e ? (e.data as DNSAnswer) : null
+  for (const e of events) {
+    if (e.type !== 'answer') continue
+    const d = fields(e.data)
+    if (!d || !isStr(d.server) || !isStr(d.rcode)) continue
+    return {
+      ...(d as unknown as DNSAnswer),
+      answer: dnsRecords(d.answer),
+      authority: dnsRecords(d.authority),
+      additional: dnsRecords(d.additional),
+    }
+  }
+  return null
 }
 
 // ---- tcp
@@ -149,9 +185,13 @@ export function portsView(events: ToolRunEvent[]): PortsView {
   const closed: PortResult[] = []
   const filtered: PortResult[] = []
   for (const e of events) {
-    if (e.type === 'start') total = (e.data as ScanStart).total
-    else if (e.type === 'port') {
-      const p = e.data as PortResult
+    const d = fields(e.data)
+    if (!d) continue
+    if (e.type === 'start') {
+      if (isNum(d.total)) total = d.total
+    } else if (e.type === 'port') {
+      if (!isNum(d.port) || !isStr(d.state) || (d.service !== undefined && !isStr(d.service))) continue
+      const p = d as unknown as PortResult
       if (p.state === 'open') open.push(p)
       else if (p.state === 'closed') closed.push(p)
       else filtered.push(p)

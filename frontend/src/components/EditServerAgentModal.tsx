@@ -64,15 +64,28 @@ export default function EditServerAgentModal({ agent, isOpen, onClose, onSaved, 
   const [toolsSaving, setToolsSaving] = useState(false)
   const saving = busy || toolsSaving
 
+  // Seeded when the modal opens, so a cancelled edit does not persist into
+  // the next one, and when it is shown for a different agent. Not on every
+  // re-read of the same agent: the page polls it every 15 s, and re-seeding
+  // then would throw away what is being typed (and the tools tick).
+  const seededFor = useRef<string | null>(null)
   useEffect(() => {
-    if (!isOpen) return
-    // Re-seeded on open so a cancelled edit does not persist into the next one.
+    if (!isOpen) {
+      seededFor.current = null
+      return
+    }
+    if (seededFor.current === agent.agent_id) return
+    seededFor.current = agent.agent_id
     setValues(initial)
     setToolsEnabled(agent.tools_enabled)
     setError(null)
+  }, [isOpen, agent.agent_id, initial, agent.tools_enabled])
+
+  useEffect(() => {
+    if (!isOpen) return
     const t = window.setTimeout(() => firstFieldRef.current?.focus(), 50)
     return () => window.clearTimeout(t)
-  }, [isOpen, initial, agent.tools_enabled])
+  }, [isOpen, agent.agent_id])
 
   useEffect(() => {
     if (!isOpen) return
@@ -167,8 +180,9 @@ export default function EditServerAgentModal({ agent, isOpen, onClose, onSaved, 
           </div>
           <button
             onClick={onClose}
+            disabled={saving}
             aria-label="Close"
-            className="rounded p-1 text-slate-400 transition hover:text-white"
+            className="rounded p-1 text-slate-400 transition hover:text-white disabled:opacity-50"
           >
             <X className="h-5 w-5" />
           </button>
