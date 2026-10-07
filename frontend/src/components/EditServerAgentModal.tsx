@@ -8,6 +8,9 @@ import AgentSettingsFields, {
 } from '@/components/AgentSettingsFields'
 import { useAgentActions, type Agent } from '@/hooks/useAgents'
 import type { ApiError } from '@/services/api'
+import { setAgentTools } from '@/hooks/useNetTools'
+import { colors } from '@/utils/colors'
+import { agentToolsStateText } from '@/utils/netTools'
 
 interface Props {
   agent: Agent
@@ -55,20 +58,26 @@ export default function EditServerAgentModal({ agent, isOpen, onClose, onSaved, 
   const initial = useMemo(() => settingsOf(agent), [agent])
   const [values, setValues] = useState<AgentSettings>(initial)
   const [error, setError] = useState<string | null>(null)
+  // Saved through its own audited endpoint (PUT /agents/:agent_id/tools),
+  // apart from the general settings.
+  const [toolsEnabled, setToolsEnabled] = useState(agent.tools_enabled)
+  const [toolsSaving, setToolsSaving] = useState(false)
+  const saving = busy || toolsSaving
 
   useEffect(() => {
     if (!isOpen) return
     // Re-seeded on open so a cancelled edit does not persist into the next one.
     setValues(initial)
+    setToolsEnabled(agent.tools_enabled)
     setError(null)
     const t = window.setTimeout(() => firstFieldRef.current?.focus(), 50)
     return () => window.clearTimeout(t)
-  }, [isOpen, initial])
+  }, [isOpen, initial, agent.tools_enabled])
 
   useEffect(() => {
     if (!isOpen) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !busy) onClose()
+      if (e.key === 'Escape' && !saving) onClose()
     }
     document.addEventListener('keydown', onKey)
     const prev = document.body.style.overflow
@@ -77,10 +86,10 @@ export default function EditServerAgentModal({ agent, isOpen, onClose, onSaved, 
       document.removeEventListener('keydown', onKey)
       document.body.style.overflow = prev
     }
-  }, [isOpen, busy, onClose])
+  }, [isOpen, saving, onClose])
 
   const { errors, valid } = validateAgentSettings(values, true)
-  const changed =
+  const settingsChanged =
     values.name !== initial.name ||
     values.osType !== initial.osType ||
     values.ipOverride !== initial.ipOverride ||
@@ -92,6 +101,8 @@ export default function EditServerAgentModal({ agent, isOpen, onClose, onSaved, 
     values.memoryThresholdPercent !== initial.memoryThresholdPercent ||
     values.diskThresholdEnabled !== initial.diskThresholdEnabled ||
     values.diskThresholdPercent !== initial.diskThresholdPercent
+  const toolsChanged = toolsEnabled !== agent.tools_enabled
+  const changed = settingsChanged || toolsChanged
 
   if (!isOpen) return null
 
@@ -99,27 +110,35 @@ export default function EditServerAgentModal({ agent, isOpen, onClose, onSaved, 
     if (!valid || !changed) return
     setError(null)
     try {
-      await update(agent.agent_id, {
-        name: values.name.trim(),
-        os_type: values.osType,
-        check_interval: values.interval,
-        retry_attempts: values.retries,
-        // Sent even when empty: that is how an override is cleared and the
-        // address goes back to whatever the agent detects.
-        ip_address_override: values.ipOverride.trim(),
-        notify_channels: notifyChannelsPayload(values),
-        cpu_threshold_percent: thresholdPayload(values.cpuThresholdEnabled, values.cpuThresholdPercent),
-        memory_threshold_percent: thresholdPayload(
-          values.memoryThresholdEnabled,
-          values.memoryThresholdPercent,
-        ),
-        disk_threshold_percent: thresholdPayload(values.diskThresholdEnabled, values.diskThresholdPercent),
-      })
+      if (settingsChanged) {
+        await update(agent.agent_id, {
+          name: values.name.trim(),
+          os_type: values.osType,
+          check_interval: values.interval,
+          retry_attempts: values.retries,
+          // Sent even when empty: that is how an override is cleared and the
+          // address goes back to whatever the agent detects.
+          ip_address_override: values.ipOverride.trim(),
+          notify_channels: notifyChannelsPayload(values),
+          cpu_threshold_percent: thresholdPayload(values.cpuThresholdEnabled, values.cpuThresholdPercent),
+          memory_threshold_percent: thresholdPayload(
+            values.memoryThresholdEnabled,
+            values.memoryThresholdPercent,
+          ),
+          disk_threshold_percent: thresholdPayload(values.diskThresholdEnabled, values.diskThresholdPercent),
+        })
+      }
+      if (toolsChanged) {
+        setToolsSaving(true)
+        await setAgentTools(agent.agent_id, toolsEnabled)
+      }
       push(`${values.name.trim()} updated`, 'success')
       onSaved()
       onClose()
     } catch (err) {
       setError((err as ApiError).message || 'Could not save the changes')
+    } finally {
+      setToolsSaving(false)
     }
   }
 
@@ -131,7 +150,7 @@ export default function EditServerAgentModal({ agent, isOpen, onClose, onSaved, 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
-      onMouseDown={(e) => e.target === e.currentTarget && !busy && onClose()}
+      onMouseDown={(e) => e.target === e.currentTarget && !saving && onClose()}
     >
       <div
         role="dialog"
@@ -163,6 +182,31 @@ export default function EditServerAgentModal({ agent, isOpen, onClose, onSaved, 
             firstFieldRef={firstFieldRef}
           />
 
+          <div className="border-t border-white/10" />
+
+          {/* Both switches are needed: this one in Sentinel, and
+              ENABLE_TOOLS=true on the host, which the agent reports. */}
+          <section>
+            <h3 className="mb-4 text-xs font-semibold uppercase tracking-widest text-slate-300">
+              Network tools
+            </h3>
+            <label className="flex cursor-pointer items-center gap-3">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-emerald-500"
+                checked={toolsEnabled}
+                onChange={(e) => setToolsEnabled(e.target.checked)}
+              />
+              <span className="text-sm text-white">Allow network tools</span>
+            </label>
+            <p className={`mt-2 text-xs ${agent.tools_local ? 'text-slate-400' : colors.warning.text}`}>
+              {agentToolsStateText(agent.tools_local)}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Lets admins and granted users run ping, traceroute, DNS lookups and port checks from this server.
+            </p>
+          </section>
+
           {intervalChanged && (
             <p className="rounded-lg border border-white/10 bg-slate-800/40 p-3 text-xs text-slate-400">
               The agent picks up a new interval on its next report, so the change takes effect
@@ -180,18 +224,18 @@ export default function EditServerAgentModal({ agent, isOpen, onClose, onSaved, 
         <div className="flex shrink-0 items-center justify-end gap-3 border-t border-white/10 p-6">
           <button
             onClick={onClose}
-            disabled={busy}
+            disabled={saving}
             className="rounded-lg border border-white/20 px-6 py-2 text-sm font-medium text-white transition hover:bg-white/5 disabled:opacity-50"
           >
             Cancel
           </button>
           <button
             onClick={() => void save()}
-            disabled={busy || !valid || !changed}
+            disabled={saving || !valid || !changed}
             title={!changed ? 'Nothing has been changed' : undefined}
             className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-emerald-600 to-emerald-500 px-6 py-2 text-sm font-medium text-white transition hover:from-emerald-500 hover:to-emerald-400 disabled:opacity-50"
           >
-            {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
             Save changes
           </button>
         </div>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { AlertTriangle, CheckCircle2, Loader2, Pause, Pencil, Play, RefreshCw, SlidersHorizontal, Trash2 } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Loader2, Pause, Pencil, Play, Radar, RefreshCw, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { useSite } from '@/hooks/useSites'
 import { DEVICE_TYPE_LABEL, formatSpeed, useDevice, useDeviceActions, type Device } from '@/hooks/useDevices'
 import { useIncidents, formatDuration, DEFAULT_FILTERS } from '@/hooks/useIncidents'
@@ -18,6 +18,8 @@ import PortTable from '@/components/network/PortTable'
 import PortEventList from '@/components/network/PortEventList'
 import { CONDITION_LABEL, PORT_STATE, portState, portTitle, portTraffic, WARNING_CONDITIONS } from '@/utils/network'
 import type { ApiError } from '@/services/api'
+import { useAuthContext } from '@/context/AuthContext'
+import { canUseNetTools, toolsQuery } from '@/utils/netTools'
 
 /** Device types drawn as a faceplate; the rest get the port table only. */
 const FACEPLATE_TYPES = new Set(['switch', 'router'])
@@ -78,6 +80,7 @@ function PortQuickPanel({ deviceId, port }: { deviceId: string; port: PortView }
 export default function DeviceDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { currentUser } = useAuthContext()
   const { device, loading, notFound, refetch } = useDevice(id)
   const { site } = useSite(device?.site_id)
   const { data: portsView, refetch: refetchPorts } = useDevicePorts(id)
@@ -158,8 +161,17 @@ export default function DeviceDetail() {
           </p>
           {device.status_detail && <p className="mt-1 text-sm text-amber-400">{device.status_detail}</p>}
         </div>
-        {canEdit && (
-          <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2">
+          {canUseNetTools(currentUser) && (
+            <Link
+              className="btn-secondary flex items-center gap-2"
+              to={`/tools${toolsQuery({ tool: 'ping', target: device.host })}`}
+            >
+              <Radar className="h-4 w-4" /> Ping / Trace
+            </Link>
+          )}
+          {canEdit && (
+          <>
             <button className="btn-secondary flex items-center gap-2" disabled={busy || !device.enabled || refreshWatch.phase === 'running'} onClick={() => void startRefresh()}>
               <RefreshCw className={`h-4 w-4 ${refreshWatch.phase === 'running' ? 'animate-spin' : ''}`} /> Refresh now
             </button>
@@ -186,8 +198,9 @@ export default function DeviceDetail() {
                 <Trash2 className="h-4 w-4" /> Delete
               </button>
             )}
-          </div>
-        )}
+          </>
+          )}
+        </div>
       </div>
 
       {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">{error}</div>}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Server, Loader2, Terminal, Trash2, Pencil } from 'lucide-react'
+import { ArrowLeft, Server, Loader2, Terminal, Trash2, Pencil, Radar } from 'lucide-react'
 import { useToasts, Toaster } from '@/components/Toast'
 import ServerStatusCards from '@/components/ServerStatusCards'
 import HistoricalPerformance, { type RangeValue } from '@/components/HistoricalPerformance'
@@ -15,6 +15,7 @@ import {
 import { useAuthContext } from '@/context/AuthContext'
 import { useAppConfig } from '@/context/AppConfigContext'
 import type { ApiError } from '@/services/api'
+import { canUseNetTools, toolsQuery } from '@/utils/netTools'
 
 /** Label and value, the shape every row in the sidebar takes. */
 function InfoRow({ label, value }: { label: string; value: string | null | undefined }) {
@@ -118,8 +119,17 @@ export default function ServerDetail() {
             <span className="text-slate-500">{agent.name}</span>
           </nav>
         </div>
-        {isAdmin && (
-          <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {canUseNetTools(currentUser) && (
+            <Link
+              className="btn-secondary !py-1.5"
+              to={`/tools${toolsQuery({ vantage: { kind: 'agent', agent_id: agent.agent_id } })}`}
+            >
+              <Radar className="h-4 w-4" /> Network tools
+            </Link>
+          )}
+          {isAdmin && (
+          <>
             <button className="btn-secondary !py-1.5" onClick={() => setEditing(true)}>
               <Pencil className="h-4 w-4" /> Edit
             </button>
@@ -132,8 +142,9 @@ export default function ServerDetail() {
             >
               <Trash2 className="inline h-4 w-4" />
             </button>
-          </div>
-        )}
+          </>
+          )}
+        </div>
       </div>
 
       {/* The sidebar sits after the main column on narrow screens: the metrics

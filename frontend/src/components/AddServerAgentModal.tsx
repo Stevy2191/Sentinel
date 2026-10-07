@@ -284,6 +284,9 @@ function InstallStep({
   setTab: (t: Tab) => void
 }) {
   const { agent } = created
+  // Adds ENABLE_TOOLS=true to every install command below. The admin toggle
+  // in Sentinel (Edit → Allow network tools) is still needed.
+  const [enableTools, setEnableTools] = useState(false)
   const isWindows = agent.os_type === 'windows'
   // Downloads come from the external address, the agent reports to the
   // internal one. They are the same unless a proxy sits in front.
@@ -309,6 +312,7 @@ function InstallStep({
     `OS_TYPE="${agent.os_type}"`,
     `CHECK_INTERVAL="${agent.check_interval}"`,
     `RETRY_ATTEMPTS="${agent.retry_attempts}"`,
+    ...(enableTools ? ['ENABLE_TOOLS="true"'] : []),
   ].join(' \\\n  ')
 
   const bashInstall = `curl -L -o server-agent.sh "${downloadURL}/scripts/server-agent.sh"
@@ -320,6 +324,8 @@ ${env} \\
 chmod +x server-docker-agent.sh
 ${env} \\
   sudo -E bash ./server-docker-agent.sh`
+
+  const dockerToolsFlag = enableTools ? '  -e ENABLE_TOOLS="true" \\\n' : ''
 
   const directDocker = `# Build the agent image from the binary this Sentinel serves
 curl -L -o sentinel-agent "${downloadURL}/agent/download/linux/amd64"
@@ -346,7 +352,7 @@ docker run -d \\
   -e SERVER_NAME="${agent.name}" \\
   -e CHECK_INTERVAL="${agent.check_interval}" \\
   -e RETRY_ATTEMPTS="${agent.retry_attempts}" \\
-  sentinel-agent:local`
+${dockerToolsFlag}  sentinel-agent:local`
 
   const windowsEnv = [
     `$env:SERVER_TOKEN="${agent.server_token ?? ''}"`,
@@ -356,6 +362,7 @@ docker run -d \\
     `$env:OS_TYPE="${agent.os_type}"`,
     `$env:CHECK_INTERVAL="${agent.check_interval}"`,
     `$env:RETRY_ATTEMPTS="${agent.retry_attempts}"`,
+    ...(enableTools ? ['$env:ENABLE_TOOLS="true"'] : []),
   ].join('\n')
 
   const windowsInstall = `${windowsEnv}
@@ -407,6 +414,22 @@ iwr -useb "${downloadURL}/scripts/server-agent.ps1" | iex`
           reachable from the server you are installing on. Change them under Settings → System.
         </div>
       )}
+
+      <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-white/10 bg-slate-800/40 p-4">
+        <input
+          type="checkbox"
+          className="mt-0.5 h-4 w-4 accent-emerald-500"
+          checked={enableTools}
+          onChange={(e) => setEnableTools(e.target.checked)}
+        />
+        <span>
+          <span className="block text-sm font-medium text-white">Enable network tools on this server</span>
+          <span className="mt-1 block text-xs text-slate-400">
+            Adds ENABLE_TOOLS=true to the commands below, so ping, traceroute, DNS lookups and port checks can run
+            from this server. Allow it in Sentinel as well, under Edit → Allow network tools.
+          </span>
+        </span>
+      </label>
 
       {/* Horizontally scrollable so four tabs do not wrap on a phone. */}
       <div className="-mx-1 flex gap-1 overflow-x-auto border-b border-white/10 px-1">
