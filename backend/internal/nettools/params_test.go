@@ -3,6 +3,7 @@ package nettools
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -209,6 +210,26 @@ func TestNormalizeTCPPorts(t *testing.T) {
 		if err != nil || got.Params.Ports != want {
 			t.Errorf("ports %q: %q, %v; want %q", in, got.Params.Ports, err, want)
 		}
+	}
+}
+
+// The port list is stored with the run and audited as typed, and parsing it
+// walks every range: past 8 KB it is refused, however few distinct ports it
+// names. "1-1024," repeated never names more than 1024.
+func TestNormalizeTCPPortsLength(t *testing.T) {
+	long := strings.Repeat("1-1024,", MaxPortsLength/7)
+	long += strings.Repeat("2", MaxPortsLength-len(long)) // a last port, 2 or 22
+	if len(long) != 8<<10 {
+		t.Fatalf("test list is %d bytes, want 8 KB", len(long))
+	}
+	got, err := Normalize(Spec{Tool: ToolTCP, Target: "h", Params: Params{Ports: long}})
+	if err != nil || got.Params.Ports != long {
+		t.Errorf("an 8 KB list: %v; want it accepted as typed", err)
+	}
+	_, err = Normalize(Spec{Tool: ToolTCP, Target: "h", Params: Params{Ports: long + "2"}})
+	var pe *ParamError
+	if !errors.As(err, &pe) || pe.Field != "ports" || pe.Message != "the port list is too long" {
+		t.Errorf("8 KB + 1: %v; want ports: the port list is too long", err)
 	}
 }
 

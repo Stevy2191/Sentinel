@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -119,7 +120,7 @@ func (s *Service) runLocal(ctx context.Context, cancel context.CancelFunc, run l
 			}
 		}
 	}()
-	summary, err := s.runTool(ctx, spec, rec.emit)
+	summary, err := s.runToolSafely(ctx, run.id, spec, rec.emit)
 	close(stopFlush)
 	<-flushed
 
@@ -137,6 +138,22 @@ func (s *Service) runLocal(ctx context.Context, cancel context.CancelFunc, run l
 	if _, err := s.finish(wctx, run.id, status, sum, errText, run.owner); err != nil {
 		log.Printf("[tools] %v", err)
 	}
+}
+
+// errToolPanicked is a tool that panicked; its run ends failed with this.
+var errToolPanicked = errors.New(msgToolPanicked)
+
+// runToolSafely runs the tool, turning a panic into errToolPanicked (and a
+// log entry with the stack), so the run still finishes and the server stays
+// up. The emitter runs on the tool's goroutine, so it is covered too.
+func (s *Service) runToolSafely(ctx context.Context, runID uuid.UUID, spec nettools.Spec, emit nettools.Emitter) (summary any, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[tools] run %s: the %s tool panicked: %v\n%s", runID, spec.Tool, r, debug.Stack())
+			summary, err = nil, errToolPanicked
+		}
+	}()
+	return s.runTool(ctx, spec, emit)
 }
 
 // localOutcome maps how a local tool ended to a final status and error

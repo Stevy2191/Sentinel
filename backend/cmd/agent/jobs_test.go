@@ -88,8 +88,6 @@ func TestJobLoopSplitsBurstsUnderThePostLimit(t *testing.T) {
 func TestJobLoopRefusesJobsItWillNotRun(t *testing.T) {
 	_, lan, _ := net.ParseCIDR("10.0.0.0/24")
 	_, linkLocal, _ := net.ParseCIDR("169.254.0.0/16")
-	expired := testJob("run-1", "10.0.0.5")
-	expired.Deadline = time.Now().Add(-time.Second)
 	tooMany := testJob("run-1", "10.0.0.5")
 	tooMany.Spec.Params.Count = 1000
 	noAddress := testJob("run-1", "")
@@ -115,7 +113,6 @@ func TestJobLoopRefusesJobsItWillNotRun(t *testing.T) {
 		{"multicast DNS server", dnsVia("224.0.0.251"), nil, "never probed"},
 		{"DNS server outside TOOLS_ALLOWED_TARGETS", dnsVia("8.8.8.8"), []*net.IPNet{lan}, "outside TOOLS_ALLOWED_TARGETS"},
 		{"parameters past the limits", tooMany, nil, "count"},
-		{"deadline already passed", expired, nil, "deadline"},
 		{"no address to probe", noAddress, nil, "no target address"},
 	}
 	for _, tc := range cases {
@@ -134,6 +131,47 @@ func TestJobLoopRefusesJobsItWillNotRun(t *testing.T) {
 			}
 			if ran.Load() != 0 {
 				t.Error("the tool ran for a refused job")
+			}
+		})
+	}
+}
+
+// The agent bounds a job by its own clock: the tool's limit from when the job
+// arrived. Sentinel's deadline is on Sentinel's clock, so an agent whose clock
+// runs fast would otherwise refuse every DNS job (15 s limit) as already past
+// its deadline, and cut the other tools short; Sentinel's sweeper still bounds
+// the run on its side.
+func TestJobLoopBoundsAJobByItsOwnClock(t *testing.T) {
+	cases := []struct {
+		name     string
+		job      agentJob
+		deadline time.Duration // Sentinel's, from now on the agent's clock
+	}{
+		{"a lookup whose deadline already passed here (the agent runs 1 min fast)",
+			agentJob{RunID: "run-1", Spec: nettools.Spec{Tool: nettools.ToolDNS, Target: "example.org"}}, -time.Minute},
+		{"a ping whose deadline is 200 ms away here", testJob("run-1", "10.0.0.5"), 200 * time.Millisecond},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeSentinel(t)
+			job := tc.job
+			job.Deadline = time.Now().Add(tc.deadline)
+			f.set(func() { f.jobs = []agentJob{job} })
+			deadlines := make(chan time.Time, 1)
+			runner := runnerFunc(func(ctx context.Context, _ nettools.Spec, _ nettools.Emitter) (any, error) {
+				d, _ := ctx.Deadline()
+				deadlines <- d
+				return nil, nil
+			})
+			before := time.Now()
+			startLoop(t, testLoop(f, runner, nil))
+			if fin := f.waitFinish(t, "run-1"); fin.Status != "done" {
+				t.Fatalf("finish = %+v, want done: the job runs whatever Sentinel's clock says", fin)
+			}
+			limit := nettools.Deadline(job.Spec.Tool)
+			if d := <-deadlines; d.Before(before.Add(limit)) || d.After(time.Now().Add(limit)) {
+				t.Errorf("the tool's deadline is %s from the start, want the tool's limit (%s) on the agent's clock",
+					d.Sub(before), limit)
 			}
 		})
 	}
@@ -233,9 +271,37 @@ func TestJobLoopReportsAToolThatCannotRun(t *testing.T) {
 	}
 }
 
-// A tool stopped by the job's deadline reports timed_out with no error text:
-// Sentinel then words it as it does its own runs that time out. A tool error
-// once the deadline has passed counts as the deadline's doing.
+// A tool that panics fails its run with a fixed message instead of taking the
+// agent down; the events it emitted first are still posted, and the next job
+// runs as usual.
+func TestJobLoopSurvivesAToolThatPanics(t *testing.T) {
+	f := newFakeSentinel(t)
+	f.set(func() { f.jobs = []agentJob{testJob("run-1", "10.0.0.5"), testJob("run-2", "10.0.0.6")} })
+	runner := runnerFunc(func(_ context.Context, s nettools.Spec, emit nettools.Emitter) (any, error) {
+		if s.TargetIP == "10.0.0.5" {
+			emit(nettools.Event{Type: nettools.EventReply, Data: nettools.PingReply{Seq: 1, RTTMS: 1, TTL: 64, From: s.TargetIP}})
+			panic("a bug in the tool")
+		}
+		return nettools.PingSummary{Sent: 1, Received: 1}, nil
+	})
+	startLoop(t, testLoop(f, runner, nil))
+
+	fin := f.waitFinish(t, "run-1")
+	if fin.Status != "failed" || fin.Error != "the tool stopped unexpectedly" || len(fin.Summary) != 0 {
+		t.Errorf("finish = %+v (summary %s), want failed / the tool stopped unexpectedly with no summary", fin, fin.Summary)
+	}
+	if n := len(f.eventsOf("run-1")); n != 1 {
+		t.Errorf("%d events posted before the panic's finish, want 1", n)
+	}
+	if fin := f.waitFinish(t, "run-2"); fin.Status != "done" {
+		t.Errorf("the next job: finish = %+v, want done", fin)
+	}
+}
+
+// A tool stopped by its deadline (the agent's own clock plus the tool's
+// limit) reports timed_out with no error text: Sentinel then words it as it
+// does its own runs that time out. A tool error once the deadline has passed
+// counts as the deadline's doing.
 func TestJobLoopReportsTimedOutAtTheDeadline(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -252,14 +318,15 @@ func TestJobLoopReportsTimedOutAtTheDeadline(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFakeSentinel(t)
-			job := testJob("run-1", "10.0.0.5")
-			job.Deadline = time.Now().Add(200 * time.Millisecond)
-			f.set(func() { f.jobs = []agentJob{job} })
+			f.set(func() { f.jobs = []agentJob{testJob("run-1", "10.0.0.5")} })
 			runner := runnerFunc(func(ctx context.Context, _ nettools.Spec, _ nettools.Emitter) (any, error) {
 				<-ctx.Done()
 				return tc.ret(ctx)
 			})
-			startLoop(t, testLoop(f, runner, nil))
+			l := testLoop(f, runner, nil)
+			// The agent's own limit for the tool (2 minutes for ping).
+			l.toolLimit = func(nettools.Tool) time.Duration { return 200 * time.Millisecond }
+			startLoop(t, l)
 			fin := f.waitFinish(t, "run-1")
 			if fin.Status != "timed_out" || fin.Error != "" {
 				t.Errorf("finish = %s / %q, want timed_out with no error text", fin.Status, fin.Error)
@@ -323,7 +390,7 @@ func TestJobLoopRunsAtMostTwoJobsAtOnce(t *testing.T) {
 }
 
 // While Sentinel's switch is off the agent asks again only every
-// disabledWait (60 s; 1 s here), not in a tight loop.
+// disabledWait (15 s; 1 s here), not in a tight loop.
 func TestJobLoopWaitsWhileToolsAreDisabled(t *testing.T) {
 	f := newFakeSentinel(t)
 	f.set(func() {
@@ -335,6 +402,39 @@ func TestJobLoopWaitsWhileToolsAreDisabled(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	if n := f.pollCount(); n != 1 {
 		t.Errorf("%d polls in 300 ms after tools_disabled, want 1", n)
+	}
+}
+
+// The wait after tools_disabled is 15 s, under Sentinel's 30 s pickup
+// timeout: a run started just after an admin switches tools on is collected
+// on the agent's next poll, before the sweeper fails it as not picked up.
+func TestJobLoopAsksAgainWithinThePickupTimeoutAfterToolsDisabled(t *testing.T) {
+	if jobDisabledWait != 15*time.Second {
+		t.Errorf("jobDisabledWait = %s, want 15s (below Sentinel's 30 s pickup timeout)", jobDisabledWait)
+	}
+	if l := newJobLoop(config{}, nil); l.disabledWait != jobDisabledWait {
+		t.Errorf("the loop waits %s after tools_disabled, want jobDisabledWait (%s)", l.disabledWait, jobDisabledWait)
+	}
+
+	// Tools switched on during the wait: the next poll collects the job.
+	f := newFakeSentinel(t)
+	f.set(func() {
+		f.nextStatus = http.StatusForbidden
+		f.nextBody = `{"success":false,"error":{"code":"tools_disabled","message":"network tools are switched off for this agent in Sentinel"}}`
+	})
+	runner := runnerFunc(func(context.Context, nettools.Spec, nettools.Emitter) (any, error) {
+		return nettools.PingSummary{Sent: 1, Received: 1}, nil
+	})
+	l := testLoop(f, runner, nil)
+	l.disabledWait = 100 * time.Millisecond
+	startLoop(t, l)
+	waitFor(t, "the refused poll", func() bool { return f.pollCount() >= 1 })
+	f.set(func() {
+		f.nextStatus, f.nextBody = 0, ""
+		f.jobs = []agentJob{testJob("run-1", "10.0.0.5")}
+	})
+	if fin := f.waitFinish(t, "run-1"); fin.Status != "done" {
+		t.Errorf("finish = %+v, want done once tools are on", fin)
 	}
 }
 

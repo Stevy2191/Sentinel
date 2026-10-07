@@ -12,6 +12,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -31,8 +32,12 @@ const (
 	jobFlushEvery = 250 * time.Millisecond
 	// jobMinPoll: a poll that comes back sooner than this without a job (a
 	// proxy cutting it short) waits out the rest, so it cannot spin.
-	jobMinPoll      = time.Second
-	jobDisabledWait = 60 * time.Second
+	jobMinPoll = time.Second
+	// jobDisabledWait is the wait after tools_disabled. It stays under
+	// Sentinel's 30 s pickup timeout: an agent counts as ready once it polls
+	// with tools on, and a run started just after the switch goes on must
+	// be collected before the sweeper fails it.
+	jobDisabledWait = 15 * time.Second
 	jobBackoffMin   = 5 * time.Second
 	jobBackoffMax   = 60 * time.Second
 	// The last events post and the finish are tried this many times, this
@@ -56,6 +61,9 @@ type jobLoop struct {
 	now     func() time.Time
 	slots   chan struct{}
 	jobs    sync.WaitGroup
+	// toolLimit is how long a job's tool may run: nettools.Deadline, or
+	// shorter in tests.
+	toolLimit func(nettools.Tool) time.Duration
 
 	// The loop's waits (the job* constants; tests shorten them).
 	flushEvery   time.Duration
@@ -78,6 +86,7 @@ func newJobLoop(cfg config, runner toolRunner) *jobLoop {
 		runner:       runner,
 		allowed:      cfg.ToolsAllowed,
 		now:          time.Now,
+		toolLimit:    nettools.Deadline,
 		slots:        make(chan struct{}, maxConcurrentJobs),
 		flushEvery:   jobFlushEvery,
 		minPoll:      jobMinPoll,
@@ -153,17 +162,14 @@ func sleepCtx(ctx context.Context, d time.Duration) {
 }
 
 // check applies the agent's own rules to a job, whatever Sentinel decided:
-// the tools' parameter limits (Normalize again, here), the address rules and
-// the deadline. It returns the spec to run, or why the job is refused.
+// the tools' parameter limits (Normalize again, here) and the address rules.
+// It returns the spec to run, or why the job is refused.
 func (l *jobLoop) check(job *agentJob) (nettools.Spec, string) {
 	spec, err := nettools.Normalize(job.Spec)
 	if err != nil {
 		return spec, "the agent refused the parameters: " + err.Error()
 	}
 	spec.TargetIP = strings.TrimSpace(job.Spec.TargetIP)
-	if !job.Deadline.After(l.now()) {
-		return spec, "the job's deadline passed before it started"
-	}
 	if spec.TargetIP == "" {
 		// Only a lookup through this host's own resolver has no address,
 		// and that resolver is always allowed.
@@ -188,6 +194,7 @@ func (l *jobLoop) check(job *agentJob) (nettools.Spec, string) {
 // handle checks one job, runs it inside its deadline while its events are
 // posted, and reports how it ended.
 func (l *jobLoop) handle(ctx context.Context, job *agentJob) {
+	received := l.now()
 	spec, reason := l.check(job)
 	if reason != "" {
 		log.Printf("refused tool job %s: %s", job.RunID, reason)
@@ -201,12 +208,12 @@ func (l *jobLoop) handle(ctx context.Context, job *agentJob) {
 	}
 	defer func() { <-l.slots }()
 
-	// The job's deadline, but never later than the tool's own limit.
-	deadline := job.Deadline
-	if limit := l.now().Add(nettools.Deadline(spec.Tool)); limit.Before(deadline) {
-		deadline = limit
-	}
-	runCtx, stopTool := context.WithDeadline(ctx, deadline)
+	// The agent's own clock bounds the job: the tool's limit from when the
+	// job arrived. job.Deadline is on Sentinel's clock, and an agent whose
+	// clock runs ahead would see it as already past (every DNS job refused)
+	// or near (the other tools cut short). Sentinel's sweeper still bounds
+	// the run on its side.
+	runCtx, stopTool := context.WithDeadline(ctx, received.Add(l.toolLimit(spec.Tool)))
 	defer stopTool()
 
 	log.Printf("running %s job %s against %s", spec.Tool, job.RunID, spec.Target)
@@ -215,7 +222,7 @@ func (l *jobLoop) handle(ctx context.Context, job *agentJob) {
 	followed := make(chan flushResult, 1)
 	go func() { followed <- l.follow(ctx, job.RunID, buf, stopTool, toolDone) }()
 
-	summary, runErr := l.runner.Run(runCtx, spec, func(ev nettools.Event) { buf.add(ev, l.now()) })
+	summary, runErr := l.runTool(runCtx, job.RunID, spec, func(ev nettools.Event) { buf.add(ev, l.now()) })
 	if runErr != nil && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 		// The deadline stopped the tool, whatever error it gave for it. Read
 		// now: the deadline may pass while the last events are posted.
@@ -239,6 +246,23 @@ func (l *jobLoop) handle(ctx context.Context, job *agentJob) {
 	default:
 		l.report(ctx, job.RunID, outcome(summary, runErr))
 	}
+}
+
+// errToolPanicked is a tool that panicked; its run is reported failed with it.
+var errToolPanicked = errors.New("the tool stopped unexpectedly")
+
+// runTool runs the job's tool, turning a panic into errToolPanicked (and a
+// log entry with the stack): the run is reported failed, its events still
+// go out, and the agent carries on with its other jobs. The emitter runs on
+// the tool's goroutine, so it is covered too.
+func (l *jobLoop) runTool(ctx context.Context, runID string, spec nettools.Spec, emit nettools.Emitter) (summary any, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("tool job %s: the %s tool panicked: %v\n%s", runID, spec.Tool, r, debug.Stack())
+			summary, err = nil, errToolPanicked
+		}
+	}()
+	return l.runner.Run(ctx, spec, emit)
 }
 
 // flushResult is how a round of events posts went.

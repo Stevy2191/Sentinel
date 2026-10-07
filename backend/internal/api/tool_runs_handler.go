@@ -77,10 +77,20 @@ func (h *toolRunsHandler) vantages(c *gin.Context) {
 	respondSuccess(c, http.StatusOK, gin.H{"vantages": list, "allowlist_empty": h.runs.AllowlistEmpty(ctx)})
 }
 
+// maxCreateBodyBytes bounds a POST /tools/runs body: far above any real
+// request (the longest field, the port list, stops at 8 KB).
+const maxCreateBodyBytes = 16 << 10
+
 // create handles POST /tools/runs.
 func (h *toolRunsHandler) create(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxCreateBodyBytes)
 	var req toolruns.CreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			respondToolError(c, http.StatusRequestEntityTooLarge, toolruns.CodeLimit, "the request is too large")
+			return
+		}
 		respondToolError(c, http.StatusBadRequest, toolruns.CodeInvalidParams, "invalid request body")
 		return
 	}

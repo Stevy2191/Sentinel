@@ -3,6 +3,7 @@
 package nettools
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net"
@@ -11,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/net/ipv4"
 )
 
 var loopback = net.IPv4(127, 0, 0, 1)
@@ -53,6 +56,31 @@ func TestReadPayloadClampsLength(t *testing.T) {
 	got, ok := parseICMPv4(readPayload(buf, len(buf)+16))
 	if want := (parsedICMP{kind: ReplyEcho, id: 0x1234, seq: 7}); !ok || got != want {
 		t.Errorf("parsed %+v, %v; want %+v, true", got, ok, want)
+	}
+}
+
+// A packet whose handling panics is logged and skipped: the reader goes on
+// to the next one (its probes would all time out otherwise) and stops only
+// when the socket closes. No socket needed: the reads are scripted.
+func TestReadPacketsSkipsAPacketThatPanics(t *testing.T) {
+	packets := [][]byte{{1}, {2}, {3}}
+	read := func(b []byte) (int, *ipv4.ControlMessage, net.Addr, error) {
+		if len(packets) == 0 {
+			return 0, nil, nil, net.ErrClosed
+		}
+		n := copy(b, packets[0])
+		packets = packets[1:]
+		return n, nil, &net.IPAddr{IP: loopback}, nil
+	}
+	var handled []byte
+	readPackets(read, make(chan struct{}), func(payload []byte, _ *ipv4.ControlMessage, _ net.Addr, _ time.Time) {
+		if payload[0] == 2 {
+			panic("a packet the parser chokes on")
+		}
+		handled = append(handled, payload[0])
+	})
+	if !bytes.Equal(handled, []byte{1, 3}) {
+		t.Errorf("handled packets %v, want [1 3]: the one after the panic too", handled)
 	}
 }
 

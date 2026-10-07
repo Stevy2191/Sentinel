@@ -24,6 +24,7 @@ const (
 	msgNotPickedUp   = "the agent didn't pick up the job (offline?)"
 	msgTimedOut      = "the run went past its time limit"
 	msgInterrupted   = "Sentinel restarted while the run was in progress"
+	msgToolPanicked  = "the tool stopped unexpectedly"
 )
 
 // systemActor audits the finishes nobody asked for: the sweeper's.
