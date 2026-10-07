@@ -28,7 +28,7 @@ Phase 7 is next; phase 6 is unblocked (it needed phase 4, which is done) and can
 
 ## Tools and security track
 
-Roadmap: `docs/superpowers/specs/2026-10-04-tools-and-security-roadmap.md` (agreed 2026-10-04; S1 designed in `specs/2026-10-05-tools-s1-network-tools-design.md` and built). Phases are numbered S1–S6 to stay distinct from the network phases. Every phase is admin-only (or a granted permission), limited to an allowlist of target subnets, rate limited and audited.
+Roadmap: `docs/superpowers/specs/2026-10-04-tools-and-security-roadmap.md` (agreed 2026-10-04; S1 designed in `specs/2026-10-05-tools-s1-network-tools-design.md` and built). Phases are numbered S1–S6 to stay distinct from the network phases. Every phase is admin-only (or a granted permission), rate limited and audited; port checks (and later scans) are limited to an allowlist of target subnets, while ping, traceroute and DNS may reach any address that is not always blocked.
 
 | Phase | What | State |
 |---|---|---|
@@ -44,7 +44,7 @@ S1 → S2 → S3 is one chain; S4 can go at any point; S5 follows S1; S6 is last
 ## To be checked by the owner
 
 Tools S1 (after updating the work install from `dev`; Claude had no browser, so none of these has been run in one):
-1. With the allowlist empty, Network Tools shows "No targets are allowed yet. An admin adds subnets and hosts in Settings → Network tools", and a ping is refused with "… is not on the network tools allowlist".
+1. With the allowlist empty, a ping to any address (e.g. 8.8.8.8) runs, while the Ports tab shows "No port-check targets are allowed yet. An admin adds subnets and hosts in Settings → Network tools" and a port check is refused with "… is not on the network tools allowlist". A ping to 169.254.169.254 is refused with "… is an address network tools never contact".
 2. In Settings → Network tools, add the office subnet (e.g. a 10.x /16). A line such as 10.0.0.0/7 is named with "too broad: use /8 or narrower" and nothing is saved.
 3. From the Sentinel server: ping a host on the list (replies arrive about one a second and the chart and tiles fill in), traceroute it, look up a name through the system resolver and through a named DNS server on the list, and check ports with "common".
 4. Enable a Linux agent: re-run its install with "Enable network tools on this server" ticked (or add `ENABLE_TOOLS=true` to `/etc/sentinel/agent.conf` and restart it), then Edit → Allow network tools. Within a minute it can be chosen under "Run from"; run each tool from it.

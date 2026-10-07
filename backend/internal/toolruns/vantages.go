@@ -94,8 +94,8 @@ func (s *Service) Vantages(ctx context.Context) ([]VantageView, error) {
 	return out, nil
 }
 
-// AllowlistEmpty reports whether no target is allowed yet, for the Tools
-// page's banner (grant holders cannot read the admin settings).
+// AllowlistEmpty reports whether no port-check target is allowed yet, for
+// the Tools page's banner (grant holders cannot read the admin settings).
 func (s *Service) AllowlistEmpty(ctx context.Context) bool {
 	allow, _ := nettools.ParseAllowlist(LoadSettings(ctx, s.settings).Allowlist)
 	return allow.Empty()

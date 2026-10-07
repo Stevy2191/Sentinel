@@ -154,6 +154,12 @@ func pingReq(target string) CreateRequest {
 	return CreateRequest{Tool: nettools.ToolPing, Vantage: Vantage{Kind: models.VantageSentinel}, Target: target}
 }
 
+// portReq is a port check from Sentinel: the only tool the allowlist fences.
+func portReq(target string) CreateRequest {
+	return CreateRequest{Tool: nettools.ToolTCP, Vantage: Vantage{Kind: models.VantageSentinel}, Target: target,
+		Params: nettools.Params{Ports: "22"}}
+}
+
 func agentPing(a *models.Agent, target string) CreateRequest {
 	return CreateRequest{Tool: nettools.ToolPing, Vantage: Vantage{Kind: models.VantageAgent, AgentID: a.AgentID}, Target: target}
 }

@@ -16,9 +16,10 @@ import (
 )
 
 // Create validates the request, applies the guardrails in order (parameters,
-// vantage, target resolution, allowlist, per-target rate, active-run caps),
-// inserts the run and starts it on the server or queues it for the agent.
-// User-facing failures are *Refusal.
+// vantage, target resolution, blocked addresses and the port-check
+// allowlist, per-target rate, active-run caps), inserts the run and starts
+// it on the server or queues it for the agent. User-facing failures are
+// *Refusal.
 func (s *Service) Create(ctx context.Context, who Requester, req CreateRequest) (*models.ToolRun, error) {
 	spec, err := nettools.Normalize(nettools.Spec{Tool: req.Tool, Target: req.Target, Params: req.Params})
 	if err != nil {
@@ -52,8 +53,11 @@ func (s *Service) Create(ctx context.Context, who Requester, req CreateRequest) 
 		return nil, refuse(http.StatusUnprocessableEntity, CodeInvalidParams, "vantage: kind must be sentinel or agent")
 	}
 
-	// The address the tool will contact, checked against the allowlist. A
-	// DNS lookup through the vantage's own resolver contacts no target.
+	// The address the tool will contact. Every tool refuses the
+	// always-blocked addresses; only port checks must also be on the
+	// allowlist (a ping, traceroute or DNS query to any other address is
+	// harmless). A DNS lookup through the vantage's own resolver contacts no
+	// target.
 	host := spec.Target
 	if spec.Tool == nettools.ToolDNS {
 		host = dnsServerHost(spec.Params.Server)
@@ -64,10 +68,19 @@ func (s *Service) Create(ctx context.Context, who Requester, req CreateRequest) 
 		if refusal != nil {
 			return nil, refusal
 		}
-		allow, _ := nettools.ParseAllowlist(settings.Allowlist)
-		if allow.Empty() || !allow.Allows(host, ip) {
-			r := refuse(http.StatusUnprocessableEntity, CodeTargetNotAllowed,
-				"%s is not on the network tools allowlist", describeTarget(host, ip))
+		var r *Refusal
+		switch {
+		case nettools.AlwaysBlocked(ip):
+			r = refuse(http.StatusUnprocessableEntity, CodeTargetNotAllowed,
+				"%s is an address network tools never contact", describeTarget(host, ip))
+		case spec.Tool == nettools.ToolTCP:
+			allow, _ := nettools.ParseAllowlist(settings.Allowlist)
+			if allow.Empty() || !allow.Allows(host, ip) {
+				r = refuse(http.StatusUnprocessableEntity, CodeTargetNotAllowed,
+					"%s is not on the network tools allowlist", describeTarget(host, ip))
+			}
+		}
+		if r != nil {
 			s.audit.Record(ctx, who.actor(), models.ActionToolRunRefused, models.ResourceToolRun, nil,
 				models.AuditChanges{Summary: map[string]any{
 					"tool": string(spec.Tool), "target": spec.Target, "target_ip": ip.String(),

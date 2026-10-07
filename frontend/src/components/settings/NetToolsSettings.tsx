@@ -83,15 +83,15 @@ export default function NetToolsSettings({ push }: Props) {
       </p>
 
       <SettingsCard
-        title="Allowed targets"
-        description="One entry per line: an IPv4 address (10.0.0.5), a subnet no broader than /8 (10.0.0.0/24), a host name (fileserver.example.org) or a wildcard (*.example.org). Nothing can be probed until this list has entries."
+        title="Allowed port-check targets"
+        description="Port checks may only target what is listed here; ping, traceroute and DNS lookups can reach any address that is not always blocked. One entry per line: an IPv4 address (10.0.0.5), a subnet no broader than /8 (10.0.0.0/24), a host name (fileserver.example.org) or a wildcard (*.example.org). No port check can run until this list has entries."
       >
         <textarea
           rows={8}
           className="w-full font-mono"
           value={text}
           spellCheck={false}
-          aria-label="Allowed targets, one per line"
+          aria-label="Allowed port-check targets, one per line"
           onChange={(e) => setText(e.target.value)}
         />
         {lines.length > 0 && (
