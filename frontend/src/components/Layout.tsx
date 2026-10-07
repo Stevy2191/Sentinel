@@ -1,48 +1,10 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Menu, X, RefreshCw, Settings } from 'lucide-react'
+import { Menu, X, RefreshCw } from 'lucide-react'
 import { useAuthContext } from '@/context/AuthContext'
 import { useAppConfig } from '@/context/AppConfigContext'
 import { canUseNetTools } from '@/utils/netTools'
-
-// Order matters: the four things Sentinel watches sit together, then what it
-// publishes, then what it reports after the fact. Incidents was splitting the
-// monitoring group in half.
-const nav: { to: string; label: string; end?: boolean; netTools?: boolean }[] = [
-  { to: '/', label: 'Overview', end: true },
-  // Dashboards cover everything below, so they sit with the Overview.
-  { to: '/dashboards', label: 'Dashboards' },
-  // What is being monitored.
-  { to: '/uptime', label: 'Uptime Monitoring' },
-  { to: '/ssl', label: 'SSL & Domains' },
-  { to: '/servers', label: 'Server Monitoring' },
-  { to: '/network', label: 'Network Monitoring' },
-  // Troubleshooting from Sentinel or an agent: admins and granted users only.
-  { to: '/tools', label: 'Network Tools', netTools: true },
-  // What comes out of it.
-  { to: '/status-pages', label: 'Status Pages' },
-  { to: '/incidents', label: 'Incidents' },
-  { to: '/reports', label: 'Reports' },
-]
-
-// Network Monitoring has its own nav: it will hold sites, devices, maps,
-// dashboards, MIBs and credentials, far more than fits in the main list. Each
-// roadmap phase adds its own entries here, so there is never a dead link.
-// adminOnly entries are hidden from members, as Users is.
-const networkNav: { to: string; label: string; end?: boolean; adminOnly?: boolean }[] = [
-  { to: '/network/sites', label: 'Sites' },
-  { to: '/network/devices', label: 'Devices' },
-  { to: '/network/mibs/browse', label: 'MIB browser' },
-  { to: '/network/credentials', label: 'Credentials', adminOnly: true },
-  { to: '/network/profiles', label: 'Profiles', adminOnly: true },
-  { to: '/network/mibs', label: 'MIB library', end: true, adminOnly: true },
-  { to: '/network/settings', label: 'Settings', adminOnly: true },
-]
-
-/** Whether a path belongs to the Network Monitoring section. */
-function inNetworkSection(pathname: string): boolean {
-  return pathname === '/network' || pathname.startsWith('/network/')
-}
+import { NAV, SETTINGS_NAV, isNavActive } from '@/utils/navigation'
 
 /**
  * Type size for the sidebar wordmark. A configurable name can be far longer
@@ -56,8 +18,8 @@ function wordmarkClass(name: string): string {
   return 'text-base'
 }
 
-function navClass({ isActive }: { isActive: boolean }) {
-  return `rd-nav ${isActive ? 'active' : ''}`
+function navClass(active: boolean) {
+  return `rd-nav ${active ? 'active' : ''}`
 }
 
 /** "Good morning" / "Good afternoon" / "Good evening" for the top bar. */
@@ -76,7 +38,6 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
   const username = currentUser?.username ?? 'User'
   const role = currentUser?.is_admin ? 'Admin' : 'Member'
   const { pathname } = useLocation()
-  const network = inNetworkSection(pathname)
 
   const go = (path: string) => {
     onNavigate?.()
@@ -98,36 +59,33 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
         >
           {appName}
         </div>
-        <div className="mt-2 text-xs text-slate-400">{network ? 'Network Monitoring' : 'Uptime Monitor'}</div>
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 space-y-1 overflow-y-auto p-4">
-        {network ? (
-          <>
-            {/* The way back out. A plain button rather than a NavLink so it is
-                never shown as the active page. */}
-            <button className="rd-nav w-full text-left" onClick={() => go('/')}>
-              ← Sentinel
-            </button>
-            <div className="my-2 border-t border-white/10" />
-            {networkNav
-              .filter((item) => !item.adminOnly || currentUser?.is_admin)
-              .map((item) => (
-                <NavLink key={item.to} to={item.to} end={item.end} onClick={onNavigate} className={navClass}>
+      <nav className="flex-1 overflow-y-auto p-4">
+        {NAV.map((group) => {
+          const items = group.items.filter((item) => !item.netTools || canUseNetTools(currentUser))
+          if (items.length === 0) return null
+          return (
+            <div key={group.label ?? 'top'} className="space-y-1">
+              {group.label && (
+                <div className="px-4 pb-1 pt-5 text-[11px] font-semibold uppercase tracking-widest text-slate-500">
+                  {group.label}
+                </div>
+              )}
+              {items.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  onClick={onNavigate}
+                  className={() => navClass(isNavActive(pathname, item))}
+                >
                   {item.label}
                 </NavLink>
               ))}
-          </>
-        ) : (
-          nav
-            .filter((item) => !item.netTools || canUseNetTools(currentUser))
-            .map((item) => (
-              <NavLink key={item.to} to={item.to} end={item.end} onClick={onNavigate} className={navClass}>
-                {item.label}
-              </NavLink>
-            ))
-        )}
+            </div>
+          )
+        })}
       </nav>
 
       {/* User footer */}
@@ -148,16 +106,10 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
           </div>
         </button>
         <div className="mt-1 space-y-0.5">
-          {currentUser?.is_admin && (
-            <button
-              className="w-full rounded-lg px-4 py-2 text-left text-xs text-slate-400 transition hover:bg-white/5 hover:text-slate-300"
-              onClick={() => go('/admin/users')}
-            >
-              Users
-            </button>
-          )}
           <button
-            className="w-full rounded-lg px-4 py-2 text-left text-xs text-slate-400 transition hover:bg-white/5 hover:text-slate-300"
+            className={`w-full rounded-lg px-4 py-2 text-left text-xs transition hover:bg-white/5 ${
+              isNavActive(pathname, SETTINGS_NAV) ? 'bg-white/5 text-white' : 'text-slate-400 hover:text-slate-300'
+            }`}
             onClick={() => go('/settings')}
           >
             Settings
@@ -176,7 +128,6 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
 
 export default function Layout() {
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const navigate = useNavigate()
 
   return (
     // The gradient ground lives on <body> (index.css) so it also backs the
@@ -205,7 +156,7 @@ export default function Layout() {
       )}
 
       <div className="p-4 md:ml-56 md:p-8">
-        {/* Top bar: greeting on the left, refresh and settings on the right. */}
+        {/* Top bar: greeting on the left, refresh on the right. */}
         <div className="mb-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button
@@ -224,13 +175,6 @@ export default function Layout() {
               aria-label="Refresh"
             >
               <RefreshCw className="h-5 w-5" />
-            </button>
-            <button
-              className="text-slate-400 transition hover:text-slate-300"
-              onClick={() => navigate('/settings')}
-              aria-label="Settings"
-            >
-              <Settings className="h-5 w-5" />
             </button>
           </div>
         </div>
