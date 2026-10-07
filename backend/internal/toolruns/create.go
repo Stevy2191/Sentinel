@@ -98,19 +98,12 @@ func (s *Service) Create(ctx context.Context, who Requester, req CreateRequest) 
 		Target:      spec.Target,
 		TargetIP:    targetIP,
 		Params:      models.RawJSON(params),
-		CreatedAt:   now,
 	}
 	if agent != nil {
-		// Queued until the agent claims it; the claim resets the deadline to
-		// claim time + the tool's limit. Until then it is far enough out that
-		// the pickup timeout, not the deadline, ends an unclaimed run.
 		run.Status = models.ToolRunQueued
 		run.AgentUUID, run.AgentRef = &agent.ID, &agent.AgentID
-		run.Deadline = now.Add(PickupTimeout + nettools.Deadline(spec.Tool))
 	} else {
 		run.Status = models.ToolRunRunning
-		run.StartedAt = &now
-		run.Deadline = now.Add(nettools.Deadline(spec.Tool))
 	}
 
 	var capRefusal *Refusal
@@ -132,6 +125,21 @@ func (s *Service) Create(ctx context.Context, who Requester, req CreateRequest) 
 		if r != nil {
 			capRefusal = r
 			return r
+		}
+		// The run's clock starts here, after the lookup and the wait for
+		// the lock, so neither eats into the tool's time limit (a
+		// maximum-length ping has only 5 s to spare).
+		start := s.now()
+		run.CreatedAt = start
+		if agent != nil {
+			// Queued until the agent claims it; the claim resets the
+			// deadline to claim time + the tool's limit. Until then it is far
+			// enough out that the pickup timeout, not the deadline, ends an
+			// unclaimed run.
+			run.Deadline = start.Add(PickupTimeout + nettools.Deadline(spec.Tool))
+		} else {
+			run.StartedAt = &start
+			run.Deadline = start.Add(nettools.Deadline(spec.Tool))
 		}
 		return tx.Create(run).Error
 	})

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -380,5 +381,127 @@ func TestDBCreateAlwaysBlockedInsideAllowedCIDR(t *testing.T) {
 	testdb.Must(t, err)
 	if run.TargetIP == nil || *run.TargetIP != "169.254.1.1" {
 		t.Errorf("neighbour: target_ip %v, want 169.254.1.1", run.TargetIP)
+	}
+}
+
+// zone returns a resolver that answers from hosts and falls back to the
+// fixture zone.
+func zone(hosts map[string]string) func(ctx context.Context, host string) ([]net.IP, error) {
+	return func(ctx context.Context, host string) ([]net.IP, error) {
+		if ip, ok := hosts[host]; ok {
+			return []net.IP{net.ParseIP(ip)}, nil
+		}
+		return fakeResolve(ctx, host)
+	}
+}
+
+// A host-name entry (exact or wildcard) allows its name wherever it
+// resolves: the run is created against the resolved address even though no
+// address or CIDR entry covers it.
+func TestDBCreateAllowedByHostNameOnly(t *testing.T) {
+	e := newEnv(t, "10.0.0.0/24", "backup.example.org", "*.lab.example.org")
+	e.svc.resolve = zone(map[string]string{"backup.example.org": "192.168.7.20", "nas.lab.example.org": "172.16.4.9"})
+	ctx := context.Background()
+	who := e.user(t, false)
+	for _, c := range []struct{ name, ip string }{
+		{"backup.example.org", "192.168.7.20"},
+		{"nas.lab.example.org", "172.16.4.9"},
+	} {
+		run, err := e.svc.Create(ctx, who, pingReq(c.name))
+		if err != nil {
+			t.Errorf("%s: %v, want allowed by its host-name entry", c.name, err)
+			continue
+		}
+		got := e.reload(t, run.ID)
+		if got.Target != c.name || got.TargetIP == nil || *got.TargetIP != c.ip {
+			t.Errorf("%s: stored target %s / %v, want %s / %s", c.name, got.Target, got.TargetIP, c.name, c.ip)
+		}
+		if call := <-e.launched; call.spec.TargetIP != c.ip {
+			t.Errorf("%s: launched against %q, want %s", c.name, call.spec.TargetIP, c.ip)
+		}
+	}
+	if n := len(e.audit.byAction(models.ActionToolRunRefused)); n != 0 {
+		t.Errorf("%d refusals audited, want none", n)
+	}
+}
+
+// A name that resolves but matches no host-name entry, to an address no
+// address or CIDR entry covers, is refused naming both.
+func TestDBCreateResolvableNameOutsideTheAllowlist(t *testing.T) {
+	e := newEnv(t)
+	e.svc.resolve = zone(map[string]string{"intranet.example.com": "192.168.9.9"})
+	_, err := e.svc.Create(context.Background(), e.user(t, false), pingReq("intranet.example.com"))
+	r := refusal(t, err)
+	if r.Status != http.StatusUnprocessableEntity || r.Code != CodeTargetNotAllowed ||
+		r.Message != "intranet.example.com (192.168.9.9) is not on the network tools allowlist" {
+		t.Errorf("refusal = %+v", r)
+	}
+	var n int64
+	testdb.Must(t, e.db.Raw(`SELECT count(*) FROM tool_runs`).Scan(&n).Error)
+	refused := e.audit.byAction(models.ActionToolRunRefused)
+	if n != 0 || len(refused) != 1 || refused[0].changes.Summary["target_ip"] != "192.168.9.9" {
+		t.Errorf("%d runs inserted, refusal audit %+v; want none and one entry for 192.168.9.9", n, refused)
+	}
+}
+
+// A run's clock starts when it is inserted, not when the request arrived:
+// a slow lookup or a wait for the caps lock never eats into the tool's time
+// limit (a maximum-length ping leaves only 5 s of slack), for runs on the
+// server and for an agent's pickup window alike.
+func TestDBCreateClockStartsAtInsert(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.svc.resolve = func(ctx context.Context, host string) ([]net.IP, error) {
+		e.clock.Add(4 * time.Second) // a slow lookup
+		return fakeResolve(ctx, host)
+	}
+	arrived := e.clock.Now()
+
+	// Hold the caps lock, and move the clock while Create waits for it.
+	tx := e.db.Begin()
+	testdb.Must(t, tx.Error)
+	defer tx.Rollback()
+	testdb.Must(t, tx.Exec(`SELECT pg_advisory_xact_lock(hashtext('tool_runs_caps'))`).Error)
+	type result struct {
+		run *models.ToolRun
+		err error
+	}
+	done := make(chan result, 1)
+	who := e.user(t, false)
+	go func() {
+		run, err := e.svc.Create(ctx, who, pingReq("fileserver.example.org"))
+		done <- result{run, err}
+	}()
+	waitFor(t, "Create to wait for the caps lock", func() bool {
+		var waiting int64
+		testdb.Must(t, e.db.Raw(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
+			AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`).Scan(&waiting).Error)
+		return waiting == 1
+	})
+	e.clock.Add(3 * time.Second)
+	testdb.Must(t, tx.Commit().Error)
+	res := <-done
+	testdb.Must(t, res.err)
+
+	start := arrived.Add(7 * time.Second)
+	got := e.reload(t, res.run.ID)
+	if got.StartedAt == nil || !got.StartedAt.Equal(start) || !got.Deadline.Equal(start.Add(2*time.Minute)) ||
+		!got.CreatedAt.Equal(start) || !res.run.Deadline.Equal(got.Deadline) {
+		t.Errorf("run created %v, started %v, deadline %v (returned %v); want all from %v (+2m)",
+			got.CreatedAt, got.StartedAt, got.Deadline, res.run.Deadline, start)
+	}
+	if call := <-e.launched; !call.run.Deadline.Equal(start.Add(2 * time.Minute)) {
+		t.Errorf("launched with deadline %v, want %v", call.run.Deadline, start.Add(2*time.Minute))
+	}
+
+	// An agent run's pickup window and deadline count from its insert too.
+	agent := e.readyAgent(t, "file-server")
+	before := e.clock.Now()
+	run, err := e.svc.Create(ctx, e.user(t, false), agentPing(agent, "fileserver.example.org"))
+	testdb.Must(t, err)
+	queued := before.Add(4 * time.Second)
+	got = e.reload(t, run.ID)
+	if !got.CreatedAt.Equal(queued) || !got.Deadline.Equal(queued.Add(PickupTimeout+2*time.Minute)) {
+		t.Errorf("agent run created %v, deadline %v; want %v and +30s+2m", got.CreatedAt, got.Deadline, queued)
 	}
 }
