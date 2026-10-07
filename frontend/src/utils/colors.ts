@@ -143,3 +143,13 @@ export const chartPalette = [
   '#22d3ee', '#a78bfa', '#34d399', '#60a5fa', '#f472b6',
   '#fbbf24', '#f87171', '#2dd4bf', '#c084fc', '#a3e635',
 ]
+
+// Axis, grid and tooltip colours for Recharts charts. Hex, like chartPalette,
+// because Recharts draws SVG; these are the values the existing charts use.
+export const chartChrome = {
+  grid: '#16303a',
+  tick: '#7A8A94',
+  tooltipBg: '#0f172a',
+  tooltipBorder: 'rgba(255,255,255,0.1)',
+  tooltipText: '#e2e8f0',
+}

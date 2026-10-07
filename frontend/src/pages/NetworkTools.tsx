@@ -6,6 +6,7 @@ import { cancelToolRun, createToolRun, useToolRuns, useVantages } from '@/hooks/
 import { useRunStream } from '@/hooks/useRunStream'
 import NoToolsAccess from '@/components/netTools/NoToolsAccess'
 import RunHistory from '@/components/netTools/RunHistory'
+import RunResult from '@/components/netTools/RunResult'
 import RunStatusLine from '@/components/netTools/RunStatusLine'
 import ToolForm from '@/components/netTools/ToolForm'
 import type { ApiError } from '@/services/api'
@@ -91,7 +92,9 @@ function ToolsPage() {
     ? null
     : (stream.run ??
       (isFinalStatus(current.status) || !stream.status ? current : { ...current, status: stream.status }))
-  const running = !!run && !isFinalStatus(run.status)
+  // A stream that gave up while the run is unfinished must not lock the
+  // form: stop treating the run as running (the history still shows it).
+  const running = !!run && !isFinalStatus(run.status) && !stream.error
 
   const switchTool = (next: NetTool) => {
     if (next === tool) return
@@ -225,7 +228,7 @@ function ToolsPage() {
               Open run <ExternalLink className="h-3.5 w-3.5" />
             </Link>
           </div>
-          <p className="text-sm text-slate-500">{stream.events.length} events received</p>
+          <RunResult run={run} events={stream.events} />
         </div>
       )}
 
