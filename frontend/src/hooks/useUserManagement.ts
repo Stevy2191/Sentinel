@@ -12,6 +12,8 @@ export interface ManagedUser {
   is_admin: boolean
   created_at: string
   last_login?: string | null
+  /** The network tools grant. Sent to admins only; admins can always use tools. */
+  net_tools?: boolean
 }
 
 export interface PendingInvitation {
