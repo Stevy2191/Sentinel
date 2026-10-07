@@ -161,7 +161,7 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
       type: 'http',
       description: '',
       target: '',
-      // Starts at the instance default from Settings → System, so this dialog
+      // Starts at the instance default from Settings → General, so this dialog
       // agrees with the other create paths.
       interval: defaultCheckInterval,
       customInterval: '',

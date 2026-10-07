@@ -87,7 +87,7 @@ case "$url_host" in
     echo "       That address means *this* machine, not the Sentinel server, so the agent" >&2
     echo "       would try to report to itself and never connect." >&2
     echo "       It comes from the address Sentinel was open at in your browser. Set the" >&2
-    echo "       external and internal URLs under Settings -> System to an address other" >&2
+    echo "       external and internal URLs under Settings -> General to an address other" >&2
     echo "       machines can reach, then copy the install command again." >&2
     exit 1 ;;
 esac
@@ -276,7 +276,7 @@ case "$url_host" in
     echo "       That address means *this* machine, not the Sentinel server, so the agent" >&2
     echo "       would try to report to itself and never connect." >&2
     echo "       It comes from the address Sentinel was open at in your browser. Set the" >&2
-    echo "       external and internal URLs under Settings -> System to an address other" >&2
+    echo "       external and internal URLs under Settings -> General to an address other" >&2
     echo "       machines can reach, then copy the install command again." >&2
     exit 1 ;;
 esac
@@ -461,7 +461,7 @@ if ($parsedUrl.IsLoopback -or ($loopbackHosts -contains $parsedUrl.Host) -or ($p
     Write-Host "       That address means *this* machine, not the Sentinel server, so the agent"
     Write-Host "       would try to report to itself and never connect."
     Write-Host "       It comes from the address Sentinel was open at in your browser. Set the"
-    Write-Host "       external and internal URLs under Settings -> System to an address other"
+    Write-Host "       external and internal URLs under Settings -> General to an address other"
     Write-Host "       machines can reach, then copy the install command again."
     exit 1
 }

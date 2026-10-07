@@ -19,7 +19,7 @@ import (
 
 // BaseURLFunc resolves the instance's externally reachable base URL. It is
 // called at the moment a link is built rather than captured at construction, so
-// an admin's edit in Settings -> System takes effect on the next email instead
+// an admin's edit in Settings -> General takes effect on the next email instead
 // of the next restart.
 type BaseURLFunc func() string
 

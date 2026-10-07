@@ -66,7 +66,7 @@ export default function SettingsLayout() {
 
       <label className="block md:hidden">
         <span className="sr-only">Settings section</span>
-        <select className="w-full" value={section?.path ?? ''} onChange={(e) => navigate(e.target.value)}>
+        <select className="rd-select w-full" value={section?.path ?? ''} onChange={(e) => navigate(e.target.value)}>
           {section === undefined && <option value="">Choose a section…</option>}
           {GROUPS.map((group) => {
             const inGroup = sections.filter((s) => s.group === group)

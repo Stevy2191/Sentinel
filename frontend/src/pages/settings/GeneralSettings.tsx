@@ -487,7 +487,7 @@ export default function GeneralSettings() {
               disabled={systemSaving || !nameValid || !intervalValid || !checkRetentionValid || !urlsValid || !slaValid}
               onClick={() => void saveSystem()}
             >
-              {systemSaving ? 'Saving…' : 'Save System Settings'}
+              {systemSaving ? 'Saving…' : 'Save General Settings'}
             </button>
           </div>
         </>
