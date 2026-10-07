@@ -23,12 +23,8 @@ createRoot(container).render(
   </StrictMode>
 )
 
-// Register the service worker for PWA/offline support. Production only, so it
-// never interferes with the Vite dev server's HMR.
-if (import.meta.env.PROD && 'serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((err) => {
-      console.warn('Service worker registration failed:', err)
-    })
-  })
-}
+// No service worker is registered. The one Sentinel used to install served
+// a cached copy of the app whenever a page load failed, which hid the
+// browser's certificate warning after the self-signed certificate rotated
+// and left sign-in failing with "Network error". public/sw.js now only
+// removes that old worker from browsers that still have it.

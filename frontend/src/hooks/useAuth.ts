@@ -1,6 +1,22 @@
 import { useCallback, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuthContext } from '@/context/AuthContext'
+
+// Shown when a sign-in request gets no answer at all. With a self-signed
+// certificate this usually means the certificate rotated and the browser no
+// longer accepts it; reloading lets the browser show its warning.
+const UNREACHABLE =
+  "Can't reach Sentinel. Reload the page; if your browser shows a certificate warning, accept it and try again."
+
+/** returnPath is where to go after signing in: the page RequireAuth sent the
+ *  user here from, when it is a path inside Sentinel, else the dashboard. */
+function returnPath(state: unknown): string {
+  const from = (state as { from?: unknown } | null)?.from
+  if (typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') && !from.startsWith('/login')) {
+    return from
+  }
+  return '/dashboard'
+}
 
 interface LoginResult {
   success: boolean
@@ -24,6 +40,8 @@ interface ApiEnvelope {
  */
 export function useAuth() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const afterSignIn = returnPath(location.state)
   const { refreshAuth } = useAuthContext()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -49,16 +67,16 @@ export function useAuth() {
 	// The backend already set the auth cookie on this response; pull the
         // user record so AuthContext flips isAuthenticated to true.
         await refreshAuth()
-        navigate('/dashboard')
+        navigate(afterSignIn)
         return { success: true }
       } catch {
-        setError('Network error. Please try again.')
+        setError(UNREACHABLE)
         return { success: false }
       } finally {
         setLoading(false)
       }
     },
-    [navigate, refreshAuth]
+    [navigate, refreshAuth, afterSignIn]
   )
 
   const register = useCallback(
@@ -83,7 +101,7 @@ export function useAuth() {
         }
         return { success: true }
       } catch {
-        setError('Network error. Please try again.')
+        setError(UNREACHABLE)
         return { success: false }
       } finally {
         setLoading(false)
@@ -109,16 +127,16 @@ export function useAuth() {
           return { success: false }
         }
 	await refreshAuth()
-        navigate('/dashboard')
+        navigate(afterSignIn)
         return { success: true }
       } catch {
-        setError('Network error. Please try again.')
+        setError(UNREACHABLE)
         return { success: false }
       } finally {
         setLoading(false)
       }
     },
-    [navigate, refreshAuth]
+    [navigate, refreshAuth, afterSignIn]
   )
 
   return { login, register, verifyMFA, loading, error, setError }
