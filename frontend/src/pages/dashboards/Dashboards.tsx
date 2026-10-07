@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { Globe2, LayoutDashboard, Loader2, Plus } from 'lucide-react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Globe2, LayoutDashboard, Loader2 } from 'lucide-react'
+import DashboardsHeader from '@/components/DashboardsHeader'
 import { useAuthContext } from '@/context/AuthContext'
 import { useDashboards } from '@/hooks/useDashboards'
 import NewDashboardModal from '@/components/dashboards/NewDashboardModal'
@@ -42,7 +43,13 @@ export default function Dashboards() {
   const navigate = useNavigate()
   const { currentUser } = useAuthContext()
   const { dashboards, loading, error } = useDashboards()
-  const [creating, setCreating] = useState(false)
+  const [searchParams, setSearchParams] = useSearchParams()
+  // ?new=1 (from the Status pages tab's "+ New → Dashboard") opens the dialog.
+  const [creating, setCreating] = useState(() => searchParams.get('new') === '1')
+  const closeCreate = () => {
+    setCreating(false)
+    if (searchParams.has('new')) setSearchParams({}, { replace: true })
+  }
 
   const groups = useMemo(() => {
     const me = currentUser?.user_id
@@ -55,15 +62,7 @@ export default function Dashboards() {
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-4xl font-light text-white">Dashboards</h1>
-          <p className="mt-2 text-slate-400">Your own views, site views for everyone at a site, and screens for the wall.</p>
-        </div>
-        <button className="btn-primary flex items-center gap-2" onClick={() => setCreating(true)}>
-          <Plus className="h-4 w-4" /> New dashboard
-        </button>
-      </div>
+      <DashboardsHeader active="dashboards" onNewDashboard={() => setCreating(true)} />
       {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">{error}</div>}
       {loading ? (
         <Loader2 className="h-6 w-6 animate-spin text-slate-500" />
@@ -79,7 +78,7 @@ export default function Dashboards() {
         </>
       )}
       {creating && (
-        <NewDashboardModal onClose={() => setCreating(false)} onCreated={(d) => navigate(`/dashboards/${d.id}/edit`)} />
+        <NewDashboardModal onClose={closeCreate} onCreated={(d) => navigate(`/dashboards/${d.id}/edit`)} />
       )}
     </div>
   )
