@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { ExternalLink, Loader2 } from 'lucide-react'
 import api from '@/services/api'
 import { useToasts, Toaster } from '@/components/Toast'
@@ -8,12 +8,13 @@ import BackupRestore from '@/components/BackupRestore'
 import ReconnectAgent from '@/components/ReconnectAgent'
 import TimezoneSelector from '@/components/TimezoneSelector'
 import NotificationSettings from '@/pages/NotificationSettings'
+import NetToolsSettings from '@/components/settings/NetToolsSettings'
 import { useAuthContext } from '@/context/AuthContext'
 import { useAppConfig, DEFAULT_APP_NAME } from '@/context/AppConfigContext'
 import { useIncidentRetention } from '@/hooks/useIncidents'
 import { useSystemVersion } from '@/hooks/useSystemVersion'
 
-type Tab = 'system' | 'notifications' | 'about'
+type Tab = 'system' | 'notifications' | 'nettools' | 'about'
 
 const GITHUB_URL = 'https://github.com/Stevy2191/Sentinel'
 
@@ -34,6 +35,7 @@ const MAX_SLA_TARGET = 100
 const TAB_LABEL: Record<Tab, string> = {
   system: 'System',
   notifications: 'Notifications',
+  nettools: 'Network tools',
   about: 'About',
 }
 
@@ -91,12 +93,17 @@ export default function Settings() {
   // are gated by RequireAdmin, so a non-admin is not shown tabs they cannot use.
   const tabs = useMemo<Tab[]>(
     () =>
-      (['system', 'notifications', 'about'] as Tab[]).filter(
-        (t) => (t !== 'notifications' && t !== 'system') || isAdmin
-      ),
+      (['system', 'notifications', 'nettools', 'about'] as Tab[]).filter((t) => t === 'about' || isAdmin),
     [isAdmin]
   )
-  const [tab, setTab] = useState<Tab>(() => (isAdmin ? 'system' : 'about'))
+  // ?tab= opens a tab directly (the Network Tools page links to
+  // ?tab=nettools); a tab this user cannot see falls back to the default.
+  const [searchParams] = useSearchParams()
+  const [tab, setTab] = useState<Tab>(() => {
+    const asked = searchParams.get('tab')
+    if (asked && asked in TAB_LABEL && (asked === 'about' || isAdmin)) return asked as Tab
+    return isAdmin ? 'system' : 'about'
+  })
 
   // ---- Incident retention (server-side, admin-only) ----
   const { days: retentionDays, bounds: retentionBounds, save: saveRetention } = useIncidentRetention()
@@ -546,6 +553,8 @@ export default function Settings() {
       )}
 
       {tab === 'notifications' && isAdmin && <NotificationSettings />}
+
+      {tab === 'nettools' && isAdmin && <NetToolsSettings push={push} />}
 
       {tab === 'about' && (
         <div className="space-y-6">

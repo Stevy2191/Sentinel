@@ -13,6 +13,7 @@ import {
   Activity,
   AlertTriangle,
   FileText,
+  Radar,
 } from 'lucide-react'
 import {
   useMonitor,
@@ -27,8 +28,10 @@ import { useUptimeReport } from '@/hooks/useReports'
 import { useMonitorUptime, type UptimeRange } from '@/hooks/useMonitorUptime'
 import { useMonitorGroups, useMoveMonitorToGroup } from '@/hooks/useMonitorGroups'
 import { useAppConfig } from '@/context/AppConfigContext'
+import { useAuthContext } from '@/context/AuthContext'
 import { useUsers } from '@/hooks/useUsers'
 import { monitorAccess } from '@/utils/monitorAccess'
+import { canUseNetTools, monitorHost, toolsQuery } from '@/utils/netTools'
 import {
   useGetMaintenanceStatus,
   useEnableMaintenanceMode,
@@ -104,6 +107,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
   const { toasts, push } = useToasts()
+  const { currentUser } = useAuthContext()
 
   const { monitor, loading } = useMonitor(mode === 'create' ? undefined : id)
 
@@ -249,6 +253,9 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
   }
 
   const isHttp = monitor.type === 'http'
+  // The host this monitor checks, for "Ping / Trace"; null for webhooks and
+  // for users without network tools.
+  const pingHost = canUseNetTools(currentUser) ? monitorHost(monitor) : null
   const online = monitor.current_status === 'online'
   const offline = monitor.current_status === 'offline'
   const access = monitorAccess(monitor)
@@ -362,6 +369,11 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
           <button className="btn-secondary !py-1.5" onClick={() => void handleTest()}>
             <Play className="h-4 w-4" /> Test
           </button>
+          {pingHost && (
+            <Link className="btn-secondary !py-1.5" to={`/tools${toolsQuery({ tool: 'ping', target: pingHost })}`}>
+              <Radar className="h-4 w-4" /> Ping / Trace
+            </Link>
+          )}
           {access.canEdit && (
             <button className="btn-secondary !py-1.5" onClick={() => void handlePauseResume()}>
               {monitor.enabled ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}

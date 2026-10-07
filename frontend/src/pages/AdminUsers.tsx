@@ -21,6 +21,7 @@ import {
   type ManagedUser,
   type Role,
 } from '@/hooks/useUserManagement'
+import { setUserNetTools } from '@/hooks/useNetTools'
 
 const inputCls =
   'w-full rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary-500'
@@ -123,6 +124,8 @@ export default function AdminUsers() {
 
   const [tab, setTab] = useState<'create' | 'invite' | 'pending'>('create')
   const [modal, setModal] = useState<Modal>(null)
+  // The user whose network tools grant is being saved.
+  const [toolsBusy, setToolsBusy] = useState<string | null>(null)
 
   // ---- users list state ----
   const [search, setSearch] = useState('')
@@ -178,6 +181,22 @@ export default function AdminUsers() {
       await refetchUsers()
     } catch (err) {
       push((err as { message?: string }).message ?? 'Failed to delete user', 'error')
+    }
+  }
+
+  const toggleNetTools = async (u: ManagedUser, enabled: boolean) => {
+    setToolsBusy(u.id)
+    try {
+      await setUserNetTools(u.id, enabled)
+      push(
+        enabled ? `${u.username} can now use network tools` : `${u.username} can no longer use network tools`,
+        'success'
+      )
+      await refetchUsers()
+    } catch (err) {
+      push((err as ApiError).message || 'Could not change network tools access', 'error')
+    } finally {
+      setToolsBusy(null)
     }
   }
 
@@ -262,13 +281,14 @@ export default function AdminUsers() {
                     </button>
                   </th>
                 ))}
+                <th className="px-3 py-2 font-medium">Network tools</th>
                 <th className="px-3 py-2 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
               {pageRows.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-3 py-8 text-center text-slate-500">
+                  <td colSpan={6} className="px-3 py-8 text-center text-slate-500">
                     No users match.
                   </td>
                 </tr>
@@ -287,6 +307,26 @@ export default function AdminUsers() {
                       </td>
                       <td className="px-3 py-2 text-slate-500">
                         {u.created_at ? format(new Date(u.created_at), 'MMM d, yyyy') : '—'}
+                      </td>
+                      <td className="px-3 py-2">
+                        {u.is_admin ? (
+                          <label className="flex items-center gap-2 text-xs text-slate-500">
+                            <input type="checkbox" className="h-4 w-4" checked disabled readOnly />
+                            Admins always can
+                          </label>
+                        ) : (
+                          <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-400">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4"
+                              checked={!!u.net_tools}
+                              disabled={toolsBusy === u.id}
+                              aria-label={`Network tools for ${u.username}`}
+                              onChange={(e) => void toggleNetTools(u, e.target.checked)}
+                            />
+                            {u.net_tools ? 'Allowed' : 'Not allowed'}
+                          </label>
+                        )}
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex flex-wrap justify-end gap-1.5">
