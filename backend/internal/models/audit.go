@@ -48,6 +48,13 @@ const (
 	ActionDashboardUnshared    = "dashboard_unshared"
 	ActionDashboardLinkCreated = "dashboard_link_created"
 	ActionDashboardLinkRevoked = "dashboard_link_revoked"
+
+	ActionToolRunStarted          = "tool_run_started"
+	ActionToolRunFinished         = "tool_run_finished"
+	ActionToolRunRefused          = "tool_run_refused"
+	ActionNetToolsSettingsUpdated = "net_tools_settings_updated"
+	ActionUserNetToolsChanged     = "user_net_tools_changed"
+	ActionAgentToolsChanged       = "agent_tools_changed"
 )
 
 // Audited resource types.
@@ -65,6 +72,11 @@ const (
 	ResourceCustomMetric  = "custom_metric"
 
 	ResourceDashboard = "dashboard"
+
+	ResourceToolRun  = "tool_run"
+	ResourceSettings = "settings"
+	ResourceUser     = "user"
+	ResourceAgent    = "agent"
 )
 
 // AuditChanges is the JSONB detail on an audit entry. For an update it carries

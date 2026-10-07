@@ -439,6 +439,10 @@ type heartbeatRequest struct {
 	MemoryTotalMB   int64  `json:"memory_total_mb"`
 	GoVersion       string `json:"go_version"`
 	DockerAvailable *bool  `json:"docker_available"`
+	// ToolsLocal is the agent's ENABLE_TOOLS flag. Agents built before the
+	// network tools never send it, which is how Sentinel knows they are too
+	// old to run them.
+	ToolsLocal *bool `json:"tools_local"`
 }
 
 // HeartbeatHandler handles POST /api/v1/agents/heartbeat, authenticated by the
@@ -481,6 +485,7 @@ func HeartbeatHandler(agents *services.AgentService) gin.HandlerFunc {
 			MemoryTotalMB:   req.MemoryTotalMB,
 			GoVersion:       req.GoVersion,
 			DockerAvailable: req.DockerAvailable,
+			ToolsLocal:      req.ToolsLocal,
 		}
 		if err := agents.Heartbeat(c.Request.Context(), agent, info); err != nil {
 			respondInternal(c, "HeartbeatHandler", err)

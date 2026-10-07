@@ -414,6 +414,7 @@ func GetCurrentUserHandler(authService *services.AuthService) gin.HandlerFunc {
 			"username":    user.Username,
 			"is_admin":    user.IsAdmin,
 			"mfa_enabled": user.MFAEnabled,
+			"net_tools":   user.NetTools,
 			"last_login":  user.LastLogin,
 			"theme": gin.H{
 				"primary_color": defaultStr(user.ThemePrimaryColor, "#10b981"),

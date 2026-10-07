@@ -191,6 +191,7 @@ func ListUsersHandler(authService *services.AuthService) gin.HandlerFunc {
 			if isAdmin {
 				entry["role"] = u.Role
 				entry["is_admin"] = u.IsAdmin
+				entry["net_tools"] = u.NetTools
 				entry["created_at"] = u.CreatedAt
 			}
 			out = append(out, entry)

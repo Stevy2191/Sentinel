@@ -77,6 +77,14 @@ const (
 	// thresholds (a device may override either).
 	SettingUPSLowBatteryPct = "ups_low_battery_pct"
 	SettingUPSHighLoadPct   = "ups_high_load_pct"
+
+	// Network tools (spec 2026-10-05-tools-s1). The allowlist is a JSON array
+	// of strings (IPv4 addresses, CIDRs, host names, *.domain wildcards);
+	// empty means no target is allowed. Read and written by
+	// internal/toolruns, which holds the defaults (empty, true, 30 days).
+	SettingNetToolsAllowlist     = "net_tools_allowlist"
+	SettingNetToolsServerEnabled = "net_tools_server_enabled"
+	SettingNetToolsRetentionDays = "net_tools_retention_days"
 )
 
 // Bounds and defaults for the system settings above.
