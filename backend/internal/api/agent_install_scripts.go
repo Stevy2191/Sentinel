@@ -12,6 +12,11 @@ const bashInstallScript = `#!/usr/bin/env bash
 #   SERVER_TOKEN="srv_..." AGENT_ID="agent_..." sudo -E bash ./server-agent.sh
 #
 # Installs the agent to /usr/local/bin, writes a systemd unit, and starts it.
+#
+# Network tools (optional): add ENABLE_TOOLS=true to let Sentinel run ping,
+# traceroute, DNS and port checks from this host once an admin also allows it
+# in Sentinel. TOOLS_ALLOWED_TARGETS="10.0.0.0/8,192.168.1.10" limits what the
+# agent will probe, whatever Sentinel asks.
 set -euo pipefail
 
 SENTINEL_URL="${SENTINEL_URL:-${POCKETBASE_URL:-{{.SentinelURL}}}}"
@@ -22,6 +27,8 @@ OS_TYPE="${OS_TYPE:-linux}"
 CHECK_INTERVAL="${CHECK_INTERVAL:-60}"
 RETRY_ATTEMPTS="${RETRY_ATTEMPTS:-3}"
 DISK_PATH="${DISK_PATH:-/}"
+ENABLE_TOOLS="${ENABLE_TOOLS:-false}"
+TOOLS_ALLOWED_TARGETS="${TOOLS_ALLOWED_TARGETS:-}"
 # Short, so a wrong address fails in seconds rather than at the OS TCP timeout.
 CONNECT_TIMEOUT="${CONNECT_TIMEOUT:-10}"
 
@@ -40,6 +47,11 @@ command -v curl >/dev/null 2>&1 || die "curl is required"
 command -v systemctl >/dev/null 2>&1 || die "systemd is required; use the Docker installer on a host without it"
 [ -n "$AGENT_ID" ] || die "AGENT_ID is not set — copy the command from Sentinel"
 [ -n "$SERVER_TOKEN" ] || die "SERVER_TOKEN is not set — copy the command from Sentinel"
+# Written into the config file below, so only the characters an address list
+# needs: anything else could add lines to it.
+case "$TOOLS_ALLOWED_TARGETS" in
+  *[!0-9./,]*) die "TOOLS_ALLOWED_TARGETS must be IPv4 addresses and CIDRs separated by commas, e.g. 10.0.0.0/8,192.168.1.10" ;;
+esac
 
 case "$(uname -m)" in
   x86_64|amd64)  ARCH=amd64 ;;
@@ -51,6 +63,7 @@ info "installing the Sentinel agent"
 echo "    server:   $SENTINEL_URL"
 echo "    agent:    $AGENT_ID"
 echo "    interval: ${CHECK_INTERVAL}s"
+echo "    tools:    $ENABLE_TOOLS"
 
 
 # --- can this machine actually reach Sentinel? -------------------------------
@@ -121,6 +134,8 @@ OS_TYPE=$OS_TYPE
 CHECK_INTERVAL=$CHECK_INTERVAL
 RETRY_ATTEMPTS=$RETRY_ATTEMPTS
 DISK_PATH=$DISK_PATH
+ENABLE_TOOLS=$ENABLE_TOOLS
+TOOLS_ALLOWED_TARGETS=$TOOLS_ALLOWED_TARGETS
 EOF
 chmod 0600 "$CONF_PATH"
 
@@ -202,6 +217,11 @@ const dockerInstallScript = `#!/usr/bin/env bash
 # Sentinel monitoring agent installer (Docker).
 #
 #   SERVER_TOKEN="srv_..." AGENT_ID="agent_..." sudo -E bash ./server-docker-agent.sh
+#
+# Network tools (optional): add ENABLE_TOOLS=true to let Sentinel run ping,
+# traceroute, DNS and port checks from this host once an admin also allows it
+# in Sentinel. TOOLS_ALLOWED_TARGETS="10.0.0.0/8,192.168.1.10" limits what the
+# agent will probe, whatever Sentinel asks.
 set -euo pipefail
 
 SENTINEL_URL="${SENTINEL_URL:-${POCKETBASE_URL:-{{.SentinelURL}}}}"
@@ -213,6 +233,8 @@ CHECK_INTERVAL="${CHECK_INTERVAL:-60}"
 RETRY_ATTEMPTS="${RETRY_ATTEMPTS:-3}"
 CONTAINER_NAME="${CONTAINER_NAME:-sentinel-agent}"
 IMAGE="${AGENT_IMAGE:-alpine:latest}"
+ENABLE_TOOLS="${ENABLE_TOOLS:-false}"
+TOOLS_ALLOWED_TARGETS="${TOOLS_ALLOWED_TARGETS:-}"
 CONNECT_TIMEOUT="${CONNECT_TIMEOUT:-10}"
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -222,6 +244,9 @@ command -v docker >/dev/null 2>&1 || die "docker is required"
 docker info >/dev/null 2>&1 || die "cannot talk to the Docker daemon; run with sudo or add your user to the docker group"
 [ -n "$AGENT_ID" ] || die "AGENT_ID is not set — copy the command from Sentinel"
 [ -n "$SERVER_TOKEN" ] || die "SERVER_TOKEN is not set — copy the command from Sentinel"
+case "$TOOLS_ALLOWED_TARGETS" in
+  *[!0-9./,]*) die "TOOLS_ALLOWED_TARGETS must be IPv4 addresses and CIDRs separated by commas, e.g. 10.0.0.0/8,192.168.1.10" ;;
+esac
 
 case "$(uname -m)" in
   x86_64|amd64)  ARCH=amd64 ;;
@@ -294,6 +319,9 @@ info "starting $CONTAINER_NAME"
 # The host's /proc and /etc are mounted read-only so the agent reports the
 # host's metrics rather than the container's, and the Docker socket read-only
 # so it can list containers without being able to control them.
+# Network tools need raw ICMP for ping and traceroute: NET_RAW is in Docker's
+# default capabilities, and --network host makes the probes leave from this
+# host's own addresses.
 docker run -d \
   --name "$CONTAINER_NAME" \
   --restart unless-stopped \
@@ -314,6 +342,8 @@ docker run -d \
   -e OS_TYPE="$OS_TYPE" \
   -e CHECK_INTERVAL="$CHECK_INTERVAL" \
   -e RETRY_ATTEMPTS="$RETRY_ATTEMPTS" \
+  -e ENABLE_TOOLS="$ENABLE_TOOLS" \
+  -e TOOLS_ALLOWED_TARGETS="$TOOLS_ALLOWED_TARGETS" \
   sentinel-agent:local >/dev/null
 
 sleep 4
@@ -365,6 +395,11 @@ const windowsInstallScript = `# Sentinel monitoring agent installer.
 #   $env:AGENT_ID="agent_..."; $env:SERVER_TOKEN="srv_..."
 #   iwr -useb <url>/scripts/server-agent.ps1 | iex
 #
+# Network tools (optional): set $env:ENABLE_TOOLS="true" first to let Sentinel
+# run ping, traceroute, DNS and port checks from this host once an admin also
+# allows it in Sentinel; $env:TOOLS_ALLOWED_TARGETS="10.0.0.0/8,192.168.1.10"
+# limits what the agent will probe, whatever Sentinel asks.
+#
 # Installs the agent to Program Files, registers it as a Windows service, and
 # starts it. Run from an elevated PowerShell (Run as Administrator).
 
@@ -398,6 +433,7 @@ if (-not $env:OS_TYPE) { $env:OS_TYPE = "windows" }
 if (-not $env:CHECK_INTERVAL) { $env:CHECK_INTERVAL = "60" }
 if (-not $env:RETRY_ATTEMPTS) { $env:RETRY_ATTEMPTS = "3" }
 if (-not $env:DISK_PATH) { $env:DISK_PATH = "C:\" }
+if (-not $env:ENABLE_TOOLS) { $env:ENABLE_TOOLS = "false" }
 
 if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64") {
     Die "unsupported architecture: $env:PROCESSOR_ARCHITECTURE (only amd64 is available)"
@@ -408,6 +444,7 @@ Info "installing the Sentinel agent"
 Write-Host "    server:   $env:SENTINEL_URL"
 Write-Host "    agent:    $env:AGENT_ID"
 Write-Host "    interval: $($env:CHECK_INTERVAL)s"
+Write-Host "    tools:    $env:ENABLE_TOOLS"
 
 # --- can this machine actually reach Sentinel? --------------------------
 # Checked before anything is installed, same reasoning as the bash script:
@@ -490,8 +527,11 @@ $envLines = @(
     "OS_TYPE=$env:OS_TYPE",
     "CHECK_INTERVAL=$env:CHECK_INTERVAL",
     "RETRY_ATTEMPTS=$env:RETRY_ATTEMPTS",
-    "DISK_PATH=$env:DISK_PATH"
+    "DISK_PATH=$env:DISK_PATH",
+    "ENABLE_TOOLS=$env:ENABLE_TOOLS"
 )
+# Only when set: an empty value in a service environment is best left out.
+if ($env:TOOLS_ALLOWED_TARGETS) { $envLines += "TOOLS_ALLOWED_TARGETS=$env:TOOLS_ALLOWED_TARGETS" }
 Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName" -Name "Environment" -Value $envLines -Type MultiString
 
 Info "starting the service"
