@@ -80,13 +80,19 @@ Rulings recorded while executing (each with its cost if wrong):
 
 ## Fixed in the final whole-branch review
 
-(filled in after the final review)
+1. A tools-disabled poll no longer counts as "ready": `NextJob` records the poll only after the `tools_enabled` check, and the agent's wait after `403 tools_disabled` drops from 60 s to 15 s (under the 30 s pickup timeout). The first run after an admin switches an agent on no longer fails as "not picked up"; the agent shows offline until its next poll, at most 15 s later.
+2. Size limits: `Normalize` refuses a port list longer than 8 KB ("the port list is too long"), and `POST /tools/runs` reads at most 16 KB of body (413, code `limit`, "the request is too large").
+3. The agent edit form seeds its fields only when it opens or shows a different agent, not on every 15 s poll, so the "Allow network tools" tick and typed values survive; the header X is disabled while saving, like Cancel, Escape and the backdrop.
+4. Agent clock skew: the agent bounds a job by its own clock (the tool's limit from when the job arrived) and no longer refuses a job as "the job's deadline passed before it started"; Sentinel's sweeper still bounds the run, and the agent still reports `timed_out` at its local deadline.
+5. Panics: a tool that panics on the Sentinel server or on an agent ends its run `failed` ("the tool stopped unexpectedly") with the stack logged, and the process carries on; the raw ICMP reader logs and skips a packet whose handling panics and keeps reading.
+6. The result panels' view models skip events whose data is null or lacks the fields they read (with the right types), so a malformed event cannot crash a panel.
+7. Docs: the restart note under Known limitations gives the real offline window, the Dockerfile's historical `AGENT_VERSION` comment names the old 1.0.0 default again, and the allowlist help says a host-name entry allows whatever address the name resolves to.
 
 ## Known limitations
 
 - IPv4 only: a target that resolves only to IPv6 is refused (`ipv6_unsupported`). DNS lookups still return AAAA records.
 - The limits are fixed in code: 30 runs a minute per user (burst 10), 20 a minute per target address, and at most 3 active per user, 3 per target, 10 overall and 2 per agent.
-- The per-target rate buckets and the agents' last-poll times live in memory. A restart resets them, and agents show as offline until their next poll, within 25 s.
+- The per-target rate buckets and the agents' last-poll times live in memory. A restart resets them, and agents show as offline until their next poll: usually within 25 s, but up to 60 s for an agent backing off after the polls that failed while Sentinel was down. An agent whose tools are switched off asks again every 15 s, so after they are switched on it shows offline for up to 15 s.
 - Rate-limit refusals (429) are not audited, by design, so they cannot flood the log.
 - Traceroute needs raw ICMP (root or NET_RAW, or the Windows ICMP API). The unprivileged ICMP socket serves ping only. Hosts or firewalls that drop ICMP Time Exceeded show timeouts past the first hop, which is the honest result.
 - DNS has no EDNS0 and no DNSSEC. The system resolver is the first IPv4 nameserver only: no search domains and no fallback to a second server.
@@ -118,7 +124,6 @@ Found while executing and left for later (minor review findings, by area; items 
 
 ### nettools and stream (`backend/internal/nettools`, `backend/internal/stream`)
 
-- (T1) Ports string length unbounded; ParsePorts cost O(parts×range) (params.go:187, ports.go:56) — cap Ports length (~4-8 KB) or count iterations
 - (T1) ports_test.go:67 t.Errorf then index nil slice → use t.Fatalf
 - (T1) params_test "ping size 0" doesn't assert 0 kept; check order tool→target not pinned
 - (T1) single-label wildcard (*.lan, *.local) refused by design — confirm with owner
@@ -166,7 +171,6 @@ Found while executing and left for later (minor review findings, by area; items 
 - (T9) no log when an event can't be encoded (local.go:41)
 - (T9) no test of a local run hitting its deadline / ctx deadline == run.Deadline
 - (T9) List limit/offset rules untested (query.go:73-84)
-- (T9) no recover in runLocal — a tool panic crashes the server (local.go:122)
 - (T9) events after `end` on cancel are inherent (cancel wins) → SSE/UI should re-fetch the run after `end` (carry to Task 17 view: final counts from GET run)
 - (T9) tool errors not wrapping ctx.Err() at deadline map to failed not timed_out — guard on ctx.Err()
 - (T10) pickup-timeout sweep can fail a run an agent claimed in the same ms (sweeper.go:62-66 + recorder.go:139-141) — robust fix: pickup-timeout finish moves only queued runs (from-statuses arg to finish)
@@ -191,7 +195,6 @@ Found while executing and left for later (minor review findings, by area; items 
 ### Agent (`backend/cmd/agent`)
 
 - (T13) agent stopping mid-run sends no finish → run shows running until deadline+15 s then timed_out (jobs.go:264,228,240,316-323) — send a finish on a short background ctx ("the agent stopped")
-- (T13) clock skew ≥15 s ahead makes the agent refuse every DNS job ("deadline passed") with no hint (jobs.go:164-165) — mention clock in the reason or estimate skew from Date header
 - (T13) 413 then finish always 409 → logged as failure (jobs.go:234,323) — wording/log level
 - (T13) test gaps — 413 path; unknown tool refusal; posts stop after 409; events kept & re-posted after a 5xx
 - (T13) redundant TargetIP trim (jobs.go:163)
@@ -216,8 +219,6 @@ Found while executing and left for later (minor review findings, by area; items 
 - (T17) hop count from view.hops.length not summary.hop_count (TracerouteResult.tsx:27)
 - (T17) `?? 5` duplicated default vs DEFAULT_PARAMS (TracerouteResult.tsx:16)
 - (T17) Cancel button hidden after a stream error (decision 3 trade-off) — user cancels via Open run
-- (T18) EditServerAgentModal re-seeds an open modal on every 15 s agent poll (pre-existing; EditServerAgentModal.tsx:197-206) — the new "Allow network tools" tick is reset before Save unless saved within the poll window; re-seed only on open
-- (T18) header X close button not gated on saving (EditServerAgentModal.tsx:168-174) — completes the Esc/backdrop ruling
 - (T18) NetToolsSettings load can flash the error box for a frame (436-444)
 - (T18) allowlist text typed during a save is overwritten (NetToolsSettings.tsx:446-468,484-491)
 - (T18) ?tab= matches prototype keys (Settings.tsx:987) — use tabs.includes
