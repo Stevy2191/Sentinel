@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import api from '@/services/api'
+import api, { onUnauthorized } from '@/services/api'
 
 export interface UserTheme {
   primary_color: string
@@ -82,6 +82,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // A 401 from any API call after sign-in means the session is gone (it
+  // expired, or the user signed out elsewhere): drop the user, and the route
+  // guard sends the page to /login.
+  useEffect(() => onUnauthorized(() => setCurrentUser(null)), [])
 
   const value = useMemo(
     () => ({

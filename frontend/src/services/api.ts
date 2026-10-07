@@ -45,11 +45,29 @@ export function extractError(
   return { message: payload.message || fallback, code: payload.code }
 }
 
+// Told when the API refuses a request for want of a session: the 24-hour
+// session ran out, or the user signed out in another tab. AuthContext clears
+// the signed-in user, so the route guard sends the page to /login instead of
+// leaving it polling and failing. The /auth/* endpoints are left out: a wrong
+// password or MFA code answers 401 there too, which is not an expired session.
+const unauthorizedListeners = new Set<() => void>()
+
+/** onUnauthorized registers listener and returns a function that removes it. */
+export function onUnauthorized(listener: () => void): () => void {
+  unauthorizedListeners.add(listener)
+  return () => {
+    unauthorizedListeners.delete(listener)
+  }
+}
+
 // Response interceptor: normalize errors into ApiError.
 api.interceptors.response.use(
   (response) => response,
   (error: AxiosError<{ error?: ApiResponseError | string }>) => {
     const status = error.response?.status ?? 0
+    if (status === 401 && !(error.config?.url ?? '').startsWith('/auth/')) {
+      unauthorizedListeners.forEach((listener) => listener())
+    }
     const { message, code } = extractError(
       error.response?.data?.error,
       error.message || 'An unexpected error occurred'

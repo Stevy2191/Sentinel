@@ -1,60 +1,31 @@
-// Sentinel service worker.
+// Sentinel no longer uses a service worker; this one only removes itself.
 //
-// Deliberately conservative for a live-monitoring app:
-//  - App shell + hashed static assets are cached so the UI loads offline/fast.
-//  - API and public-status requests are NEVER cached — serving stale uptime or
-//    status data as if it were live would be misleading, so those pass straight
-//    through (and fail offline, which is the correct behavior).
-//  - Navigations are network-first so a new deploy is picked up immediately,
-//    falling back to the cached shell only when offline.
+// The old worker answered a failed page load with its cached copy of the
+// app. That hid real failures: when the self-signed certificate rotates
+// (every 8 hours), the browser refuses the new one until the user accepts it
+// again, but the worker served the cached login page instead of letting the
+// browser show its certificate warning, so sign-in failed with "Network
+// error". Sentinel is a live monitoring app with nothing useful to show
+// offline, so the worker is gone.
+//
+// Browsers that already registered the old worker fetch this file on their
+// next visit, see it changed, and install it: it deletes every cache it
+// made, unregisters itself, and reloads open tabs so they run without it.
+// Nothing registers a worker any more (see src/index.tsx), so new visitors
+// never get one.
 
-const CACHE = 'sentinel-v1'
-const APP_SHELL = ['/', '/index.html', '/manifest.json', '/favicon.svg', '/icon.svg']
-
-self.addEventListener('install', (event) => {
+self.addEventListener('install', () => {
   self.skipWaiting()
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(APP_SHELL).catch(() => {})))
 })
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches
-      .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim())
-  )
-})
-
-self.addEventListener('fetch', (event) => {
-  const req = event.request
-  if (req.method !== 'GET') return
-
-  const url = new URL(req.url)
-
-  // Never cache live data.
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/public/')) return
-
-  // Navigations: network-first, cached shell as offline fallback.
-  if (req.mode === 'navigate') {
-    event.respondWith(
-      fetch(req).catch(() => caches.match('/index.html').then((r) => r || caches.match('/')))
-    )
-    return
-  }
-
-  // Static assets (Vite hashes filenames → safe to cache-first).
-  event.respondWith(
-    caches.match(req).then((cached) => {
-      if (cached) return cached
-      return fetch(req)
-        .then((res) => {
-          if (res && res.status === 200 && res.type === 'basic') {
-            const clone = res.clone()
-            caches.open(CACHE).then((cache) => cache.put(req, clone))
-          }
-          return res
-        })
-        .catch(() => cached)
-    })
+    (async () => {
+      const keys = await caches.keys()
+      await Promise.all(keys.map((k) => caches.delete(k)))
+      await self.registration.unregister()
+      const tabs = await self.clients.matchAll({ type: 'window' })
+      for (const tab of tabs) tab.navigate(tab.url)
+    })()
   )
 })
