@@ -3,11 +3,12 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Menu, X, RefreshCw, Settings } from 'lucide-react'
 import { useAuthContext } from '@/context/AuthContext'
 import { useAppConfig } from '@/context/AppConfigContext'
+import { canUseNetTools } from '@/utils/netTools'
 
 // Order matters: the four things Sentinel watches sit together, then what it
 // publishes, then what it reports after the fact. Incidents was splitting the
 // monitoring group in half.
-const nav = [
+const nav: { to: string; label: string; end?: boolean; netTools?: boolean }[] = [
   { to: '/', label: 'Overview', end: true },
   // Dashboards cover everything below, so they sit with the Overview.
   { to: '/dashboards', label: 'Dashboards' },
@@ -16,6 +17,8 @@ const nav = [
   { to: '/ssl', label: 'SSL & Domains' },
   { to: '/servers', label: 'Server Monitoring' },
   { to: '/network', label: 'Network Monitoring' },
+  // Troubleshooting from Sentinel or an agent: admins and granted users only.
+  { to: '/tools', label: 'Network Tools', netTools: true },
   // What comes out of it.
   { to: '/status-pages', label: 'Status Pages' },
   { to: '/incidents', label: 'Incidents' },
@@ -117,11 +120,13 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
               ))}
           </>
         ) : (
-          nav.map((item) => (
-            <NavLink key={item.to} to={item.to} end={item.end} onClick={onNavigate} className={navClass}>
-              {item.label}
-            </NavLink>
-          ))
+          nav
+            .filter((item) => !item.netTools || canUseNetTools(currentUser))
+            .map((item) => (
+              <NavLink key={item.to} to={item.to} end={item.end} onClick={onNavigate} className={navClass}>
+                {item.label}
+              </NavLink>
+            ))
         )}
       </nav>
 
