@@ -244,7 +244,7 @@ func (p *WebhookPlugin) buildPayload(m *NotificationMessage) webhookPayload {
 		},
 		Links: webhookLinks{
 			ViewInSentinel: fmt.Sprintf("%s/monitors/%s", base, m.MonitorID),
-			ViewReport:     fmt.Sprintf("%s/reports?monitor_id=%s", base, m.MonitorID),
+			ViewReport:     fmt.Sprintf("%s%s", base, m.ReportPath()),
 		},
 	}
 

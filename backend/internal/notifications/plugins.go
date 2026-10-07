@@ -107,6 +107,12 @@ func (m *NotificationMessage) HasReport() bool {
 	return m.DeviceID == nil && m.AgentID == nil
 }
 
+// ReportPath returns the frontend path of this monitor's report: the
+// analytics view, opened on this monitor. Only meaningful when HasReport.
+func (m *NotificationMessage) ReportPath() string {
+	return fmt.Sprintf("/reports/analytics?monitor_id=%s", m.MonitorID)
+}
+
 // NotificationPlugin is implemented by each delivery channel (email, Slack,
 // Discord, ...). Implementations must respect the provided context's deadline.
 type NotificationPlugin interface {

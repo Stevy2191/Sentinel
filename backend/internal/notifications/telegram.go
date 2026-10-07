@@ -255,7 +255,7 @@ func (p *TelegramPlugin) buildText(m *NotificationMessage) string {
 
 	detailURL := fmt.Sprintf("%s%s", base, m.ViewPath())
 	if m.HasReport() {
-		reportURL := fmt.Sprintf("%s/reports?monitor_id=%s", base, m.MonitorID)
+		reportURL := fmt.Sprintf("%s%s", base, m.ReportPath())
 		fmt.Fprintf(&b, "\n[View in Sentinel](%s) \\• [View Report](%s)", escapeMDV2URL(detailURL), escapeMDV2URL(reportURL))
 	} else {
 		fmt.Fprintf(&b, "\n[View in Sentinel](%s)", escapeMDV2URL(detailURL))

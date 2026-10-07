@@ -603,7 +603,7 @@ func (p *EmailPlugin) buildHTMLBody(m *NotificationMessage) string {
 	// rather than linking a monitor_id (zero for either) that means nothing.
 	buttons := fmt.Sprintf(`<td style="padding-right:12px;"><a href="%s" style="display:inline-block;background:%s;color:#ffffff;padding:11px 22px;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;">View in Sentinel</a></td>`, detailURL, colorSuccess)
 	if m.HasReport() {
-		reportURL := fmt.Sprintf("%s/monitors/%s/report", base, m.MonitorID)
+		reportURL := fmt.Sprintf("%s%s", base, m.ReportPath())
 		buttons += fmt.Sprintf(`<td><a href="%s" style="display:inline-block;background:#ffffff;color:%s;border:1px solid %s;padding:10px 21px;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;">View Report</a></td>`, reportURL, colorSuccess, colorSuccess)
 	}
 
@@ -689,7 +689,7 @@ func (p *EmailPlugin) buildTextBody(m *NotificationMessage) string {
 	}
 	fmt.Fprintf(&b, "\nView in Sentinel: %s%s\n", base, m.ViewPath())
 	if m.HasReport() {
-		fmt.Fprintf(&b, "View Report: %s/monitors/%s/report\n", base, m.MonitorID)
+		fmt.Fprintf(&b, "View Report: %s%s\n", base, m.ReportPath())
 	}
 	fmt.Fprintf(&b, "\n(c) 2026 Sentinel Monitoring\n")
 	return b.String()
