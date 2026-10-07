@@ -15,7 +15,7 @@ function when(iso: string): string {
 }
 
 /**
- * Backup and restore, on Settings → System.
+ * Backup and restore, on Settings → Backups.
  *
  * Restore is the only action in the application that destroys data outright,
  * so it is deliberately the slowest thing here to do by accident: a separate

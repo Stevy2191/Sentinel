@@ -196,7 +196,7 @@ function ThresholdsForm({ port, deviceId, onSaved }: { port: Port; deviceId: str
       </button>
       {saved && <span className="text-sm text-emerald-400">Saved</span>}
       {error && <span className="text-sm text-red-400">{error}</span>}
-      <p className="basis-full text-xs text-slate-500">Leave a field empty to use the default from Network settings.</p>
+      <p className="basis-full text-xs text-slate-500">Leave a field empty to use the default from Settings → Polling &amp; thresholds.</p>
     </form>
   )
 }

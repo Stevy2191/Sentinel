@@ -117,7 +117,7 @@ func ServeInstallScriptHandler(settings *services.SettingsService) gin.HandlerFu
 		// act on rather than a script that might carry something else.
 		if err := validateSentinelURL(url); err != nil || url == "" {
 			respondError(c, http.StatusServiceUnavailable,
-				"this server cannot determine its own address; set the external and internal URLs under Settings -> System, then download the script again")
+				"this server cannot determine its own address; set the external and internal URLs under Settings -> General, then download the script again")
 			return
 		}
 

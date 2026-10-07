@@ -8,7 +8,7 @@ export const DEFAULT_CHECK_INTERVAL = 60
 export const DEFAULT_SLA_TARGET = 99.9
 
 interface AppConfig {
-  /** The instance's display name, as set in Settings → System. */
+  /** The instance's display name, as set in Settings → General. */
   appName: string
   /** Whether self-registration is open. */
   registrationEnabled: boolean

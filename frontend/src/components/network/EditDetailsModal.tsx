@@ -199,7 +199,7 @@ export default function EditDetailsModal({ device, onClose, onSaved, upsDefaults
       <input className={inputCls} type="number" min={10} max={100} value={highLoad} onChange={(e) => setHighLoad(e.target.value)}
         placeholder={upsDefaults ? `Use the default (${upsDefaults.high} %)` : 'Use the default'} />
     </label>
-    <span className="block text-xs text-slate-500">Leave blank to use the default from Network settings.</span>
+    <span className="block text-xs text-slate-500">Leave blank to use the default from Settings → Polling &amp; thresholds.</span>
   </fieldset>
 )}
 

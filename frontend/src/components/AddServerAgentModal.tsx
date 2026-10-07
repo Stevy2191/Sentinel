@@ -399,7 +399,7 @@ iwr -useb "${downloadURL}/scripts/server-agent.ps1" | iex`
             Sentinel has no address configured, so it used the one your browser is open at (
             <span className="font-mono">{reportURL || downloadURL}</span>). On any other server that
             address means that server itself, so the agent would never connect. Set the external and
-            internal URLs under <span className="font-medium">Settings → System</span> to an address
+            internal URLs under <span className="font-medium">Settings → General</span> to an address
             your other machines can reach, then add the server again.
           </p>
         </div>
@@ -411,7 +411,7 @@ iwr -useb "${downloadURL}/scripts/server-agent.ps1" | iex`
         <div className="rounded-lg border border-white/10 bg-slate-800/40 p-4 text-xs text-slate-400">
           Scripts download from <span className="text-slate-200">{downloadURL}</span> and the agent
           reports to <span className="text-slate-200">{reportURL}</span>. Both addresses must be
-          reachable from the server you are installing on. Change them under Settings → System.
+          reachable from the server you are installing on. Change them under Settings → General.
         </div>
       )}
 
