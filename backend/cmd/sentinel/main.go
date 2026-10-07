@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -31,9 +32,17 @@ import (
 	"github.com/Stevy2191/Sentinel/backend/internal/notifications"
 	"github.com/Stevy2191/Sentinel/backend/internal/services"
 	"github.com/Stevy2191/Sentinel/backend/internal/snmp"
+	"github.com/Stevy2191/Sentinel/backend/internal/stream"
+	"github.com/Stevy2191/Sentinel/backend/internal/toolruns"
 )
 
 const shutdownTimeout = 30 * time.Second
+
+// toolHubBuffer is how many live tool-run frames one open stream may fall
+// behind before it is dropped. A port scan can publish a whole flush of
+// events at once (up to 1,024 ports); a dropped browser reconnects and
+// replays from the database, so this only saves the round trip.
+const toolHubBuffer = 2048
 
 // version is stamped at build time with -ldflags "-X main.version=...",
 // mirroring the agent's own versioning (cmd/agent/main.go). Left at "dev" for
@@ -272,6 +281,11 @@ func run() error {
 	sslChecker := services.NewSSLCheckerService(db, notificationManager)
 	incidentRetention := services.NewIncidentRetentionService(db, settingsService)
 	agentService := services.NewAgentService(db)
+	// Network tools (S1): the run service, and the hub its runs publish live
+	// events to for the SSE streams. The same hub goes to the tool routes, so
+	// a stream sees the live frames and the end frame of the runs it follows.
+	toolHub := stream.NewHub(toolHubBuffer)
+	toolRuns := toolruns.New(toolruns.Deps{DB: db, Settings: settingsService, Audit: auditService, Hub: toolHub})
 	// The Sentinel host's own resources. The disk path matters in a container:
 	// the container's root is an overlay, so it has to measure something that
 	// reaches the host's filesystem.
@@ -354,6 +368,9 @@ func run() error {
 	// Agents authenticate with their own token, so their ingest routes sit
 	// outside the group behind the user session middleware.
 	api.RegisterAgentIngestRoutes(router, agentService)
+	// Agents with ENABLE_TOOLS long-poll here for network-tool jobs and post
+	// their results, with the same token as their metrics.
+	api.RegisterAgentJobRoutes(router, agentService, toolRuns)
 	// Installer endpoints: the agent binary and the two scripts. Public,
 	// because a host being provisioned has an agent token but no user session.
 	api.RegisterAgentInstallRoutes(router, settingsService)
@@ -377,6 +394,9 @@ func run() error {
 	api.RegisterSettingsRoutes(v1, settingsService, models.DefaultMonitorCheckInterval, authService, reportScheduler)
 	api.RegisterSSLCertificateRoutes(v1, sslChecker, authService)
 	api.RegisterAgentRoutes(v1, agentService, settingsService, authService)
+	// Network tools: runs, history and the live stream, for admins and users
+	// granted the tools.
+	api.RegisterToolRoutes(v1, toolRuns, toolHub, authService, auditService)
 	api.RegisterBackupRoutes(v1, backupService, auditService, authService, profileService)
 	api.RegisterSiteRoutes(v1, siteService, auditService, authService)
 	api.RegisterSNMPCredentialRoutes(v1, snmpCredentialService, siteService, auditService, authService)
@@ -401,6 +421,8 @@ func run() error {
 	admin.Use(api.RequireAdmin(authService))
 	api.RegisterUserManagementRoutes(admin, authService)
 	api.RegisterAuditRoutes(admin, auditService)
+	// Network tools settings, the per-user grant and the per-agent switch.
+	api.RegisterNetToolsAdminRoutes(admin, settingsService, authService, agentService, auditService)
 	api.RegisterInvitationRoutes(admin, router, invitationService, authService)
 	api.RegisterNotificationConfigRoutes(v1, notificationConfigService, authService)
 
@@ -429,6 +451,10 @@ func run() error {
 		notifyAgentThresholdChange(ctx, notificationManager, change)
 	})
 	go agentService.StartOfflineSweep(loopCtx)
+	// Network tools: runs a previous process left in progress become
+	// interrupted, then pickup timeouts and overdue runs are swept every few
+	// seconds and old history is pruned daily.
+	go toolRuns.Start(loopCtx)
 	go hostSampler.Start(loopCtx)
 	// The MIB library seeds/refreshes its built-in (IETF) modules on every
 	// start; an upload that replaced one of them is left alone (SyncBuiltins
@@ -459,11 +485,16 @@ func run() error {
 	}
 	go services.NewNetworkMaintenance(metricsStore, settingsService).Start(loopCtx)
 
-	// 9. HTTP server.
+	// 9. HTTP server. Every request's context derives from streamsCtx, which
+	// is cancelled just before Shutdown: open SSE streams and agent long-polls
+	// then end at once instead of holding shutdown for its whole timeout.
+	streamsCtx, cancelStreams := context.WithCancel(context.Background())
+	defer cancelStreams()
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           router,
 		ReadHeaderTimeout: 5 * time.Second,
+		BaseContext:       func(net.Listener) context.Context { return streamsCtx },
 	}
 	serverErr := make(chan error, 1)
 	go func() {
@@ -497,6 +528,7 @@ func run() error {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
+	cancelStreams()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Printf("http shutdown error: %v", err)
 	}

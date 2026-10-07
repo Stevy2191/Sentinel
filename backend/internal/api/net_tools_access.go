@@ -76,6 +76,8 @@ func refuseNetTools(c *gin.Context) {
 // auditToolRefusal records a run request that RequireNetTools refused: the
 // spec audits runs "refused for permission reasons". It is mounted ahead of
 // the guard on POST /tools/runs only, so refused reads cannot flood the log.
+// The summary carries the code and message the caller was given, as the
+// service's own tool_run_refused entries do.
 func auditToolRefusal(audit auditRecorder) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Next()
@@ -83,7 +85,9 @@ func auditToolRefusal(audit auditRecorder) gin.HandlerFunc {
 			return
 		}
 		audit.Record(c.Request.Context(), actorFrom(c), models.ActionToolRunRefused, models.ResourceToolRun, nil,
-			models.AuditChanges{Summary: map[string]any{"reason": msgNetToolsRequired}})
+			models.AuditChanges{Summary: map[string]any{
+				"code": toolruns.CodeForbidden, "message": msgNetToolsRequired,
+			}})
 	}
 }
 
