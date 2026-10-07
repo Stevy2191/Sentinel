@@ -26,13 +26,13 @@ export default function VantageSelect({ vantages, value, onChange, disabled }: P
         {!selected && <option value={value}>{value === 'sentinel' ? 'Sentinel server' : 'Unknown agent'}</option>}
         {vantages.map((v) => (
           <option key={vantageKey(v)} value={vantageKey(v)} disabled={!v.ready}>
-            {v.ready ? v.name : `${v.name} (${vantageReasonText(v.reason ?? 'offline')})`}
+            {v.ready ? v.name : `${v.name} — ${vantageReasonText(v.reason ?? 'offline')}`}
           </option>
         ))}
       </select>
       {selected && !selected.ready && (
         <p className={`mt-1 text-xs ${colors.warning.text}`}>
-          {selected.name} can&apos;t run tools now. {vantageReasonText(selected.reason ?? 'offline')}.
+          {selected.name} can&apos;t run tools now: {vantageReasonText(selected.reason ?? 'offline')}
         </p>
       )}
       {!selected && vantages.length > 0 && (
