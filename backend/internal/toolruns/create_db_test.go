@@ -120,7 +120,7 @@ func TestDBCreateRefusals(t *testing.T) {
 			http.StatusConflict, CodeVantageNotReady, "offline-box hasn't asked for jobs in the last minute (offline?)"},
 		{"an agent too old for tools", agentPing(tooOld, "10.0.0.5"),
 			http.StatusConflict, CodeVantageNotReady, "This agent's version can't run tools — update it"},
-		{"an address outside the allowlist", pingReq("10.9.9.9"),
+		{"a port check outside the allowlist", portReq("10.9.9.9"),
 			http.StatusUnprocessableEntity, CodeTargetNotAllowed, "10.9.9.9 is not on the network tools allowlist"},
 		{"a name outside the allowlist", pingReq("printer.example.org"),
 			http.StatusUnprocessableEntity, CodeResolveFailed, "printer.example.org doesn't resolve from Sentinel — use its IP address"},
@@ -131,7 +131,7 @@ func TestDBCreateRefusals(t *testing.T) {
 		// Review Focus 3: *.lab.example.org allows the name, but it resolves
 		// to the cloud metadata address, which is always blocked.
 		{"an allowed name that resolves to the metadata address", pingReq("meta.lab.example.org"),
-			http.StatusUnprocessableEntity, CodeTargetNotAllowed, "meta.lab.example.org (169.254.169.254) is not on the network tools allowlist"},
+			http.StatusUnprocessableEntity, CodeTargetNotAllowed, "meta.lab.example.org (169.254.169.254) is an address network tools never contact"},
 	}
 	for _, c := range cases {
 		_, err := e.svc.Create(ctx, who, c.req)
@@ -145,11 +145,17 @@ func TestDBCreateRefusals(t *testing.T) {
 	if n != 0 {
 		t.Errorf("%d runs were inserted by refused creates", n)
 	}
-	// Only the two allowlist refusals are audited.
+	// Only the two target refusals are audited.
 	refused := e.audit.byAction(models.ActionToolRunRefused)
 	if len(refused) != 2 || refused[0].resourceID != nil || refused[0].resourceType != models.ResourceToolRun ||
 		refused[1].changes.Summary["target_ip"] != "169.254.169.254" || refused[1].changes.Summary["code"] != CodeTargetNotAllowed {
 		t.Errorf("refusal audit = %+v, want two tool_run_refused entries", refused)
+	}
+
+	// The allowlist only fences port checks: a ping to an address outside it
+	// runs.
+	if run, err := e.svc.Create(ctx, who, pingReq("10.9.9.9")); err != nil || run.TargetIP == nil || *run.TargetIP != "10.9.9.9" {
+		t.Errorf("ping outside the allowlist = %+v, %v; want a run against 10.9.9.9", run, err)
 	}
 
 	// A name resolving to IPv6 and IPv4 uses the IPv4 address.
@@ -161,14 +167,17 @@ func TestDBCreateRefusals(t *testing.T) {
 }
 
 // With the server switched off, Sentinel runs are refused; an empty
-// allowlist refuses every target.
+// allowlist refuses every port check but no ping.
 func TestDBCreateServerOffAndEmptyAllowlist(t *testing.T) {
 	e := newEnv(t, []string{}...)
 	ctx := context.Background()
 	who := e.user(t, false)
-	_, err := e.svc.Create(ctx, who, pingReq("10.0.0.5"))
+	_, err := e.svc.Create(ctx, who, portReq("10.0.0.5"))
 	if r := refusal(t, err); r.Code != CodeTargetNotAllowed {
-		t.Errorf("empty allowlist: %s, want target_not_allowed", r.Code)
+		t.Errorf("empty allowlist, port check: %s, want target_not_allowed", r.Code)
+	}
+	if _, err := e.svc.Create(ctx, who, pingReq("10.0.0.5")); err != nil {
+		t.Errorf("empty allowlist, ping: %v, want a run", err)
 	}
 	_, err = SaveSettings(ctx, e.settings, Settings{Allowlist: testAllowlist, ServerEnabled: false, RetentionDays: 30})
 	testdb.Must(t, err)
@@ -179,8 +188,9 @@ func TestDBCreateServerOffAndEmptyAllowlist(t *testing.T) {
 	}
 }
 
-// A lookup through the vantage's own resolver contacts no target, so it
-// needs no allowlist entry and has no target_ip; a named server is a target.
+// A lookup through the vantage's own resolver contacts no target and has no
+// target_ip; a named server is the target, needs no allowlist entry (the
+// allowlist only fences port checks) and is never an always-blocked address.
 func TestDBCreateDNS(t *testing.T) {
 	e := newEnv(t, "10.0.0.53")
 	ctx := context.Background()
@@ -200,10 +210,12 @@ func TestDBCreateDNS(t *testing.T) {
 		t.Errorf("launched spec %+v, want no TargetIP and record type MX", call.spec)
 	}
 
-	_, err = e.svc.Create(ctx, who, dns("8.8.8.8"))
-	if r := refusal(t, err); r.Code != CodeTargetNotAllowed || r.Message != "8.8.8.8 is not on the network tools allowlist" {
-		t.Errorf("a server outside the allowlist: %+v", r)
+	run, err = e.svc.Create(ctx, who, dns("8.8.8.8"))
+	testdb.Must(t, err)
+	if run.TargetIP == nil || *run.TargetIP != "8.8.8.8" {
+		t.Errorf("a server outside the allowlist: target_ip %v, want 8.8.8.8", run.TargetIP)
 	}
+	<-e.launched
 
 	run, err = e.svc.Create(ctx, who, dns("10.0.0.53:5353"))
 	testdb.Must(t, err)
@@ -348,9 +360,10 @@ func TestDBCreateTargetRate(t *testing.T) {
 	}
 }
 
-// Review Focus 3, by address: an always-blocked address is refused even when
-// an allowlisted CIDR covers it, whether it is the probed host or a DNS
-// lookup's named server; a neighbour in the same CIDR is allowed.
+// Review Focus 3, by address: an always-blocked address is refused for every
+// tool, even when an allowlisted CIDR covers it, whether it is the probed
+// host or a DNS lookup's named server; a neighbour in the same CIDR is
+// allowed.
 func TestDBCreateAlwaysBlockedInsideAllowedCIDR(t *testing.T) {
 	e := newEnv(t, "169.254.0.0/16", "224.0.0.0/8")
 	ctx := context.Background()
@@ -364,17 +377,18 @@ func TestDBCreateAlwaysBlockedInsideAllowedCIDR(t *testing.T) {
 		req  CreateRequest
 		msg  string
 	}{
-		{"the metadata address", pingReq("169.254.169.254"), "169.254.169.254 is not on the network tools allowlist"},
-		{"a multicast address", pingReq("224.0.0.1"), "224.0.0.1 is not on the network tools allowlist"},
-		{"the metadata address as a DNS server", dns("169.254.169.254:53"), "169.254.169.254 is not on the network tools allowlist"},
+		{"the metadata address", pingReq("169.254.169.254"), "169.254.169.254 is an address network tools never contact"},
+		{"a multicast address", pingReq("224.0.0.1"), "224.0.0.1 is an address network tools never contact"},
+		{"the metadata address as a DNS server", dns("169.254.169.254:53"), "169.254.169.254 is an address network tools never contact"},
+		{"a port check of the metadata address", portReq("169.254.169.254"), "169.254.169.254 is an address network tools never contact"},
 	} {
 		_, err := e.svc.Create(ctx, who, c.req)
 		if r := refusal(t, err); r.Code != CodeTargetNotAllowed || r.Message != c.msg {
 			t.Errorf("%s: %s %q, want target_not_allowed %q", c.name, r.Code, r.Message, c.msg)
 		}
 	}
-	if n := len(e.audit.byAction(models.ActionToolRunRefused)); n != 3 {
-		t.Errorf("%d refusals audited, want 3", n)
+	if n := len(e.audit.byAction(models.ActionToolRunRefused)); n != 4 {
+		t.Errorf("%d refusals audited, want 4", n)
 	}
 
 	run, err := e.svc.Create(ctx, who, pingReq("169.254.1.1"))
@@ -407,7 +421,7 @@ func TestDBCreateAllowedByHostNameOnly(t *testing.T) {
 		{"backup.example.org", "192.168.7.20"},
 		{"nas.lab.example.org", "172.16.4.9"},
 	} {
-		run, err := e.svc.Create(ctx, who, pingReq(c.name))
+		run, err := e.svc.Create(ctx, who, portReq(c.name))
 		if err != nil {
 			t.Errorf("%s: %v, want allowed by its host-name entry", c.name, err)
 			continue
@@ -430,7 +444,7 @@ func TestDBCreateAllowedByHostNameOnly(t *testing.T) {
 func TestDBCreateResolvableNameOutsideTheAllowlist(t *testing.T) {
 	e := newEnv(t)
 	e.svc.resolve = zone(map[string]string{"intranet.example.com": "192.168.9.9"})
-	_, err := e.svc.Create(context.Background(), e.user(t, false), pingReq("intranet.example.com"))
+	_, err := e.svc.Create(context.Background(), e.user(t, false), portReq("intranet.example.com"))
 	r := refusal(t, err)
 	if r.Status != http.StatusUnprocessableEntity || r.Code != CodeTargetNotAllowed ||
 		r.Message != "intranet.example.com (192.168.9.9) is not on the network tools allowlist" {

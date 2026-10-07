@@ -25,8 +25,10 @@ import {
   vantageKey,
 } from '@/utils/netTools'
 
+// The allowlist fences port checks only; ping, traceroute and DNS can reach
+// any address that is not always blocked.
 const EMPTY_ALLOWLIST =
-  'No targets are allowed yet. An admin adds subnets and hosts in Settings → Network tools'
+  'No port-check targets are allowed yet. An admin adds subnets and hosts in Settings → Network tools'
 
 /** /tools: run ping, traceroute, a DNS lookup or a port check and watch it
  *  live; the history of everyone's runs below. */
@@ -160,7 +162,7 @@ function ToolsPage() {
         </p>
       </div>
 
-      {vantageData?.allowlist_empty && (
+      {tool === 'tcp' && vantageData?.allowlist_empty && (
         <div className={`rounded-lg border p-4 text-sm ${colors.warning.border} ${colors.warning.bg} ${colors.warning.text}`}>
           <p>{EMPTY_ALLOWLIST}</p>
           {isAdmin && (

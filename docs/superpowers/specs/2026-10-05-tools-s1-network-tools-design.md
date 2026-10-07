@@ -590,3 +590,9 @@ text above where the two differ.
    on are stamped); and the agent bounds a job by its own clock (claim time
    + the tool's deadline) instead of checking Sentinel's absolute deadline,
    so clock skew between the two cannot refuse or shorten runs.
+8. **The allowlist fences port checks only** (owner's decision after S1
+   reached dev, 2026-10-07). Ping, traceroute and DNS lookups, including a
+   named DNS server, may contact any address that is not always blocked; the
+   always-blocked addresses are refused for every tool. The empty-allowlist
+   banner shows on the Ports tab only. See the follow-ups doc, "Changed after
+   S1 reached dev".

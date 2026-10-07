@@ -155,12 +155,13 @@ func toolData(t *testing.T, body []byte, out any) {
 }
 
 // A refusal from the service reaches the browser in the coded shape, with
-// its own status. The allowlist is empty out of the box, so nothing may run.
+// its own status. The allowlist is empty out of the box, so no port check
+// may run.
 func TestDBCreateToolRunAnswersRefusalsInTheCodedShape(t *testing.T) {
 	rig := newToolsRig(t)
 	r := rig.routerFor(t, grantedUser(t, rig.db), false)
 	w := toolRequest(r, http.MethodPost, "/api/v1/tools/runs",
-		`{"tool":"ping","vantage":{"kind":"sentinel"},"target":"10.0.0.5","params":{}}`)
+		`{"tool":"tcp","vantage":{"kind":"sentinel"},"target":"10.0.0.5","params":{"ports":"22"}}`)
 	if w.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status %d, want 422: %s", w.Code, w.Body.String())
 	}

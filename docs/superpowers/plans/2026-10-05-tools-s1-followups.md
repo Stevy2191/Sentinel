@@ -88,6 +88,28 @@ Rulings recorded while executing (each with its cost if wrong):
 6. The result panels' view models skip events whose data is null or lacks the fields they read (with the right types), so a malformed event cannot crash a panel.
 7. Docs: the restart note under Known limitations gives the real offline window, the Dockerfile's historical `AGENT_VERSION` comment names the old 1.0.0 default again, and the allowlist help says a host-name entry allows whatever address the name resolves to.
 
+## Changed after S1 reached dev (2026-10-07, owner's decisions)
+
+1. The allowlist fences port checks only. Ping, traceroute and DNS lookups
+   (including a named DNS server) can reach any address that is not always
+   blocked; the always-blocked addresses (cloud metadata, 0.0.0.0/8,
+   multicast, broadcast) are refused for every tool with "… is an address
+   network tools never contact". The empty-allowlist banner shows on the
+   Ports tab only ("No port-check targets are allowed yet. An admin adds
+   subnets and hosts in Settings → Network tools"). The agent's own
+   `TOOLS_ALLOWED_TARGETS` still applies to every tool it runs.
+2. The frontend no longer installs a service worker. The old one answered a
+   failed page load with a cached copy of the app, which hid the browser's
+   certificate warning after Caddy's 8-hourly certificate rotation and left
+   sign-in failing with "Network error"; `public/sw.js` now only removes it
+   from browsers that still have it. Sign-in that gets no answer now says
+   "Can't reach Sentinel. Reload the page; if your browser shows a
+   certificate warning, accept it and try again."
+3. A 401 from any API call outside `/auth/*` signs the page out, so an
+   expired session goes to the login page instead of polling and failing;
+   after signing in the user returns to the page they asked for (an alert
+   email's link, the page whose session expired).
+
 ## Known limitations
 
 - IPv4 only: a target that resolves only to IPv6 is refused (`ipv6_unsupported`). DNS lookups still return AAAA records.
