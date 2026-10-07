@@ -583,3 +583,10 @@ text above where the two differ.
    holders cannot read the admin settings but the Tools page needs to show
    the empty-allowlist banner.
 6. **The Linux agent's config file is `/etc/sentinel/agent.conf`.**
+7. **Changed by the final whole-branch review** (see the follow-ups doc,
+   "Fixed in the final whole-branch review"): an agent answered
+   `tools_disabled` backs off 15 s, not 60 s; a poll answered
+   `tools_disabled` does not count towards readiness (only polls with tools
+   on are stamped); and the agent bounds a job by its own clock (claim time
+   + the tool's deadline) instead of checking Sentinel's absolute deadline,
+   so clock skew between the two cannot refuse or shorten runs.
