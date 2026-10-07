@@ -1,6 +1,6 @@
 # Where Sentinel stands
 
-Updated 2026-10-05. Read this first when picking the work up on another machine.
+Updated 2026-10-07. Read this first when picking the work up on another machine.
 
 ## Branches
 
@@ -28,20 +28,37 @@ Phase 7 is next; phase 6 is unblocked (it needed phase 4, which is done) and can
 
 ## Tools and security track
 
-Roadmap: `docs/superpowers/specs/2026-10-04-tools-and-security-roadmap.md` (agreed 2026-10-04; nothing designed yet). Phases are numbered S1–S6 to stay distinct from the network phases. Every phase is admin-only (or a granted permission), limited to an allowlist of target subnets, rate limited and audited.
+Roadmap: `docs/superpowers/specs/2026-10-04-tools-and-security-roadmap.md` (agreed 2026-10-04; S1 designed in `specs/2026-10-05-tools-s1-network-tools-design.md` and built). Phases are numbered S1–S6 to stay distinct from the network phases. Every phase is admin-only (or a granted permission), limited to an allowlist of target subnets, rate limited and audited.
 
 | Phase | What | State |
 |---|---|---|
-| S1 | Network tools: ping, traceroute (MTR-style), DNS lookup, port check/quick scan — from Sentinel or any server agent, streamed live | Not started |
-| S2 | nmap: bundled scan profiles (quick, full TCP, service/version, OS, NSE categories), guarded raw mode, parsed results, history and diff — needs S1 | Not started |
+| S1 | Network tools: ping, traceroute (MTR-style), DNS lookup, port check/quick scan — from Sentinel or any server agent, streamed live | Done (`feature/tools-s1`, awaiting merge to `dev`); follow-ups in `plans/2026-10-05-tools-s1-followups.md` |
+| S2 | nmap: bundled scan profiles (quick, full TCP, service/version, OS, NSE categories), guarded raw mode, parsed results, history and diff — needs S1 | Not started; unblocked by S1 |
 | S3 | Attack surface: scheduled scans, open ports and exposed services per host, change alerts, CVE-based vulnerability overview, inside (agent) vs outside view — needs S2 | Not started |
 | S4 | Flow analysis: NetFlow/IPFIX/sFlow collector, top talkers, protocols, who-talks-to-whom per site and interface — needs network phase 2 only | Not started |
-| S5 | Per-server traffic: connections and traffic per process from the agents, live on the server page — needs S1 | Not started |
-| S6 | Packet capture: bounded on-demand capture, protocol breakdown, .pcap download — needs S1; last | Not started |
+| S5 | Per-server traffic: connections and traffic per process from the agents, live on the server page — needs S1 | Not started; unblocked by S1 |
+| S6 | Packet capture: bounded on-demand capture, protocol breakdown, .pcap download — needs S1; last | Not started; unblocked by S1 |
 
 S1 → S2 → S3 is one chain; S4 can go at any point; S5 follows S1; S6 is last. Where the track sits against network phases 6 and 7 is the owner's call.
 
 ## To be checked by the owner
+
+Tools S1 (after updating the work install from `dev`; Claude had no browser, so none of these has been run in one):
+1. With the allowlist empty, Network Tools shows "No targets are allowed yet. An admin adds subnets and hosts in Settings → Network tools", and a ping is refused with "… is not on the network tools allowlist".
+2. In Settings → Network tools, add the office subnet (e.g. a 10.x /16). A line such as 10.0.0.0/7 is named with "too broad: use /8 or narrower" and nothing is saved.
+3. From the Sentinel server: ping a host on the list (replies arrive about one a second and the chart and tiles fill in), traceroute it, look up a name through the system resolver and through a named DNS server on the list, and check ports with "common".
+4. Enable a Linux agent: re-run its install with "Enable network tools on this server" ticked (or add `ENABLE_TOOLS=true` to `/etc/sentinel/agent.conf` and restart it), then Edit → Allow network tools. Within a minute it can be chosen under "Run from"; run each tool from it.
+5. A Windows agent, if one is to hand: the same as 4, and its traceroute shows the hops.
+6. Through Caddy, watch a 10-round traceroute: the table updates round by round, not all at the end.
+7. Cancel a run mid-way, once from the Sentinel server and once from an agent: it shows Cancelled within a second, and the agent stops.
+8. Stop an agent's service in the middle of a traceroute: by the deadline plus 15 s the run shows Timed out and the page no longer says Running.
+9. Grant a non-admin "Network tools" on the Users page: they see Network Tools in the menu, can run tools and see everyone's runs, cannot open Settings → Network tools, and get no Cancel on someone else's running run.
+10. An agent that has not been updated says "This agent's version can't run tools — update it" in its Edit form and is disabled under "Run from".
+11. `GET /api/v1/audit-log?resource_type=tool_run` lists `tool_run_started` and `tool_run_finished` entries, and a `tool_run_refused` for an off-list target.
+12. Windows agent, ping and traceroute (it uses IcmpSendEcho): replies arrive, and a traceroute shows the intermediate hops (time-exceeded replies), not only the destination.
+13. Windows agent, DNS lookup with no named server: it goes through the system resolver, which picks the adapter's DNS server (the first up adapter, not by metric); the answer matches `nslookup` on that machine.
+14. Windows agent, TCP scan of a host with one closed port and one open port: the closed port shows `closed`, not `filtered` (the refused-connection path retries after an RST; a 1.5 s timeout could misreport it).
+15. In the agent's Edit form, ticking "Allow network tools" survives until Save: wait over 15 s (the agent list re-polls) before pressing Save, and the tick must still be there. A pre-existing re-seed of the open modal on each poll is being triaged and may reset it.
 
 Phase 5 (after updating the work install from `dev`; Claude had no browser, so none of these has been run in one, and 6-11 come from the code reviews):
 1. Create a Metrics report for the two WAN ports, period last month; the PDF shows 95th in/out, the billable 95th and the total moved, and the numbers look right against the ISP's portal.
