@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -21,6 +22,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/Stevy2191/Sentinel/backend/internal/nettools"
 )
 
 // version is stamped at build time with -ldflags "-X main.version=...".
@@ -49,6 +52,12 @@ type config struct {
 	RetryAttempts int
 	DiskPath      string
 	DockerSocket  string
+	// ToolsEnabled (ENABLE_TOOLS) lets this agent collect network-tool jobs.
+	// Sentinel's own switch for the agent must be on as well.
+	ToolsEnabled bool
+	// ToolsAllowed (TOOLS_ALLOWED_TARGETS) limits the addresses a job may
+	// probe, whatever Sentinel asks. Empty means no local limit.
+	ToolsAllowed []*net.IPNet
 }
 
 func loadConfig() (config, error) {
@@ -95,7 +104,24 @@ func loadConfig() (config, error) {
 		}
 		cfg.RetryAttempts = n
 	}
+	cfg.ToolsEnabled = envTrue(os.Getenv("ENABLE_TOOLS"))
+	if raw := strings.TrimSpace(os.Getenv("TOOLS_ALLOWED_TARGETS")); raw != "" {
+		nets, err := nettools.ParseAddressList(raw)
+		if err != nil {
+			return cfg, fmt.Errorf("TOOLS_ALLOWED_TARGETS must be comma-separated IPv4 addresses and CIDRs: %w", err)
+		}
+		cfg.ToolsAllowed = nets
+	}
 	return cfg, nil
+}
+
+// envTrue reads a yes/no setting: true, 1 or yes, in any case, mean yes.
+func envTrue(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "true", "1", "yes":
+		return true
+	}
+	return false
 }
 
 func main() {
@@ -119,11 +145,12 @@ func main() {
 	}
 
 	client := &apiClient{
-		baseURL: cfg.ServerURL,
-		token:   cfg.ServerToken,
-		agentID: cfg.AgentID,
-		retries: cfg.RetryAttempts,
-		http:    &http.Client{Timeout: 30 * time.Second},
+		baseURL:    cfg.ServerURL,
+		token:      cfg.ServerToken,
+		agentID:    cfg.AgentID,
+		retries:    cfg.RetryAttempts,
+		http:       &http.Client{Timeout: 30 * time.Second},
+		toolsLocal: cfg.ToolsEnabled,
 	}
 
 	if runAsServiceIfApplicable(cfg, collector, docker, client) {
@@ -158,6 +185,18 @@ func run(ctx context.Context, cfg config, collector *Collector, docker *DockerCo
 		log.Printf("initial heartbeat failed (will keep trying): %v", err)
 	} else {
 		log.Println("registered with server")
+	}
+
+	// Network tools run beside the metrics, in their own loop, only on a
+	// host that opted in. run waits for that loop before it returns.
+	if cfg.ToolsEnabled {
+		log.Printf("network tools enabled; collecting jobs from %s", cfg.ServerURL)
+		jobsDone := make(chan struct{})
+		go func() {
+			defer close(jobsDone)
+			newJobLoop(cfg, &nettools.Runner{}).run(ctx)
+		}()
+		defer func() { <-jobsDone }()
 	}
 
 	metricsTicker := time.NewTicker(cfg.CheckInterval)
@@ -225,6 +264,9 @@ type apiClient struct {
 	agentID string
 	retries int
 	http    *http.Client
+	// toolsLocal is ENABLE_TOOLS, reported on every heartbeat as tools_local
+	// so Sentinel can show both halves of the opt-in.
+	toolsLocal bool
 }
 
 func (c *apiClient) heartbeat(ctx context.Context, info SystemInfo) error {
@@ -232,11 +274,13 @@ func (c *apiClient) heartbeat(ctx context.Context, info SystemInfo) error {
 		SystemInfo
 		AgentID      string `json:"agent_id"`
 		AgentVersion string `json:"agent_version"`
+		ToolsLocal   bool   `json:"tools_local"`
 	}
 	return c.post(ctx, "/api/v1/agents/heartbeat", heartbeatBody{
 		SystemInfo:   info,
 		AgentID:      c.agentID,
 		AgentVersion: version,
+		ToolsLocal:   c.toolsLocal,
 	})
 }
 
