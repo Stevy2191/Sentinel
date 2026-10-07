@@ -123,7 +123,7 @@ export default function Notifications() {
                 channel={ch}
                 testing={testing === ch.name}
                 onTest={handleTest}
-                onConfigure={() => navigate('/settings#notifications')}
+                onConfigure={() => navigate('/settings/notifications')}
                 canTest={canTest}
               />
             ))}

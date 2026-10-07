@@ -166,7 +166,7 @@ function ToolsPage() {
         <div className={`rounded-lg border p-4 text-sm ${colors.warning.border} ${colors.warning.bg} ${colors.warning.text}`}>
           <p>{EMPTY_ALLOWLIST}</p>
           {isAdmin && (
-            <Link to="/settings?tab=nettools" className="mt-1 inline-block underline">
+            <Link to="/settings/network-tools" className="mt-1 inline-block underline">
               Open Settings → Network tools
             </Link>
           )}
