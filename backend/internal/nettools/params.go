@@ -22,6 +22,7 @@ const (
 	TCPTimeoutDefaultMS, TCPTimeoutMinMS, TCPTimeoutMaxMS       = 1500, 500, 5000
 	TCPConcurrency                                              = 50
 	MaxPorts                                                    = 1024
+	MaxPortsLength                                              = 8 << 10 // bytes of the ports list
 	MaxTargetLength                                             = 253
 	DNSTimeout                                                  = 5 * time.Second
 )
@@ -184,6 +185,11 @@ func normalizeServer(s string) (string, error) {
 func normalizeTCP(in Params) (Params, error) {
 	var out Params
 	var err error
+	// Before parsing: the list is stored and audited as typed, and a long
+	// one of repeated ranges names few ports but costs a pass per range.
+	if len(in.Ports) > MaxPortsLength {
+		return out, &ParamError{Field: "ports", Message: "the port list is too long"}
+	}
 	out.Ports = strings.TrimSpace(in.Ports)
 	if out.Ports == "" || strings.EqualFold(out.Ports, "common") {
 		out.Ports = "common"

@@ -28,6 +28,8 @@ var (
 
 // agentJob is a job as jobs/next sends it (toolruns.Job in Sentinel; the
 // agent cannot import that package, which pulls in the database layer).
+// Deadline is on Sentinel's clock, so the agent does not go by it: it bounds
+// a job by its own clock (handle).
 type agentJob struct {
 	RunID    string        `json:"run_id"`
 	Spec     nettools.Spec `json:"spec"`

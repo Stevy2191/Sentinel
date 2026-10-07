@@ -6,8 +6,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"math/rand/v2"
 	"net"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -82,12 +84,22 @@ func (p *unixProber) Close() error {
 
 // readLoop hands every reply that answers one of our probes to its waiter.
 func (p *unixProber) readLoop() {
+	readPackets(p.p4.ReadFrom, p.done, p.deliver)
+}
+
+// readPackets reads packets with read until done is closed or the socket
+// is, handing each one's payload to handle. The packets come from anywhere
+// on the network: one whose handling panics is logged and skipped, so it
+// can neither stop the reader (every probe after it would time out) nor
+// take the process down.
+func readPackets(read func([]byte) (int, *ipv4.ControlMessage, net.Addr, error), done <-chan struct{},
+	handle func(payload []byte, cm *ipv4.ControlMessage, src net.Addr, at time.Time)) {
 	buf := make([]byte, 1500)
 	for {
-		n, cm, src, err := p.p4.ReadFrom(buf)
+		n, cm, src, err := read(buf)
 		if err != nil {
 			select {
-			case <-p.done:
+			case <-done:
 				return
 			default:
 			}
@@ -96,28 +108,49 @@ func (p *unixProber) readLoop() {
 			}
 			continue
 		}
-		at := time.Now()
-		msg, ok := parseICMPv4(readPayload(buf, n))
-		if !ok {
-			continue
-		}
-		key := probeKey{seq: msg.seq}
-		if p.raw {
-			key.id = msg.id
-		}
-		p.mu.Lock()
-		ch, ok := p.waiters[key]
-		delete(p.waiters, key)
-		p.mu.Unlock()
-		if !ok {
-			continue
-		}
-		r := received{msg: msg, from: addrIP(src), at: at}
-		if cm != nil {
-			r.ttl = cm.TTL
-		}
-		ch <- r // buffered: never blocks
+		handlePacket(handle, readPayload(buf, n), cm, src, time.Now())
 	}
+}
+
+// handlePacket runs handle on one packet, recovering a panic.
+func handlePacket(handle func([]byte, *ipv4.ControlMessage, net.Addr, time.Time),
+	payload []byte, cm *ipv4.ControlMessage, src net.Addr, at time.Time) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[tools] skipped an ICMP packet from %v that panicked the reader: %v\n%s", src, r, debug.Stack())
+		}
+	}()
+	handle(payload, cm, src, at)
+}
+
+// deliver hands a reply that answers one of our probes to its waiter.
+func (p *unixProber) deliver(payload []byte, cm *ipv4.ControlMessage, src net.Addr, at time.Time) {
+	msg, ok := parseICMPv4(payload)
+	if !ok {
+		return
+	}
+	key := probeKey{seq: msg.seq}
+	if p.raw {
+		key.id = msg.id
+	}
+	ch, ok := p.takeWaiter(key)
+	if !ok {
+		return
+	}
+	r := received{msg: msg, from: addrIP(src), at: at}
+	if cm != nil {
+		r.ttl = cm.TTL
+	}
+	ch <- r // buffered: never blocks
+}
+
+// takeWaiter removes and returns the waiter for key.
+func (p *unixProber) takeWaiter(key probeKey) (chan received, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	ch, ok := p.waiters[key]
+	delete(p.waiters, key)
+	return ch, ok
 }
 
 // readPayload is the part of buf that a read of n bytes filled, clamped to

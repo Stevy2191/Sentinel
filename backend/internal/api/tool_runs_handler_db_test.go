@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -208,6 +209,41 @@ func TestDBCreateToolRunQueuesAnAgentRun(t *testing.T) {
 	if run.Status != "queued" || run.Tool != "ping" || run.UserID != user || run.VantageKind != "agent" ||
 		run.AgentID != agent.AgentID || run.VantageName != "file-server" || run.TargetIP != "10.0.0.5" || run.Params.Count != 5 {
 		t.Errorf("run = %+v", run)
+	}
+}
+
+// POST /tools/runs reads at most 16 KB of body: a larger one is refused with
+// 413 limit and nothing is created, even a valid request padded out. The
+// same request unpadded is accepted, so the size alone was refused.
+func TestDBCreateToolRunRefusesAnOversizedBody(t *testing.T) {
+	rig := newToolsRig(t)
+	ctx := context.Background()
+	_, err := toolruns.SaveSettings(ctx, services.NewSettingsService(rig.db),
+		toolruns.Settings{Allowlist: []string{"10.0.0.0/24"}, ServerEnabled: true, RetentionDays: 30})
+	testdb.Must(t, err)
+	agent := registerToolAgent(t, rig.db, "file-server", true)
+	if job, err := rig.runs.NextJob(ctx, agent, time.Millisecond); err != nil || job != nil {
+		t.Fatalf("NextJob = %v, %v; want an empty poll", job, err)
+	}
+	r := rig.routerFor(t, grantedUser(t, rig.db), false)
+	body := `{"tool":"ping","vantage":{"kind":"agent","agent_id":"` + agent.AgentID + `"},"target":"10.0.0.5","params":{}}`
+	padded := body[:len(body)-1] + strings.Repeat(" ", 16<<10) + "}"
+
+	w := toolRequest(r, http.MethodPost, "/api/v1/tools/runs", padded)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status %d, want 413: %s", w.Code, w.Body.String())
+	}
+	if code, msg := toolErrorBody(t, w.Body.Bytes()); code != "limit" || msg != "the request is too large" {
+		t.Errorf("refusal = %q %q, want limit / the request is too large", code, msg)
+	}
+	var runs int64
+	testdb.Must(t, rig.db.Raw(`SELECT count(*) FROM tool_runs`).Scan(&runs).Error)
+	if runs != 0 {
+		t.Errorf("%d runs stored for an oversized request", runs)
+	}
+
+	if w := toolRequest(r, http.MethodPost, "/api/v1/tools/runs", body); w.Code != http.StatusCreated {
+		t.Errorf("the same request unpadded: status %d, want 201: %s", w.Code, w.Body.String())
 	}
 }
 

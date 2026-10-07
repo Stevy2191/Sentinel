@@ -156,8 +156,8 @@ func TestDBNextJobTimesOutAndRecordsPolls(t *testing.T) {
 	if _, err := e.svc.NextJob(ctx, off, time.Second); !errors.Is(err, ErrToolsDisabled) {
 		t.Errorf("tools off: %v, want ErrToolsDisabled", err)
 	}
-	if _, ok := e.svc.polls.lastSeen(off.ID); !ok {
-		t.Error("a refused poll was not recorded")
+	if _, ok := e.svc.polls.lastSeen(off.ID); ok {
+		t.Error("a poll refused as tools_disabled was recorded")
 	}
 
 	// A hung-up agent ends the wait at once.
@@ -165,6 +165,41 @@ func TestDBNextJobTimesOutAndRecordsPolls(t *testing.T) {
 	cancel()
 	if job, err := e.svc.NextJob(cctx, agent, 5*time.Second); job != nil || err != nil {
 		t.Errorf("cancelled poll: %+v, %v", job, err)
+	}
+}
+
+// A poll answered tools_disabled does not make the agent ready. Otherwise,
+// once the switch goes on, the agent would count as ready while it still
+// sleeps off the 403, a run queued then would wait, and the sweeper would
+// fail it as not picked up. Only a poll with tools on counts.
+func TestDBToolsDisabledPollDoesNotMakeTheAgentReady(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	agent := e.newAgent(t, "file-server", false, boolPtr(true))
+	for i := 0; i < 2; i++ {
+		if _, err := e.svc.NextJob(ctx, agent, time.Second); !errors.Is(err, ErrToolsDisabled) {
+			t.Fatalf("poll %d with tools off: %v, want ErrToolsDisabled", i+1, err)
+		}
+		if reason := e.svc.agentReason(agent, e.clock.Now()); reason != ReasonToolsOff {
+			t.Errorf("after poll %d with tools off: reason %q, want %q", i+1, reason, ReasonToolsOff)
+		}
+	}
+
+	// The admin switches tools on: the agent has not polled with them on yet.
+	testdb.Exec(t, e.db, `UPDATE agents SET tools_enabled = true WHERE id = ?`, agent.ID)
+	agent.ToolsEnabled = true
+	if reason := e.svc.agentReason(agent, e.clock.Now()); reason != ReasonOffline {
+		t.Errorf("tools just switched on: reason %q, want %q until the agent polls again", reason, ReasonOffline)
+	}
+	if _, err := e.svc.Create(ctx, e.user(t, false), agentPing(agent, "10.0.0.5")); refusal(t, err).Code != CodeVantageNotReady {
+		t.Errorf("a run before the agent's next poll: %v, want vantage_not_ready", err)
+	}
+
+	if job, err := e.svc.NextJob(ctx, agent, 0); job != nil || err != nil {
+		t.Fatalf("poll with tools on: %+v, %v; want an empty poll", job, err)
+	}
+	if reason := e.svc.agentReason(agent, e.clock.Now()); reason != "" {
+		t.Errorf("after a poll with tools on: reason %q, want ready", reason)
 	}
 }
 

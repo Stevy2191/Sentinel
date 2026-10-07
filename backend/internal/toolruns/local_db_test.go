@@ -192,6 +192,44 @@ func TestDBLocalRunToolError(t *testing.T) {
 	}
 }
 
+// A tool that panics fails its run with a fixed message instead of taking
+// the server down: the events it emitted first are kept, the run's cancel
+// func is forgotten, and the next run works.
+func TestDBLocalRunToolPanic(t *testing.T) {
+	e := newEnv(t)
+	e.svc.launch = e.svc.launchLocal
+	e.svc.runTool = func(_ context.Context, spec nettools.Spec, emit nettools.Emitter) (any, error) {
+		if spec.TargetIP == "10.0.0.5" {
+			emit(nettools.Event{Type: nettools.EventReply, Data: nettools.PingReply{Seq: 1, RTTMS: 1, TTL: 64, From: spec.TargetIP}})
+			panic("a bug in the tool")
+		}
+		return nettools.PingSummary{Sent: 1, Received: 1}, nil
+	}
+	ctx := context.Background()
+	who := e.user(t, false)
+
+	run, err := e.svc.Create(ctx, who, pingReq("10.0.0.5"))
+	testdb.Must(t, err)
+	waitFor(t, "the run to end", func() bool { return !models.ToolRunActive(e.reload(t, run.ID).Status) })
+	got := e.reload(t, run.ID)
+	if got.Status != models.ToolRunFailed || got.Error == nil || *got.Error != "the tool stopped unexpectedly" || got.EventCount != 1 {
+		t.Errorf("run = status %s, error %v, %d events; want failed, the tool stopped unexpectedly, 1 event",
+			got.Status, got.Error, got.EventCount)
+	}
+	if !e.summaryIsNull(t, run.ID) {
+		t.Error("a run whose tool panicked stored a summary")
+	}
+	waitFor(t, "the cancel func to be forgotten", func() bool {
+		e.svc.mu.Lock()
+		defer e.svc.mu.Unlock()
+		return len(e.svc.cancels) == 0
+	})
+
+	next, err := e.svc.Create(ctx, who, pingReq("10.0.0.6"))
+	testdb.Must(t, err)
+	waitFor(t, "the next run to finish", func() bool { return e.reload(t, next.ID).Status == models.ToolRunDone })
+}
+
 // summaryIsNull reports whether the run's summary column is SQL NULL (not
 // the JSON null).
 func (e *env) summaryIsNull(t *testing.T, id uuid.UUID) bool {

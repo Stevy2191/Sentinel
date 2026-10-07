@@ -34,13 +34,16 @@ var (
 // NextJob claims the oldest queued run for agent, waiting up to wait for one
 // to be queued (woken by Create). (nil, nil) when none arrived in time or
 // the agent hung up. ErrToolsDisabled when the admin switch is off. Every
-// call records a poll, which is what makes the agent count as ready.
+// call with tools on records a poll, which is what makes the agent count as
+// ready. A tools_disabled poll records nothing: that agent then sleeps
+// before asking again, so it must not count as ready the moment the switch
+// goes on, or the first run would wait out the pickup timeout.
 func (s *Service) NextJob(ctx context.Context, agent *models.Agent, wait time.Duration) (*Job, error) {
-	s.polls.seen(agent.ID, s.now())
-	defer func() { s.polls.seen(agent.ID, s.now()) }()
 	if !agent.ToolsEnabled {
 		return nil, ErrToolsDisabled
 	}
+	s.polls.seen(agent.ID, s.now())
+	defer func() { s.polls.seen(agent.ID, s.now()) }()
 	wake := s.wakeChan(agent.ID)
 	timer := time.NewTimer(max(wait, 0))
 	defer timer.Stop()
