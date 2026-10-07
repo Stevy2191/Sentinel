@@ -171,7 +171,11 @@ func TestToolRoutesRefuseUsersWithoutTheGrant(t *testing.T) {
 		t.Fatalf("POST /tools/runs: status %d, want 403", w.Code)
 	}
 	if len(audit.entries) != 1 || audit.entries[0] != models.ActionToolRunRefused {
-		t.Errorf("audit = %v, want one %s", audit.entries, models.ActionToolRunRefused)
+		t.Fatalf("audit = %v, want one %s", audit.entries, models.ActionToolRunRefused)
+	}
+	// The same code and message as the service's own refusal entries.
+	if s := audit.changes[0].Summary; s["code"] != "forbidden" || s["message"] != "network tools access required" {
+		t.Errorf("refusal summary = %v, want code forbidden and the refusal message", s)
 	}
 }
 
