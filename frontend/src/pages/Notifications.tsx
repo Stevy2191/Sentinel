@@ -96,9 +96,9 @@ export default function Notifications() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold">Notifications</h1>
+        <h2 className="text-2xl font-light text-white">Notification history</h2>
         <p className="text-sm text-slate-400">
-          Configure notification channels and view alert history
+          The channels in use, this week&apos;s deliveries and every alert sent
         </p>
       </div>
 

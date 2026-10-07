@@ -130,7 +130,7 @@ export default function TestWalkPanel({ oid, kind }: Props) {
         <button
           type="button"
           className="btn-secondary"
-          onClick={() => navigate(`/network/profiles?new=1&oid=${encodeURIComponent(oid)}&kind=${encodeURIComponent(kind ?? '')}`)}
+          onClick={() => navigate(`/settings/network/profiles?new=1&oid=${encodeURIComponent(oid)}&kind=${encodeURIComponent(kind ?? '')}`)}
         >
           Make a metric from this
         </button>

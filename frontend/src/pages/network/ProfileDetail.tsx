@@ -87,7 +87,7 @@ export default function ProfileDetail() {
     return (
       <div className="card p-8 text-center">
         <p className="text-slate-300">Profile not found.</p>
-        <Link to="/network/profiles" className="mt-2 inline-block text-sm text-primary-400 hover:underline">
+        <Link to="/settings/network/profiles" className="mt-2 inline-block text-sm text-primary-400 hover:underline">
           Back to profiles
         </Link>
       </div>
@@ -145,11 +145,11 @@ export default function ProfileDetail() {
   return (
     <div className="space-y-8">
       <div>
-        <Link to="/network/profiles" className="text-sm text-slate-400 hover:text-slate-300">
+        <Link to="/settings/network/profiles" className="text-sm text-slate-400 hover:text-slate-300">
           ← Profiles
         </Link>
         <div className="mt-2 flex flex-wrap items-center gap-3">
-          <h1 className="text-4xl font-light text-white">{profile.name}</h1>
+          <h2 className="text-2xl font-light text-white">{profile.name}</h2>
           {profile.builtin && (
             <span className="inline-flex items-center rounded-full border border-slate-500/30 bg-slate-500/15 px-2.5 py-0.5 text-xs font-medium text-slate-300">
               Built-in

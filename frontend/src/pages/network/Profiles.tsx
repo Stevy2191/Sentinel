@@ -36,7 +36,7 @@ export default function Profiles() {
           .filter(Boolean),
         poll_interval_minutes: fields.pollMinutes,
       })
-      navigate(`/network/profiles/${p.id}`)
+      navigate(`/settings/network/profiles/${p.id}`)
     } catch (err) {
       setCreateError((err as ApiError).message || 'Could not create the profile')
     } finally {
@@ -60,7 +60,7 @@ export default function Profiles() {
     setCopyingId(p.id)
     try {
       const cp = await copyProfile(p.id)
-      navigate(`/network/profiles/${cp.id}`)
+      navigate(`/settings/network/profiles/${cp.id}`)
     } catch (err) {
       setActionError((err as ApiError).message)
       setCopyingId(null)
@@ -74,7 +74,7 @@ export default function Profiles() {
   if (isNewFlow && addOid) {
     return (
       <div className="space-y-6">
-        <h1 className="text-4xl font-light text-white">Add this as a metric to which profile?</h1>
+        <h2 className="text-2xl font-light text-white">Add this as a metric to which profile?</h2>
         {loading ? (
           <p className="text-sm text-slate-400">Loading…</p>
         ) : profiles.length === 0 ? (
@@ -86,7 +86,7 @@ export default function Profiles() {
                 key={p.id}
                 type="button"
                 className="flex w-full items-center justify-between gap-3 p-4 text-left hover:bg-white/5"
-                onClick={() => navigate(`/network/profiles/${p.id}?addOid=${encodeURIComponent(addOid)}`)}
+                onClick={() => navigate(`/settings/network/profiles/${p.id}?addOid=${encodeURIComponent(addOid)}`)}
               >
                 <span className="text-slate-200">{p.name}</span>
                 {p.builtin && <span className="text-xs text-slate-500">Built-in</span>}
@@ -94,7 +94,7 @@ export default function Profiles() {
             ))}
           </div>
         )}
-        <Link to="/network/profiles" className="text-sm text-slate-400 hover:text-slate-300">
+        <Link to="/settings/network/profiles" className="text-sm text-slate-400 hover:text-slate-300">
           Cancel
         </Link>
       </div>
@@ -105,7 +105,7 @@ export default function Profiles() {
     <div className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-4xl font-light text-white">Profiles</h1>
+          <h2 className="text-2xl font-light text-white">Device profiles</h2>
           <p className="mt-2 text-sm text-slate-400">
             Sets of custom metrics polled from devices by sysObjectID, on top of Sentinel&apos;s own built-in checks.
           </p>
@@ -158,7 +158,7 @@ export default function Profiles() {
                 {profiles.map((p) => (
                   <tr key={p.id}>
                     <td className="px-4 py-3">
-                      <Link to={`/network/profiles/${p.id}`} className="font-medium text-slate-200 hover:underline">
+                      <Link to={`/settings/network/profiles/${p.id}`} className="font-medium text-slate-200 hover:underline">
                         {p.name}
                       </Link>
                       {p.builtin && (
