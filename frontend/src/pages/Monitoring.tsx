@@ -28,6 +28,7 @@ import {
   filterMonitors,
   filterServers,
   filtersNarrow,
+  ownFiltersSet,
   parseMonitoringParams,
   sectionVisible,
   siteFilterOptions,
@@ -103,7 +104,7 @@ export default function Monitoring() {
     servers: { loading: agentsLoading, error: agentsError, total: agents.length, shown: shownAgents.length, canAdd: isAdmin },
     devices: { loading: devicesLoading, error: devicesError, total: devices.length, shown: shownDevices.length, canAdd: isAdmin },
   }
-  const order = visibleSections(filters).filter((s) => sectionVisible({ ...state[s], narrowed }))
+  const order = visibleSections(filters).filter((s) => sectionVisible({ ...state[s], narrowed, ownFilter: ownFiltersSet(s, filters) }))
   const missing = (Object.keys(state) as Section[]).filter((s) => state[s].error).map((s) => SECTION_LABEL[s])
   const allLoaded = !monitorsLoading && !agentsLoading && !devicesLoading
   const nothingAtAll = allLoaded && missing.length === 0 && monitors.length + agents.length + devices.length === 0

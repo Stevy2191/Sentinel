@@ -118,7 +118,9 @@ export default function UptimeSection(p: Props) {
       }
     >
       {p.all.length === 0 ? (
-        <EmptyLine text="No uptime checks yet." action="Add an uptime monitor" onAction={p.onAdd} />
+        !p.error && <EmptyLine text="No uptime checks yet." action="Add an uptime monitor" onAction={p.onAdd} />
+      ) : p.monitors.length === 0 ? (
+        <EmptyLine text="Nothing in this section matches these filters." />
       ) : (
         <div className="space-y-5">
           {tags.length > 0 && (

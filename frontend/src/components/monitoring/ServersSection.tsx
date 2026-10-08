@@ -70,7 +70,13 @@ export default function ServersSection(p: Props) {
       }
     >
       {p.total === 0 ? (
-        <EmptyLine text="No servers are being monitored yet." action="Add a server agent" onAction={p.onAdd} />
+        !p.error && (
+          <EmptyLine
+            text="No servers are being monitored yet."
+            action={p.isAdmin ? 'Add a server agent' : undefined}
+            onAction={p.onAdd}
+          />
+        )
       ) : (
         <div className="overflow-hidden rounded-lg border border-white/10 bg-slate-800/40 backdrop-blur-sm">
           <div className="overflow-x-auto">

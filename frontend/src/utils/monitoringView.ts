@@ -108,8 +108,17 @@ export function visibleSections(f: MonitoringFilters): Section[] {
   return f.group ? shown.filter((s) => s === 'uptime') : shown
 }
 
+/** ownFiltersSet is whether one of the section's own filters (the ones in its
+ *  header, not the shared toolbar) is set. */
+export function ownFiltersSet(section: Section, f: MonitoringFilters): boolean {
+  if (section === 'uptime') return f.type !== null || f.tags.length > 0
+  if (section === 'devices') return f.deviceType !== null
+  return false
+}
+
 /** sectionVisible decides whether an allowed section is drawn: always while
- *  loading or failed, when it has rows, and when it is genuinely empty (no
+ *  loading or failed, when it has rows, when its own filter hides every row
+ *  (so that filter stays reachable), and when it is genuinely empty (no
  *  filter narrows it) and this user could add the first one. */
 export function sectionVisible(s: {
   loading: boolean
@@ -118,9 +127,12 @@ export function sectionVisible(s: {
   shown: number
   narrowed: boolean
   canAdd: boolean
+  /** One of the section's own filters is set (see ownFiltersSet). */
+  ownFilter: boolean
 }): boolean {
   if (s.loading || s.error) return true
   if (s.shown > 0) return true
+  if (s.ownFilter && s.total > 0) return true
   return !s.narrowed && s.total === 0 && s.canAdd
 }
 
