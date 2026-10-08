@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { useDevices } from '@/hooks/useDevices'
 import { usePortChoices } from '@/hooks/usePorts'
@@ -77,7 +78,9 @@ export default function CircuitFormModal({ siteId, initial, onClose, onSaved }: 
     }
   }
 
-  return (
+  // Rendered at the end of <body>: the cards it opens from use backdrop-filter,
+  // which traps a fixed-position overlay inside the card instead of the page.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <form
         className="card max-h-[90vh] w-full max-w-lg space-y-4 overflow-y-auto p-6"
@@ -178,6 +181,7 @@ export default function CircuitFormModal({ siteId, initial, onClose, onSaved }: 
           </button>
         </div>
       </form>
-    </div>
+    </div>,
+    document.body
   )
 }
