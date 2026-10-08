@@ -105,3 +105,12 @@ export const STATE_DOT: Record<ViewStatus, string> = {
   maintenance: 'bg-sky-400',
   error: 'bg-orange-400',
 }
+
+/** The site page's right-column tabs, in order. */
+export type SiteTab = 'devices' | 'servers' | 'checks' | 'traffic'
+export const SITE_TABS: SiteTab[] = ['devices', 'servers', 'checks', 'traffic']
+
+/** siteTab reads the tab from the address (?tab=); anything else is Devices. */
+export function siteTab(value: string | null): SiteTab {
+  return SITE_TABS.find((t) => t === value) ?? 'devices'
+}
