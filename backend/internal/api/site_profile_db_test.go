@@ -38,10 +38,17 @@ func TestDBSiteProfileAccess(t *testing.T) {
 	shareSiteWith(t, db, site, readonly, "readonly")
 	shareSiteWith(t, db, site, editable, "editable")
 	base := "/api/v1/sites/" + site.String()
+	netBody := `{"name":"Staff","cidr":"10.20.0.0/24"}`
+	cktBody := `{"provider":"Spectrum","kind":"fiber","account_number":"8347-SECRET","support_phone":"1-800-555-0100","notes":"PIN 4411"}`
+	ghostNet, ghostCkt := "/networks/"+uuid.New().String(), "/circuits/"+uuid.New().String()
 	changes := []struct{ method, path, body string }{
-		{http.MethodPost, "/networks", `{"name":"Staff","cidr":"10.20.0.0/24"}`},
+		{http.MethodPost, "/networks", netBody},
 		{http.MethodPut, "/notes", `{"notes":"Closet: room 104"}`},
-		{http.MethodPost, "/circuits", `{"provider":"Spectrum","kind":"fiber","account_number":"8347-SECRET","support_phone":"1-800-555-0100","notes":"PIN 4411"}`},
+		{http.MethodPost, "/circuits", cktBody},
+		{http.MethodPut, ghostNet, netBody},
+		{http.MethodDelete, ghostNet, ""},
+		{http.MethodPut, ghostCkt, cktBody},
+		{http.MethodDelete, ghostCkt, ""},
 	}
 	audit := &recordingAudit{}
 
@@ -59,20 +66,44 @@ func TestDBSiteProfileAccess(t *testing.T) {
 	if w := toolRequest(r, http.MethodGet, base+"/profile", ""); w.Code != http.StatusNotFound {
 		t.Errorf("stranger reading: %d, want 404", w.Code)
 	}
-	if w := toolRequest(r, http.MethodPost, base+"/networks", changes[0].body); w.Code != http.StatusNotFound {
-		t.Errorf("stranger changing: %d, want 404", w.Code)
+	for _, c := range changes {
+		if w := toolRequest(r, c.method, base+c.path, c.body); w.Code != http.StatusNotFound {
+			t.Errorf("stranger %s %s: %d, want 404", c.method, c.path, w.Code)
+		}
 	}
 	if len(audit.calls) != 0 {
 		t.Fatalf("refused requests were audited: %+v", audit.calls)
 	}
 
 	r = siteProfileRouter(t, db, editable, audit)
-	for _, c := range changes {
+	var netID, cktID string
+	for _, c := range changes[:3] {
+		w := toolRequest(r, c.method, base+c.path, c.body)
+		if w.Code >= 300 {
+			t.Fatalf("editable %s %s: %d %s", c.method, c.path, w.Code, w.Body.String())
+		}
+		created := dataOf[struct {
+			ID string `json:"id"`
+		}](t, w)
+		switch c.path {
+		case "/networks":
+			netID = created.ID
+		case "/circuits":
+			cktID = created.ID
+		}
+	}
+	for _, c := range []struct{ method, path, body string }{
+		{http.MethodPut, "/networks/" + netID, `{"name":"Staff 2","cidr":"10.20.0.0/24"}`},
+		{http.MethodPut, "/circuits/" + cktID, cktBody},
+		{http.MethodDelete, "/networks/" + netID, ""},
+		{http.MethodDelete, "/circuits/" + cktID, ""},
+	} {
 		if w := toolRequest(r, c.method, base+c.path, c.body); w.Code >= 300 {
 			t.Fatalf("editable %s %s: %d %s", c.method, c.path, w.Code, w.Body.String())
 		}
 	}
-	want := []string{"site_network_created", "site_notes_updated", "site_circuit_created"}
+	want := []string{"site_network_created", "site_notes_updated", "site_circuit_created",
+		"site_network_updated", "site_circuit_updated", "site_network_deleted", "site_circuit_deleted"}
 	if len(audit.calls) != len(want) {
 		t.Fatalf("audit calls = %+v", audit.calls)
 	}
