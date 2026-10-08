@@ -4,6 +4,7 @@ import { LayoutDashboard, MapPin, Pencil, Plus, Radar, Trash2 } from 'lucide-rea
 import { siteAddressLines, useSite, useSiteActions } from '@/hooks/useSites'
 import { useDevices } from '@/hooks/useDevices'
 import { useDashboards } from '@/hooks/useDashboards'
+import { useSiteProfile, useSiteProfileActions } from '@/hooks/useSiteProfile'
 import SiteFormModal from '@/components/SiteFormModal'
 import SiteSharingPanel from '@/components/SiteSharingPanel'
 import NewDashboardModal from '@/components/dashboards/NewDashboardModal'
@@ -12,6 +13,9 @@ import DeviceFilterBar from '@/components/network/DeviceFilterBar'
 import { filterDevices, NO_DEVICE_FILTERS } from '@/utils/devices'
 import DeviceFormModal from '@/components/network/DeviceFormModal'
 import ScanModal from '@/components/network/ScanModal'
+import CircuitsCard from '@/components/sites/CircuitsCard'
+import NetworksCard from '@/components/sites/NetworksCard'
+import NotesCard from '@/components/sites/NotesCard'
 import { useSitePortSummary, usePortEvents, type PortRef } from '@/hooks/usePorts'
 import SiteTrafficCharts from '@/components/network/SiteTrafficCharts'
 import PortEventList from '@/components/network/PortEventList'
@@ -50,6 +54,8 @@ export default function SiteDetail() {
   const { remove, busy } = useSiteActions()
   const { data: summary } = useSitePortSummary(id)
   const { events } = usePortEvents({ siteId: id }, 15)
+  const { profile, error: profileError, refetch: refetchProfile } = useSiteProfile(id)
+  const profileActions = useSiteProfileActions(id ?? '')
   const [editing, setEditing] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -77,6 +83,7 @@ export default function SiteDetail() {
   const isAdmin = site.access === 'admin'
   const canEdit = isAdmin || site.access === 'editable'
   const address = siteAddressLines(site)
+  const changed = () => void refetchProfile()
 
   const handleDelete = async () => {
     setError(null)
@@ -118,12 +125,14 @@ export default function SiteDetail() {
             </button>
             {confirmDelete ? (
               <>
-                {dashboards.length > 0 && (
-                  <span className="self-center text-sm text-amber-300">
-                    Its {dashboards.length} dashboard{dashboards.length === 1 ? '' : 's'}
-                    {dashboards.some((d) => d.published) && ` (${dashboards.filter((d) => d.published).length} with a public link)`} will be deleted too.
-                  </span>
-                )}
+                <span className="self-center text-sm text-amber-300">
+                  Its networks, circuits and notes
+                  {dashboards.length > 0 &&
+                    `, and its ${dashboards.length} dashboard${dashboards.length === 1 ? '' : 's'}${
+                      dashboards.some((d) => d.published) ? ` (${dashboards.filter((d) => d.published).length} with a public link)` : ''
+                    }`}{' '}
+                  will be deleted too.
+                </span>
                 <button className="btn-secondary" onClick={() => setConfirmDelete(false)}>
                   Cancel
                 </button>
@@ -142,89 +151,115 @@ export default function SiteDetail() {
 
       {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">{error}</div>}
 
-      <section className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-lg font-light text-white">Dashboards</h2>
-          {canEdit && (
-            <button className="btn-secondary flex items-center gap-2" onClick={() => setNewDashboard(true)}>
-              <Plus className="h-4 w-4" /> New site dashboard
-            </button>
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+        {/* The site's facts. */}
+        <div className="min-w-0 space-y-6">
+          {profileError && <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">{profileError}</div>}
+          {profile ? (
+            <>
+              <CircuitsCard siteId={site.id} circuits={profile.circuits} canEdit={canEdit} onDelete={profileActions.deleteCircuit} onChanged={changed} />
+              <NetworksCard siteId={site.id} networks={profile.networks} canEdit={canEdit} onDelete={profileActions.deleteNetwork} onChanged={changed} />
+              <NotesCard
+                notes={profile.notes}
+                canEdit={canEdit}
+                busy={profileActions.busy}
+                onSave={async (notes) => {
+                  await profileActions.saveNotes(notes)
+                  changed()
+                }}
+              />
+            </>
+          ) : (
+            !profileError && <p className="text-sm text-slate-400">Loading the site profile…</p>
           )}
+          {isAdmin && <SiteSharingPanel siteId={site.id} />}
         </div>
-        {dashboards.length === 0 ? (
-          <p className="text-sm text-slate-500">No dashboards for this site yet.</p>
-        ) : (
-          <ul className="flex flex-wrap gap-2">
-            {dashboards.map((d) => (
-              <li key={d.id}>
-                <Link to={`/dashboards/${d.id}`} className="card inline-flex items-center gap-2 px-3 py-2 text-sm hover:bg-white/5">
-                  <LayoutDashboard className="h-4 w-4 text-teal-400" /> {d.name}
-                  {d.published && <span className="text-xs text-teal-300">public</span>}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
 
-      <section className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-lg font-light text-white">
-            Devices ({shownDevices.length === devices.length ? devices.length : `${shownDevices.length} of ${devices.length}`})
-          </h2>
-          {canEdit && (
-            <div className="flex gap-2">
-              <button className="btn-secondary flex items-center gap-2" onClick={() => setScanning(true)}>
-                <Radar className="h-4 w-4" /> Scan subnet
-              </button>
-              <button className="btn-primary flex items-center gap-2" onClick={() => setAddingDevice(true)}>
-                <Plus className="h-4 w-4" /> Add device
-              </button>
-            </div>
-          )}
-        </div>
-        {devices.length === 0 ? (
-          <div className="card p-8 text-center">
-            <p className="text-slate-300">No devices yet.</p>
-            {canEdit && <p className="mt-1 text-sm text-slate-500">Add a device by address, or scan a subnet to find them.</p>}
-          </div>
-        ) : (
-          <>
-            <DeviceFilterBar filters={deviceFilters} onChange={setDeviceFilters} />
-            {shownDevices.length === 0 ? (
-              <div className="card p-6 text-center text-sm text-slate-400">
-                No devices match these filters.{' '}
-                <button type="button" className="text-primary-400 hover:underline" onClick={() => setDeviceFilters(NO_DEVICE_FILTERS)}>
-                  Clear filters
+        {/* What is there. */}
+        <div className="min-w-0 space-y-8">
+          <section className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-lg font-light text-white">Dashboards</h2>
+              {canEdit && (
+                <button className="btn-secondary flex items-center gap-2" onClick={() => setNewDashboard(true)}>
+                  <Plus className="h-4 w-4" /> New site dashboard
                 </button>
+              )}
+            </div>
+            {dashboards.length === 0 ? (
+              <p className="text-sm text-slate-500">No dashboards for this site yet.</p>
+            ) : (
+              <ul className="flex flex-wrap gap-2">
+                {dashboards.map((d) => (
+                  <li key={d.id}>
+                    <Link to={`/dashboards/${d.id}`} className="card inline-flex items-center gap-2 px-3 py-2 text-sm hover:bg-white/5">
+                      <LayoutDashboard className="h-4 w-4 text-teal-400" /> {d.name}
+                      {d.published && <span className="text-xs text-teal-300">public</span>}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-lg font-light text-white">
+                Devices ({shownDevices.length === devices.length ? devices.length : `${shownDevices.length} of ${devices.length}`})
+              </h2>
+              {canEdit && (
+                <div className="flex gap-2">
+                  <button className="btn-secondary flex items-center gap-2" onClick={() => setScanning(true)}>
+                    <Radar className="h-4 w-4" /> Scan subnet
+                  </button>
+                  <button className="btn-primary flex items-center gap-2" onClick={() => setAddingDevice(true)}>
+                    <Plus className="h-4 w-4" /> Add device
+                  </button>
+                </div>
+              )}
+            </div>
+            {devices.length === 0 ? (
+              <div className="card p-8 text-center">
+                <p className="text-slate-300">No devices yet.</p>
+                {canEdit && <p className="mt-1 text-sm text-slate-500">Add a device by address, or scan a subnet to find them.</p>}
               </div>
             ) : (
-              <DeviceTable devices={shownDevices} showSite={false} />
+              <>
+                <DeviceFilterBar filters={deviceFilters} onChange={setDeviceFilters} />
+                {shownDevices.length === 0 ? (
+                  <div className="card p-6 text-center text-sm text-slate-400">
+                    No devices match these filters.{' '}
+                    <button type="button" className="text-primary-400 hover:underline" onClick={() => setDeviceFilters(NO_DEVICE_FILTERS)}>
+                      Clear filters
+                    </button>
+                  </div>
+                ) : (
+                  <DeviceTable devices={shownDevices} showSite={false} />
+                )}
+              </>
             )}
-          </>
-        )}
-      </section>
-
-      {devices.length > 0 && (
-        <>
-          <SiteTrafficCharts siteId={site.id} />
-          <div className="grid gap-6 lg:grid-cols-2">
-            <PortRefList title="Busiest ports" refs={summary?.busiest ?? []} empty="No traffic figures yet." detail={(r) => formatPct(r.util_pct)} />
-            <PortRefList
-              title="Ports with problems"
-              refs={summary?.problems ?? []}
-              empty="Nothing wrong right now."
-              detail={(r) => (r.conditions.length ? r.conditions.map((c) => CONDITION_LABEL[c]).join(', ') : 'Link down')}
-            />
-          </div>
-          <section className="space-y-3">
-            <h2 className="text-lg font-light text-white">Recent port events</h2>
-            <PortEventList events={events} showDevice />
           </section>
-        </>
-      )}
 
-      {isAdmin && <SiteSharingPanel siteId={site.id} />}
+          {devices.length > 0 && (
+            <>
+              <SiteTrafficCharts siteId={site.id} />
+              <div className="grid gap-6 xl:grid-cols-2">
+                <PortRefList title="Busiest ports" refs={summary?.busiest ?? []} empty="No traffic figures yet." detail={(r) => formatPct(r.util_pct)} />
+                <PortRefList
+                  title="Ports with problems"
+                  refs={summary?.problems ?? []}
+                  empty="Nothing wrong right now."
+                  detail={(r) => (r.conditions.length ? r.conditions.map((c) => CONDITION_LABEL[c]).join(', ') : 'Link down')}
+                />
+              </div>
+              <section className="space-y-3">
+                <h2 className="text-lg font-light text-white">Recent port events</h2>
+                <PortEventList events={events} showDevice />
+              </section>
+            </>
+          )}
+        </div>
+      </div>
 
       {editing && (
         <SiteFormModal
