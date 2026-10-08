@@ -22,11 +22,13 @@ function ServerLine({ agent }: { agent: Agent }) {
 
 /** The servers whose site is this site. canHint: the viewer can set a
  *  server's site (admins). */
-export default function SiteServersList({ agents, canHint }: { agents: Agent[]; canHint: boolean }) {
+export default function SiteServersList({ agents, canHint, error }: { agents: Agent[]; canHint: boolean; error?: string | null }) {
   return (
     <section className="space-y-3">
       <h2 className="text-lg font-light text-white">Servers ({agents.length})</h2>
-      {agents.length === 0 ? (
+      {error ? (
+        <p className="text-sm text-red-400">Could not load servers.</p>
+      ) : agents.length === 0 ? (
         <p className="text-sm text-slate-500">
           None at this site.{canHint && ' A server’s site is set in its Edit form.'}
         </p>

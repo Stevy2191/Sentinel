@@ -9,7 +9,7 @@ interface Props {
   networks: SiteNetwork[]
   canEdit: boolean
   onDelete: (id: string) => Promise<unknown>
-  onChanged: () => void
+  onChanged: () => Promise<unknown> | void
 }
 
 /** A site's subnets: name, then subnet · VLAN · gateway, then its note. */
@@ -25,8 +25,8 @@ export default function NetworksCard({ siteId, networks, canEdit, onDelete, onCh
     setDeleting(id)
     try {
       await onDelete(id)
+      await onChanged()
       setConfirming(null)
-      onChanged()
     } catch (err) {
       setError((err as ApiError).message || 'Could not delete the network')
     } finally {

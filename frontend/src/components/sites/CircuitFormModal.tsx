@@ -41,7 +41,7 @@ export default function CircuitFormModal({ siteId, initial, onClose, onSaved }: 
   // the site comes back as no port, so saving drops the stale link.
   const [deviceId, setDeviceId] = useState(initial?.port?.device_id ?? '')
   const [interfaceId, setInterfaceId] = useState(initial?.port?.interface_id ?? '')
-  const { ports } = usePortChoices(deviceId || undefined)
+  const { ports, error: portsError } = usePortChoices(deviceId || undefined)
   const [error, setError] = useState<string | null>(null)
 
   const submit = async (e: React.FormEvent) => {
@@ -51,6 +51,10 @@ export default function CircuitFormModal({ siteId, initial, onClose, onSaved }: 
     const u = speedValue(up)
     if (d === 'bad' || u === 'bad') {
       setError('Speeds must be numbers in Mbps')
+      return
+    }
+    if (deviceId && !interfaceId) {
+      setError('Choose a port, or pick "Not tied to a port"')
       return
     }
     const input = {
@@ -145,7 +149,9 @@ export default function CircuitFormModal({ siteId, initial, onClose, onSaved }: 
             ))}
           </select>
           {deviceId &&
-            (ports === null ? (
+            (portsError ? (
+              <p className="text-xs text-red-400">{portsError}</p>
+            ) : ports === null ? (
               <p className="text-xs text-slate-500">Loading ports…</p>
             ) : (
               <select className={`${inputCls} cursor-pointer`} value={interfaceId} onChange={(e) => setInterfaceId(e.target.value)} aria-label="Port">

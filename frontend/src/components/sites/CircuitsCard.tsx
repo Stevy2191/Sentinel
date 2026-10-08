@@ -12,7 +12,7 @@ interface Props {
   circuits: SiteCircuit[]
   canEdit: boolean
   onDelete: (id: string) => Promise<unknown>
-  onChanged: () => void
+  onChanged: () => Promise<unknown> | void
 }
 
 function UsageRow({ label, bps, mbps }: { label: string; bps: number | null; mbps: number | null }) {
@@ -62,8 +62,8 @@ export default function CircuitsCard({ siteId, circuits, canEdit, onDelete, onCh
     setDeleting(id)
     try {
       await onDelete(id)
+      await onChanged()
       setConfirming(null)
-      onChanged()
     } catch (err) {
       setError((err as ApiError).message || 'Could not delete the circuit')
     } finally {
