@@ -190,6 +190,11 @@ func applyMonitorUpdates(target, updates *models.Monitor) {
 	if updates.NotifyChannels != nil {
 		target.NotifyChannels = updates.NotifyChannels
 	}
+	// Applied only when the request carried site_id: nil then means "clear",
+	// where a request that left it out keeps the site it has.
+	if updates.SiteIDSet {
+		target.SiteID = updates.SiteID
+	}
 
 	// A pointer field cannot otherwise distinguish "the caller omitted this"
 	// from "the caller wants it cleared" - both unmarshal to nil. 0 is the
