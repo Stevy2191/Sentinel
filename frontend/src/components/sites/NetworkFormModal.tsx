@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { useSiteProfileActions, type SiteNetwork } from '@/hooks/useSiteProfile'
 import type { ApiError } from '@/services/api'
@@ -42,7 +43,9 @@ export default function NetworkFormModal({ siteId, initial, onClose, onSaved }: 
     }
   }
 
-  return (
+  // Rendered at the end of <body>: the cards it opens from use backdrop-filter,
+  // which traps a fixed-position overlay inside the card instead of the page.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <form className="card w-full max-w-md space-y-4 p-6" onClick={(e) => e.stopPropagation()} onSubmit={(e) => void submit(e)}>
         <div className="flex items-start justify-between">
@@ -83,6 +86,7 @@ export default function NetworkFormModal({ siteId, initial, onClose, onSaved }: 
           </button>
         </div>
       </form>
-    </div>
+    </div>,
+    document.body
   )
 }

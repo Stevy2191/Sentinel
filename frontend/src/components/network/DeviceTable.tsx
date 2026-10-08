@@ -82,9 +82,12 @@ export default function DeviceTable({ devices, showSite }: { devices: Device[]; 
 
   return (
     <div className="overflow-hidden rounded-lg border border-white/10 bg-slate-800/40">
-      <div className="overflow-x-auto">
+      {/* A long device list scrolls in its own box rather than stretching the
+          page. One box scrolls both ways so the sticky header stays pinned
+          (the same arrangement as MonitorTable). */}
+      <div className="max-h-[65vh] overflow-auto">
         <table className="w-full text-sm">
-          <thead>
+          <thead className="sticky top-0 z-10 bg-slate-900">
             <tr className="border-b border-white/10 text-left text-xs text-slate-400">
               {head('status', 'Status')}
               {head('name', 'Name')}
