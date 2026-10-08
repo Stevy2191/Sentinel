@@ -126,6 +126,13 @@ type Agent struct {
 	ToolsEnabled bool  `json:"tools_enabled" gorm:"column:tools_enabled"`
 	ToolsLocal   *bool `json:"tools_local" gorm:"column:tools_local"`
 
+	// SiteID labels the server with a site, for filtering the Monitoring
+	// list. Optional, and not a permission.
+	SiteID *uuid.UUID `json:"site_id" gorm:"column:site_id;type:uuid"`
+	// SiteName is the site's name, filled in by the API for responses. Not
+	// stored.
+	SiteName *string `json:"site_name" gorm:"-"`
+
 	CreatedAt time.Time `json:"created_at" gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt time.Time `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
 }

@@ -171,6 +171,17 @@ type Monitor struct {
 	// nil means every enabled channel (the default); an empty slice means none.
 	NotifyChannels StringSlice `json:"notify_channels" gorm:"column:notify_channels;type:jsonb"`
 	GroupID        *uuid.UUID  `json:"group_id" gorm:"column:group_id;type:uuid"`
+	// SiteID labels the monitor with a site, for filtering the Monitoring
+	// list. Optional, and not a permission: who can see the monitor is decided
+	// by ownership and sharing alone.
+	SiteID *uuid.UUID `json:"site_id" gorm:"column:site_id;type:uuid"`
+	// SiteName is the site's name, filled in by the API for responses. Not
+	// stored.
+	SiteName *string `json:"site_name" gorm:"-"`
+	// SiteIDSet says an update carried site_id at all. A nil SiteID cannot
+	// tell "left out" (keep the site) from "null" (clear it), so the handler
+	// records which it was here. Never read from or written to JSON.
+	SiteIDSet bool `json:"-" gorm:"-"`
 	// SLATarget is the uptime percentage this monitor is held to (e.g. 99.9).
 	// Nil means no SLA is defined and compliance is not evaluated.
 	SLATarget *float64   `json:"sla_target" gorm:"column:sla_target"`
