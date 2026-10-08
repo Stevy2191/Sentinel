@@ -49,7 +49,7 @@ Spec: `docs/superpowers/specs/2026-10-07-ux-reorganization-design.md` (agreed 20
 |---|---|---|
 | 1 | Navigation and Settings: one grouped sidebar (Network folded in, Dashboards and Status Pages as one entry), one Settings area with a section menu, old addresses redirect | Done (`dev`); plan `plans/2026-10-07-ux-reorg-piece1-navigation-settings.md` |
 | 2 | Combined Monitoring list: uptime checks, servers and network devices on one page, a section per type, shared filters and one "+ Add"; monitors and servers gain an optional site | Done (`dev`); plan `plans/2026-10-07-ux-piece2-monitoring-list.md`; follow-ups `plans/2026-10-07-ux-piece2-followups.md` |
-| 3 | Site profiles: networks, ISPs and circuits (optionally tied to a port, with live usage) and notes per site; two-column site page with its devices, servers and uptime checks | Spec agreed: `specs/2026-10-08-ux-piece3-site-profiles-design.md`; plan next |
+| 3 | Site profiles: networks, ISPs and circuits (optionally tied to a port, with live usage) and notes per site; two-column site page with its devices, servers and uptime checks | Done (`feature/ux-piece3`, awaiting merge to `dev`); plan `plans/2026-10-08-ux-piece3-site-profiles.md` |
 | 4 | Dashboards and status pages merged: status pages become publishable dashboards | Not started |
 
 ## To be checked by the owner
@@ -120,6 +120,18 @@ Phase 3 (not yet confirmed on real equipment; verified against the SNMP simulato
 7. As a non-admin, the Site select in a monitor's form lists only your sites; an empty Servers or Devices section is not shown.
 8. `/uptime`, `/uptime?type=http`, `/servers` and `/network/devices` land on the right filtered view; the old bookmarks for monitor, server and device pages still work.
 9. + Add offers every create action from the three old pages, with the admin-only ones hidden from non-admins.
+
+### UX reorganization piece 3 (on the dev stack)
+
+1. A site's page shows two columns (one on a phone): circuits, networks, notes and sharing on the left; dashboards, devices, servers, uptime checks and the traffic and port lists on the right.
+2. Add a network with a host address (10.20.0.5/24): it is saved as 10.20.0.0/24. Adding it again is refused; a gateway outside it is refused.
+3. Add a circuit tied to the firewall's WAN port: the card shows current in/out against its speed and links to the port; unplug or disable the port and the card says "Port down".
+4. Edit the notes; reload; they are kept with their line breaks.
+5. Scan subnet offers the saved networks.
+6. Give a server and a monitor this site (from their edit forms): they appear in the site's Servers and Uptime checks lists.
+7. The header's "watched · down" matches what Monitoring shows for the site, and "Open in Monitoring" lands on it filtered.
+8. As an editable sharer, add and edit a circuit; as a read-only sharer, the add and edit actions are absent and the profile is readable.
+9. The sites list shows each site's devices, servers, checks and down count.
 
 ## How to resume
 
