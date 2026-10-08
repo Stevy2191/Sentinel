@@ -123,7 +123,7 @@ Phase 3 (not yet confirmed on real equipment; verified against the SNMP simulato
 
 ### UX reorganization piece 3 (on the dev stack)
 
-1. A site's page shows two columns (one on a phone): circuits, networks, notes and sharing on the left; dashboards, devices, servers, uptime checks and the traffic and port lists on the right.
+1. A site's page shows two columns (one on a phone): circuits, networks, notes and sharing on the left; on the right, tabs for Devices, Servers, Uptime checks and Traffic & ports, each with its count and a red "N down" (Traffic & ports: amber "N problems"). Only one tab shows at a time, `?tab=` in the address reopens it, and the site's dashboards sit on a line under the header.
 2. Add a network with a host address (10.20.0.5/24): it is saved as 10.20.0.0/24. Adding it again is refused; a gateway outside it is refused.
 3. Add a circuit tied to the firewall's WAN port: the card shows current in/out against its speed and links to the port; unplug or disable the port and the card says "Port down".
 4. Edit the notes; reload; they are kept with their line breaks.
