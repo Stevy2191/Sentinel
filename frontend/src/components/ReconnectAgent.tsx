@@ -195,7 +195,7 @@ docker run -d --name sentinel-agent --restart unless-stopped \\
   sentinel-agent:local`}
           />
           <p className="text-xs text-slate-500">
-            The host appears under Server Monitoring within a minute of restarting.
+            The host appears under Monitoring → Servers within a minute of restarting.
           </p>
         </div>
       )}

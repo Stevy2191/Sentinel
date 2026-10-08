@@ -21,7 +21,7 @@ const REFRESH_MS = 30_000
  * Overview is a read-only snapshot of how everything stands right now.
  *
  * Deliberately without the monitor table or any create action: those live on
- * Uptime Monitoring. This page answers "is anything wrong" at a glance and
+ * the Monitoring page. This page answers "is anything wrong" at a glance and
  * nothing else, so it stays legible on a wall display.
  */
 /**
@@ -159,7 +159,7 @@ export default function Overview() {
       },
       {
         key: 'uptime',
-        title: 'Uptime Monitoring',
+        title: 'Uptime checks',
         to: monitoringPath('uptime'),
         colorType: 'monitoring' as const,
         value: String(counts.total),
@@ -182,7 +182,7 @@ export default function Overview() {
       },
       {
         key: 'agents',
-        title: 'Server Monitoring',
+        title: 'Servers',
         to: monitoringPath('servers'),
         colorType: 'agents' as const,
         value: agentSummary.value,

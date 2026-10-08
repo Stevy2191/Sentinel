@@ -5,6 +5,7 @@ import {
   SECTIONS,
   SECTION_CHIP,
   VIEW_STATUS_LABEL,
+  unknownOption,
   type MonitoringFilters,
   type Section,
   type ViewStatus,
@@ -43,6 +44,8 @@ export default function MonitoringToolbar({ filters, onChange, counts, statuses,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debounced])
 
+  const extraSite = unknownOption(filters.site, ['none', ...sites.map((s) => s.id)], 'Unknown site')
+  const extraGroup = unknownOption(filters.group, ['ungrouped', ...groups.map((g) => g.id)], 'Unknown group')
   const total = counts.uptime + counts.servers + counts.devices
 
   return (
@@ -93,8 +96,9 @@ export default function MonitoringToolbar({ filters, onChange, counts, statuses,
               {s.name}
             </option>
           ))}
+          {extraSite && <option value={extraSite.value}>{extraSite.label}</option>}
         </select>
-        {groups.length > 0 && (
+        {(groups.length > 0 || filters.group) && (
           <select
             className="rd-select"
             aria-label="Filter by group"
@@ -108,6 +112,7 @@ export default function MonitoringToolbar({ filters, onChange, counts, statuses,
                 {g.name}
               </option>
             ))}
+            {extraGroup && <option value={extraGroup.value}>{extraGroup.label}</option>}
           </select>
         )}
       </div>

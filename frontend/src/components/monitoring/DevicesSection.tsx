@@ -12,6 +12,8 @@ interface Props {
   isAdmin: boolean
   filters: MonitoringFilters
   onFilters: (next: MonitoringFilters) => void
+  /** Back to no filters, staying on this section. */
+  onClearFilters: () => void
   collapsed: boolean
   onToggle: () => void
   loading: boolean
@@ -57,7 +59,7 @@ export default function DevicesSection(p: Props) {
           />
         )
       ) : p.devices.length === 0 ? (
-        <EmptyLine text="Nothing in this section matches these filters." />
+        <EmptyLine text="Nothing in this section matches these filters." action="Clear filters" onAction={p.onClearFilters} />
       ) : (
         <DeviceTable devices={p.devices} showSite />
       )}

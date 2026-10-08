@@ -561,7 +561,7 @@ docker ps -a --filter name=sentinel-agent   # expect: no rows`}
           <div className="rounded-lg border border-white/10 bg-slate-800/40 p-4">
             <h4 className="mb-2 text-sm font-medium text-white">Then in Sentinel</h4>
             <p className="text-xs text-slate-400">
-              Delete this server under Server Monitoring to remove it and its metric history.
+              Delete this server under Monitoring → Servers to remove it and its metric history.
               Leaving it registered is also fine — it simply shows as offline. Nothing is removed
               automatically.
             </p>
@@ -587,7 +587,7 @@ docker ps -a --filter name=sentinel-agent   # expect: no rows`}
           <div className="rounded-lg border border-white/10 bg-slate-800/40 p-4">
             <h4 className="mb-2 text-sm font-medium text-white">After installation</h4>
             <ul className="list-inside list-disc space-y-1 text-xs text-slate-400">
-              <li>The host appears under Server Monitoring within a minute.</li>
+              <li>The host appears under Monitoring → Servers within a minute.</li>
               <li>
                 Metrics are sent every {agent.check_interval} seconds; a heartbeat every 5
                 minutes keeps it marked active.
@@ -628,7 +628,7 @@ docker ps -a --filter name=sentinel-agent   # expect: no rows`}
           <div className="rounded-lg border border-white/10 bg-slate-800/40 p-4">
             <h4 className="mb-2 text-sm font-medium text-white">After installation</h4>
             <ul className="list-inside list-disc space-y-1 text-xs text-slate-400">
-              <li>The host appears under Server Monitoring within a minute.</li>
+              <li>The host appears under Monitoring → Servers within a minute.</li>
               <li>
                 Metrics are sent every {agent.check_interval} seconds; a heartbeat every 5
                 minutes keeps it marked active.
