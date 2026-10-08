@@ -219,6 +219,10 @@ type AgentSettings struct {
 	RetryAttempts int
 	// IPOverride nil clears any pinned address.
 	IPOverride *string
+	// SetSite says the update carries a site at all; SiteID nil with SetSite
+	// clears it. Without SetSite the site is left as it is.
+	SetSite bool
+	SiteID  *uuid.UUID
 	// NotifyChannels is applied only when non-nil. Nil means "leave as is",
 	// which is different from an empty slice meaning "alert nowhere".
 	NotifyChannels *models.StringSlice
@@ -251,6 +255,13 @@ func (s *AgentService) Update(ctx context.Context, agentID string, settings Agen
 	// resetting it to "every channel".
 	if settings.NotifyChannels != nil {
 		updates["notify_channels"] = *settings.NotifyChannels
+	}
+	if settings.SetSite {
+		if settings.SiteID == nil {
+			updates["site_id"] = nil
+		} else {
+			updates["site_id"] = *settings.SiteID
+		}
 	}
 	// Editing a threshold - raising it, lowering it, or disabling it -
 	// resets its active-alert flag without notifying: nothing about the

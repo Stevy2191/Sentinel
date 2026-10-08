@@ -393,7 +393,7 @@ func run() error {
 	api.RegisterNotificationRoutes(v1, notificationManager, monitorService, agentService, deviceService, siteService, authService)
 	api.RegisterSettingsRoutes(v1, settingsService, models.DefaultMonitorCheckInterval, authService, reportScheduler)
 	api.RegisterSSLCertificateRoutes(v1, sslChecker, authService)
-	api.RegisterAgentRoutes(v1, agentService, settingsService, authService)
+	api.RegisterAgentRoutes(v1, agentService, settingsService, authService, siteService)
 	// Network tools: runs, history and the live stream, for admins and users
 	// granted the tools.
 	api.RegisterToolRoutes(v1, toolRuns, toolHub, authService, auditService)
