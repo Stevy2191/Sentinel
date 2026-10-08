@@ -54,15 +54,20 @@ export default function CircuitsCard({ siteId, circuits, canEdit, onDelete, onCh
   const [editing, setEditing] = useState<SiteCircuit | 'new' | null>(null)
   const [confirming, setConfirming] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
 
   const remove = async (id: string) => {
+    if (deleting) return
     setError(null)
+    setDeleting(id)
     try {
       await onDelete(id)
       setConfirming(null)
       onChanged()
     } catch (err) {
       setError((err as ApiError).message || 'Could not delete the circuit')
+    } finally {
+      setDeleting(null)
     }
   }
 
@@ -98,11 +103,11 @@ export default function CircuitsCard({ siteId, circuits, canEdit, onDelete, onCh
                     (confirming === c.id ? (
                       <div className="flex shrink-0 items-center gap-1.5 text-xs">
                         <span className="text-amber-300">Delete?</span>
-                        <button className="btn-secondary !px-2 !py-0.5 text-xs" onClick={() => setConfirming(null)}>
+                        <button className="btn-secondary !px-2 !py-0.5 text-xs" disabled={deleting === c.id} onClick={() => { setConfirming(null); setError(null) }}>
                           Cancel
                         </button>
-                        <button className="btn bg-red-600 !px-2 !py-0.5 text-xs text-white hover:bg-red-700" onClick={() => void remove(c.id)}>
-                          Delete
+                        <button className="btn bg-red-600 !px-2 !py-0.5 text-xs text-white hover:bg-red-700" disabled={deleting === c.id} onClick={() => void remove(c.id)}>
+                          {deleting === c.id ? 'Deleting…' : 'Delete'}
                         </button>
                       </div>
                     ) : (
@@ -110,7 +115,7 @@ export default function CircuitsCard({ siteId, circuits, canEdit, onDelete, onCh
                         <button className="rounded p-1 text-slate-400 hover:bg-white/10 hover:text-white" aria-label={`Edit ${c.provider}`} onClick={() => setEditing(c)}>
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
-                        <button className="rounded p-1 text-red-400 hover:bg-red-500/10" aria-label={`Delete ${c.provider}`} onClick={() => setConfirming(c.id)}>
+                        <button className="rounded p-1 text-red-400 hover:bg-red-500/10" aria-label={`Delete ${c.provider}`} onClick={() => { setError(null); setConfirming(c.id) }}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>

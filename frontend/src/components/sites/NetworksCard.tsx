@@ -17,15 +17,20 @@ export default function NetworksCard({ siteId, networks, canEdit, onDelete, onCh
   const [editing, setEditing] = useState<SiteNetwork | 'new' | null>(null)
   const [confirming, setConfirming] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
 
   const remove = async (id: string) => {
+    if (deleting) return
     setError(null)
+    setDeleting(id)
     try {
       await onDelete(id)
       setConfirming(null)
       onChanged()
     } catch (err) {
       setError((err as ApiError).message || 'Could not delete the network')
+    } finally {
+      setDeleting(null)
     }
   }
 
@@ -59,11 +64,11 @@ export default function NetworksCard({ siteId, networks, canEdit, onDelete, onCh
                 (confirming === n.id ? (
                   <div className="flex shrink-0 items-center gap-1.5 text-xs">
                     <span className="text-amber-300">Delete?</span>
-                    <button className="btn-secondary !px-2 !py-0.5 text-xs" onClick={() => setConfirming(null)}>
+                    <button className="btn-secondary !px-2 !py-0.5 text-xs" disabled={deleting === n.id} onClick={() => { setConfirming(null); setError(null) }}>
                       Cancel
                     </button>
-                    <button className="btn bg-red-600 !px-2 !py-0.5 text-xs text-white hover:bg-red-700" onClick={() => void remove(n.id)}>
-                      Delete
+                    <button className="btn bg-red-600 !px-2 !py-0.5 text-xs text-white hover:bg-red-700" disabled={deleting === n.id} onClick={() => void remove(n.id)}>
+                      {deleting === n.id ? 'Deleting…' : 'Delete'}
                     </button>
                   </div>
                 ) : (
@@ -71,7 +76,7 @@ export default function NetworksCard({ siteId, networks, canEdit, onDelete, onCh
                     <button className="rounded p-1 text-slate-400 hover:bg-white/10 hover:text-white" aria-label={`Edit ${n.name}`} onClick={() => setEditing(n)}>
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
-                    <button className="rounded p-1 text-red-400 hover:bg-red-500/10" aria-label={`Delete ${n.name}`} onClick={() => setConfirming(n.id)}>
+                    <button className="rounded p-1 text-red-400 hover:bg-red-500/10" aria-label={`Delete ${n.name}`} onClick={() => { setError(null); setConfirming(n.id) }}>
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
