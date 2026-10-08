@@ -61,8 +61,8 @@ export default function SiteDetail() {
   const { events } = usePortEvents({ siteId: id }, 15)
   const { profile, error: profileError, refetch: refetchProfile } = useSiteProfile(id)
   const profileActions = useSiteProfileActions(id ?? '')
-  const { monitors } = useAllMonitors()
-  const { agents } = useAgents()
+  const { monitors, error: monitorsError } = useAllMonitors()
+  const { agents, error: agentsError } = useAgents()
   const siteMonitors = useMemo(() => monitors.filter((m) => m.site_id === id), [monitors, id])
   const siteAgents = useMemo(() => agents.filter((a) => a.site_id === id), [agents, id])
   const counts = useMemo(() => summaryCounts(siteMonitors, siteAgents, devices), [siteMonitors, siteAgents, devices])
@@ -93,7 +93,7 @@ export default function SiteDetail() {
   const isAdmin = site.access === 'admin'
   const canEdit = isAdmin || site.access === 'editable'
   const address = siteAddressLines(site)
-  const changed = () => void refetchProfile()
+  const changed = () => refetchProfile()
 
   const handleDelete = async () => {
     setError(null)
@@ -133,6 +133,7 @@ export default function SiteDetail() {
             <Link to={`/monitoring?site=${site.id}`} className="text-primary-400 hover:underline">
               Open in Monitoring
             </Link>
+            {(monitorsError || agentsError) && <span className="text-amber-300"> · some lists could not load</span>}
           </p>
         </div>
         {isAdmin && (
@@ -182,7 +183,7 @@ export default function SiteDetail() {
                 busy={profileActions.busy}
                 onSave={async (notes) => {
                   await profileActions.saveNotes(notes)
-                  changed()
+                  await changed()
                 }}
               />
             </>
@@ -257,8 +258,8 @@ export default function SiteDetail() {
             )}
           </section>
 
-          <SiteServersList agents={siteAgents} canHint={isAdmin} />
-          <SiteChecksList monitors={siteMonitors} />
+          <SiteServersList agents={siteAgents} canHint={isAdmin} error={agentsError} />
+          <SiteChecksList monitors={siteMonitors} error={monitorsError} />
 
           {devices.length > 0 && (
             <>

@@ -76,7 +76,13 @@ export default function Sites() {
                 return (
                   text && (
                     <p className="mt-3 text-xs text-slate-400">
-                      {text} · <span className={counts.down > 0 ? 'text-red-400' : ''}>{counts.down} down</span>
+                      {text}
+                      {lists.monitors && lists.agents && lists.devices && (
+                        <>
+                          {' '}
+                          · <span className={counts.down > 0 ? 'text-red-400' : ''}>{counts.down} down</span>
+                        </>
+                      )}
                     </p>
                   )
                 )

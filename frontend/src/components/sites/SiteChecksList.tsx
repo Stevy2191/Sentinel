@@ -5,11 +5,13 @@ import { formatResponseTime } from '@/utils/formatters'
 import { STATE_DOT } from '@/utils/siteProfile'
 
 /** The uptime checks whose site is this site that the viewer can see. */
-export default function SiteChecksList({ monitors }: { monitors: Monitor[] }) {
+export default function SiteChecksList({ monitors, error }: { monitors: Monitor[]; error?: string | null }) {
   return (
     <section className="space-y-3">
       <h2 className="text-lg font-light text-white">Uptime checks ({monitors.length})</h2>
-      {monitors.length === 0 ? (
+      {error ? (
+        <p className="text-sm text-red-400">Could not load uptime checks.</p>
+      ) : monitors.length === 0 ? (
         <p className="text-sm text-slate-500">None at this site. A monitor’s site is set in its edit form.</p>
       ) : (
         <ul className="card divide-y divide-white/10">

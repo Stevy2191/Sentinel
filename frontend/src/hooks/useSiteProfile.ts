@@ -85,10 +85,14 @@ const POLL_MS = 30_000
 export function useSiteProfile(siteId: string | undefined) {
   const [answer, setAnswer] = useState<{ siteId: string; profile: SiteProfile | null; error: string | null } | null>(null)
   const latest = useRef(0)
+  // Loads in progress; the poll skips a tick while one is running so a slow
+  // server cannot supersede every answer before it lands.
+  const inFlight = useRef(0)
 
   const refetch = useCallback(async () => {
     if (!siteId) return
     const mine = ++latest.current
+    inFlight.current++
     try {
       const { data } = await api.get<ApiResponse<SiteProfile>>(`/sites/${siteId}/profile`)
       if (mine === latest.current) setAnswer({ siteId, profile: data.data, error: null })
@@ -101,12 +105,16 @@ export function useSiteProfile(siteId: string | undefined) {
           error: (err as ApiError).message || 'Could not load the site profile',
         }))
       }
+    } finally {
+      inFlight.current--
     }
   }, [siteId])
 
   useEffect(() => {
     void refetch()
-    const t = window.setInterval(() => void refetch(), POLL_MS)
+    const t = window.setInterval(() => {
+      if (inFlight.current === 0) void refetch()
+    }, POLL_MS)
     return () => window.clearInterval(t)
   }, [refetch])
 
