@@ -48,7 +48,7 @@ Spec: `docs/superpowers/specs/2026-10-07-ux-reorganization-design.md` (agreed 20
 | Piece | What | State |
 |---|---|---|
 | 1 | Navigation and Settings: one grouped sidebar (Network folded in, Dashboards and Status Pages as one entry), one Settings area with a section menu, old addresses redirect | Done (`dev`); plan `plans/2026-10-07-ux-reorg-piece1-navigation-settings.md` |
-| 2 | Combined Monitoring list: uptime checks, servers and network devices on one page, a section per type, shared filters and one "+ Add"; monitors and servers gain an optional site | Done (`feature/ux-piece2`, awaiting merge to `dev`); plan `plans/2026-10-07-ux-piece2-monitoring-list.md` |
+| 2 | Combined Monitoring list: uptime checks, servers and network devices on one page, a section per type, shared filters and one "+ Add"; monitors and servers gain an optional site | Done (`feature/ux-piece2`, awaiting merge to `dev`); plan `plans/2026-10-07-ux-piece2-monitoring-list.md`; follow-ups `plans/2026-10-07-ux-piece2-followups.md` |
 | 3 | Site profiles: address, network information, ISPs and circuits per site | Not started |
 | 4 | Dashboards and status pages merged: status pages become publishable dashboards | Not started |
 
