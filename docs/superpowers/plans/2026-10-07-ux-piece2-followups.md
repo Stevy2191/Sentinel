@@ -2,9 +2,11 @@
 
 This records what was deliberately left for later while executing `2026-10-07-ux-piece2-monitoring-list.md` on `feature/ux-piece2`, and the rulings made at the final review.
 
-## `GET /monitor-groups` returns every grouped monitor to any signed-in user
+## Fixed: `GET /monitor-groups` returned every grouped monitor to any signed-in user
 
-**`GET /monitor-groups` returns every grouped monitor — including `headers` and `body`, which can hold credentials — to any signed-in user, regardless of ownership or sharing (`backend/internal/api/monitor_group_handler.go` ~63-86). Pre-existing; needs its own fix.** The Monitoring page now loads this endpoint on every visit, so the exposure is easier to reach than before.
+`GET /monitor-groups` returned every grouped monitor — including `headers` and `body`, which can hold credentials — to any signed-in user, regardless of ownership or sharing. Fixed on `fix/monitor-group-access`: each group now lists, counts and averages only the monitors the caller can see (admins see all). The same fix makes `POST /monitors/:id/group` require edit access to the monitor; before, anyone signed in could regroup any monitor. Tests: `TestDBMonitorGroupsShowOnlyVisibleMonitors`, `TestDBMoveMonitorToGroupNeedsEditAccess`.
+
+Still open, by design for now: monitor groups themselves are global, so any signed-in user can create, rename, reorder or delete a group (deleting one ungroups everyone's monitors in it).
 
 ## Rulings (declined to judge in this piece)
 

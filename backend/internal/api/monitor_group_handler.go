@@ -66,21 +66,48 @@ func GetMonitorGroupsHandler(monitorService *services.MonitorService, incidentSe
 			return
 		}
 
+		// Groups are shared by everyone, but their monitors are not: each group
+		// lists only the monitors the caller may see, so another user's monitor
+		// (and its request headers, which can hold credentials) never comes
+		// back just because it shares a group. Admins see every monitor.
+		userID, _, isAdmin, _ := GetUserFromContext(c)
+		var visible map[uuid.UUID]bool
+		if !isAdmin {
+			mine, err := monitorService.ListAccessibleMonitors(c.Request.Context(), userID, false, map[string]interface{}{})
+			if err != nil {
+				respondInternal(c, "GetMonitorGroupsHandler", err)
+				return
+			}
+			visible = make(map[uuid.UUID]bool, len(mine))
+			for _, m := range mine {
+				visible[m.ID] = true
+			}
+		}
+
 		end := time.Now()
 		start := end.Add(-groupUptimeWindow)
 
 		out := make([]gin.H, 0, len(groups))
 		for i := range groups {
 			g := groups[i]
+			members := g.Monitors
+			if visible != nil {
+				members = make([]models.Monitor, 0, len(g.Monitors))
+				for _, m := range g.Monitors {
+					if visible[m.ID] {
+						members = append(members, m)
+					}
+				}
+			}
 			out = append(out, gin.H{
 				"id":            g.ID,
 				"name":          g.Name,
 				"description":   g.Description,
 				"color":         g.Color,
 				"position":      g.Position,
-				"monitors":      g.Monitors,
-				"monitor_count": len(g.Monitors),
-				"group_uptime":  avgUptime(c, incidentService, g.Monitors, start, end),
+				"monitors":      members,
+				"monitor_count": len(members),
+				"group_uptime":  avgUptime(c, incidentService, members, start, end),
 				"created_at":    g.CreatedAt,
 				"updated_at":    g.UpdatedAt,
 			})
@@ -168,6 +195,10 @@ func MoveMonitorToGroupHandler(monitorService *services.MonitorService) gin.Hand
 	return func(c *gin.Context) {
 		monitorID, ok := parseMonitorID(c)
 		if !ok {
+			return
+		}
+		// Regrouping changes the monitor, so it needs edit access to it.
+		if !authorizeMonitor(c, monitorService, monitorID, "edit") {
 			return
 		}
 		var body moveMonitorBody
