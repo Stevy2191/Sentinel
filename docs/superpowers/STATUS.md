@@ -48,7 +48,7 @@ Spec: `docs/superpowers/specs/2026-10-07-ux-reorganization-design.md` (agreed 20
 | Piece | What | State |
 |---|---|---|
 | 1 | Navigation and Settings: one grouped sidebar (Network folded in, Dashboards and Status Pages as one entry), one Settings area with a section menu, old addresses redirect | Done (`dev`); plan `plans/2026-10-07-ux-reorg-piece1-navigation-settings.md` |
-| 2 | Combined Monitoring list: uptime checks, servers and network devices on one page, a section per type, shared filters and one "+ Add"; monitors and servers gain an optional site | Spec agreed: `specs/2026-10-07-ux-piece2-monitoring-list-design.md`; plan next |
+| 2 | Combined Monitoring list: uptime checks, servers and network devices on one page, a section per type, shared filters and one "+ Add"; monitors and servers gain an optional site | Done (`feature/ux-piece2`, awaiting merge to `dev`); plan `plans/2026-10-07-ux-piece2-monitoring-list.md` |
 | 3 | Site profiles: address, network information, ISPs and circuits per site | Not started |
 | 4 | Dashboards and status pages merged: status pages become publishable dashboards | Not started |
 
@@ -108,6 +108,18 @@ Phase 3 (not yet confirmed on real equipment; verified against the SNMP simulato
 2. MIB browser → test-walk a 3850 (e.g. the ENTITY-SENSOR or ENVMON tables) shows real rows.
 3. A 3850 and a 4500-X show the Health section within two minutes: CPU per switch, temperatures with sensible values, fans and power supplies with states.
 4. Copy the starter profile, add a metric from the browser with a preview, save, and see it on the device page (a copy starts with no match prefixes — attach it or add prefixes).
+
+### UX reorganization piece 2 (on the dev stack)
+
+1. The sidebar shows Monitoring, Sites, SSL & Domains under Monitor; Monitoring stays highlighted on a monitor, a server, a device and a port.
+2. `/monitoring` shows Uptime checks, Servers and Devices; each collapses and stays collapsed after a reload.
+3. All monitors appear (more than 50 if you have them).
+4. The type chips, status, site and group filters, and search narrow the sections; picking a group hides Servers and Devices; the address changes with each filter and Back restores the previous view.
+5. "Down" in the summary strip filters to everything down.
+6. Give a monitor and a server a site; both show it, and the site filter finds them with that site's devices. Delete a test site: its monitor and server stay, with no site.
+7. As a non-admin, the Site select in a monitor's form lists only your sites; an empty Servers or Devices section is not shown.
+8. `/uptime`, `/uptime?type=http`, `/servers` and `/network/devices` land on the right filtered view; the old bookmarks for monitor, server and device pages still work.
+9. + Add offers every create action from the three old pages, with the admin-only ones hidden from non-admins.
 
 ## How to resume
 

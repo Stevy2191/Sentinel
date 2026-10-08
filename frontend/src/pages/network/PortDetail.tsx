@@ -21,6 +21,7 @@ import {
   WARNING_CONDITIONS,
 } from '@/utils/network'
 import type { ApiError } from '@/services/api'
+import { monitoringPath } from '@/utils/monitoringView'
 
 const inputCls =
   'w-32 rounded-md border border-white/10 bg-slate-900/60 px-3 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary-500'
@@ -215,7 +216,7 @@ export default function PortDetail() {
     return (
       <div className="card p-8 text-center">
         <p className="text-slate-300">Port not found.</p>
-        <Link to={id ? `/network/devices/${id}` : '/network/devices'} className="mt-2 inline-block text-sm text-primary-400 hover:underline">
+        <Link to={id ? `/network/devices/${id}` : monitoringPath('devices')} className="mt-2 inline-block text-sm text-primary-400 hover:underline">
           Back to the device
         </Link>
       </div>

@@ -16,6 +16,7 @@ import { useAuthContext } from '@/context/AuthContext'
 import { useAppConfig } from '@/context/AppConfigContext'
 import type { ApiError } from '@/services/api'
 import { canUseNetTools, toolsQuery } from '@/utils/netTools'
+import { monitoringPath } from '@/utils/monitoringView'
 
 /** Label and value, the shape every row in the sidebar takes. */
 function InfoRow({ label, value }: { label: string; value: string | null | undefined }) {
@@ -70,7 +71,7 @@ export default function ServerDetail() {
     try {
       await remove(agentID)
       push(`${agent?.name ?? 'Agent'} unregistered`, 'success')
-      navigate('/servers')
+      navigate(monitoringPath('servers'))
     } catch (err) {
       push((err as ApiError).message || 'Could not unregister the agent', 'error')
     }
@@ -87,8 +88,8 @@ export default function ServerDetail() {
   if (error || !agent) {
     return (
       <div className="space-y-4">
-        <Link to="/servers" className="inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white">
-          <ArrowLeft className="h-4 w-4" /> Back to Servers
+        <Link to={monitoringPath('servers')} className="inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white">
+          <ArrowLeft className="h-4 w-4" /> Back to Monitoring
         </Link>
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-6 text-sm text-red-400">
           {error ?? 'That server could not be found.'}
@@ -106,14 +107,14 @@ export default function ServerDetail() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <Link
-            to="/servers"
+            to={monitoringPath('servers')}
             className="inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white"
           >
-            <ArrowLeft className="h-4 w-4" /> Back to Servers
+            <ArrowLeft className="h-4 w-4" /> Back to Monitoring
           </Link>
           <nav aria-label="Breadcrumb" className="mt-1 text-xs text-slate-600">
-            <Link to="/servers" className="transition hover:text-slate-400">
-              Server Monitoring
+            <Link to={monitoringPath('servers')} className="transition hover:text-slate-400">
+              Monitoring
             </Link>
             <span className="px-1">›</span>
             <span className="text-slate-500">{agent.name}</span>

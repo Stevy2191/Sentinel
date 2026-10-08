@@ -6,6 +6,7 @@ import { useScanSubnet } from '@/hooks/useDiscovery'
 import { useToasts, Toaster } from '@/components/Toast'
 import { useAuthContext } from '@/context/AuthContext'
 import type { ApiResponse, DiscoveredHost, MonitorInput } from '@/types'
+import { monitoringPath } from '@/utils/monitoringView'
 
 const DEFAULT_INTERVAL_SECONDS = 60
 const DEFAULT_TIMEOUT_SECONDS = 10
@@ -146,7 +147,7 @@ export default function NetworkDiscovery() {
           )}
         </div>
         <div className="flex gap-2">
-          <button className="rd-btn rd-btn-primary" onClick={() => navigate('/uptime')}>
+          <button className="rd-btn rd-btn-primary" onClick={() => navigate(monitoringPath('uptime'))}>
             Go to dashboard
           </button>
           <button className="rd-btn rd-btn-secondary" onClick={reset}>
@@ -162,7 +163,7 @@ export default function NetworkDiscovery() {
     <div className="mx-auto max-w-4xl space-y-5 pb-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="vs-title text-2xl">Network discovery</h1>
-        <button className="rd-btn rd-btn-secondary" onClick={() => navigate('/uptime')}>
+        <button className="rd-btn rd-btn-secondary" onClick={() => navigate(monitoringPath('uptime'))}>
           <X className="h-4 w-4" /> Cancel
         </button>
       </div>

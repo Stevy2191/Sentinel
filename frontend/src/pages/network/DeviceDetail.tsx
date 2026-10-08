@@ -20,6 +20,7 @@ import { CONDITION_LABEL, PORT_STATE, portState, portTitle, portTraffic, WARNING
 import type { ApiError } from '@/services/api'
 import { useAuthContext } from '@/context/AuthContext'
 import { canUseNetTools, toolsQuery } from '@/utils/netTools'
+import { monitoringPath } from '@/utils/monitoringView'
 
 /** Device types drawn as a faceplate; the rest get the port table only. */
 const FACEPLATE_TYPES = new Set(['switch', 'router'])
@@ -106,8 +107,8 @@ export default function DeviceDetail() {
     return (
       <div className="card p-8 text-center">
         <p className="text-slate-300">Device not found.</p>
-        <Link to="/network/devices" className="mt-2 inline-block text-sm text-primary-400 hover:underline">
-          Back to devices
+        <Link to={monitoringPath('devices')} className="mt-2 inline-block text-sm text-primary-400 hover:underline">
+          Back to Monitoring
         </Link>
       </div>
     )

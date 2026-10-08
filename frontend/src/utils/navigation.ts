@@ -33,9 +33,9 @@ export const NAV: NavGroup[] = [
   {
     label: 'Monitor',
     items: [
-      { to: '/uptime', label: 'Uptime', match: ['/uptime', '/monitors'] },
-      { to: '/servers', label: 'Servers', match: ['/servers'] },
-      { to: '/network/devices', label: 'Devices', match: ['/network/devices'] },
+      // One list for everything Sentinel watches; detail pages keep their
+      // own addresses, so they are matched here too.
+      { to: '/monitoring', label: 'Monitoring', match: ['/monitoring', '/monitors', '/servers', '/network/devices'] },
       { to: '/network/sites', label: 'Sites', match: ['/network/sites'] },
       { to: '/ssl', label: 'SSL & Domains', match: ['/ssl'] },
     ],
@@ -61,7 +61,7 @@ export const SETTINGS_NAV: NavItem = { to: '/settings', label: 'Settings', match
 
 /** isNavActive reports whether item is the sidebar entry for pathname. A
  *  trailing slash is ignored; a prefix only counts at a path boundary, so
- *  /uptimeX does not light up Uptime. */
+ *  /monitoringX does not light up Monitoring. */
 export function isNavActive(pathname: string, item: NavItem): boolean {
   const path = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
   return item.match.some((m) => (item.exact ? path === m : path === m || path.startsWith(`${m}/`)))
