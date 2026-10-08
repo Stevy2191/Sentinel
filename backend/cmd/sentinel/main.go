@@ -378,7 +378,7 @@ func run() error {
 	// All other /api/v1 routes require a valid JWT.
 	v1 := router.Group("/api/v1")
 	v1.Use(api.AuthMiddleware(authService))
-	api.RegisterMonitorRoutes(v1, monitorService, checkService, settingsService)
+	api.RegisterMonitorRoutes(v1, monitorService, checkService, settingsService, siteService)
 	api.RegisterMonitorCreationRoutes(v1, monitorService, checkService)
 	api.RegisterDiscoveryRoutes(v1, discoveryService, authService)
 	api.RegisterCheckRoutes(v1, checkService, incidentService, monitorService)

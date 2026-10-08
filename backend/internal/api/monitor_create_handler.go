@@ -142,6 +142,9 @@ func BulkCreateMonitorsHandler(monitorService *services.MonitorService) gin.Hand
 
 		for i := range req.Monitors {
 			monitor := req.Monitors[i]
+			// Bulk upload does not set a site (it sets no group either), and
+			// it must not be a way around the site check either.
+			monitor.SiteID = nil
 			row := bulkRowResult{Index: i, Name: monitor.Name}
 
 			// Mirror the defaults a single create would apply, so an import only

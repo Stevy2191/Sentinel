@@ -2,6 +2,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
@@ -153,7 +155,7 @@ func queryInt(c *gin.Context, key string, def int) int {
 }
 
 // CreateMonitorHandler handles POST /api/v1/monitors.
-func CreateMonitorHandler(monitorService *services.MonitorService, settingsService *services.SettingsService) gin.HandlerFunc {
+func CreateMonitorHandler(monitorService *services.MonitorService, settingsService *services.SettingsService, sites siteLabels) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var monitor models.Monitor
 		if err := c.ShouldBindJSON(&monitor); err != nil {
@@ -180,6 +182,12 @@ func CreateMonitorHandler(monitorService *services.MonitorService, settingsServi
 			return
 		}
 
+		// A site the caller cannot see is refused, the same as one that does
+		// not exist.
+		if monitor.SiteID != nil && !requireAssignableSite(c, sites, *monitor.SiteID) {
+			return
+		}
+
 		// The creator owns the monitor.
 		if userID, _, _, ok := GetUserFromContext(c); ok {
 			monitor.OwnerID = &userID
@@ -191,13 +199,15 @@ func CreateMonitorHandler(monitorService *services.MonitorService, settingsServi
 			return
 		}
 
+		labelMonitorSites(c.Request.Context(), sites, []*models.Monitor{created})
+
 		log.Printf("Monitor created: %s (ID: %s)", created.Name, created.ID)
 		respondSuccess(c, http.StatusCreated, created)
 	}
 }
 
 // GetMonitorsHandler handles GET /api/v1/monitors with filtering and pagination.
-func GetMonitorsHandler(monitorService *services.MonitorService) gin.HandlerFunc {
+func GetMonitorsHandler(monitorService *services.MonitorService, sites siteLabels) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		page := queryInt(c, "page", defaultPage)
 		if page < 1 {
@@ -257,6 +267,12 @@ func GetMonitorsHandler(monitorService *services.MonitorService) gin.HandlerFunc
 			pages = (total + limit - 1) / limit
 		}
 
+		labels := make([]*models.Monitor, len(pageItems))
+		for i := range pageItems {
+			labels[i] = &pageItems[i]
+		}
+		labelMonitorSites(c.Request.Context(), sites, labels)
+
 		now := time.Now()
 		enriched := make([]monitorResponse, 0, len(pageItems))
 		for _, m := range pageItems {
@@ -288,7 +304,7 @@ func GetMonitorsHandler(monitorService *services.MonitorService) gin.HandlerFunc
 }
 
 // GetMonitorHandler handles GET /api/v1/monitors/:id.
-func GetMonitorHandler(monitorService *services.MonitorService) gin.HandlerFunc {
+func GetMonitorHandler(monitorService *services.MonitorService, sites siteLabels) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := parseMonitorID(c)
 		if !ok {
@@ -304,6 +320,7 @@ func GetMonitorHandler(monitorService *services.MonitorService) gin.HandlerFunc 
 			respondError(c, classifyServiceError(err), err.Error())
 			return
 		}
+		labelMonitorSites(c.Request.Context(), sites, []*models.Monitor{monitor})
 		userID, _, isAdmin, _ := GetUserFromContext(c)
 		r := toMonitorResponse(*monitor, time.Now())
 		r.IsOwner = monitor.OwnerID != nil && *monitor.OwnerID == userID
@@ -324,7 +341,7 @@ func GetMonitorHandler(monitorService *services.MonitorService) gin.HandlerFunc 
 }
 
 // UpdateMonitorHandler handles PUT /api/v1/monitors/:id.
-func UpdateMonitorHandler(monitorService *services.MonitorService) gin.HandlerFunc {
+func UpdateMonitorHandler(monitorService *services.MonitorService, sites siteLabels) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := parseMonitorID(c)
 		if !ok {
@@ -335,17 +352,47 @@ func UpdateMonitorHandler(monitorService *services.MonitorService) gin.HandlerFu
 			return
 		}
 
+		// Bound twice: once into the monitor, and once to see whether
+		// site_id was sent at all, which the monitor's nil SiteID cannot say.
 		var updates models.Monitor
-		if err := c.ShouldBindJSON(&updates); err != nil {
+		if err := c.ShouldBindBodyWith(&updates, binding.JSON); err != nil {
 			respondError(c, http.StatusBadRequest, "invalid request body: "+err.Error())
 			return
 		}
+		var raw struct {
+			SiteID json.RawMessage `json:"site_id"`
+		}
+		if err := c.ShouldBindBodyWith(&raw, binding.JSON); err != nil {
+			respondError(c, http.StatusBadRequest, "invalid request body: "+err.Error())
+			return
+		}
+		site, err := parseSiteField(raw.SiteID)
+		if err != nil {
+			respondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		if site.Set && site.ID != nil {
+			current, err := monitorService.GetMonitor(c.Request.Context(), id)
+			if err != nil {
+				respondError(c, classifyServiceError(err), err.Error())
+				return
+			}
+			// Keeping the site a monitor already has is not choosing one: an
+			// editor who cannot see that site must still be able to save.
+			unchanged := current.SiteID != nil && *current.SiteID == *site.ID
+			if !unchanged && !requireAssignableSite(c, sites, *site.ID) {
+				return
+			}
+		}
+		updates.SiteIDSet = site.Set
+		updates.SiteID = site.ID
 
 		updated, err := monitorService.UpdateMonitor(c.Request.Context(), id, &updates)
 		if err != nil {
 			respondError(c, classifyServiceError(err), err.Error())
 			return
 		}
+		labelMonitorSites(c.Request.Context(), sites, []*models.Monitor{updated})
 
 		log.Printf("Monitor updated: %s (ID: %s)", updated.Name, updated.ID)
 		respondSuccess(c, http.StatusOK, updated)
@@ -579,12 +626,13 @@ func RegisterMonitorRoutes(
 	monitorService *services.MonitorService,
 	checkService *services.CheckService,
 	settingsService *services.SettingsService,
+	sites siteLabels,
 ) {
 	monitors := rg.Group("/monitors")
-	monitors.POST("", CreateMonitorHandler(monitorService, settingsService))
-	monitors.GET("", GetMonitorsHandler(monitorService))
-	monitors.GET("/:id", GetMonitorHandler(monitorService))
-	monitors.PUT("/:id", UpdateMonitorHandler(monitorService))
+	monitors.POST("", CreateMonitorHandler(monitorService, settingsService, sites))
+	monitors.GET("", GetMonitorsHandler(monitorService, sites))
+	monitors.GET("/:id", GetMonitorHandler(monitorService, sites))
+	monitors.PUT("/:id", UpdateMonitorHandler(monitorService, sites))
 	monitors.DELETE("/:id", DeleteMonitorHandler(monitorService))
 	monitors.POST("/:id/pause", PauseMonitorHandler(monitorService))
 	monitors.POST("/:id/resume", ResumeMonitorHandler(monitorService))
