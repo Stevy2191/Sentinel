@@ -71,6 +71,28 @@ func (s *SiteService) Get(ctx context.Context, id uuid.UUID) (*models.Site, erro
 	return &site, nil
 }
 
+// NamesByID returns the names of the given sites, keyed by id. Ids with no
+// site are left out. It labels monitors and agents with their site, so it
+// does not check access: anyone who can see a monitor sees its site's name.
+func (s *SiteService) NamesByID(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error) {
+	names := make(map[uuid.UUID]string, len(ids))
+	if len(ids) == 0 {
+		return names, nil
+	}
+	var rows []struct {
+		ID   uuid.UUID
+		Name string
+	}
+	if err := s.db.WithContext(ctx).Model(&models.Site{}).
+		Select("id, name").Where("id IN ?", ids).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("loading site names: %w", err)
+	}
+	for _, r := range rows {
+		names[r.ID] = r.Name
+	}
+	return names, nil
+}
+
 // SiteAccess is what userID may do in siteID. It returns ErrSiteNotFound for a
 // site that does not exist, so callers can answer 404 for both "missing" and
 // "not yours" without telling the two apart to the client.
