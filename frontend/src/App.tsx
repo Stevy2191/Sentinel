@@ -19,6 +19,7 @@ const Overview = lazy(() => import('@/pages/Overview'))
 const Dashboards = lazy(() => import('@/pages/dashboards/Dashboards'))
 const DashboardPage = lazy(() => import('@/pages/dashboards/DashboardPage'))
 const UptimeMonitoring = lazy(() => import('@/pages/UptimeMonitoring'))
+const Monitoring = lazy(() => import('@/pages/Monitoring'))
 const Incidents = lazy(() => import('@/pages/Incidents'))
 const IncidentDetail = lazy(() => import('@/pages/IncidentDetail'))
 const Monitors = lazy(() => import('@/pages/Monitors'))
@@ -102,6 +103,7 @@ export default function App() {
               {/* Kept: bookmarks and in-app links still point at /dashboard. */}
               <Route path="/dashboard" element={<Navigate to="/" replace />} />
               <Route path="/uptime" element={<UptimeMonitoring />} />
+              <Route path="/monitoring" element={<Monitoring />} />
               <Route path="/incidents" element={<Incidents />} />
                 <Route path="/incidents/:id" element={<IncidentDetail />} />
               <Route path="/monitors" element={<Monitors />} />
