@@ -98,8 +98,8 @@ shows `060_monitor_agent_sites.sql` first):
   `site_id`.
 - `site_circuits`: `id UUID PK`, `site_id UUID NOT NULL REFERENCES sites(id) ON
   DELETE CASCADE`, `provider VARCHAR(100) NOT NULL`, `circuit_ref
-  VARCHAR(100)`, `kind VARCHAR(20) NOT NULL`, `download_mbps NUMERIC`,
-  `upload_mbps NUMERIC`, `support_phone VARCHAR(50)`, `account_number
+  VARCHAR(100)`, `kind VARCHAR(20) NOT NULL`, `download_mbps DOUBLE PRECISION`,
+  `upload_mbps DOUBLE PRECISION`, `support_phone VARCHAR(50)`, `account_number
   VARCHAR(100)`, `notes VARCHAR(1000)`, `interface_id UUID REFERENCES
   device_interfaces(id) ON DELETE SET NULL`, `created_at`/`updated_at
   TIMESTAMPTZ`; index on `site_id`.
@@ -122,7 +122,8 @@ All refusals are 400 with a message naming the field.
   already has 10.20.0.0/24"); different sites may reuse one.
 - **Circuit:** provider required, at most 100 characters; type one of `fiber`,
   `cable`, `dsl`, `fixed_wireless`, `cellular`, `copper`, `other` (shown as
-  Fiber, Cable, DSL, Fixed wireless, Cellular, T1/copper, Other); download and
+  Fiber, Cable, DSL, Fixed wireless, Cellular, T1/copper, Other; blank means
+  `other`); download and
   upload speed, when given, greater than 0 and at most 100000 Mbps (decimals
   allowed); circuit ID and account number at most 100 characters; support phone
   at most 50 (free text); notes at most 1000. The port, when given, must be a
@@ -136,8 +137,8 @@ All refusals are 400 with a message naming the field.
   the site. Account numbers are part of the profile and are visible to
   read-only sharers.
 - **Change networks, circuits and notes:** admins and editable sharers. A
-  read-only sharer is refused with 403 "you can view this site but not change
-  it"; someone the site is not shared with gets 404, as today.
+  read-only sharer is refused with 403 "you need edit access to this site" (the
+  wording the device and scan routes already use); someone the site is not shared with gets 404, as today.
 - **Name, description, address, delete, sharing:** admins only, unchanged.
 - Each change to a network, circuit or the notes is written to the audit log
   (`site_network_created` / `_updated` / `_deleted`, `site_circuit_created` /
