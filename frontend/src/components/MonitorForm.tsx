@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import NotificationChannelPicker from '@/components/NotificationChannelPicker'
+import SiteSelect from '@/components/SiteSelect'
 import type { ApiError } from '@/services/api'
 import type { Monitor, MonitorInput, MonitorType } from '@/types'
 import { useAppConfig } from '@/context/AppConfigContext'
@@ -20,6 +21,8 @@ export interface MonitorFormValues {
   sla_target: string
   /** null = all channels, [] = none, [...] = only those. */
   notify_channels: string[] | null
+  /** A site id, or '' for no site. */
+  site_id: string
 }
 
 export const emptyMonitorForm: MonitorFormValues = {
@@ -36,6 +39,7 @@ export const emptyMonitorForm: MonitorFormValues = {
   tags: '',
   sla_target: '',
   notify_channels: null,
+  site_id: '',
 }
 
 /** Build form values from an existing monitor (for editing). */
@@ -54,6 +58,7 @@ export function monitorToForm(m: Monitor): MonitorFormValues {
     tags: (m.tags ?? []).join(', '),
     sla_target: m.sla_target != null ? String(m.sla_target) : '',
     notify_channels: m.notify_channels ?? null,
+    site_id: m.site_id ?? '',
   }
 }
 
@@ -135,6 +140,8 @@ export function monitorFormToInput(v: MonitorFormValues): MonitorInput {
   // rather than omitted, so editing a monitor down to a blank field actually
   // clears a previously-set override instead of leaving it untouched.
   input.sla_target = v.sla_target.trim() ? Number(v.sla_target.trim()) : 0
+  // Always sent: null is how an edit clears the site.
+  input.site_id = v.site_id || null
   return input
 }
 
@@ -145,6 +152,8 @@ interface Props {
   error?: ApiError | null
   submitLabel?: string
   onCancel?: () => void
+  /** The current site's name, for a site the user cannot see. */
+  currentSiteName?: string | null
 }
 
 const inputCls =
@@ -186,6 +195,7 @@ export default function MonitorForm({
   error,
   submitLabel = 'Save Monitor',
   onCancel,
+  currentSiteName,
 }: Props) {
   // A new monitor starts at the instance's configured interval (Settings →
   // System), so the field agrees with what the API would apply if the value
@@ -354,6 +364,14 @@ export default function MonitorForm({
             value={values.tags}
             onChange={(e) => set('tags', e.target.value)}
             placeholder="prod, critical"
+          />
+        </Field>
+        <Field label="Site" help="Where this service is, for filtering the Monitoring list. It doesn't change who can see the monitor.">
+          <SiteSelect
+            value={values.site_id}
+            onChange={(v) => set('site_id', v)}
+            currentName={currentSiteName ?? null}
+            className={inputCls}
           />
         </Field>
         <Field

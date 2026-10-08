@@ -16,6 +16,7 @@ import { useCreateMonitor } from '@/hooks/useMonitors'
 import { useMonitorGroups, useMoveMonitorToGroup } from '@/hooks/useMonitorGroups'
 import { useToasts, Toaster } from '@/components/Toast'
 import NotificationChannelPicker from '@/components/NotificationChannelPicker'
+import SiteSelect from '@/components/SiteSelect'
 import { useAvailableChannels } from '@/hooks/useNotificationConfig'
 import {
   emptyMonitorForm,
@@ -528,6 +529,10 @@ export default function MonitorWizard() {
                     </option>
                   ))}
                 </select>
+              </label>
+              <label className="block">
+                <span className="vs-eyebrow mb-1 block">Site (optional)</span>
+                <SiteSelect value={values.site_id} onChange={(v) => set('site_id', v)} className={inputCls} style={inputStyle} />
               </label>
             </div>
 

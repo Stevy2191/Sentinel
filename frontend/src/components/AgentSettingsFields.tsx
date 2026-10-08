@@ -1,5 +1,6 @@
 import type { RefObject } from 'react'
 import NotificationsSection from './NotificationsSection'
+import SiteSelect from '@/components/SiteSelect'
 import type { AgentOS } from '@/hooks/useAgents'
 
 /** The settings an operator owns. Credentials are not among them. */
@@ -7,6 +8,8 @@ export interface AgentSettings {
   name: string
   osType: AgentOS
   ipOverride: string
+  /** A site id, or '' for no site. */
+  siteId: string
   interval: number
   retries: number
   /** Whether this server alerts at all. */
@@ -188,6 +191,19 @@ export default function AgentSettingsFields({
               {errors.ip ??
                 'Leave blank to auto-detect, or enter the internal address this host is reached on (e.g. 192.168.1.10).'}
             </p>
+          </div>
+
+          <div>
+            <label htmlFor="agent-site" className="mb-1 block text-sm font-medium text-white">
+              Site
+            </label>
+            <SiteSelect
+              id="agent-site"
+              value={values.siteId}
+              onChange={(v) => set('siteId', v)}
+              className={`${field} cursor-pointer appearance-none`}
+            />
+            <p className="mt-1 text-xs text-slate-500">Where this host is, for filtering the Monitoring list (optional)</p>
           </div>
 
           <div>

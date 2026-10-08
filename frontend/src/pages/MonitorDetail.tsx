@@ -228,6 +228,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
         <h1 className="vs-title text-2xl">Edit Monitor</h1>
         <MonitorForm
           initialValues={monitorToForm(monitor)}
+          currentSiteName={monitor.site_name ?? null}
           onSubmit={handleUpdate}
           isLoading={updating}
           error={updateErr}

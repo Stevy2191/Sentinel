@@ -61,6 +61,11 @@ export interface Monitor {
   // [] = notifications disabled for this monitor, [...] = only those channels.
   notify_channels?: string[] | null
   group_id?: string | null
+  /** The site this monitor is labelled with. A label only: it does not
+   *  change who can see the monitor. */
+  site_id?: string | null
+  /** Read-only: the site's name, on list and detail responses. */
+  site_name?: string | null
   owner_id?: string | null
   is_owner?: boolean
   permission?: 'owner' | 'admin' | 'editable' | 'readonly'
@@ -98,6 +103,8 @@ export interface MonitorInput {
   enabled?: boolean
   tags?: string[]
   notify_channels?: string[] | null
+  /** null clears the site; left out keeps it. */
+  site_id?: string | null
   // Verify the TLS certificate on HTTPS checks. Omitted means verify, which is
   // also the column default — never send undefined meaning "off".
   ssl_verify?: boolean
