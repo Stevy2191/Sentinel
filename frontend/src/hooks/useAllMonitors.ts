@@ -17,16 +17,20 @@ export function useAllMonitors(pollMs = 30_000) {
   // Each load takes a number; only the newest may write, so a slow earlier
   // load cannot overwrite a newer one.
   const latest = useRef(0)
+  // Loads in progress; the poll skips a tick while one is running so a slow
+  // server cannot starve every load.
+  const inFlight = useRef(0)
 
   const refetch = useCallback(async () => {
     const mine = ++latest.current
+    inFlight.current++
     try {
       const all = await fetchAllPages(async (page) => {
         const { data } = await api.get<ApiResponse<PaginatedMonitors>>('/monitors', {
           params: { page, limit: PAGE_SIZE },
         })
         return data.data
-      })
+      }, undefined, (m) => m.id)
       if (mine !== latest.current) return
       setMonitors(all)
       setError(null)
@@ -35,13 +39,16 @@ export function useAllMonitors(pollMs = 30_000) {
       if (mine !== latest.current) return
       setError((err as ApiError).message || 'Failed to load monitors')
     } finally {
+      inFlight.current--
       if (mine === latest.current) setLoading(false)
     }
   }, [])
 
   useEffect(() => {
     void refetch()
-    const t = window.setInterval(() => void refetch(), pollMs)
+    const t = window.setInterval(() => {
+      if (inFlight.current === 0) void refetch()
+    }, pollMs)
     return () => window.clearInterval(t)
   }, [refetch, pollMs])
 

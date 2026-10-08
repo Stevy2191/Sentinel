@@ -192,7 +192,7 @@ export default function BulkUpload() {
         </div>
         <div className="flex gap-2">
           <button className="rd-btn rd-btn-primary" onClick={() => navigate(monitoringPath('uptime'))}>
-            Go to dashboard
+            Go to Monitoring
           </button>
           <button className="rd-btn rd-btn-secondary" onClick={reset}>
             Import more

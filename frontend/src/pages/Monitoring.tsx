@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { RefreshCw } from 'lucide-react'
 import { useAuthContext } from '@/context/AuthContext'
 import { useAllMonitors } from '@/hooks/useAllMonitors'
 import { useMonitorGroups } from '@/hooks/useMonitorGroups'
@@ -66,6 +67,16 @@ export default function Monitoring() {
     return () => window.clearInterval(t)
   }, [refetchGroups])
 
+  const [refreshing, setRefreshing] = useState(false)
+  const refreshAll = async () => {
+    setRefreshing(true)
+    try {
+      await Promise.all([refetchMonitorList(), refetchGroups(), refetchAgents(), refetchDevices()])
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
   const refetchMonitors = useCallback(async () => {
     await Promise.all([refetchMonitorList(), refetchGroups()])
   }, [refetchMonitorList, refetchGroups])
@@ -93,6 +104,8 @@ export default function Monitoring() {
   const counts = useMemo(() => summaryCounts(monitors, agents, devices), [monitors, agents, devices])
   const siteOptions = useMemo(() => siteFilterOptions(sites, [...monitors, ...agents]), [sites, monitors, agents])
   const narrowed = filtersNarrow(filters)
+  // Keeps the chosen section, so the user stays where they were.
+  const clearFilters = () => setFilters({ ...NO_FILTERS, show: filters.show })
 
   const [createOpen, setCreateOpen] = useState(false)
   const [groupModal, setGroupModal] = useState<{ mode: 'create' | 'edit'; group?: MonitorGroup } | null>(null)
@@ -119,13 +132,23 @@ export default function Monitoring() {
           <h1 className="text-4xl font-light text-white">Monitoring</h1>
           <p className="mt-2 text-sm text-slate-400">Uptime checks, servers and network devices in one place</p>
         </div>
-        <AddMenu
-          isAdmin={isAdmin}
-          onMonitor={() => setCreateOpen(true)}
-          onGroup={() => setGroupModal({ mode: 'create' })}
-          onServer={() => setAgentModal({ existing: null })}
-          onDevice={() => setAddingDevice(true)}
-        />
+        <div className="flex items-center gap-2">
+          <button
+            className="btn-secondary px-2.5"
+            onClick={() => void refreshAll()}
+            aria-label="Refresh"
+            title="Refresh"
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshing || monitorsLoading ? 'animate-spin' : ''}`} />
+          </button>
+          <AddMenu
+            isAdmin={isAdmin}
+            onMonitor={() => setCreateOpen(true)}
+            onGroup={() => setGroupModal({ mode: 'create' })}
+            onServer={() => setAgentModal({ existing: null })}
+            onDevice={() => setAddingDevice(true)}
+          />
+        </div>
       </div>
 
       <MonitoringToolbar
@@ -137,7 +160,7 @@ export default function Monitoring() {
         groups={groups}
       />
 
-      <SummaryStrip counts={counts} missing={missing} onPick={(status) => setFilters({ ...filters, status })} />
+      <SummaryStrip counts={counts} missing={missing} onPick={(status) => setFilters({ ...NO_FILTERS, status })} />
 
       {nothingAtAll ? (
         <div className="rounded-lg border border-white/10 bg-slate-800/40 p-10 text-center text-sm text-slate-300">
@@ -162,6 +185,7 @@ export default function Monitoring() {
                 groups={groups}
                 filters={filters}
                 onFilters={setFilters}
+                onClearFilters={clearFilters}
                 narrowed={narrowed}
                 uptimeById={uptimeById}
                 incidents30d={monthSummary?.aggregate.total_incidents ?? null}
@@ -201,6 +225,7 @@ export default function Monitoring() {
                 isAdmin={isAdmin}
                 filters={filters}
                 onFilters={setFilters}
+                onClearFilters={clearFilters}
                 collapsed={!!sectionToggles.on.devices}
                 onToggle={() => sectionToggles.toggle('devices')}
                 loading={devicesLoading}

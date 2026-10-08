@@ -4,7 +4,7 @@ import MonitorTable from '@/components/MonitorTable'
 import SectionShell from '@/components/monitoring/SectionShell'
 import EmptyLine from '@/components/monitoring/EmptyLine'
 import { useRememberedToggles } from '@/hooks/useRememberedToggles'
-import { MONITOR_SORTS, monitorState, sortMonitors, type MonitorSortKey, type MonitoringFilters } from '@/utils/monitoringView'
+import { MONITOR_SORTS, monitorState, sortMonitors, unknownOption, type MonitorSortKey, type MonitoringFilters } from '@/utils/monitoringView'
 import type { Monitor, MonitorGroup } from '@/types'
 
 interface Props {
@@ -15,6 +15,8 @@ interface Props {
   groups: MonitorGroup[]
   filters: MonitoringFilters
   onFilters: (next: MonitoringFilters) => void
+  /** Back to no filters, staying on this section. */
+  onClearFilters: () => void
   /** Whether any filter narrows the rows (empty groups are then hidden). */
   narrowed: boolean
   uptimeById: Map<string, number>
@@ -44,7 +46,10 @@ export default function UptimeSection(p: Props) {
 
   const sorted = useMemo(() => sortMonitors(p.monitors, sort, p.uptimeById), [p.monitors, sort, p.uptimeById])
   const types = useMemo(() => [...new Set(p.all.map((m) => m.type))].sort(), [p.all])
-  const tags = useMemo(() => [...new Set(p.all.flatMap((m) => m.tags ?? []))].sort(), [p.all])
+  // Selected tags stay listed even when no monitor has them, so each can be
+  // switched off.
+  const tags = useMemo(() => [...new Set([...p.all.flatMap((m) => m.tags ?? []), ...p.filters.tags])].sort(), [p.all, p.filters.tags])
+  const extraType = unknownOption(p.filters.type, types, null)
   const avgResponse = useMemo(() => {
     const timed = p.all.filter((m) => m.enabled && m.last_response_time_ms > 0)
     return timed.length ? Math.round(timed.reduce((sum, m) => sum + m.last_response_time_ms, 0) / timed.length) : 0
@@ -89,7 +94,7 @@ export default function UptimeSection(p: Props) {
       onRetry={p.onRetry}
       summary={
         <span>
-          {avgResponse > 0 ? `Avg ${avgResponse} ms` : 'No response times yet'} · {p.incidents30d ?? 0} incidents (30 days)
+          {avgResponse > 0 ? `Avg ${avgResponse} ms` : 'No response times yet'} · {p.incidents30d ?? '…'} incidents (30 days)
         </span>
       }
       controls={
@@ -106,6 +111,7 @@ export default function UptimeSection(p: Props) {
                 {t.toUpperCase()}
               </option>
             ))}
+            {extraType && <option value={extraType.value}>{extraType.label}</option>}
           </select>
           <select className="rd-select" aria-label="Sort monitors" value={sort} onChange={(e) => setSort(e.target.value as MonitorSortKey)}>
             {MONITOR_SORTS.map((s) => (
@@ -119,8 +125,6 @@ export default function UptimeSection(p: Props) {
     >
       {p.all.length === 0 ? (
         !p.error && <EmptyLine text="No uptime checks yet." action="Add an uptime monitor" onAction={p.onAdd} />
-      ) : p.monitors.length === 0 ? (
-        <EmptyLine text="Nothing in this section matches these filters." />
       ) : (
         <div className="space-y-5">
           {tags.length > 0 && (
@@ -133,6 +137,10 @@ export default function UptimeSection(p: Props) {
               ))}
             </div>
           )}
+          {p.monitors.length === 0 ? (
+            <EmptyLine text="Nothing in this section matches these filters." action="Clear filters" onAction={p.onClearFilters} />
+          ) : (
+            <>
           {p.groups.map((g) => {
             const members = byGroup.get(g.id) ?? []
             if (p.narrowed && members.length === 0) return null
@@ -172,6 +180,8 @@ export default function UptimeSection(p: Props) {
             ) : (
               table(ungrouped)
             ))}
+            </>
+          )}
         </div>
       )}
     </SectionShell>

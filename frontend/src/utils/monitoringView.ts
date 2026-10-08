@@ -245,6 +245,19 @@ export function siteFilterOptions(
   return [...byId].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
 }
 
+/** unknownOption is the extra select option for a selected value no loaded row
+ *  offers (a deleted group or site, a bookmarked type), so the select shows
+ *  what is applied and choosing "All" is a real change. known includes the
+ *  fixed values such as "none". Null label means the value upper-cased. */
+export function unknownOption(
+  selected: string | null,
+  known: string[],
+  label: string | null
+): { value: string; label: string } | null {
+  if (!selected || known.includes(selected)) return null
+  return { value: selected, label: label ?? selected.toUpperCase() }
+}
+
 export const MONITOR_SORTS = [
   { key: 'down-first', label: 'Down first' },
   { key: 'name', label: 'Name (A–Z)' },

@@ -26,16 +26,18 @@ export default function SectionShell(p: Props) {
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <button className="flex items-center gap-2 text-left" onClick={p.onToggle} aria-expanded={!p.collapsed}>
-          <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${p.collapsed ? '-rotate-90' : ''}`} />
-          <h2 className="text-xl font-light text-white">{p.title}</h2>
-          <span className="text-sm tabular-nums text-slate-400">{p.loading ? '…' : p.count}</span>
-          {p.down > 0 && (
-            <span className="rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-400">
-              {p.down} down
-            </span>
-          )}
-        </button>
+        <h2 className="text-xl font-light text-white">
+          <button className="flex items-center gap-2 text-left" onClick={p.onToggle} aria-expanded={!p.collapsed}>
+            <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${p.collapsed ? '-rotate-90' : ''}`} />
+            {p.title}
+            <span className="text-sm tabular-nums text-slate-400">{p.loading ? '…' : p.count}</span>
+            {p.down > 0 && (
+              <span className="rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-400">
+                {p.down} down
+              </span>
+            )}
+          </button>
+        </h2>
         {!p.collapsed && (p.summary || p.controls) && (
           <div className="flex flex-wrap items-center gap-3 text-sm text-slate-400">
             {p.summary}
