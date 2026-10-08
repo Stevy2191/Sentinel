@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
 	"github.com/Stevy2191/Sentinel/backend/internal/services"
@@ -83,6 +85,8 @@ type createAgentRequest struct {
 	// IPAddressOverride pins the address this host is recorded under. Empty
 	// means use whatever the agent detects.
 	IPAddressOverride *string `json:"ip_address_override"`
+	// SiteID labels the server with a site. Omitted means no site.
+	SiteID *uuid.UUID `json:"site_id"`
 	// NotifyChannels selects where this agent alerts. Omitted means every
 	// enabled channel; an explicit empty list means nowhere.
 	NotifyChannels *[]string `json:"notify_channels"`
@@ -172,7 +176,7 @@ func parseIPOverride(c *gin.Context, raw *string) (*string, bool) {
 }
 
 // CreateAgentHandler handles POST /api/v1/agents.
-func CreateAgentHandler(agents *services.AgentService, settings *services.SettingsService) gin.HandlerFunc {
+func CreateAgentHandler(agents *services.AgentService, settings *services.SettingsService, sites siteLabels) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req createAgentRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -205,6 +209,9 @@ func CreateAgentHandler(agents *services.AgentService, settings *services.Settin
 			!validateThreshold(c, "disk_threshold_percent", req.DiskThresholdPercent) {
 			return
 		}
+		if req.SiteID != nil && !requireAssignableSite(c, sites, *req.SiteID) {
+			return
+		}
 
 		agent := &models.Agent{
 			Name:              name,
@@ -212,6 +219,7 @@ func CreateAgentHandler(agents *services.AgentService, settings *services.Settin
 			CheckInterval:     interval,
 			RetryAttempts:     retries,
 			IPAddressOverride: override,
+			SiteID:            req.SiteID,
 			// A newly added server should be watched from the start: omitted
 			// defaults to DefaultThresholdPercent rather than "disabled",
 			// unlike an update, where omitted means "leave alone" (there is
@@ -233,6 +241,7 @@ func CreateAgentHandler(agents *services.AgentService, settings *services.Settin
 
 		// The token is returned here and nowhere else in a list response: this
 		// is the moment the operator needs it to build the install command.
+		labelAgentSites(c.Request.Context(), sites, []*models.Agent{agent})
 		urls := resolveSentinelURLs(c, settings)
 		respondSuccess(c, http.StatusCreated, gin.H{
 			"agent":        agent,
@@ -246,16 +255,19 @@ func CreateAgentHandler(agents *services.AgentService, settings *services.Settin
 }
 
 // ListAgentsHandler handles GET /api/v1/agents.
-func ListAgentsHandler(agents *services.AgentService) gin.HandlerFunc {
+func ListAgentsHandler(agents *services.AgentService, sites siteLabels) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		list, err := agents.List(c.Request.Context())
 		if err != nil {
 			respondInternal(c, "ListAgentsHandler", err)
 			return
 		}
+		labels := make([]*models.Agent, len(list))
 		for i := range list {
 			list[i].HideToken()
+			labels[i] = &list[i]
 		}
+		labelAgentSites(c.Request.Context(), sites, labels)
 		respondSuccess(c, http.StatusOK, list)
 	}
 }
@@ -263,13 +275,14 @@ func ListAgentsHandler(agents *services.AgentService) gin.HandlerFunc {
 // GetAgentHandler handles GET /api/v1/agents/:agent_id. Admin-only, and the
 // one place the token can be read back — the install command cannot be
 // rebuilt without it.
-func GetAgentHandler(agents *services.AgentService, settings *services.SettingsService) gin.HandlerFunc {
+func GetAgentHandler(agents *services.AgentService, settings *services.SettingsService, sites siteLabels) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		agent, err := agents.Get(c.Request.Context(), c.Param("agent_id"))
 		if err != nil {
 			respondAgentError(c, err)
 			return
 		}
+		labelAgentSites(c.Request.Context(), sites, []*models.Agent{agent})
 		urls := resolveSentinelURLs(c, settings)
 		respondSuccess(c, http.StatusOK, gin.H{
 			"agent":        agent,
@@ -286,6 +299,9 @@ type updateAgentRequest struct {
 	CheckInterval     *int    `json:"check_interval"`
 	RetryAttempts     *int    `json:"retry_attempts"`
 	IPAddressOverride *string `json:"ip_address_override"`
+	// SiteID left out keeps the site, null clears it, an id sets it. Raw so
+	// the handler can tell the first two apart.
+	SiteID json.RawMessage `json:"site_id"`
 	// NotifyChannels omitted leaves the current selection alone; an explicit
 	// empty list turns alerts off for this agent.
 	NotifyChannels *[]string `json:"notify_channels"`
@@ -297,7 +313,7 @@ type updateAgentRequest struct {
 }
 
 // UpdateAgentHandler handles PATCH /api/v1/agents/:agent_id.
-func UpdateAgentHandler(agents *services.AgentService) gin.HandlerFunc {
+func UpdateAgentHandler(agents *services.AgentService, sites siteLabels) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		current, err := agents.Get(c.Request.Context(), c.Param("agent_id"))
 		if err != nil {
@@ -343,12 +359,24 @@ func UpdateAgentHandler(agents *services.AgentService) gin.HandlerFunc {
 			return
 		}
 
+		site, err := parseSiteField(req.SiteID)
+		if err != nil {
+			respondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		unchanged := site.ID != nil && current.SiteID != nil && *current.SiteID == *site.ID
+		if site.ID != nil && !unchanged && !requireAssignableSite(c, sites, *site.ID) {
+			return
+		}
+
 		settings := services.AgentSettings{
 			Name:                   name,
 			OSType:                 osType,
 			CheckInterval:          interval,
 			RetryAttempts:          retries,
 			IPOverride:             override,
+			SetSite:                site.Set,
+			SiteID:                 site.ID,
 			CPUThresholdPercent:    req.CPUThresholdPercent,
 			MemoryThresholdPercent: req.MemoryThresholdPercent,
 			DiskThresholdPercent:   req.DiskThresholdPercent,
@@ -364,6 +392,7 @@ func UpdateAgentHandler(agents *services.AgentService) gin.HandlerFunc {
 			return
 		}
 		updated.HideToken()
+		labelAgentSites(c.Request.Context(), sites, []*models.Agent{updated})
 		respondSuccess(c, http.StatusOK, updated)
 	}
 }
@@ -702,21 +731,21 @@ func respondAgentError(c *gin.Context, err error) {
 
 // RegisterAgentRoutes mounts the management routes, which are admin-gated by
 // the caller's group.
-func RegisterAgentRoutes(rg *gin.RouterGroup, agents *services.AgentService, settings *services.SettingsService, users adminChecker) {
+func RegisterAgentRoutes(rg *gin.RouterGroup, agents *services.AgentService, settings *services.SettingsService, users adminChecker, sites siteLabels) {
 	// Reading agents and their metrics is available to any signed-in user, the
 	// same as monitors: it is dashboard data. Registering, changing and
 	// removing an agent are administrative.
 	g := rg.Group("/agents")
-	g.GET("", ListAgentsHandler(agents))
+	g.GET("", ListAgentsHandler(agents, sites))
 	g.GET("/:agent_id/metrics", GetAgentMetricsHandler(agents))
 	g.GET("/:agent_id/status", GetAgentStatusHandler(agents))
 
 	admin := rg.Group("/agents", RequireAdmin(users))
-	admin.POST("", CreateAgentHandler(agents, settings))
+	admin.POST("", CreateAgentHandler(agents, settings, sites))
 	// Returns the token, so it is admin-only and sits apart from the read
 	// routes above.
-	admin.GET("/:agent_id", GetAgentHandler(agents, settings))
-	admin.PATCH("/:agent_id", UpdateAgentHandler(agents))
+	admin.GET("/:agent_id", GetAgentHandler(agents, settings, sites))
+	admin.PATCH("/:agent_id", UpdateAgentHandler(agents, sites))
 	admin.DELETE("/:agent_id", DeleteAgentHandler(agents))
 	// Issues a new token, recreating the registration if it was deleted. Its
 	// whole purpose is to hand out a credential, so it is administrative.
