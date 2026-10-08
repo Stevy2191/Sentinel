@@ -26,6 +26,7 @@ function settingsOf(agent: Agent): AgentSettings {
     name: agent.name,
     osType: agent.os_type,
     ipOverride: agent.ip_address_override ?? '',
+    siteId: agent.site_id ?? '',
     interval: agent.check_interval,
     retries: agent.retry_attempts,
     // null means every enabled channel, an empty list means none — the same
@@ -103,6 +104,7 @@ export default function EditServerAgentModal({ agent, isOpen, onClose, onSaved, 
 
   const { errors, valid } = validateAgentSettings(values, true)
   const settingsChanged =
+    values.siteId !== initial.siteId ||
     values.name !== initial.name ||
     values.osType !== initial.osType ||
     values.ipOverride !== initial.ipOverride ||
@@ -132,6 +134,7 @@ export default function EditServerAgentModal({ agent, isOpen, onClose, onSaved, 
           // Sent even when empty: that is how an override is cleared and the
           // address goes back to whatever the agent detects.
           ip_address_override: values.ipOverride.trim(),
+          site_id: values.siteId || null,
           notify_channels: notifyChannelsPayload(values),
           cpu_threshold_percent: thresholdPayload(values.cpuThresholdEnabled, values.cpuThresholdPercent),
           memory_threshold_percent: thresholdPayload(

@@ -118,6 +118,8 @@ function MonitorRow({
           <span className="text-xs font-medium uppercase text-slate-400">{monitor.type}</span>
         </td>
 
+        <td className="px-4 py-3 text-sm text-slate-400">{monitor.site_name ?? '—'}</td>
+
         <td className="px-4 py-3">
           <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${pill.cls}`}>
             <span className={`h-1.5 w-1.5 rounded-full ${pill.dot}`} />
@@ -210,6 +212,7 @@ export default function MonitorTable({
             <tr className="border-b border-white/10 bg-slate-900">
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-400">Service Name</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-400">Service Type</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-slate-400">Site</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-400">Service Status</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-400">Response Time</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-400">Uptime</th>

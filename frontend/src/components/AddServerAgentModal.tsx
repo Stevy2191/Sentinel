@@ -23,6 +23,7 @@ const BLANK: AgentSettings = {
   name: '',
   osType: 'ubuntu',
   ipOverride: '',
+  siteId: '',
   interval: 60,
   retries: 3,
   // On by default with no channels chosen, which the API reads as "every
@@ -152,6 +153,7 @@ export default function AddServerAgentModal({ isOpen, onClose, onCreated, push, 
         check_interval: values.interval,
         retry_attempts: values.retries,
         ip_address_override: values.ipOverride.trim(),
+        site_id: values.siteId || null,
         notify_channels: notifyChannelsPayload(values),
         cpu_threshold_percent: thresholdPayload(values.cpuThresholdEnabled, values.cpuThresholdPercent),
         memory_threshold_percent: thresholdPayload(

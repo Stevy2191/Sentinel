@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { X, Loader2 } from 'lucide-react'
 import { useCreateMonitor } from '@/hooks/useMonitors'
 import NotificationsSection from './NotificationsSection'
+import SiteSelect from '@/components/SiteSelect'
 import { useAppConfig } from '@/context/AppConfigContext'
 import type { ApiError } from '@/services/api'
 import type { Monitor, MonitorType } from '@/types'
@@ -71,6 +72,8 @@ interface FormState {
   name: string
   type: TypeKey
   description: string
+  /** A site id, or '' for no site. */
+  siteId: string
   target: string
   /** A preset in seconds, or 'custom' while the free-text field is in use. */
   interval: number | 'custom'
@@ -160,6 +163,7 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
       name: '',
       type: 'http',
       description: '',
+      siteId: '',
       target: '',
       // Starts at the instance default from Settings → General, so this dialog
       // agrees with the other create paths.
@@ -295,6 +299,7 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
       const created = await create({
         name: form.name.trim(),
         description: form.description.trim(),
+        site_id: form.siteId || null,
         type: form.type as MonitorType,
         url: form.target.trim(),
         interval_seconds: interval,
@@ -420,6 +425,19 @@ export default function CreateMonitorModal({ isOpen, onClose, onCreated, push }:
                   rows={2}
                   className={`${field} resize-none`}
                 />
+              </div>
+
+              <div>
+                <label htmlFor="cm-site" className="mb-1 block text-sm font-medium text-white">
+                  Site (Optional)
+                </label>
+                <SiteSelect
+                  id="cm-site"
+                  value={form.siteId}
+                  onChange={(v) => set('siteId', v)}
+                  className={`${field} cursor-pointer appearance-none`}
+                />
+                <p className="mt-1 text-xs text-slate-500">Where this service is, for filtering the Monitoring list</p>
               </div>
             </div>
           </section>

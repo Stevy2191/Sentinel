@@ -45,6 +45,10 @@ export interface Agent {
   /** ENABLE_TOOLS on the host, as the agent last reported it; null when it
    *  never has (a version too old to run tools). */
   tools_local: boolean | null
+  /** The site this server is labelled with, or null. */
+  site_id: string | null
+  /** Read-only: the site's name, on list and single-agent responses. */
+  site_name?: string | null
 
   created_at: string
   updated_at: string
@@ -93,6 +97,8 @@ export interface CreateAgentInput {
   retry_attempts: number
   /** Empty or omitted lets the agent detect its own address. */
   ip_address_override?: string
+  /** null clears the site (on edit); left out keeps it. */
+  site_id?: string | null
   /** null means every enabled channel; an empty array means alert nowhere. */
   notify_channels?: string[] | null
   /** 0 disables the threshold (the API's clear sentinel); 1-100 sets it. */
