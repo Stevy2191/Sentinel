@@ -166,6 +166,9 @@ func TestDBSiteProfileCarriesLivePort(t *testing.T) {
 	if p.Circuits[0].Port != nil {
 		t.Errorf("port of a device now at another site: %+v", p.Circuits[0].Port)
 	}
+	if p.Circuits[0].InterfaceID != nil {
+		t.Errorf("stale interface_id kept next to no port: %v", p.Circuits[0].InterfaceID)
+	}
 	if _, _, err := svc.UpdateCircuit(ctx, s.SiteID, c.ID, circuit(t, models.SiteCircuitInput{Provider: "Spectrum", Kind: "fiber"})); err != nil {
 		t.Errorf("saving the circuit without its moved port: %v", err)
 	}
@@ -259,6 +262,10 @@ func TestDBRestoreKeepsSiteProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pg_dump: %v", err)
 	}
+	// Empty the profile, so what comes back can only have come from the dump.
+	testdb.Exec(t, db, `DELETE FROM site_circuits`)
+	testdb.Exec(t, db, `DELETE FROM site_networks`)
+	testdb.Exec(t, db, `UPDATE sites SET notes = NULL`)
 	restore := exec.Command("docker", append([]string{"exec", "-i", "-e", "PGPASSWORD=test", container, "psql"}, b.restoreArgs()...)...)
 	restore.Stdin = bytes.NewReader(dump)
 	if out, err := restore.CombinedOutput(); err != nil {

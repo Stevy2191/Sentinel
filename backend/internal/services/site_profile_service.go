@@ -98,6 +98,11 @@ func (s *SiteProfileService) Profile(ctx context.Context, siteID uuid.UUID) (*Si
 			if p, ok := live[*c.InterfaceID]; ok && p.SiteID == siteID {
 				v.Port = &p
 			}
+			// A dropped port drops its stale id too, so a client's GET, modify,
+			// PUT does not send back a port that is no longer at this site.
+			if v.Port == nil {
+				v.InterfaceID = nil
+			}
 		}
 		out.Circuits = append(out.Circuits, v)
 	}
