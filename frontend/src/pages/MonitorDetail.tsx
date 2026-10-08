@@ -54,6 +54,7 @@ import type { Check, MonitorInput } from '@/types'
 import MonitorTypeBadge from '@/components/MonitorTypeBadge'
 import MonitorPerformance from '@/components/MonitorPerformance'
 import { Sparkline, hourlySparklinePoints, STATUS_COLOR, uptimeColor as windowUptimeColor } from '@/components/UptimeSparkline'
+import { monitoringPath } from '@/utils/monitoringView'
 
 // Format a Date for a datetime-local input (local time, minute precision).
 function toLocalInput(d: Date): string {
@@ -200,7 +201,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
   if (mode === 'create') {
     return (
       <div className="max-w-3xl space-y-6">
-        <button className="btn-secondary" onClick={() => navigate('/uptime')}>
+        <button className="btn-secondary" onClick={() => navigate(monitoringPath('uptime'))}>
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
         <h1 className="vs-title text-2xl">Create Monitor</h1>
@@ -209,7 +210,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
           isLoading={creating}
           error={createErr}
           submitLabel="Create Monitor"
-          onCancel={() => navigate('/uptime')}
+          onCancel={() => navigate(monitoringPath('uptime'))}
         />
         <Toaster toasts={toasts} />
       </div>
@@ -246,8 +247,8 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
     return (
       <div className="space-y-4">
         <div className="card p-6 text-slate-500">Monitor not found.</div>
-        <button className="btn-secondary" onClick={() => navigate('/uptime')}>
-          <ArrowLeft className="h-4 w-4" /> Back to monitors
+        <button className="btn-secondary" onClick={() => navigate(monitoringPath('uptime'))}>
+          <ArrowLeft className="h-4 w-4" /> Back to Monitoring
         </button>
       </div>
     )
@@ -287,7 +288,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
   const handleDelete = async () => {
     try {
       await deleteMonitor()
-      navigate('/uptime')
+      navigate(monitoringPath('uptime'))
     } catch {
       push('Delete failed', 'error')
       setConfirmDelete(false)
@@ -345,14 +346,14 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <Link
-            to="/uptime"
+            to={monitoringPath('uptime')}
             className="inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white"
           >
-            <ArrowLeft className="h-4 w-4" /> Back to Monitors
+            <ArrowLeft className="h-4 w-4" /> Back to Monitoring
           </Link>
           <nav aria-label="Breadcrumb" className="mt-1 text-xs text-slate-600">
-            <Link to="/uptime" className="transition hover:text-slate-400">
-              Uptime Monitoring
+            <Link to={monitoringPath('uptime')} className="transition hover:text-slate-400">
+              Monitoring
             </Link>
             <span className="px-1">›</span>
             <span className="text-slate-500">{monitor.name}</span>

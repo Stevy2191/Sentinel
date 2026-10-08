@@ -6,6 +6,7 @@ import { AppConfigProvider } from '@/context/AppConfigContext'
 import RequireAuth from '@/components/RequireAuth'
 import Layout from '@/components/Layout'
 import LegacyRedirect from '@/components/LegacyRedirect'
+import MonitoringRedirect from '@/components/MonitoringRedirect'
 import Auth from '@/pages/Auth'
 
 // Route components load on demand. The app shipped as one ~950 KB chunk, so a
@@ -18,22 +19,18 @@ import Auth from '@/pages/Auth'
 const Overview = lazy(() => import('@/pages/Overview'))
 const Dashboards = lazy(() => import('@/pages/dashboards/Dashboards'))
 const DashboardPage = lazy(() => import('@/pages/dashboards/DashboardPage'))
-const UptimeMonitoring = lazy(() => import('@/pages/UptimeMonitoring'))
 const Monitoring = lazy(() => import('@/pages/Monitoring'))
 const Incidents = lazy(() => import('@/pages/Incidents'))
 const IncidentDetail = lazy(() => import('@/pages/IncidentDetail'))
-const Monitors = lazy(() => import('@/pages/Monitors'))
 const MonitorDetail = lazy(() => import('@/pages/MonitorDetail'))
 const MonitorWizard = lazy(() => import('@/pages/MonitorWizard'))
 const BulkUpload = lazy(() => import('@/pages/BulkUpload'))
 const NetworkDiscovery = lazy(() => import('@/pages/NetworkDiscovery'))
 const Reports = lazy(() => import('@/pages/Reports'))
 const SSL = lazy(() => import('@/pages/SSL'))
-const ServerMonitoring = lazy(() => import('@/pages/ServerMonitoring'))
 const ServerDetail = lazy(() => import('@/pages/ServerDetail'))
 const Sites = lazy(() => import('@/pages/network/Sites'))
 const SiteDetail = lazy(() => import('@/pages/network/SiteDetail'))
-const Devices = lazy(() => import('@/pages/network/Devices'))
 const DeviceDetail = lazy(() => import('@/pages/network/DeviceDetail'))
 const PortDetail = lazy(() => import('@/pages/network/PortDetail'))
 const Credentials = lazy(() => import('@/pages/network/Credentials'))
@@ -102,23 +99,23 @@ export default function App() {
               <Route path="/dashboards/:id/edit" element={<DashboardPage mode="edit" />} />
               {/* Kept: bookmarks and in-app links still point at /dashboard. */}
               <Route path="/dashboard" element={<Navigate to="/" replace />} />
-              <Route path="/uptime" element={<UptimeMonitoring />} />
+              <Route path="/uptime" element={<MonitoringRedirect show="uptime" />} />
               <Route path="/monitoring" element={<Monitoring />} />
               <Route path="/incidents" element={<Incidents />} />
                 <Route path="/incidents/:id" element={<IncidentDetail />} />
-              <Route path="/monitors" element={<Monitors />} />
+              <Route path="/monitors" element={<MonitoringRedirect show="uptime" />} />
               <Route path="/ssl" element={<SSL />} />
-              <Route path="/servers" element={<ServerMonitoring />} />
+              <Route path="/servers" element={<MonitoringRedirect show="servers" />} />
               <Route path="/servers/:agentID" element={<ServerDetail />} />
-              {/* The page moved to /servers; the old path is kept so existing
+              {/* The old list addresses open the Monitoring page; they are kept so existing
                   links and bookmarks still land somewhere useful. */}
-              <Route path="/server-monitoring" element={<Navigate to="/servers" replace />} />
+              <Route path="/server-monitoring" element={<MonitoringRedirect show="servers" />} />
               {/* Network Monitoring. /network has no page of its own until a
                   network overview exists, so it opens the site list. */}
               <Route path="/network" element={<Navigate to="/network/sites" replace />} />
               <Route path="/network/sites" element={<Sites />} />
               <Route path="/network/sites/:id" element={<SiteDetail />} />
-              <Route path="/network/devices" element={<Devices />} />
+              <Route path="/network/devices" element={<MonitoringRedirect show="devices" />} />
               <Route path="/network/devices/:id" element={<DeviceDetail />} />
               <Route path="/network/devices/:id/ports/:ifIndex" element={<PortDetail />} />
               {/* Network's setup pages moved into Settings; the old addresses

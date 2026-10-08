@@ -5,6 +5,7 @@ import api from '@/services/api'
 import { useToasts, Toaster } from '@/components/Toast'
 import { parseCsvRecords } from '@/utils/csv'
 import type { ApiResponse, MonitorInput, MonitorType } from '@/types'
+import { monitoringPath } from '@/utils/monitoringView'
 
 const COLUMNS = ['name', 'type', 'url', 'interval_seconds', 'timeout_seconds', 'retries', 'method', 'tags']
 
@@ -190,7 +191,7 @@ export default function BulkUpload() {
           )}
         </div>
         <div className="flex gap-2">
-          <button className="rd-btn rd-btn-primary" onClick={() => navigate('/uptime')}>
+          <button className="rd-btn rd-btn-primary" onClick={() => navigate(monitoringPath('uptime'))}>
             Go to dashboard
           </button>
           <button className="rd-btn rd-btn-secondary" onClick={reset}>
@@ -210,7 +211,7 @@ export default function BulkUpload() {
           <button className="rd-btn rd-btn-secondary" onClick={downloadTemplate}>
             <Download className="h-4 w-4" /> Template
           </button>
-          <button className="rd-btn rd-btn-secondary" onClick={() => navigate('/uptime')}>
+          <button className="rd-btn rd-btn-secondary" onClick={() => navigate(monitoringPath('uptime'))}>
             <X className="h-4 w-4" /> Cancel
           </button>
         </div>

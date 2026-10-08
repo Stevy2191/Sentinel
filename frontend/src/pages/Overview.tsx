@@ -13,6 +13,7 @@ import { useSavedReports } from '@/hooks/useReportBuilder'
 import { useCardShimmer } from '@/hooks/useCardShimmer'
 import ShimmerStatCard from '@/components/ShimmerStatCard'
 import { REPORT_PERIODS, type ReportPeriod } from '@/utils/reportPeriods'
+import { monitoringPath } from '@/utils/monitoringView'
 
 const REFRESH_MS = 30_000
 
@@ -159,7 +160,7 @@ export default function Overview() {
       {
         key: 'uptime',
         title: 'Uptime Monitoring',
-        to: '/uptime',
+        to: monitoringPath('uptime'),
         colorType: 'monitoring' as const,
         value: String(counts.total),
         subtitle:
@@ -182,7 +183,7 @@ export default function Overview() {
       {
         key: 'agents',
         title: 'Server Monitoring',
-        to: '/servers',
+        to: monitoringPath('servers'),
         colorType: 'agents' as const,
         value: agentSummary.value,
         subtitle: agentSummary.subtitle,
