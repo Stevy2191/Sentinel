@@ -5,6 +5,11 @@ import { siteAddressLines, useSite, useSiteActions } from '@/hooks/useSites'
 import { useDevices } from '@/hooks/useDevices'
 import { useDashboards } from '@/hooks/useDashboards'
 import { useSiteProfile, useSiteProfileActions } from '@/hooks/useSiteProfile'
+import { useAllMonitors } from '@/hooks/useAllMonitors'
+import { useAgents } from '@/hooks/useAgents'
+import SiteServersList from '@/components/sites/SiteServersList'
+import SiteChecksList from '@/components/sites/SiteChecksList'
+import { summaryCounts } from '@/utils/monitoringView'
 import SiteFormModal from '@/components/SiteFormModal'
 import SiteSharingPanel from '@/components/SiteSharingPanel'
 import NewDashboardModal from '@/components/dashboards/NewDashboardModal'
@@ -56,6 +61,11 @@ export default function SiteDetail() {
   const { events } = usePortEvents({ siteId: id }, 15)
   const { profile, error: profileError, refetch: refetchProfile } = useSiteProfile(id)
   const profileActions = useSiteProfileActions(id ?? '')
+  const { monitors } = useAllMonitors()
+  const { agents } = useAgents()
+  const siteMonitors = useMemo(() => monitors.filter((m) => m.site_id === id), [monitors, id])
+  const siteAgents = useMemo(() => agents.filter((a) => a.site_id === id), [agents, id])
+  const counts = useMemo(() => summaryCounts(siteMonitors, siteAgents, devices), [siteMonitors, siteAgents, devices])
   const [editing, setEditing] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -117,6 +127,13 @@ export default function SiteDetail() {
               </span>
             </address>
           )}
+          <p className="mt-3 text-sm text-slate-400">
+            <span className="font-semibold tabular-nums text-white">{counts.watching}</span> watched ·{' '}
+            <span className={`font-semibold tabular-nums ${counts.down > 0 ? 'text-red-400' : 'text-white'}`}>{counts.down}</span> down ·{' '}
+            <Link to={`/monitoring?site=${site.id}`} className="text-primary-400 hover:underline">
+              Open in Monitoring
+            </Link>
+          </p>
         </div>
         {isAdmin && (
           <div className="flex gap-2">
@@ -240,6 +257,9 @@ export default function SiteDetail() {
             )}
           </section>
 
+          <SiteServersList agents={siteAgents} canHint={isAdmin} />
+          <SiteChecksList monitors={siteMonitors} />
+
           {devices.length > 0 && (
             <>
               <SiteTrafficCharts siteId={site.id} />
@@ -274,7 +294,9 @@ export default function SiteDetail() {
       {addingDevice && (
         <DeviceFormModal siteId={site.id} onClose={() => setAddingDevice(false)} onSaved={() => { setAddingDevice(false); void refetchDevices() }} />
       )}
-      {scanning && <ScanModal siteId={site.id} onClose={() => setScanning(false)} onAdded={() => void refetchDevices()} />}
+      {scanning && (
+        <ScanModal siteId={site.id} networks={profile?.networks ?? []} onClose={() => setScanning(false)} onAdded={() => void refetchDevices()} />
+      )}
       {newDashboard && (
         <NewDashboardModal siteId={site.id} onClose={() => setNewDashboard(false)} onCreated={(d) => navigate(`/dashboards/${d.id}/edit`)} />
       )}

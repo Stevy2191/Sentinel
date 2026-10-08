@@ -4,6 +4,10 @@ import { MapPin, Plus } from 'lucide-react'
 import { useAuthContext } from '@/context/AuthContext'
 import { siteAddressLines, useSites } from '@/hooks/useSites'
 import SiteFormModal from '@/components/SiteFormModal'
+import { useAllMonitors } from '@/hooks/useAllMonitors'
+import { useAgents } from '@/hooks/useAgents'
+import { useDevices } from '@/hooks/useDevices'
+import { siteCounts, siteCountsText } from '@/utils/siteProfile'
 
 export default function Sites() {
   const navigate = useNavigate()
@@ -11,6 +15,16 @@ export default function Sites() {
   const isAdmin = !!currentUser?.is_admin
   const { sites, loading, error, refetch } = useSites()
   const [adding, setAdding] = useState(false)
+  // A list that has not loaded, or failed, is left out of each card's line
+  // rather than counted as zero.
+  const monitorsQ = useAllMonitors()
+  const agentsQ = useAgents()
+  const devicesQ = useDevices()
+  const lists = {
+    monitors: monitorsQ.loading || monitorsQ.error ? null : monitorsQ.monitors,
+    agents: agentsQ.loading || agentsQ.error ? null : agentsQ.agents,
+    devices: devicesQ.loading || devicesQ.error ? null : devicesQ.devices,
+  }
 
   return (
     <div className="space-y-8">
@@ -56,6 +70,17 @@ export default function Sites() {
                   <MapPin className="h-3.5 w-3.5 shrink-0" /> {siteAddressLines(s).join(', ')}
                 </p>
               )}
+              {(() => {
+                const counts = siteCounts(s.id, lists)
+                const text = siteCountsText(counts)
+                return (
+                  text && (
+                    <p className="mt-3 text-xs text-slate-400">
+                      {text} · <span className={counts.down > 0 ? 'text-red-400' : ''}>{counts.down} down</span>
+                    </p>
+                  )
+                )
+              })()}
             </button>
           ))}
         </div>

@@ -3,14 +3,27 @@ import { Loader2, X } from 'lucide-react'
 import { useSiteScan, type ScanResult } from '@/hooks/useSiteScan'
 import { useSiteCredentialOptions } from '@/hooks/useSnmpCredentials'
 import type { ApiError } from '@/services/api'
+import { scanChoices } from '@/utils/siteProfile'
 
 const inputCls =
   'w-full rounded-md border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary-500'
 
-export default function ScanModal({ siteId, onClose, onAdded }: { siteId: string; onClose: () => void; onAdded: () => void }) {
+export default function ScanModal({
+  siteId,
+  networks = [],
+  onClose,
+  onAdded,
+}: {
+  siteId: string
+  /** The site's saved networks; the scannable ones are offered as one-click choices. */
+  networks?: { name: string; cidr: string }[]
+  onClose: () => void
+  onAdded: () => void
+}) {
   const { options } = useSiteCredentialOptions(siteId, true)
   const { job, start, busy, error, addDevices } = useSiteScan(siteId)
   const [cidr, setCidr] = useState('')
+  const choices = scanChoices(networks)
   const [chosen, setChosen] = useState<string[]>([])
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [message, setMessage] = useState<string | null>(null)
@@ -69,6 +82,22 @@ export default function ScanModal({ siteId, onClose, onAdded }: { siteId: string
           <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); void start(cidr.trim(), chosen) }}>
             <label className="block space-y-1">
               <span className="text-sm text-slate-300">Subnet</span>
+              {choices.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pb-1" aria-label="Saved networks">
+                  {choices.map((n) => (
+                    <button
+                      key={n.cidr}
+                      type="button"
+                      onClick={() => setCidr(n.cidr)}
+                      className={`rounded-full px-2.5 py-1 text-xs transition ${
+                        cidr === n.cidr ? 'bg-primary-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                      }`}
+                    >
+                      {n.name} · {n.cidr}
+                    </button>
+                  ))}
+                </div>
+              )}
               <input className={inputCls} value={cidr} onChange={(e) => setCidr(e.target.value)} placeholder="10.20.0.0/24 (a /22 at most)" required autoFocus />
             </label>
             <fieldset className="space-y-1">
