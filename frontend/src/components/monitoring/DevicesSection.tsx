@@ -49,11 +49,15 @@ export default function DevicesSection(p: Props) {
       }
     >
       {p.total === 0 ? (
-        <EmptyLine
-          text={p.isAdmin ? "No devices yet. Add one, or scan a subnet from a site's page." : 'No devices yet.'}
-          action={p.isAdmin ? 'Add a device' : undefined}
-          onAction={p.onAdd}
-        />
+        !p.error && (
+          <EmptyLine
+            text={p.isAdmin ? "No devices yet. Add one, or scan a subnet from a site's page." : 'No devices yet.'}
+            action={p.isAdmin ? 'Add a device' : undefined}
+            onAction={p.onAdd}
+          />
+        )
+      ) : p.devices.length === 0 ? (
+        <EmptyLine text="Nothing in this section matches these filters." />
       ) : (
         <DeviceTable devices={p.devices} showSite />
       )}
