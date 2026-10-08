@@ -82,3 +82,43 @@ func TestDBAgentUnknownSiteRefused(t *testing.T) {
 		t.Errorf("edit: %d %s, want 400 site not found", w.Code, w.Body.String())
 	}
 }
+
+// The edit form's main path: a PATCH sets a site on an agent that had none,
+// and both the PATCH response and GET /agents/:agent_id carry id and name.
+func TestDBAgentPatchSetsSite(t *testing.T) {
+	db := testdb.Open(t)
+	site := newSite(t, db, "Annex")
+	r := agentSiteRouter(t, db, testdb.NewUser(t, db, true))
+
+	w := toolRequest(r, http.MethodPost, "/api/v1/agents", `{"name":"fs-01","os_type":"linux"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	created := dataOf[struct {
+		Agent agentSiteView `json:"agent"`
+	}](t, w).Agent
+	if created.SiteID != nil {
+		t.Fatalf("created with a site: %+v", created)
+	}
+
+	hasSite := func(label string, got agentSiteView) {
+		t.Helper()
+		if got.SiteID == nil || *got.SiteID != site.String() || got.SiteName == nil || *got.SiteName != "Annex" {
+			t.Errorf("%s = %+v, want site %s named Annex", label, got, site)
+		}
+	}
+
+	w = toolRequest(r, http.MethodPatch, "/api/v1/agents/"+created.AgentID, `{"site_id":"`+site.String()+`"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("patch: %d %s", w.Code, w.Body.String())
+	}
+	hasSite("patch response", dataOf[agentSiteView](t, w))
+
+	w = toolRequest(r, http.MethodGet, "/api/v1/agents/"+created.AgentID, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("get: %d %s", w.Code, w.Body.String())
+	}
+	hasSite("GET /agents/:id", dataOf[struct {
+		Agent agentSiteView `json:"agent"`
+	}](t, w).Agent)
+}

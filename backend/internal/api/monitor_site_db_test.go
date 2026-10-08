@@ -179,11 +179,19 @@ func TestDBMonitorListCarriesSiteName(t *testing.T) {
 	if len(list.Monitors) != 2 {
 		t.Fatalf("listed %d monitors, want 2", len(list.Monitors))
 	}
+	labelled := 0
 	for _, m := range list.Monitors {
-		labelled := m.SiteName != nil && *m.SiteName == "Annex"
-		if (m.SiteID != nil) != labelled {
-			t.Errorf("monitor %+v: site id and name disagree", m)
+		if m.SiteID != nil {
+			labelled++
+			if *m.SiteID != site.String() || m.SiteName == nil || *m.SiteName != "Annex" {
+				t.Errorf("labelled monitor %+v, want site %s named Annex", m, site)
+			}
+		} else if m.SiteName != nil {
+			t.Errorf("monitor %+v has a site name but no site", m)
 		}
+	}
+	if labelled != 1 {
+		t.Errorf("%d monitors carry a site, want exactly 1", labelled)
 	}
 }
 
