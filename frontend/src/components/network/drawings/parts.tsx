@@ -11,6 +11,9 @@ export interface Hit {
   selected: number | null
   onSelect: (ifIndex: number) => void
   lastKnown: string | null | undefined
+  /** A problem colour to pulse out from the port (a warning, or an
+   *  important port down); none while the drawing is dark. */
+  alert?: 'yellow' | 'red'
 }
 
 export const lightClass = (light: Light, fl: Flicker = '') =>
@@ -18,7 +21,20 @@ export const lightClass = (light: Light, fl: Flicker = '') =>
 
 /** A port's button: hover or focus shows the port popover, click selects
  *  it, as PortCell does on the simple faceplate. */
-function PortHit({ hit, className, style, children }: { hit: Hit; className: string; style?: CSSProperties; children?: ReactNode }) {
+function PortHit({
+  hit,
+  className,
+  style,
+  children,
+  wave = true,
+}: {
+  hit: Hit
+  className: string
+  style?: CSSProperties
+  children?: ReactNode
+  /** Pulse the alert from this part (the port itself, not a panel light). */
+  wave?: boolean
+}) {
   const ref = useRef<HTMLButtonElement>(null)
   const [hovering, setHovering] = useState(false)
   const [focused, setFocused] = useState(false)
@@ -44,6 +60,12 @@ function PortHit({ hit, className, style, children }: { hit: Hit; className: str
         onBlur={() => setFocused(false)}
       >
         {children}
+        {wave && hit.alert && (
+          <span className={`rf-wave rf-wave-${hit.alert}`} aria-hidden>
+            <i />
+            <i />
+          </span>
+        )}
       </button>
       {(hovering || focused) && (
         <PortPopover
@@ -116,7 +138,7 @@ export function SfpHousing({ x, y, top, bottom, bar }: { x: number; y: number; t
 /** A status panel light with its number under it (ES-16-XG). */
 export function PanelLight({ number, light, flicker, hit }: { number: number; light: Light; flicker: Flicker; hit: Hit }) {
   return (
-    <PortHit hit={hit} className="rf-lamp">
+    <PortHit hit={hit} className="rf-lamp" wave={false}>
       <span className={`rf-dot ${lightClass(light, flicker)}`} />
       <span className="rf-pnum">{number}</span>
     </PortHit>

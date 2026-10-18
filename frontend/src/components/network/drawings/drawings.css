@@ -117,3 +117,21 @@
   margin-left: 3px; vertical-align: 2px; }
 .rf-pwr { position: absolute; left: 28px; top: 46px; width: 6px; height: 6px; border-radius: 50%; background: #3d4247; }
 .rf-pwr.rf-l-white { background: #f2f4f6; box-shadow: 0 0 6px #fff; }
+
+/* a problem port pulses its colour outward: two rings, a second apart,
+   spreading from the port to about twice its size as they fade */
+.rf-wave { position: absolute; left: 50%; top: 50%; width: 34px; height: 34px; margin: -17px 0 0 -17px; pointer-events: none; z-index: 3; }
+.rf-wave i { position: absolute; inset: 0; border-radius: 50%; border: 2px solid currentColor; opacity: 0; }
+.rf-wave-yellow { color: #ffd23a; }
+.rf-wave-red { color: #ff4d4d; }
+@keyframes rf-ping {
+  0% { transform: scale(0.55); opacity: 0.9; }
+  100% { transform: scale(2.1); opacity: 0; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .rf-wave i { animation: rf-ping 2s ease-out infinite; }
+  .rf-wave i + i { animation-delay: 1s; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rf-wave i:first-child { opacity: 0.45; transform: scale(1.25); }
+}
