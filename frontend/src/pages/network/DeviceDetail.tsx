@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, CheckCircle2, Loader2, Pause, Pencil, Play, Radar, RefreshCw, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { useSite } from '@/hooks/useSites'
 import { DEVICE_TYPE_LABEL, formatSpeed, useDevice, useDeviceActions, type Device } from '@/hooks/useDevices'
@@ -10,6 +10,7 @@ import { useRefreshWatch } from '@/hooks/useRefreshWatch'
 import DeviceStatusBadge from '@/components/network/DeviceStatusBadge'
 import DeviceFormModal from '@/components/network/DeviceFormModal'
 import EditDetailsModal from '@/components/network/EditDetailsModal'
+import FaceplateLayoutEditor from '@/components/network/FaceplateLayoutEditor'
 import Faceplate, { FaceplateLegend } from '@/components/network/Faceplate'
 import HealthSection from '@/components/network/HealthSection'
 import TrafficChart from '@/components/network/TrafficChart'
@@ -93,10 +94,22 @@ export default function DeviceDetail() {
   const { update, remove, refresh, busy } = useDeviceActions()
   const [editing, setEditing] = useState(false)
   const [editingDetails, setEditingDetails] = useState(false)
+  const [fixingLayout, setFixingLayout] = useState(false)
+  const [searchParams, setSearchParams] = useSearchParams()
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<number | null>(null)
   const refreshWatch = useRefreshWatch(device, refetch)
+  // Settings → Faceplate layouts links here with ?fixLayout=1 to open the
+  // editor once; the parameter is dropped so a reload does not reopen it.
+  useEffect(() => {
+    if (searchParams.get('fixLayout') !== '1') return
+    if (currentUser?.is_admin) setFixingLayout(true)
+    const next = new URLSearchParams(searchParams)
+    next.delete('fixLayout')
+    setSearchParams(next, { replace: true })
+  }, [searchParams, setSearchParams, currentUser])
+
   // A finished refresh re-read the interfaces too.
   useEffect(() => {
     if (refreshWatch.phase === 'done') void refetchPorts()
@@ -258,7 +271,20 @@ export default function DeviceDetail() {
       {showFaceplate && portsView && (
         <section className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-lg font-light text-white">Front panel</h2>
+            <div className="flex items-baseline gap-3">
+              <h2 className="text-lg font-light text-white">Front panel</h2>
+              {currentUser?.is_admin && (
+                <button
+                  type="button"
+                  className="text-sm text-primary-400 hover:underline disabled:cursor-not-allowed disabled:text-slate-500 disabled:no-underline"
+                  disabled={!device.effective_model}
+                  title={device.effective_model ? 'Arrange this model\'s ports to match the real switch' : "Set this device's model in Edit details first"}
+                  onClick={() => setFixingLayout(true)}
+                >
+                  Fix layout
+                </button>
+              )}
+            </div>
             <FaceplateLegend />
           </div>
           <Faceplate
@@ -269,6 +295,17 @@ export default function DeviceDetail() {
             selected={selected}
             onSelect={(i) => setSelected((s) => (s === i ? null : i))}
           />
+          {currentUser?.is_admin && portsView.layout_notice && (
+            <p className="flex items-start gap-2 text-sm text-amber-400">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+              <span>
+                The saved layout for {portsView.layout_notice.model} doesn't fit this device ({layoutMisfit(portsView.layout_notice.fit)}).{' '}
+                <button type="button" className="text-primary-400 hover:underline" onClick={() => setFixingLayout(true)}>
+                  Fix layout
+                </button>
+              </span>
+            </p>
+          )}
           {selectedPort && <PortQuickPanel deviceId={device.id} port={selectedPort} />}
         </section>
       )}
@@ -316,6 +353,19 @@ export default function DeviceDetail() {
       {editing && (
         <DeviceFormModal initial={device} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); void refetch() }} />
       )}
+      {fixingLayout && (
+        <FaceplateLayoutEditor
+          device={device}
+          ports={ports}
+          onClose={() => setFixingLayout(false)}
+          onSaved={() => {
+            setFixingLayout(false)
+            void refetchPorts()
+            void refetch()
+          }}
+        />
+      )}
+
       {editingDetails && (
         <EditDetailsModal
           device={device}
@@ -326,4 +376,11 @@ export default function DeviceDetail() {
       )}
     </div>
   )
+}
+
+/** "not placed: 17; not on this device: 15" for the layout notice. */
+function layoutMisfit(fit: { missing: number[]; extra: number[] }): string {
+  return [fit.missing.length > 0 && `not placed: ${fit.missing.join(', ')}`, fit.extra.length > 0 && `not on this device: ${fit.extra.join(', ')}`]
+    .filter(Boolean)
+    .join('; ')
 }

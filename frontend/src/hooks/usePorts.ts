@@ -3,6 +3,7 @@ import api, { type ApiError } from '@/services/api'
 import type { ApiResponse } from '@/types'
 import type { Device, DeviceInterface, DeviceType, PortRole } from '@/hooks/useDevices'
 import type { MetricsRange } from '@/hooks/useMetrics'
+import type { LayoutFit } from '@/hooks/useFaceplateLayouts'
 
 export type PortCondition = 'link_down' | 'errors' | 'flapping' | 'slow_link' | 'saturated'
 
@@ -65,6 +66,9 @@ export interface DevicePorts {
   ports: PortView[]
   faceplates: UnitFaceplate[]
   defaults: PortDefaults
+  /** Set when the saved layout for the device's model does not fit its
+   *  ports, so the faceplate is drawn automatically instead. */
+  layout_notice?: { model: string; fit: LayoutFit }
 }
 
 export interface PortIncident {
