@@ -423,19 +423,19 @@ func strPtr(s string) *string { return &s }
 // M3: a stacked switch's port label names its stack member.
 func TestPortLabelIncludesStackUnit(t *testing.T) {
 	row := models.DeviceInterface{IfIndex: 5, StackUnit: 2, Alias: "Uplink"}
-	if got, want := portLabel(row), "switch 2 port 5 (Uplink)"; got != want {
+	if got, want := portLabel(portmon.Numbering{}, row), "switch 2 port 5 (Uplink)"; got != want {
 		t.Errorf("portLabel = %q, want %q", got, want)
 	}
 	row.Alias = ""
-	if got, want := portLabel(row), "switch 2 port 5"; got != want {
+	if got, want := portLabel(portmon.Numbering{}, row), "switch 2 port 5"; got != want {
 		t.Errorf("portLabel (no alias) = %q, want %q", got, want)
 	}
 	row.StackUnit = 0
-	if got, want := portLabel(row), "port 5"; got != want {
+	if got, want := portLabel(portmon.Numbering{}, row), "port 5"; got != want {
 		t.Errorf("portLabel (not stacked) = %q, want %q", got, want)
 	}
 	row.Name = "Te1/1/4"
-	if got, want := portLabel(row), "port 1/4"; got != want {
+	if got, want := portLabel(portmon.Numbering{}, row), "port 1/4"; got != want {
 		t.Errorf("portLabel (module port) = %q, want %q", got, want)
 	}
 }

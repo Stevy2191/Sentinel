@@ -119,11 +119,11 @@ func CheckFit(gs []LayoutGroup, main []int) Fit {
 
 // MainPortNumbers is the numbers of the ports Layout treats as main (the
 // lowest slot on a switch/slot/port device), ascending.
-func MainPortNumbers(ports []LayoutPort) []int {
-	main, _ := mainAndModules(ports)
+func MainPortNumbers(ports []LayoutPort, nb Numbering) []int {
+	main, _ := mainAndModules(ports, nb)
 	out := make([]int, 0, len(main))
 	for _, p := range main {
-		out = append(out, PortNumber(p.Name, p.Descr, p.IfIndex))
+		out = append(out, nb.Number(p.Name, p.Descr, p.IfIndex))
 	}
 	sort.Ints(out)
 	return out
@@ -132,7 +132,7 @@ func MainPortNumbers(ports []LayoutPort) []int {
 // FitUnits checks a layout against each stack member's main ports, in
 // LayoutUnits' order, and returns the first misfit, or nil when it fits all.
 // A device with no ports fits nothing: every number is reported as extra.
-func FitUnits(ports []LayoutPort, gs []LayoutGroup) *Fit {
+func FitUnits(ports []LayoutPort, gs []LayoutGroup, nb Numbering) *Fit {
 	units := unitGroups(ports)
 	if len(units) == 0 {
 		if f := CheckFit(gs, nil); !f.OK() {
@@ -141,7 +141,7 @@ func FitUnits(ports []LayoutPort, gs []LayoutGroup) *Fit {
 		return nil
 	}
 	for _, u := range units {
-		if f := CheckFit(gs, MainPortNumbers(u.ports)); !f.OK() {
+		if f := CheckFit(gs, MainPortNumbers(u.ports, nb)); !f.OK() {
 			return &f
 		}
 	}

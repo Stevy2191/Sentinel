@@ -489,8 +489,8 @@ func (m *PortMonitor) alert(ctx context.Context, d models.Device, row models.Dev
 // portLabel names a port for people: "port 51 (Uplink To Quantum Gate)",
 // "port 1/4" for a module port, or "switch 2 port 5 (Uplink)" on a stack
 // member.
-func portLabel(row models.DeviceInterface) string {
-	n := portmon.PortLabel(row.Name, row.Descr, row.IfIndex)
+func portLabel(nb portmon.Numbering, row models.DeviceInterface) string {
+	n := nb.Label(row.Name, row.Descr, row.IfIndex)
 	label := "port " + n
 	if row.StackUnit > 0 {
 		label = fmt.Sprintf("switch %d port %s", row.StackUnit, n)
@@ -509,7 +509,7 @@ var conditionNoun = map[portmon.Condition]string{
 // portProblem is the alert sentence for a condition starting. Detail values
 // come from the tracker; a retried open has none and gets the short form.
 func portProblem(d models.Device, row models.DeviceInterface, c portmon.Change) string {
-	who := displayName(d) + " " + portLabel(row)
+	who := displayName(d) + " " + portLabel(portmon.NumberingFor(d.SysDescr), row)
 	num := func(key string) (string, bool) {
 		switch v := c.Detail[key].(type) {
 		case float64:
@@ -580,7 +580,7 @@ func (m *PortMonitor) notifyPort(ctx context.Context, d models.Device, row model
 		*site = name
 	}
 	id, ifID, ifIndex := d.ID, row.ID, row.IfIndex
-	label := portLabel(row)
+	label := portLabel(portmon.NumberingFor(d.SysDescr), row)
 	msg := &notifications.NotificationMessage{
 		DeviceID: &id, InterfaceID: &ifID, PortIfIndex: &ifIndex, SiteName: *site,
 		MonitorName: displayName(d) + " " + label, MonitorURL: d.Host, Timestamp: c.At,

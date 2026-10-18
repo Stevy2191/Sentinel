@@ -248,10 +248,11 @@ func (s *PortService) defaults(ctx context.Context) PortDefaults {
 		DownGraceSeconds: int(th.DownGrace.Seconds())}
 }
 
-func toPortView(row models.DeviceInterface, live map[string]map[string]float64) PortView {
+// toPortView numbers the port by its device's numbering (nb).
+func toPortView(row models.DeviceInterface, live map[string]map[string]float64, nb portmon.Numbering) PortView {
 	info := portmon.IfInfo{Name: row.Name, Descr: row.Descr, Type: row.IfType, ConnectorPresent: row.ConnectorPresent}
-	v := PortView{DeviceInterface: row, Number: portmon.PortNumber(row.Name, row.Descr, row.IfIndex),
-		Label: portmon.PortLabel(row.Name, row.Descr, row.IfIndex), Slot: portmon.SlotNumber(row.Name),
+	v := PortView{DeviceInterface: row, Number: nb.Number(row.Name, row.Descr, row.IfIndex),
+		Label: nb.Label(row.Name, row.Descr, row.IfIndex), Slot: portmon.SlotNumber(row.Name),
 		Collected: row.CollectEffective(), Physical: portmon.IsPhysical(info)}
 	inst := instanceKey(row.IfIndex)
 	get := func(metric string) *float64 {
@@ -289,7 +290,7 @@ func (s *PortService) DevicePorts(ctx context.Context, d *DeviceView) (*DevicePo
 	out := &DevicePortsView{Ports: make([]PortView, 0, len(rows)), Defaults: s.defaults(ctx)}
 	var layout []portmon.LayoutPort
 	for _, r := range rows {
-		v := toPortView(r, latest[d.ID])
+		v := toPortView(r, latest[d.ID], portmon.NumberingFor(d.SysDescr))
 		out.Ports = append(out.Ports, v)
 		if v.Physical {
 			layout = append(layout, portmon.LayoutPort{IfIndex: r.IfIndex, Name: r.Name, Descr: r.Descr, Unit: r.StackUnit,
@@ -303,7 +304,7 @@ func (s *PortService) DevicePorts(ctx context.Context, d *DeviceView) (*DevicePo
 	if saved := s.savedLayout(d); saved != nil {
 		opts.Saved = saved.Groups
 		if !deviceFaceplateSet(d) {
-			if fit := portmon.FitUnits(layout, saved.Groups); fit != nil {
+			if fit := portmon.FitUnits(layout, saved.Groups, opts.Numbering); fit != nil {
 				out.LayoutNotice = &FaceplateLayoutNotice{Model: saved.Model, Fit: *fit}
 			}
 		}
@@ -378,13 +379,15 @@ func (s *PortService) resolveNeighbors(ctx context.Context, siteID uuid.UUID, vi
 	// Only devices in the same site as the one being viewed: a cross-site
 	// neighbor_device_id is never shown, so there is nothing to look up for
 	// one, and its ports are not even fetched below.
-	if err := s.db.WithContext(ctx).Select("id", "name").Where("id IN ? AND site_id = ?", deviceIDs, siteID).Find(&devices).Error; err != nil {
+	if err := s.db.WithContext(ctx).Select("id", "name", "sys_descr").Where("id IN ? AND site_id = ?", deviceIDs, siteID).Find(&devices).Error; err != nil {
 		return fmt.Errorf("loading neighbor devices: %w", err)
 	}
 	nameByID := make(map[uuid.UUID]string, len(devices))
+	numberingByID := make(map[uuid.UUID]portmon.Numbering, len(devices))
 	sameSiteIDs := make([]uuid.UUID, 0, len(devices))
 	for _, d := range devices {
 		nameByID[d.ID] = d.Name
+		numberingByID[d.ID] = portmon.NumberingFor(d.SysDescr)
 		sameSiteIDs = append(sameSiteIDs, d.ID)
 	}
 	var neighborPorts []models.DeviceInterface
@@ -413,11 +416,12 @@ func (s *PortService) resolveNeighbors(ctx context.Context, siteID uuid.UUID, vi
 		v.NeighborDeviceName = name
 		if v.NeighborIfIndex != nil {
 			if np, ok := portByKey[portKey{*v.NeighborDeviceID, *v.NeighborIfIndex}]; ok {
-				num := portmon.PortNumber(np.Name, np.Descr, np.IfIndex)
+				nb := numberingByID[np.DeviceID]
+				num := nb.Number(np.Name, np.Descr, np.IfIndex)
 				v.NeighborPortNumber = &num
 				v.NeighborPortUnit = np.StackUnit
 				v.NeighborPortAlias = np.Alias
-				v.NeighborPortLabel = portmon.PortLabel(np.Name, np.Descr, np.IfIndex)
+				v.NeighborPortLabel = nb.Label(np.Name, np.Descr, np.IfIndex)
 			}
 		}
 	}
@@ -444,7 +448,7 @@ func (s *PortService) Port(ctx context.Context, d *DeviceView, ifIndex int) (*Po
 	if open == nil {
 		open = []models.Incident{}
 	}
-	views := []PortView{toPortView(rows[0], latest[d.ID])}
+	views := []PortView{toPortView(rows[0], latest[d.ID], portmon.NumberingFor(d.SysDescr))}
 	if err := s.resolveNeighbors(ctx, d.SiteID, views); err != nil {
 		return nil, err
 	}
@@ -676,9 +680,11 @@ type PortEventView struct {
 	PortName   string `json:"port_name" gorm:"column:port_name"`
 	PortAlias  string `json:"port_alias" gorm:"column:port_alias"`
 	PortDescr  string `json:"-" gorm:"column:port_descr"`
-	PortNumber int    `json:"port_number" gorm:"-"`
-	PortLabel  string `json:"port_label" gorm:"-"`
-	StackUnit  int    `json:"stack_unit" gorm:"column:stack_unit"`
+	// DeviceSysDescr picks the device's port numbering.
+	DeviceSysDescr string `json:"-" gorm:"column:device_sys_descr"`
+	PortNumber     int    `json:"port_number" gorm:"-"`
+	PortLabel      string `json:"port_label" gorm:"-"`
+	StackUnit      int    `json:"stack_unit" gorm:"column:stack_unit"`
 }
 
 // Events returns a page of the port event log, newest first, and the total.
@@ -707,15 +713,16 @@ func (s *PortService) Events(ctx context.Context, f PortEventFilter) ([]PortEven
 	}
 	var rows []PortEventView
 	err := q.Session(&gorm.Session{}).
-		Select("e.*, d.name AS device_name, COALESCE(i.name, '') AS port_name, COALESCE(i.alias, '') AS port_alias, COALESCE(i.descr, '') AS port_descr, COALESCE(i.stack_unit, 0) AS stack_unit").
+		Select("e.*, d.name AS device_name, COALESCE(i.name, '') AS port_name, COALESCE(i.alias, '') AS port_alias, COALESCE(i.descr, '') AS port_descr, COALESCE(i.stack_unit, 0) AS stack_unit, COALESCE(d.sys_descr, '') AS device_sys_descr").
 		Order("e.started_at DESC, e.id DESC").Limit(f.Limit).Offset((f.Page - 1) * f.Limit).
 		Scan(&rows).Error
 	if err != nil {
 		return nil, 0, fmt.Errorf("listing port events: %w", err)
 	}
 	for i := range rows {
-		rows[i].PortNumber = portmon.PortNumber(rows[i].PortName, rows[i].PortDescr, rows[i].IfIndex)
-		rows[i].PortLabel = portmon.PortLabel(rows[i].PortName, rows[i].PortDescr, rows[i].IfIndex)
+		nb := portmon.NumberingFor(rows[i].DeviceSysDescr)
+		rows[i].PortNumber = nb.Number(rows[i].PortName, rows[i].PortDescr, rows[i].IfIndex)
+		rows[i].PortLabel = nb.Label(rows[i].PortName, rows[i].PortDescr, rows[i].IfIndex)
 	}
 	if rows == nil {
 		rows = []PortEventView{}
@@ -753,8 +760,9 @@ func (s *PortService) SiteSummary(ctx context.Context, siteID uuid.UUID) (*SiteP
 		models.DeviceInterface
 		DeviceName   string `gorm:"column:device_name"`
 		PollInterval int    `gorm:"column:poll_interval"`
+		SysDescr     string `gorm:"column:device_sys_descr"`
 	}
-	err := s.db.WithContext(ctx).Raw(`SELECT i.*, d.name AS device_name, d.poll_interval
+	err := s.db.WithContext(ctx).Raw(`SELECT i.*, d.name AS device_name, d.poll_interval, COALESCE(d.sys_descr, '') AS device_sys_descr
 		FROM device_interfaces i JOIN devices d ON d.id = i.device_id
 		WHERE d.site_id = ? AND i.present AND COALESCE(i.collect, i.collect_default)`, siteID).Scan(&rows).Error
 	if err != nil {
@@ -776,7 +784,7 @@ func (s *PortService) SiteSummary(ctx context.Context, siteID uuid.UUID) (*SiteP
 	out := &SitePortSummary{Busiest: []PortRef{}, Problems: []PortRef{}}
 	var busy []PortRef
 	for _, r := range rows {
-		v := toPortView(r.DeviceInterface, latest[r.DeviceID])
+		v := toPortView(r.DeviceInterface, latest[r.DeviceID], portmon.NumberingFor(r.SysDescr))
 		conds := []string{}
 		for _, c := range r.Conditions {
 			if c != models.PortConditionLinkDown {

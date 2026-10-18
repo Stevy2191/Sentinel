@@ -62,8 +62,17 @@ func TestDBFaceplateLayoutSaveListDelete(t *testing.T) {
 	}
 	list, err = svc.List(ctx)
 	testdb.Must(t, err)
-	if len(list) != 1 || list[0].Source != "builtin" || list[0].Devices != 2 || list[0].ID != nil {
-		t.Errorf("after delete: %+v", list)
+	var builtin *FaceplateLayoutView
+	for i := range list {
+		if list[i].Source == "saved" {
+			t.Errorf("a saved row is left after delete: %+v", list[i])
+		}
+		if list[i].Model == "UBNT-ES16XG" {
+			builtin = &list[i]
+		}
+	}
+	if builtin == nil || builtin.Source != "builtin" || builtin.Devices != 2 || builtin.ID != nil {
+		t.Errorf("after delete, the built-in ES-16-XG row: %+v", list)
 	}
 	if _, err := svc.Delete(ctx, after.ID); !errors.Is(err, ErrFaceplateLayoutNotFound) {
 		t.Errorf("second delete: %v", err)

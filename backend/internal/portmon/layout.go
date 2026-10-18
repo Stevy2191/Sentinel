@@ -131,6 +131,8 @@ type LayoutOptions struct {
 	// IgnoreDeviceSettings drops Rows, SFPPorts and Style (the layout
 	// editor's preview shows the layout as it will be once they are cleared).
 	IgnoreDeviceSettings bool
+	// Numbering maps the device's interface names to port numbers.
+	Numbering Numbering
 }
 
 // Layout places physical ports. The main ports are drawn by the first of
@@ -162,11 +164,11 @@ func Layout(ports []LayoutPort, o LayoutOptions) Faceplate {
 	if o.IgnoreDeviceSettings {
 		o.Rows, o.SFPPorts, o.Style = nil, nil, PortStyleAuto
 	}
-	main, modules := mainAndModules(ports)
+	main, modules := mainAndModules(ports, o.Numbering)
 	mainPorts := make([]FacePort, 0, len(main))
 	numbers := make([]int, 0, len(main))
 	for _, p := range main {
-		n := PortNumber(p.Name, p.Descr, p.IfIndex)
+		n := o.Numbering.Number(p.Name, p.Descr, p.IfIndex)
 		mainPorts = append(mainPorts, FacePort{IfIndex: p.IfIndex, Number: n})
 		numbers = append(numbers, n)
 	}
@@ -236,7 +238,7 @@ func Layout(ports []LayoutPort, o LayoutOptions) Faceplate {
 // switch/slot/port device, each other slot's ports by number (one per
 // number: see drawnBefore). On such a device a port without a slot name is
 // dropped.
-func mainAndModules(ports []LayoutPort) ([]LayoutPort, map[int]map[int]LayoutPort) {
+func mainAndModules(ports []LayoutPort, nb Numbering) ([]LayoutPort, map[int]map[int]LayoutPort) {
 	slotted, mainSlot := false, 0
 	for _, p := range ports {
 		if slotName.MatchString(p.Name) {
@@ -253,7 +255,7 @@ func mainAndModules(ports []LayoutPort) ([]LayoutPort, map[int]map[int]LayoutPor
 			continue
 		}
 		if slot := SlotNumber(p.Name); slot != mainSlot {
-			n := PortNumber(p.Name, p.Descr, p.IfIndex)
+			n := nb.Number(p.Name, p.Descr, p.IfIndex)
 			if modules[slot] == nil {
 				modules[slot] = map[int]LayoutPort{}
 			}

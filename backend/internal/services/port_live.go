@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
+	"github.com/Stevy2191/Sentinel/backend/internal/portmon"
 )
 
 // LivePort is one port as a circuit card shows it: its device, its name, its
@@ -58,8 +59,9 @@ func (s *PortService) LivePorts(ctx context.Context, interfaceIDs []uuid.UUID) (
 		Name         string
 		SiteID       uuid.UUID
 		PollInterval int
+		SysDescr     string
 	}
-	if err := s.db.WithContext(ctx).Table("devices").Select("id, name, site_id, poll_interval").
+	if err := s.db.WithContext(ctx).Table("devices").Select("id, name, site_id, poll_interval, COALESCE(sys_descr, '') AS sys_descr").
 		Where("id IN ?", deviceIDs).Scan(&devices).Error; err != nil {
 		return nil, fmt.Errorf("loading port devices: %w", err)
 	}
@@ -67,6 +69,7 @@ func (s *PortService) LivePorts(ctx context.Context, interfaceIDs []uuid.UUID) (
 		name string
 		site uuid.UUID
 		live map[string]map[string]float64
+		nb   portmon.Numbering
 	}
 	now := time.Now()
 	byDevice := make(map[uuid.UUID]deviceLive, len(devices))
@@ -75,14 +78,14 @@ func (s *PortService) LivePorts(ctx context.Context, interfaceIDs []uuid.UUID) (
 		if err != nil {
 			return nil, err
 		}
-		byDevice[d.ID] = deviceLive{name: d.Name, site: d.SiteID, live: latest[d.ID]}
+		byDevice[d.ID] = deviceLive{name: d.Name, site: d.SiteID, live: latest[d.ID], nb: portmon.NumberingFor(d.SysDescr)}
 	}
 	for _, r := range rows {
 		d, ok := byDevice[r.DeviceID]
 		if !ok {
 			continue
 		}
-		v := toPortView(r, d.live)
+		v := toPortView(r, d.live, d.nb)
 		out[r.ID] = LivePort{InterfaceID: r.ID, DeviceID: r.DeviceID, DeviceName: d.name, SiteID: d.site,
 			IfIndex: r.IfIndex, Number: v.Number, Label: v.Label, Name: r.Name, Alias: r.Alias, StackUnit: r.StackUnit,
 			OperStatus: r.OperStatus, InBps: v.InBps, OutBps: v.OutBps}

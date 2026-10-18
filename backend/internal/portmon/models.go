@@ -13,6 +13,7 @@ type BuiltinLayout struct {
 
 // Matches reports whether model is this entry's model.
 func (b BuiltinLayout) Matches(model string) bool {
+	model = NormalizeModel(model)
 	return model != "" && b.pattern.MatchString(model)
 }
 
@@ -27,6 +28,18 @@ var builtinLayouts = []BuiltinLayout{
 		Groups: []LayoutGroup{
 			{First: 1, Last: 12, Kind: GroupKindSFP, Rows: 2, Numbering: NumberingAlternate},
 			{First: 13, Last: 16, Kind: GroupKindRJ45, Rows: 1},
+		},
+	},
+	// UniFi Dream Machine SE: LAN ports 1-8 two high, the 2.5G WAN port 9
+	// on its own, then the two SFP+ cages stacked (10 over 11). Its ports
+	// are eth0-eth10, numbered from 1 by NumberingFor.
+	{
+		Name:    "UDM-SE",
+		pattern: regexp.MustCompile(`(?i)^UDM-?SE$`),
+		Groups: []LayoutGroup{
+			{First: 1, Last: 8, Kind: GroupKindRJ45, Rows: 2, Numbering: NumberingAlternate},
+			{First: 9, Last: 9, Kind: GroupKindRJ45, Rows: 1},
+			{First: 10, Last: 11, Kind: GroupKindSFP, Rows: 2, Numbering: NumberingAlternate},
 		},
 	},
 }

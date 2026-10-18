@@ -40,7 +40,8 @@ func deviceFaceplateSet(d *DeviceView) bool {
 }
 
 func layoutOptions(d *DeviceView) portmon.LayoutOptions {
-	o := portmon.LayoutOptions{Rows: d.FaceplateRows, SFPPorts: d.FaceplateSFPPorts, Model: d.EffectiveModel}
+	o := portmon.LayoutOptions{Rows: d.FaceplateRows, SFPPorts: d.FaceplateSFPPorts, Model: d.EffectiveModel,
+		Numbering: portmon.NumberingFor(d.SysDescr)}
 	if d.FaceplatePortStyle != nil {
 		o.Style = *d.FaceplatePortStyle
 	}
@@ -86,7 +87,7 @@ func (s *PortService) FaceplateEditor(ctx context.Context, d *DeviceView) (*Face
 		return nil, err
 	}
 	first := firstUnit(ports)
-	v := &FaceplateEditorView{Model: d.EffectiveModel, Saved: s.savedLayout(d), Ports: portmon.MainPortNumbers(first),
+	v := &FaceplateEditorView{Model: d.EffectiveModel, Saved: s.savedLayout(d), Ports: portmon.MainPortNumbers(first, portmon.NumberingFor(d.SysDescr)),
 		DeviceSettings: deviceFaceplateSet(d)}
 	if b := portmon.BuiltinFor(d.EffectiveModel); b != nil {
 		v.Builtin = b.Groups
@@ -136,10 +137,11 @@ func (s *PortService) PreviewFaceplate(ctx context.Context, d *DeviceView, group
 		return nil, err
 	}
 	p := &FaceplatePreview{
-		Faceplates: portmon.LayoutUnits(ports, portmon.LayoutOptions{Model: d.EffectiveModel, Saved: groups, IgnoreDeviceSettings: true}),
-		Fit:        portmon.Fit{Missing: []int{}, Extra: []int{}},
+		Faceplates: portmon.LayoutUnits(ports, portmon.LayoutOptions{Model: d.EffectiveModel, Saved: groups, IgnoreDeviceSettings: true,
+			Numbering: portmon.NumberingFor(d.SysDescr)}),
+		Fit: portmon.Fit{Missing: []int{}, Extra: []int{}},
 	}
-	if fit := portmon.FitUnits(ports, groups); fit != nil {
+	if fit := portmon.FitUnits(ports, groups, portmon.NumberingFor(d.SysDescr)); fit != nil {
 		p.Fit = *fit
 	}
 	return p, nil

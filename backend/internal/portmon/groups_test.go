@@ -140,7 +140,7 @@ func TestGroupsFromFaceplateSplitsJumps(t *testing.T) {
 }
 
 func TestMainPortNumbersAndFitUnits(t *testing.T) {
-	if got := MainPortNumbers(es16XGLayoutPorts()); !reflect.DeepEqual(got, seq(1, 16)) {
+	if got := MainPortNumbers(es16XGLayoutPorts(), Numbering{}); !reflect.DeepEqual(got, seq(1, 16)) {
 		t.Errorf("ES-16-XG main ports %v", got)
 	}
 	var stack []LayoutPort
@@ -152,11 +152,11 @@ func TestMainPortNumbersAndFitUnits(t *testing.T) {
 			stack = append(stack, LayoutPort{IfIndex: u*100 + n, Name: strconv.Itoa(u) + "/0/" + strconv.Itoa(n), Unit: u})
 		}
 	}
-	f := FitUnits(stack, es16XGGroups())
+	f := FitUnits(stack, es16XGGroups(), Numbering{})
 	if f == nil || !reflect.DeepEqual(f.Extra, []int{16}) {
 		t.Errorf("stack misfit: %+v", f)
 	}
-	if f := FitUnits(es16XGLayoutPorts(), es16XGGroups()); f != nil {
+	if f := FitUnits(es16XGLayoutPorts(), es16XGGroups(), Numbering{}); f != nil {
 		t.Errorf("ES-16-XG fits, got %+v", f)
 	}
 }
@@ -164,7 +164,7 @@ func TestMainPortNumbersAndFitUnits(t *testing.T) {
 // A device with no ports to check against never "fits": every number the
 // layout places is reported as not on the device.
 func TestFitUnitsNoPorts(t *testing.T) {
-	f := FitUnits(nil, es16XGGroups())
+	f := FitUnits(nil, es16XGGroups(), Numbering{})
 	if f == nil || !reflect.DeepEqual(f.Extra, seq(1, 16)) || len(f.Missing) != 0 {
 		t.Errorf("no ports: %+v", f)
 	}
