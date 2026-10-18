@@ -22,6 +22,7 @@ type PortService struct {
 	metrics   *MetricsStore
 	incidents *IncidentService
 	settings  *SettingsService
+	layouts   FaceplateLayoutLookup
 }
 
 func NewPortService(db *gorm.DB, metrics *MetricsStore, incidents *IncidentService, settings *SettingsService) *PortService {
@@ -217,6 +218,9 @@ type DevicePortsView struct {
 	Ports      []PortView              `json:"ports"`
 	Faceplates []portmon.UnitFaceplate `json:"faceplates"`
 	Defaults   PortDefaults            `json:"defaults"`
+	// LayoutNotice is set when the saved layout for the device's model does
+	// not fit its ports, so it is drawn automatically instead.
+	LayoutNotice *FaceplateLayoutNotice `json:"layout_notice,omitempty"`
 }
 
 type PortDetailView struct {
@@ -295,9 +299,14 @@ func (s *PortService) DevicePorts(ctx context.Context, d *DeviceView) (*DevicePo
 	if err := s.resolveNeighbors(ctx, d.SiteID, out.Ports); err != nil {
 		return nil, err
 	}
-	opts := portmon.LayoutOptions{Rows: d.FaceplateRows, SFPPorts: d.FaceplateSFPPorts, Model: d.EffectiveModel}
-	if d.FaceplatePortStyle != nil {
-		opts.Style = *d.FaceplatePortStyle
+	opts := layoutOptions(d)
+	if saved := s.savedLayout(d); saved != nil {
+		opts.Saved = saved.Groups
+		if !deviceFaceplateSet(d) {
+			if fit := portmon.FitUnits(layout, saved.Groups); fit != nil {
+				out.LayoutNotice = &FaceplateLayoutNotice{Model: saved.Model, Fit: *fit}
+			}
+		}
 	}
 	out.Faceplates = portmon.LayoutUnits(layout, opts)
 	return out, nil
