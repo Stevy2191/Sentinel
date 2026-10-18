@@ -139,7 +139,7 @@ export default function FaceplateLayoutEditor({ device, ports, onClose, onSaved 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="card max-h-[90vh] w-full max-w-3xl space-y-4 overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
+      <div className="card max-h-[90vh] w-full max-w-5xl space-y-4 overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold">
