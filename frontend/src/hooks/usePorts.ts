@@ -4,6 +4,7 @@ import type { ApiResponse } from '@/types'
 import type { Device, DeviceInterface, DeviceType, PortRole } from '@/hooks/useDevices'
 import type { MetricsRange } from '@/hooks/useMetrics'
 import type { LayoutFit } from '@/hooks/useFaceplateLayouts'
+import type { FaceplateDeviceState, FaceplateIndicators } from '@/utils/faceplateLights'
 
 export type PortCondition = 'link_down' | 'errors' | 'flapping' | 'slow_link' | 'saturated'
 
@@ -54,6 +55,9 @@ export interface Faceplate {
 export interface UnitFaceplate extends Faceplate {
   unit: number
   label: string
+  /** The realistic drawing for this unit ("udm-se"…), when its model has one
+   *  and its ports are exactly the drawing's. */
+  drawing?: string
 }
 
 export interface PortDefaults {
@@ -69,6 +73,10 @@ export interface DevicePorts {
   /** Set when the saved layout for the device's model does not fit its
    *  ports, so the faceplate is drawn automatically instead. */
   layout_notice?: { model: string; fit: LayoutFit }
+  /** The device's reachability, for a realistic drawing to go dark. */
+  device_state?: FaceplateDeviceState
+  /** A drawing's lights that are not ports (the UDM-SE drive bay). */
+  indicators?: FaceplateIndicators
 }
 
 export interface PortIncident {

@@ -161,16 +161,20 @@ function PortCell({
  *  absolutely positioned child instead of letting it float above the row.
  *  Repositions on scroll (any ancestor, caught via the capture phase — scroll
  *  does not bubble) and on resize while shown, and closes on Escape. */
-function PortPopover({
+export function PortPopover({
   anchorRef,
   port,
   state,
   onClose,
+  lastKnown,
 }: {
   anchorRef: RefObject<HTMLButtonElement | null>
   port: PortView
   state: PortState
   onClose: () => void
+  /** "10:42": the device isn't being heard from, so these are the figures
+   *  as of then. */
+  lastKnown?: string | null
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [style, setStyle] = useState<React.CSSProperties>({ position: 'fixed', top: 0, left: 0, visibility: 'hidden' })
@@ -217,6 +221,11 @@ function PortPopover({
       style={style}
       className="pointer-events-none z-50 w-56 rounded-lg border border-white/10 bg-slate-800/95 px-3 py-2 text-xs shadow-xl backdrop-blur"
     >
+      {lastKnown !== undefined && (
+        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-amber-300">
+          {lastKnown ? `Last known (${lastKnown})` : 'Last known'}
+        </p>
+      )}
       <p className="truncate font-medium text-slate-100">{portTitle(port)}</p>
       <p className="mt-0.5 flex items-center gap-1.5 text-slate-400">
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${PORT_STATE[state].dot}`} aria-hidden />

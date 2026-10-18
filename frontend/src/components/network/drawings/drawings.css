@@ -1,0 +1,91 @@
+/* Realistic faceplates. Values follow the approved mockups in
+   docs/superpowers/specs/assets/2026-10-18-realistic-faceplates. Never put
+   a star followed by a slash inside a comment here: it ends the comment. */
+
+.rf { position: relative; font-family: Inter, system-ui, sans-serif; }
+.rf-case { position: absolute; inset: 0; border-radius: 5px; }
+.rf-silver { background: linear-gradient(#f4f5f6 0%, #e6e8ea 55%, #d8dbde 100%);
+  box-shadow: inset 0 1px 0 #fff, inset 0 -2px 0 #b6bbc0, 0 10px 26px rgba(0, 0, 0, 0.55); }
+.rf-black { border-radius: 4px; background: linear-gradient(#2d3035, #1c1e21 55%, #151719);
+  box-shadow: inset 0 1px 0 #474c52, 0 10px 26px rgba(0, 0, 0, 0.6); }
+.rf-sect { position: absolute; }
+
+/* printed text */
+.rf-lbl { position: absolute; font: 500 7px/1 Inter, system-ui, sans-serif; color: #5d636a; white-space: nowrap; }
+.rf-black .rf-lbl, .rf-on-black .rf-lbl { color: #b6bcc2; }
+.rf-lbl svg { width: 6px; height: 7px; vertical-align: -1px; margin-left: 1px; }
+.rf-lbl sup { font-size: 4.5px; }
+.rf-pill { position: absolute; height: 7px; border-radius: 1.5px; background: #c3c7cb; font: 600 5px/7px Inter, system-ui, sans-serif;
+  color: #fff; text-align: center; letter-spacing: 0.2px; }
+.rf-name { position: absolute; font: 600 6.5px/1 Inter, system-ui, sans-serif; color: #4b5157; white-space: nowrap; }
+
+/* RJ45: dark-edged block, light housing, the jacks */
+.rf-rjblock { position: absolute; background: #c9cdd1; border: 2px solid #23262a; border-radius: 1px; box-sizing: border-box; }
+.rf-rjblock .rf-div { position: absolute; top: -1px; bottom: -1px; width: 4px; background: #23262a; }
+.rf-rjblock.rf-silver-frame { border-color: #e5e7e9; }
+.rf-wan { position: absolute; width: 37px; height: 33px; background: #c9cdd1; border: 2px solid #4a4e53; border-radius: 1px; box-sizing: border-box; }
+.rf-jack { position: absolute; width: 31px; height: 27px; padding: 0; border: 0; background: linear-gradient(#bfc4c9, #adb3b8); cursor: pointer; }
+.rf-jack .rf-hole { position: absolute; left: 4px; right: 4px; top: 3px; bottom: 3px; background: #3a3d41;
+  clip-path: polygon(0 18%, 34% 18%, 34% 0, 66% 0, 66% 18%, 100% 18%, 100% 100%, 0 100%); }
+.rf-jack .rf-pins { position: absolute; left: 7px; right: 7px; bottom: 5px; height: 7px;
+  background: repeating-linear-gradient(90deg, #24272a 0 1px, #7d8288 1px 2.2px); }
+.rf-jack.rf-flip .rf-hole { clip-path: polygon(0 0, 100% 0, 100% 82%, 66% 82%, 66% 100%, 34% 100%, 34% 82%, 0 82%); }
+.rf-jack.rf-flip .rf-pins { bottom: auto; top: 5px; }
+.rf-jack .rf-led { position: absolute; top: 2px; width: 7px; height: 4px; border-radius: 1.5px; background: #8b9096; }
+.rf-jack .rf-led.rf-right { right: 2px; }
+.rf-jack .rf-led.rf-left { left: 2px; }
+.rf-jack.rf-flip .rf-led { top: auto; bottom: 2px; }
+
+/* SFP+ housing: two cages and the bar between them */
+.rf-sfpbox { position: absolute; width: 44px; height: 63px; background: #1c1e21; border: 2px solid #3e4247; border-radius: 1px; box-sizing: border-box; }
+.rf-black .rf-sfpbox { width: 48px; background: #141618; border-color: #55595e; }
+.rf-cage { position: absolute; left: 1px; right: 1px; height: 24px; padding: 0; border: 0; background: #141618; cursor: pointer; }
+.rf-cage .rf-edge { position: absolute; left: 0; width: 19px; height: 6px; background: #d9dde1;
+  background-image: repeating-linear-gradient(90deg, #d9dde1 0 1px, #8f959b 1px 2px); border: 1px solid #6e747a; }
+.rf-cage .rf-clip { position: absolute; right: 3px; top: 3px; width: 7px; height: 18px; border: 1px solid #4d5258; border-left: none; }
+.rf-bar { position: absolute; left: 1px; right: 1px; top: 26px; height: 7px; background: #c9cdd1; font: 700 5px/7px Inter, system-ui, sans-serif; }
+.rf-bar.rf-plain { background: linear-gradient(#d3d7db, #9ca3aa); }
+.rf-bar span { position: absolute; color: #f2f4f6; }
+.rf-bar .rf-a { left: 9px; }
+.rf-bar .rf-b { right: 9px; }
+
+/* reset pinhole */
+.rf-reset { position: absolute; width: 6px; height: 6px; border-radius: 50%; background: #2b2f34; }
+.rf-black .rf-reset { width: 5px; height: 5px; background: #050506; box-shadow: 0 0 0 1px #4b4f54; }
+.rf-resetl { position: absolute; font: 500 6px/1 Inter, system-ui, sans-serif; color: #5d636a; }
+.rf-black .rf-resetl { color: #b6bcc2; font-size: 5px; }
+
+/* status panel lights (ES-16-XG) */
+.rf-panel { position: absolute; display: flex; align-items: flex-start; }
+.rf-lamp { width: 14px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0; border: 0; background: none; cursor: pointer; }
+.rf-dot { width: 5px; height: 5px; border-radius: 50%; background: #3d4247; }
+.rf-pnum { font: 500 6px/1 Inter, system-ui, sans-serif; color: #aab0b6; }
+.rf-legend { margin-left: 8px; margin-top: -6px; display: flex; flex-direction: column; gap: 1.5px; font: 600 4.8px/1 Inter, system-ui, sans-serif; color: #c3c8cd; }
+.rf-legend b { font-weight: 700; }
+.rf-k { display: inline-block; width: 4px; height: 4px; border-radius: 50%; margin-right: 2px; vertical-align: -0.5px; }
+.rf-k.rf-k-off { box-shadow: inset 0 0 0 1px #c3c8cd; }
+.rf-k.rf-k-g { background: #3fe07a; }
+.rf-k.rf-k-w { background: #f4f6f8; }
+
+/* light colours: the LED, the panel dot, an arrow, a device light */
+.rf-led.rf-l-green, .rf-dot.rf-l-green { background: #3fe07a; box-shadow: 0 0 5px #3fe07a; }
+.rf-led.rf-l-white, .rf-dot.rf-l-white { background: #f4f6f8; box-shadow: 0 0 5px #fff; }
+.rf-led.rf-l-yellow, .rf-dot.rf-l-yellow { background: #ffd23a; box-shadow: 0 0 5px #ffd23a; }
+.rf-led.rf-l-red, .rf-dot.rf-l-red { background: #ff4d4d; box-shadow: 0 0 5px #ff4d4d; }
+.rf-bar span.rf-l-green { color: #3fe07a; text-shadow: 0 0 4px #3fe07a; }
+.rf-bar span.rf-l-yellow { color: #ffd23a; text-shadow: 0 0 4px #ffd23a; }
+.rf-bar span.rf-l-red { color: #ff4d4d; text-shadow: 0 0 4px #ff4d4d; }
+@keyframes rf-blink { 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: no-preference) {
+  .rf-fl-slow { animation: rf-blink 1s steps(2) infinite; }
+  .rf-fl-fast { animation: rf-blink 0.4s steps(2) infinite; }
+}
+
+/* selection and focus */
+.rf-sel { outline: 1.5px solid #38bdf8; outline-offset: 1px; }
+.rf-jack:focus-visible, .rf-cage:focus-visible, .rf-lamp:focus-visible { outline: 2px solid #38bdf8; outline-offset: 1px; }
+
+/* the "not hearing from it" badge */
+.rf-badge { position: absolute; left: 8px; top: -10px; z-index: 2; border-radius: 4px; padding: 2px 7px;
+  font: 600 9px/1.4 Inter, system-ui, sans-serif; color: #fff; background: #b91c1c; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4); white-space: nowrap; }
+.rf-badge.rf-badge-quiet { background: #475569; }

@@ -1,3 +1,4 @@
+import type { FaceplateDeviceState, FaceplateIndicators } from '@/utils/faceplateLights'
 import type { MetricPoint, MetricsRange } from '@/hooks/useMetrics'
 import type { PortView, UnitFaceplate } from '@/hooks/usePorts'
 import type { HealthMetric } from '@/hooks/useDeviceHealth'
@@ -137,6 +138,8 @@ export interface PortGridData {
   model: string
   ports: PortView[]
   faceplates: UnitFaceplate[]
+  device_state?: FaceplateDeviceState
+  indicators?: FaceplateIndicators
 }
 
 export interface DeviceHealthData {
