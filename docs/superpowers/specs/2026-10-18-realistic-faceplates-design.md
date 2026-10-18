@@ -282,6 +282,9 @@ The drive bay state is one of:
   devices whose drawing declares a drive bay.
 - The poller keeps the last counters in memory, per device. Nothing is
   stored in the database.
+- The monitor is built after `PortService` in `main.go`, so `PortService`
+  gets a setter, in the style of `SetFaceplateLayouts`, to read the drive
+  bay state from it.
 - The state is served on the ports view as
   `indicators: { drive_bay: "<state>" }`, beside `faceplates`.
 - A failed walk never fails the stats poll.
