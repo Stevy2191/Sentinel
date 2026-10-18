@@ -99,9 +99,9 @@
   border: 2px solid #3fa0ff; box-shadow: 0 0 7px #3fa0ff; }
 .rf-bay { position: absolute; left: 330px; top: 22px; width: 222px; height: 62px; border-radius: 3px;
   background: linear-gradient(#eceef0, #dadde0); box-shadow: inset 0 0 0 1px #a9afb5, inset 0 2px 4px rgba(0, 0, 0, 0.18); }
-.rf-bay::after { content: ""; position: absolute; right: 12px; top: 28px; width: 5px; height: 5px; border-radius: 50%; background: #5a6067; }
-.rf-baylight { position: absolute; right: 24px; top: 28px; width: 5px; height: 5px; border-radius: 50%; background: #8b9096; }
-.rf-baylight.rf-l-white { background: #f4f6f8; box-shadow: 0 0 6px #fff; }
+/* the single dot on the right of the bay is the drive light itself */
+.rf-baylight { position: absolute; right: 12px; top: 28px; width: 5px; height: 5px; border-radius: 50%; background: #5a6067; }
+.rf-baylight.rf-l-white { background: #fff; box-shadow: 0 0 0 1px rgba(90, 96, 103, 0.45), 0 0 7px 2px #fff; }
 .rf-uswtouch { position: absolute; left: 16px; top: 16px; width: 60px; height: 60px; border-radius: 5px; background: #06090d;
   box-shadow: inset 0 0 0 2px #24292f; overflow: hidden; }
 .rf-uswtouch::before { content: ""; position: absolute; left: 50%; top: 4px; bottom: 4px; width: 1px; background: #1f4f86; }
