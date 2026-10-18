@@ -19,6 +19,7 @@ const (
 	DrawingES24500W = "es-24-500w"
 	DrawingES48500W = "es-48-500w"
 	DrawingES48750W = "es-48-750w"
+	DrawingC4500X16 = "c4500x-16"
 )
 
 // Drawing is a model's realistic front panel: the main port numbers it
@@ -30,6 +31,10 @@ type Drawing struct {
 	// model with one.
 	DriveBayDisk string
 	pattern      *regexp.Regexp
+	// Modules are the network module slots the drawing has, each with the
+	// exact port numbers of the one module it knows. A slot may be empty;
+	// any other module, or a slot not listed, means no drawing.
+	Modules map[int][]int
 	// product matches the product name that opens sysDescr ("EdgeSwitch 24
 	// 500W"), for models whose model string doesn't say which they are
 	// (every 24-port EdgeSwitch reports UBNT-ES24).
@@ -57,6 +62,10 @@ var drawings = []Drawing{
 	{Key: DrawingES24250W, Ports: portRange(1, 26), product: regexp.MustCompile(`(?i)^EDGESWITCH 24 250W$`), pattern: regexp.MustCompile(`(?i)^ES-24-250W$`)},
 	{Key: DrawingES24500W, Ports: portRange(1, 26), product: regexp.MustCompile(`(?i)^EDGESWITCH 24 500W$`), pattern: regexp.MustCompile(`(?i)^ES-24-500W$`)},
 	{Key: DrawingES48500W, Ports: portRange(1, 52), product: regexp.MustCompile(`(?i)^EDGESWITCH 48 500W$`), pattern: regexp.MustCompile(`(?i)^ES-48-500W$`)},
+	// Catalyst 4500-X-16: built-in SFP+ Te1/1/1-16, and the uplink bay
+	// (slot 2) empty or holding the 8-port SFP+ module (Te1/2/1-8), as the
+	// owner's VSS pair has (2026-10-01).
+	{Key: DrawingC4500X16, Ports: portRange(1, 16), Modules: map[int][]int{2: portRange(1, 8)}, pattern: regexp.MustCompile(`(?i)^WS-C4500X-16`)},
 	{Key: DrawingES48750W, Ports: portRange(1, 52), product: regexp.MustCompile(`(?i)^EDGESWITCH 48 750W$`), pattern: regexp.MustCompile(`(?i)^ES-48-750W$`)},
 }
 
@@ -76,6 +85,11 @@ func DrawingFor(model, sysDescr string) *Drawing {
 		if (model != "" && d.pattern != nil && d.pattern.MatchString(model)) ||
 			(product != "" && d.product != nil && d.product.MatchString(product)) {
 			d.Ports = slices.Clone(d.Ports)
+			mods := make(map[int][]int, len(d.Modules))
+			for slot, ns := range d.Modules {
+				mods[slot] = slices.Clone(ns)
+			}
+			d.Modules = mods
 			return &d
 		}
 	}
@@ -83,10 +97,26 @@ func DrawingFor(model, sysDescr string) *Drawing {
 }
 
 // drawingKey is the drawing for a unit whose main port numbers are exactly
-// the drawing's, else "": a drawing never hides or invents a port.
+// the drawing's, and whose module slots each hold nothing or exactly the
+// module the drawing knows; else "": a drawing never hides or invents a port.
 func drawingKey(d *Drawing, unitPorts []LayoutPort, nb Numbering) string {
 	if d == nil || !slices.Equal(MainPortNumbers(unitPorts, nb), d.Ports) {
 		return ""
+	}
+	_, modules := mainAndModules(unitPorts, nb)
+	for slot, ports := range modules {
+		want, ok := d.Modules[slot]
+		if !ok {
+			return ""
+		}
+		got := make([]int, 0, len(ports))
+		for n := range ports {
+			got = append(got, n)
+		}
+		slices.Sort(got)
+		if !slices.Equal(got, want) {
+			return ""
+		}
 	}
 	return d.Key
 }

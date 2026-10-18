@@ -116,3 +116,53 @@ func TestLayoutUnitsDrawingFromDescr(t *testing.T) {
 		t.Errorf("drawing %q", u[0].Drawing)
 	}
 }
+
+func cisco4500XPorts(module int) []LayoutPort {
+	var ps []LayoutPort
+	for _, f := range cisco4500X() {
+		if SlotNumber(f.Name) == 2 && PortNumber(f.Name, f.Descr, f.Index) > module {
+			continue
+		}
+		ps = append(ps, LayoutPort{IfIndex: f.Index, Name: f.Name, Descr: f.Descr})
+	}
+	return ps
+}
+
+// The 4500-X draws with its 8-port uplink module, or with the bay empty;
+// a module it doesn't know (another port count) falls back to Simple.
+func TestDrawing4500XModules(t *testing.T) {
+	o := LayoutOptions{Model: "WS-C4500X-16"}
+	if u := LayoutUnits(cisco4500XPorts(8), o); u[0].Drawing != DrawingC4500X16 {
+		t.Errorf("with the 8-port module: %q", u[0].Drawing)
+	}
+	if u := LayoutUnits(cisco4500XPorts(0), o); u[0].Drawing != DrawingC4500X16 {
+		t.Errorf("with no module: %q", u[0].Drawing)
+	}
+	if u := LayoutUnits(cisco4500XPorts(4), o); u[0].Drawing != "" {
+		t.Errorf("a 4-port module must fall back to Simple, got %q", u[0].Drawing)
+	}
+	// A VSS pair: each chassis is its own unit and its own drawing.
+	var pair []LayoutPort
+	for unit := 1; unit <= 2; unit++ {
+		for _, p := range cisco4500XPorts(8) {
+			p.Unit, p.IfIndex = unit, unit*100+p.IfIndex
+			pair = append(pair, p)
+		}
+	}
+	if u := LayoutUnits(pair, o); len(u) != 2 || u[0].Drawing != DrawingC4500X16 || u[1].Drawing != DrawingC4500X16 {
+		t.Errorf("VSS pair: %+v", u)
+	}
+}
+
+// A drawing without modules (the UDM-SE, EdgeSwitches) never draws a device
+// that has module ports.
+func TestDrawingRejectsUnknownModules(t *testing.T) {
+	ps := cisco4500XPorts(8)
+	if u := LayoutUnits(ps, LayoutOptions{Model: "WS-C4500X-32"}); u[0].Drawing != "" {
+		t.Errorf("unknown model drew %q", u[0].Drawing)
+	}
+	d := &Drawing{Key: "x", Ports: portRange(1, 16)}
+	if got := drawingKey(d, ps, Numbering{}); got != "" {
+		t.Errorf("a drawing with no modules accepted module ports: %q", got)
+	}
+}
