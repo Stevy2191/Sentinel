@@ -384,3 +384,59 @@ func TestLayoutModelFallsBack(t *testing.T) {
 		t.Errorf("USW-Pro-48 block rows %d", fp.Blocks[0].Rows)
 	}
 }
+
+func cisco4500XLayoutPorts() []LayoutPort {
+	var ps []LayoutPort
+	for _, f := range cisco4500X() {
+		ps = append(ps, LayoutPort{IfIndex: f.Index, Name: f.Name, Descr: f.Descr})
+	}
+	return ps
+}
+
+// A saved layout replaces the built-in one for the same model.
+func TestLayoutSavedOverridesBuiltin(t *testing.T) {
+	saved := []LayoutGroup{{First: 1, Last: 16, Kind: GroupKindRJ45, Rows: 2, Numbering: NumberingAlternate}}
+	fp := Layout(es16XGLayoutPorts(), LayoutOptions{Model: "UBNT-ES16XG", Saved: saved})
+	if len(fp.Blocks) != 1 || fp.Blocks[0].SFP || len(fp.Blocks[0].Top) != 8 {
+		t.Errorf("saved layout not used: %+v", fp)
+	}
+}
+
+// A saved layout that does not place the ports exactly is skipped for the
+// built-in one.
+func TestLayoutSavedMisfitFallsBack(t *testing.T) {
+	saved := []LayoutGroup{{First: 1, Last: 20, Kind: GroupKindRJ45, Rows: 2, Numbering: NumberingAlternate}}
+	fp := Layout(es16XGLayoutPorts(), LayoutOptions{Model: "UBNT-ES16XG", Saved: saved})
+	if len(fp.Blocks) != 2 || !fp.Blocks[0].SFP || fp.Blocks[1].SFP {
+		t.Errorf("want the built-in ES-16-XG drawing, got %+v", fp)
+	}
+}
+
+// The device's own settings beat a saved layout, unless told to ignore them
+// (the editor's preview).
+func TestLayoutDeviceSettingsBeatSaved(t *testing.T) {
+	two := 2
+	saved := []LayoutGroup{{First: 1, Last: 16, Kind: GroupKindRJ45, Rows: 1}}
+	fp := Layout(es16XGLayoutPorts(), LayoutOptions{Model: "UBNT-ES16XG", Rows: &two, Saved: saved})
+	for _, b := range fp.Blocks {
+		if b.Rows != 0 {
+			t.Errorf("device settings ignored: %+v", fp)
+		}
+	}
+	fp = Layout(es16XGLayoutPorts(), LayoutOptions{Model: "UBNT-ES16XG", Rows: &two, Saved: saved, IgnoreDeviceSettings: true})
+	if len(fp.Blocks) != 1 || fp.Blocks[0].Rows != 1 || len(fp.Blocks[0].Top) != 16 {
+		t.Errorf("preview should draw the saved layout: %+v", fp)
+	}
+}
+
+// Network modules are still drawn after a saved layout of the main ports.
+func TestLayoutModulesAfterLayout(t *testing.T) {
+	saved := []LayoutGroup{{First: 1, Last: 16, Kind: GroupKindSFP, Rows: 2, Numbering: NumberingAcross}}
+	fp := Layout(cisco4500XLayoutPorts(), LayoutOptions{Model: "WS-C4500X-16", Saved: saved})
+	if len(fp.Blocks) != 2 || fp.Blocks[0].Rows != 2 || !reflect.DeepEqual(numbers(fp.Blocks[0].Top), seq(1, 8)) {
+		t.Fatalf("main block: %+v", fp.Blocks)
+	}
+	if mod := fp.Blocks[1]; mod.Label != "Module 2" || len(mod.Top)+len(mod.Bottom) != 8 {
+		t.Errorf("module block %+v", mod)
+	}
+}

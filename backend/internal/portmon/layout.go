@@ -123,56 +123,75 @@ type LayoutOptions struct {
 	SFPPorts []int
 	// Style is PortStyleAuto, PortStyleSFP or PortStyleRJ45.
 	Style string
-	// Model is the device's model, for Auto's IsSFPModel check.
+	// Model is the device's model, for the built-in table and Auto's
+	// IsSFPModel check.
 	Model string
+	// Saved is the admin's saved layout for Model; nil when there is none.
+	Saved []LayoutGroup
+	// IgnoreDeviceSettings drops Rows, SFPPorts and Style (the layout
+	// editor's preview shows the layout as it will be once they are cleared).
+	IgnoreDeviceSettings bool
 }
 
-// Layout places physical ports. The main ports are ordered by number: copper
-// ones split into blocks of 12, then SFP ones (see LayoutOptions.Style) in
-// blocks of 12 columns on the right. Eight copper ports or fewer sit in one
-// row, more in two; with no copper at all, twelve SFP ports or fewer sit in
-// one row.
+// Layout places physical ports. The main ports are drawn by the first of
+// these that applies:
+//
+//  1. the device's own settings (Rows, SFPPorts or Style set): the automatic
+//     rules below, using them;
+//  2. the saved layout (Saved);
+//  3. the built-in table (models.go) for Model;
+//  4. the automatic rules.
+//
+// A saved or built-in layout is used only when it places the main ports
+// exactly (CheckFit), so it never hides or duplicates a port.
+//
+// The automatic rules order the main ports by number: copper ones split
+// into blocks of 12, then SFP ones (see LayoutOptions.Style) in blocks of 12
+// columns on the right. Eight copper ports or fewer sit in one row, more in
+// two; with no copper at all, twelve SFP ports or fewer sit in one row.
 //
 // On a device with switch/slot/port names, the lowest slot holds the main
 // ports (slot 0 on most Catalysts, slot 1 on a 4500-X), each other slot is a
-// network module drawn as its own SFP block after them, labelled "Module N",
-// and a
-// port without such a name (the Gi0/0 management port) is left off. Where
-// two module interfaces share a number (Cisco lists each cage of a 1G/10G
-// module as both Gi1/1/N and Te1/1/N), one cage is drawn, for the interface
-// that is up, else the faster one.
+// network module drawn as its own SFP block after them, labelled "Module N"
+// (after a saved or built-in layout too), and a port without such a name
+// (the Gi0/0 management port) is left off. Where two module interfaces share
+// a number (Cisco lists each cage of a 1G/10G module as both Gi1/1/N and
+// Te1/1/N), one cage is drawn, for the interface that is up, else the
+// faster one.
 func Layout(ports []LayoutPort, o LayoutOptions) Faceplate {
+	if o.IgnoreDeviceSettings {
+		o.Rows, o.SFPPorts, o.Style = nil, nil, PortStyleAuto
+	}
+	main, modules := mainAndModules(ports)
+	mainPorts := make([]FacePort, 0, len(main))
+	numbers := make([]int, 0, len(main))
+	for _, p := range main {
+		n := PortNumber(p.Name, p.Descr, p.IfIndex)
+		mainPorts = append(mainPorts, FacePort{IfIndex: p.IfIndex, Number: n})
+		numbers = append(numbers, n)
+	}
+
+	if o.Style == PortStyleAuto && o.Rows == nil && len(o.SFPPorts) == 0 {
+		layouts := [][]LayoutGroup{o.Saved}
+		if b := BuiltinFor(o.Model); b != nil {
+			layouts = append(layouts, b.Groups)
+		}
+		for _, gs := range layouts {
+			if len(gs) > 0 && CheckFit(gs, numbers).OK() {
+				rows := groupRows(gs)
+				return Faceplate{Rows: rows, Blocks: append(groupBlocks(gs, mainPorts), moduleBlocks(modules, rows)...)}
+			}
+		}
+	}
+
 	sfpSet := map[int]bool{}
 	for _, n := range o.SFPPorts {
 		sfpSet[n] = true
 	}
-	slotted, mainSlot := false, 0
-	for _, p := range ports {
-		if slotName.MatchString(p.Name) {
-			if slot := SlotNumber(p.Name); !slotted || slot < mainSlot {
-				mainSlot = slot
-			}
-			slotted = true
-		}
-	}
 	copper, sfp := []FacePort{}, []FacePort{}
-	modules := map[int]map[int]LayoutPort{}
-	for _, p := range ports {
-		if slotted && !slotName.MatchString(p.Name) {
-			continue
-		}
-		n := PortNumber(p.Name, p.Descr, p.IfIndex)
-		if slot := SlotNumber(p.Name); slot != mainSlot {
-			if modules[slot] == nil {
-				modules[slot] = map[int]LayoutPort{}
-			}
-			if cur, ok := modules[slot][n]; !ok || drawnBefore(p, cur) {
-				modules[slot][n] = p
-			}
-			continue
-		}
-		fp := FacePort{IfIndex: p.IfIndex, Number: n}
-		isSFP := sfpSet[n]
+	for i, p := range main {
+		fp := mainPorts[i]
+		isSFP := sfpSet[fp.Number]
 		switch o.Style {
 		case PortStyleSFP:
 			isSFP = true
@@ -189,13 +208,6 @@ func Layout(ports []LayoutPort, o LayoutOptions) Faceplate {
 	}
 	byNumber(copper)
 	byNumber(sfp)
-	// A model in the table (models.go) is drawn as the real switch, unless
-	// the user has set the faceplate themselves or it has network modules.
-	if len(modules) == 0 && o.Style == PortStyleAuto && o.Rows == nil && len(o.SFPPorts) == 0 {
-		if fp, ok := modelFaceplate(o.Model, append(append([]FacePort{}, copper...), sfp...)); ok {
-			return fp
-		}
-	}
 
 	rows := 1
 	if len(copper) > maxOneRowPorts || (len(copper) == 0 && len(sfp) > blockSize) {
@@ -217,11 +229,52 @@ func Layout(ports []LayoutPort, o LayoutOptions) Faceplate {
 			blocks = append(blocks, split(group.ps[i:min(i+group.size, len(group.ps))], rows, group.sfp))
 		}
 	}
+	return Faceplate{Rows: rows, Blocks: append(blocks, moduleBlocks(modules, rows)...)}
+}
+
+// mainAndModules splits physical ports into the main ports and, on a
+// switch/slot/port device, each other slot's ports by number (one per
+// number: see drawnBefore). On such a device a port without a slot name is
+// dropped.
+func mainAndModules(ports []LayoutPort) ([]LayoutPort, map[int]map[int]LayoutPort) {
+	slotted, mainSlot := false, 0
+	for _, p := range ports {
+		if slotName.MatchString(p.Name) {
+			if slot := SlotNumber(p.Name); !slotted || slot < mainSlot {
+				mainSlot = slot
+			}
+			slotted = true
+		}
+	}
+	var main []LayoutPort
+	modules := map[int]map[int]LayoutPort{}
+	for _, p := range ports {
+		if slotted && !slotName.MatchString(p.Name) {
+			continue
+		}
+		if slot := SlotNumber(p.Name); slot != mainSlot {
+			n := PortNumber(p.Name, p.Descr, p.IfIndex)
+			if modules[slot] == nil {
+				modules[slot] = map[int]LayoutPort{}
+			}
+			if cur, ok := modules[slot][n]; !ok || drawnBefore(p, cur) {
+				modules[slot][n] = p
+			}
+			continue
+		}
+		main = append(main, p)
+	}
+	return main, modules
+}
+
+// moduleBlocks draws each network module as its own labelled SFP block.
+func moduleBlocks(modules map[int]map[int]LayoutPort, rows int) []FaceBlock {
 	slots := make([]int, 0, len(modules))
 	for slot := range modules {
 		slots = append(slots, slot)
 	}
 	sort.Ints(slots)
+	blocks := make([]FaceBlock, 0, len(slots))
 	for _, slot := range slots {
 		var ps []FacePort
 		for n, p := range modules[slot] {
@@ -232,7 +285,7 @@ func Layout(ports []LayoutPort, o LayoutOptions) Faceplate {
 		b.Label = fmt.Sprintf("Module %d", slot)
 		blocks = append(blocks, b)
 	}
-	return Faceplate{Rows: rows, Blocks: blocks}
+	return blocks
 }
 
 // drawnBefore reports whether a should be drawn instead of b in one cage: an
@@ -276,6 +329,23 @@ type UnitFaceplate struct {
 // put. It is dropped from the faceplate entirely here (it still shows in
 // the port table, which is built independently of this function).
 func LayoutUnits(ports []LayoutPort, o LayoutOptions) []UnitFaceplate {
+	groups := unitGroups(ports)
+	out := make([]UnitFaceplate, 0, len(groups))
+	for _, u := range groups {
+		out = append(out, UnitFaceplate{Unit: u.unit, Label: u.label, Faceplate: Layout(u.ports, o)})
+	}
+	return out
+}
+
+type unitPorts struct {
+	unit  int
+	label string
+	ports []LayoutPort
+}
+
+// unitGroups groups ports by stack Unit, in unit order, as LayoutUnits
+// draws them (see there for why a stacked device drops unit 0).
+func unitGroups(ports []LayoutPort) []unitPorts {
 	byUnit := map[int][]LayoutPort{}
 	var units []int
 	for _, p := range ports {
@@ -286,7 +356,7 @@ func LayoutUnits(ports []LayoutPort, o LayoutOptions) []UnitFaceplate {
 	}
 	sort.Ints(units)
 	stacked := len(units) > 1
-	out := make([]UnitFaceplate, 0, len(units))
+	out := make([]unitPorts, 0, len(units))
 	for _, u := range units {
 		if stacked && u == 0 {
 			continue
@@ -295,7 +365,7 @@ func LayoutUnits(ports []LayoutPort, o LayoutOptions) []UnitFaceplate {
 		if stacked {
 			label = fmt.Sprintf("Switch %d", u)
 		}
-		out = append(out, UnitFaceplate{Unit: u, Label: label, Faceplate: Layout(byUnit[u], o)})
+		out = append(out, unitPorts{unit: u, label: label, ports: byUnit[u]})
 	}
 	return out
 }
