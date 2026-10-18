@@ -52,7 +52,21 @@ Spec: `docs/superpowers/specs/2026-10-07-ux-reorganization-design.md` (agreed 20
 | 3 | Site profiles: networks, ISPs and circuits (optionally tied to a port, with live usage) and notes per site; two-column site page with its devices, servers and uptime checks | Done (`dev`); plan `plans/2026-10-08-ux-piece3-site-profiles.md`; follow-ups `plans/2026-10-08-ux-piece3-followups.md` |
 | 4 | Dashboards and status pages merged: status pages become publishable dashboards | Not started |
 
+## Faceplate layouts per model
+
+Spec `specs/2026-10-18-faceplate-model-layouts-design.md`, plan `plans/2026-10-18-faceplate-model-layouts.md`. The EdgeSwitch 16 XG is drawn as the real switch from a built-in table (`portmon/models.go`, on `dev`). On `feature/faceplate-layout-editor`, admins can save a layout for any model: **Fix layout** on a device's faceplate, and Settings → Faceplate layouts. Migration `062_faceplate_layouts.sql`.
+
 ## To be checked by the owner
+
+### Faceplate layouts per model (on the dev stack, port 3200, with QuantumLink, the US-48 Pro)
+
+1. With no saved layout, the faceplate looks exactly as before.
+2. Fix layout opens with the current drawing as groups. Change ports 49–52 to one row, and the preview updates. Save. The device page shows the new drawing, and so does a dashboard port grid widget for that device.
+3. Remove a group: Save turns off and "Not placed: …" lists the ports.
+4. Set the model in Edit details to something else: the device goes back to the automatic drawing. Set it back, and it uses the saved layout again.
+5. Settings → Faceplate layouts lists the saved layout with 1 device, plus the built-in UBNT-ES16XG entry. Delete the saved one, and the US-48 Pro goes back to the automatic drawing.
+6. A non-admin sees no Fix layout, no Settings section, and a 403 from each route.
+
 
 ### UX reorganization piece 1 (on the dev stack)
 
