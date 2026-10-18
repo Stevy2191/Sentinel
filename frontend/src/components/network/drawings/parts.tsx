@@ -149,9 +149,24 @@ const BOLT = <path d="M3.6 0 0.8 4h1.9L2.3 7 5.2 3H3.3z" fill="currentColor" />
 
 /** A printed port label: its number, and the PoE bolt (+ / ++) or WAN globe
  *  printed beside it. */
-export function PrintedLabel({ x, y, n, poe, globe }: { x: number; y: number; n: number; poe?: '' | '+' | '++'; globe?: boolean }) {
+export function PrintedLabel({
+  x,
+  y,
+  n,
+  poe,
+  globe,
+  w,
+}: {
+  x: number
+  y: number
+  n: number | string
+  poe?: '' | '+' | '++'
+  globe?: boolean
+  /** Centre the label over a part this wide that starts at x. */
+  w?: number
+}) {
   return (
-    <div className="rf-lbl" style={{ left: x, top: y }}>
+    <div className="rf-lbl" style={{ left: x, top: y, ...(w ? { width: w, textAlign: 'center' } : {}) }}>
       {n}
       {poe !== undefined && <svg viewBox="0 0 6 7">{BOLT}</svg>}
       {poe ? <sup>{poe}</sup> : null}
@@ -181,5 +196,30 @@ export function Reset({ x, y }: { x: number; y: number }) {
         RESET
       </div>
     </>
+  )
+}
+
+/** One line of a printed legend: a colour chip (or the ▲▼ arrows in that
+ *  colour, for SFP legends) and its meaning. */
+export interface LegendItem {
+  label: string
+  colour: string
+  arrows?: string
+}
+
+/** A printed LED legend (EdgeSwitch): an icon, its title and the colours
+ *  the real LEDs use. They are printed on the case, so they never change. */
+export function Legend({ x, y, title, items, row }: { x: number; y: number; title?: string; items: LegendItem[]; row?: boolean }) {
+  return (
+    <div className={row ? 'rf-lgd rf-lgd-row' : 'rf-lgd'} style={{ left: x, top: y }}>
+      {title && <span className="rf-lgd-ic" />}
+      {title && <b>{title}</b>}
+      {items.map((it) => (
+        <span key={it.label}>
+          {it.arrows ? <span style={{ color: it.colour }}>{it.arrows} </span> : <i className="rf-k" style={{ background: it.colour }} />}
+          {it.label}
+        </span>
+      ))}
+    </div>
   )
 }

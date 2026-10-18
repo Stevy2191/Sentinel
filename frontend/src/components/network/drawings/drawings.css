@@ -135,3 +135,45 @@
 @media (prefers-reduced-motion: reduce) {
   .rf-wave i:first-child { opacity: 0.45; transform: scale(1.25); }
 }
+
+/* EdgeSwitch cases: black faces, rack ears, printed legends; the newer
+   generation has a grey port frame with gold pins, the older a silver frame
+   with small LEDs on each jack's edge */
+.rf-es { border-radius: 3px; background: linear-gradient(#2e3136, #1f2124 60%, #191b1d);
+  box-shadow: inset 0 1px 0 #44494f, 0 10px 26px rgba(0, 0, 0, 0.6); }
+.rf-es .rf-lbl { color: #a9afb5; }
+.rf-es .rf-reset { width: 5px; height: 5px; background: #050506; box-shadow: 0 0 0 1px #4b4f54; }
+.rf-es .rf-resetl { color: #b6bcc2; font-size: 5px; }
+.rf-ear { position: absolute; width: 20px; height: 10px; border-radius: 6px; background: #05060a; box-shadow: inset 0 1px 2px #000; }
+.rf-esnew .rf-rjblock { background: #b9bec3; border-color: #8d939a; }
+.rf-esnew .rf-jack .rf-pins { height: 3px; bottom: 4px; background: repeating-linear-gradient(90deg, #1b1d20 0 1px, #c9a447 1px 2.2px); }
+.rf-esnew .rf-jack.rf-flip .rf-pins { bottom: auto; top: 4px; }
+.rf-esold .rf-rjblock { background: #d4d8dc; border-color: #e9ebed; }
+.rf-esold .rf-rjblock .rf-div { background: #e9ebed; }
+.rf-esold .rf-jack .rf-led { width: 5px; height: 3px; top: 1px; }
+.rf-esold .rf-jack.rf-flip .rf-led { top: auto; bottom: 1px; }
+.rf-esold .rf-jack .rf-led.rf-left { left: 3px; }
+.rf-esold .rf-jack .rf-led.rf-right { right: 3px; }
+.rf-lgd { position: absolute; display: flex; flex-direction: column; gap: 1.5px; font: 600 4.6px/1 Inter, system-ui, sans-serif; color: #b8bec4; white-space: nowrap; }
+.rf-lgd b { font-weight: 700; margin-bottom: 1px; }
+.rf-lgd-row { flex-direction: row; align-items: center; gap: 5px; font-size: 4.8px; }
+.rf-lgd-row b { margin-bottom: 0; }
+.rf-lgd-ic { width: 9px; height: 6px; border: 1px solid #b8bec4; border-radius: 1px; margin-bottom: 1px; }
+.rf-lgd-row .rf-lgd-ic { margin-bottom: 0; }
+.rf-k { display: inline-block; width: 5px; height: 3px; border-radius: 1px; margin-right: 2px; vertical-align: 0; }
+.rf-eslogo { position: absolute; display: flex; align-items: center; gap: 5px; font: 600 8px/1 Inter, system-ui, sans-serif; color: #a9afb5; }
+.rf-eslogo i { width: 7px; height: 7px; border-radius: 50%; background: #f2f4f6; }
+.rf-eslogo-old { position: absolute; display: flex; align-items: center; gap: 9px; color: #f2f4f6; }
+.rf-eslogo-old .rf-u { font: 800 14px/1 Inter, system-ui, sans-serif; }
+.rf-eslogo-old .rf-sep { width: 1px; height: 13px; background: #7c838a; }
+.rf-eslogo-old .rf-nm { font: italic 600 11px/1 Inter, system-ui, sans-serif; }
+.rf-eslogo-old .rf-nm em { font-style: normal; font-size: 6px; background: #e6e8ea; color: #1c1e21; padding: 1px 2px; border-radius: 1px; margin-left: 3px; vertical-align: 2px; }
+.rf-eslogo-old.rf-sm { gap: 6px; }
+.rf-eslogo-old.rf-sm .rf-u { font-size: 11px; }
+.rf-eslogo-old.rf-sm .rf-nm { font-size: 8px; }
+.rf-espwr { position: absolute; width: 4px; height: 4px; border-radius: 50%; background: #3d4247; }
+.rf-espwr.rf-on { background: #3d8bff; box-shadow: 0 0 5px #3d8bff; }
+.rf-sfplbl { position: absolute; font: 600 5.5px/1 Inter, system-ui, sans-serif; color: #b8bec4; text-align: center; }
+.rf-sfpwhite { position: absolute; background: #e9ebed; border-radius: 2px; }
+.rf-sfpwhite .rf-t { position: absolute; left: 0; right: 0; text-align: center; font: 600 5.5px/1 Inter, system-ui, sans-serif; color: #5d636a; }
+.rf-pill2 { position: absolute; height: 6px; border-radius: 1.5px; background: #8d939a; font: 700 4.5px/6px Inter, system-ui, sans-serif; color: #fff; text-align: center; }
