@@ -133,6 +133,9 @@ type LayoutOptions struct {
 	IgnoreDeviceSettings bool
 	// Numbering maps the device's interface names to port numbers.
 	Numbering Numbering
+	// SysDescr picks a realistic drawing for models whose model string
+	// doesn't say which they are (EdgeSwitches).
+	SysDescr string
 }
 
 // Layout places physical ports. The main ports are drawn by the first of
@@ -335,7 +338,7 @@ type UnitFaceplate struct {
 // the port table, which is built independently of this function).
 func LayoutUnits(ports []LayoutPort, o LayoutOptions) []UnitFaceplate {
 	groups := unitGroups(ports)
-	drawing := DrawingFor(o.Model)
+	drawing := DrawingFor(o.Model, o.SysDescr)
 	out := make([]UnitFaceplate, 0, len(groups))
 	for _, u := range groups {
 		out = append(out, UnitFaceplate{Unit: u.unit, Label: u.label, Faceplate: Layout(u.ports, o),

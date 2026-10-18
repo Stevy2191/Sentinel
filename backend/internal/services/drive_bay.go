@@ -77,7 +77,7 @@ func effectiveModel(d models.Device) string {
 // a drive bay; any other device is left alone. A failed walk makes the
 // state unknown but keeps the last counters.
 func (m *DriveBayMonitor) PollDriveBay(ctx context.Context, d models.Device, t snmp.Target) {
-	drawing := portmon.DrawingFor(effectiveModel(d))
+	drawing := portmon.DrawingFor(effectiveModel(d), d.SysDescr)
 	if drawing == nil || drawing.DriveBayDisk == "" {
 		return
 	}

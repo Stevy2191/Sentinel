@@ -41,7 +41,7 @@ func deviceFaceplateSet(d *DeviceView) bool {
 
 func layoutOptions(d *DeviceView) portmon.LayoutOptions {
 	o := portmon.LayoutOptions{Rows: d.FaceplateRows, SFPPorts: d.FaceplateSFPPorts, Model: d.EffectiveModel,
-		Numbering: portmon.NumberingFor(d.SysDescr)}
+		Numbering: portmon.NumberingFor(d.SysDescr), SysDescr: d.SysDescr}
 	if d.FaceplatePortStyle != nil {
 		o.Style = *d.FaceplatePortStyle
 	}
@@ -138,7 +138,7 @@ func (s *PortService) PreviewFaceplate(ctx context.Context, d *DeviceView, group
 	}
 	p := &FaceplatePreview{
 		Faceplates: portmon.LayoutUnits(ports, portmon.LayoutOptions{Model: d.EffectiveModel, Saved: groups, IgnoreDeviceSettings: true,
-			Numbering: portmon.NumberingFor(d.SysDescr)}),
+			Numbering: portmon.NumberingFor(d.SysDescr), SysDescr: d.SysDescr}),
 		Fit: portmon.Fit{Missing: []int{}, Extra: []int{}},
 	}
 	if fit := portmon.FitUnits(ports, groups, portmon.NumberingFor(d.SysDescr)); fit != nil {

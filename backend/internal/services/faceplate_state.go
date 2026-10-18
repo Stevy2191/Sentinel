@@ -48,7 +48,7 @@ func (s *PortService) indicators(d *DeviceView, units []portmon.UnitFaceplate) *
 		if u.Drawing == "" {
 			continue
 		}
-		if dr := portmon.DrawingFor(d.EffectiveModel); dr != nil && dr.DriveBayDisk != "" {
+		if dr := portmon.DrawingFor(d.EffectiveModel, d.SysDescr); dr != nil && dr.DriveBayDisk != "" {
 			return &FaceplateIndicators{DriveBay: s.bays.State(d.ID)}
 		}
 	}

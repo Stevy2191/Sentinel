@@ -13,17 +13,17 @@ func TestDrawingFor(t *testing.T) {
 		"USW-Pro-48":  "", "UDM-Pro": "", "": "",
 	} {
 		got := ""
-		if d := DrawingFor(model); d != nil {
+		if d := DrawingFor(model, ""); d != nil {
 			got = d.Key
 		}
 		if got != want {
 			t.Errorf("DrawingFor(%q) = %q, want %q", model, got, want)
 		}
 	}
-	if d := DrawingFor("UDM-SE"); d == nil || d.DriveBayDisk != "sdb" {
+	if d := DrawingFor("UDM-SE", ""); d == nil || d.DriveBayDisk != "sdb" {
 		t.Errorf("UDM-SE drive bay disk: %+v", d)
 	}
-	if d := DrawingFor("UBNT-ES16XG"); d == nil || d.DriveBayDisk != "" {
+	if d := DrawingFor("UBNT-ES16XG", ""); d == nil || d.DriveBayDisk != "" {
 		t.Errorf("ES-16-XG has no drive bay: %+v", d)
 	}
 }
@@ -71,5 +71,48 @@ func TestLayoutUnitsDrawingNeedsExactPorts(t *testing.T) {
 	u := LayoutUnits(stack, LayoutOptions{Model: "UBNT-ES16XG"})
 	if len(u) != 2 || u[0].Drawing != DrawingES16XG || u[1].Drawing != "" {
 		t.Errorf("stack: %+v / %+v", u[0].Drawing, u[1].Drawing)
+	}
+}
+
+// EdgeSwitches all report a bare model (UBNT-ES24 for both the 24 250W and
+// the 24 500W): their drawing comes from the product name opening sysDescr.
+func TestDrawingForEdgeSwitchDescr(t *testing.T) {
+	cases := []struct{ model, descr, want string }{
+		{"UBNT-ES24", "EdgeSwitch 24 500W, 1.12.2, Linux 3.6.5-03329b4a, 1.2.0.5192732", DrawingES24500W},
+		{"UBNT-ES24", "EdgeSwitch 24 250W, 1.12.2, Linux 3.6.5-03329b4a, 1.2.0.5192732", DrawingES24250W},
+		{"UBNT-ES8", "EdgeSwitch 8 150W, 1.9.0, Linux 3.6.5", DrawingES8150W},
+		{"UBNT-ES48", "EdgeSwitch 48 500W, 1.12.2, Linux 3.6.5", DrawingES48500W},
+		{"UBNT-ES48", "EdgeSwitch 48 750W, 1.12.2, Linux 3.6.5", DrawingES48750W},
+		{"UBNT-ES24", "EdgeSwitch 24 Lite, 1.12.2, Linux 3.6.5", ""},
+		{"UBNT-ES24", "", ""},
+		{"UBNT-ES16XG", "EdgeSwitch 16 XG, 1.12.2", DrawingES16XG},
+	}
+	for _, c := range cases {
+		got := ""
+		if d := DrawingFor(c.model, c.descr); d != nil {
+			got = d.Key
+		}
+		if got != c.want {
+			t.Errorf("DrawingFor(%q, %q) = %q, want %q", c.model, c.descr, got, c.want)
+		}
+	}
+	if d := DrawingFor("UBNT-ES24", "EdgeSwitch 24 500W, 1.12.2"); d == nil || len(d.Ports) != 26 {
+		t.Errorf("ES-24-500W ports %+v", d)
+	}
+	for descr, n := range map[string]int{"EdgeSwitch 8 150W, x": 10, "EdgeSwitch 48 750W, x": 52, "EdgeSwitch 48 500W, x": 52} {
+		if d := DrawingFor("", descr); d == nil || len(d.Ports) != n {
+			t.Errorf("%s: ports %+v", descr, d)
+		}
+	}
+}
+
+func TestLayoutUnitsDrawingFromDescr(t *testing.T) {
+	var ps []LayoutPort
+	for i := 1; i <= 26; i++ {
+		ps = append(ps, LayoutPort{IfIndex: i, Name: fmt.Sprintf("0/%d", i), Descr: fmt.Sprintf("Slot: 0 Port: %d Gigabit - Level", i)})
+	}
+	u := LayoutUnits(ps, LayoutOptions{Model: "UBNT-ES24", SysDescr: "EdgeSwitch 24 500W, 1.12.2"})
+	if u[0].Drawing != DrawingES24500W {
+		t.Errorf("drawing %q", u[0].Drawing)
 	}
 }
