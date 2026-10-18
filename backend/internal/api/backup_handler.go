@@ -91,10 +91,28 @@ type backupRestorer interface {
 }
 
 // registryLoader reloads in-memory state derived from restored tables: the
-// custom metric key registry (ProfileService.Load).
+// custom metric key registry (ProfileService.Load) and the saved faceplate
+// layouts (FaceplateLayoutService.Load).
 type registryLoader interface {
 	Load(ctx context.Context) error
 }
+
+// registryLoaders runs several loaders, one after another, and joins their
+// errors.
+type registryLoaders []registryLoader
+
+func (ls registryLoaders) Load(ctx context.Context) error {
+	var errs []error
+	for _, l := range ls {
+		if err := l.Load(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// RegistryLoaders combines loaders for RestoreBackupHandler.
+func RegistryLoaders(ls ...registryLoader) registryLoader { return registryLoaders(ls) }
 
 // RestoreBackupHandler handles POST /api/v1/backups/:backup_id/restore.
 func RestoreBackupHandler(backups backupRestorer, audit auditRecorder, registry registryLoader) gin.HandlerFunc {
@@ -123,13 +141,14 @@ func RestoreBackupHandler(backups backupRestorer, audit auditRecorder, registry 
 			respondError(c, restoreErrorStatus(err), err.Error())
 			return
 		}
-		// The restore replaced the profiles: reload the custom metric keys,
-		// or samples for restored keys would be refused (and keys that no
-		// longer exist still accepted) until the next restart. The restore
-		// itself succeeded, so a failure here is logged, not returned.
+		// The restore replaced the profiles and faceplate layouts: reload
+		// them, or samples for restored metric keys would be refused (and
+		// keys that no longer exist still accepted), and the old layouts
+		// drawn, until the next restart. The restore itself succeeded, so a
+		// failure here is logged, not returned.
 		if registry != nil {
 			if err := registry.Load(c.Request.Context()); err != nil {
-				log.Printf("[backup] reloading custom metric keys after restoring %s: %v", id, err)
+				log.Printf("[backup] reloading in-memory state after restoring %s: %v", id, err)
 			}
 		}
 		respondSuccess(c, http.StatusOK, gin.H{

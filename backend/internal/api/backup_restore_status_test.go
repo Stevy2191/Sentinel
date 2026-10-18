@@ -63,3 +63,26 @@ func TestRestoreReloadsMetricRegistry(t *testing.T) {
 		}
 	}
 }
+
+type failingLoader struct {
+	calls int
+	err   error
+}
+
+func (l *failingLoader) Load(context.Context) error {
+	l.calls++
+	return l.err
+}
+
+// A restore reloads every in-memory store, even after one fails, and
+// reports each failure.
+func TestRegistryLoadersRunsAll(t *testing.T) {
+	first, second := &failingLoader{err: errors.New("metric keys")}, &failingLoader{err: errors.New("layouts")}
+	err := RegistryLoaders(first, second).Load(context.Background())
+	if first.calls != 1 || second.calls != 1 {
+		t.Errorf("calls %d, %d; want 1, 1", first.calls, second.calls)
+	}
+	if err == nil || !strings.Contains(err.Error(), "metric keys") || !strings.Contains(err.Error(), "layouts") {
+		t.Errorf("error %v, want both", err)
+	}
+}

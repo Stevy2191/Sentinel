@@ -162,6 +162,10 @@ func run() error {
 	networkSettings := services.NewNetworkSettingsService(settingsService, metricsStore)
 	mibLibrary := services.NewMIBLibrary(db)
 	profileService := services.NewProfileService(db)
+	// Admins' saved faceplate layouts, one per device model: the faceplate
+	// draws them, and a restore reloads them with the metric keys.
+	faceplateLayouts := services.NewFaceplateLayoutService(db)
+	portService.SetFaceplateLayouts(faceplateLayouts)
 	// Deleting a custom metric or a profile deletes its series; the shared
 	// store must forget their cached ids so a returning key gets fresh ones.
 	profileService.SetMetricsStore(metricsStore)
@@ -398,7 +402,7 @@ func run() error {
 	// Network tools: runs, history and the live stream, for admins and users
 	// granted the tools.
 	api.RegisterToolRoutes(v1, toolRuns, toolHub, authService, auditService)
-	api.RegisterBackupRoutes(v1, backupService, auditService, authService, profileService)
+	api.RegisterBackupRoutes(v1, backupService, auditService, authService, api.RegistryLoaders(profileService, faceplateLayouts))
 	api.RegisterSiteRoutes(v1, siteService, auditService, authService)
 	api.RegisterSiteProfileRoutes(v1, siteProfileService, siteService, auditService)
 	api.RegisterSNMPCredentialRoutes(v1, snmpCredentialService, siteService, auditService, authService)
@@ -409,6 +413,7 @@ func run() error {
 	api.RegisterNetworkRoutes(v1, deviceService, portService, metricsStore, networkSettings, siteService, authService)
 	api.RegisterMIBRoutes(v1, mibLibrary, auditService, authService)
 	api.RegisterProfileRoutes(v1, profileService, deviceService, siteService, auditService, authService, deviceWalker)
+	api.RegisterFaceplateLayoutRoutes(v1, faceplateLayouts, portService, deviceService, siteService, auditService, authService)
 	api.RegisterDeviceHealthRoute(v1, profileService, metricsStore, incidentService, deviceService, siteService)
 	api.RegisterDeviceMetricsRoute(v1, metricsStore, deviceService, siteService)
 	api.RegisterDashboardRoutes(v1, dashboardService, dashboardResolver, auditService, authService)
@@ -474,6 +479,9 @@ func run() error {
 	}
 	if err := profileService.Load(context.Background()); err != nil {
 		log.Printf("[profiles] loading custom metric keys: %v", err)
+	}
+	if err := faceplateLayouts.Load(context.Background()); err != nil {
+		log.Printf("[faceplate] loading saved layouts: %v", err)
 	}
 	pollWorkers := settingsService.GetInt(context.Background(), models.SettingSNMPPollWorkers, 16)
 	devicePoller := services.NewDevicePoller(deviceService, snmpClient, incidentService, notificationManager, pollWorkers)
