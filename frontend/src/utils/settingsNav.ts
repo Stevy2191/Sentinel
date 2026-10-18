@@ -23,6 +23,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { key: 'backups', label: 'Backups', path: '/settings/backups', group: 'Sentinel', adminOnly: true },
   { key: 'credentials', label: 'SNMP credentials', path: '/settings/network/credentials', group: 'Network', adminOnly: true },
   { key: 'profiles', label: 'Device profiles', path: '/settings/network/profiles', group: 'Network', adminOnly: true },
+  { key: 'faceplate-layouts', label: 'Faceplate layouts', path: '/settings/network/faceplate-layouts', group: 'Network', adminOnly: true },
   { key: 'mibs', label: 'MIB library', path: '/settings/network/mibs', group: 'Network', adminOnly: true },
   { key: 'polling', label: 'Polling & thresholds', path: '/settings/network/polling', group: 'Network', adminOnly: true },
   { key: 'network-tools', label: 'Network tools', path: '/settings/network-tools', group: 'Network', adminOnly: true },

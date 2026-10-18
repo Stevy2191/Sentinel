@@ -255,7 +255,7 @@ export default function FaceplateLayoutEditor({ device, ports, onClose, onSaved 
                   <button type="button" className="btn-secondary" onClick={() => setConfirmRemove(false)}>
                     Keep it
                   </button>
-                  <button type="button" className="btn-primary bg-red-600 hover:bg-red-500" disabled={saving} onClick={() => void removeSaved()}>
+                  <button type="button" className="btn bg-red-600 text-white hover:bg-red-700" disabled={saving} onClick={() => void removeSaved()}>
                     Remove
                   </button>
                 </div>

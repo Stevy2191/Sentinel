@@ -38,6 +38,7 @@ const NetworkSettings = lazy(() => import('@/pages/network/NetworkSettings'))
 const MibLibrary = lazy(() => import('@/pages/network/MibLibrary'))
 const MibBrowser = lazy(() => import('@/pages/network/MibBrowser'))
 const Profiles = lazy(() => import('@/pages/network/Profiles'))
+const FaceplateLayouts = lazy(() => import('@/pages/settings/FaceplateLayouts'))
 const ProfileDetail = lazy(() => import('@/pages/network/ProfileDetail'))
 const NetworkTools = lazy(() => import('@/pages/NetworkTools'))
 const ToolRunDetail = lazy(() => import('@/pages/ToolRunDetail'))
@@ -159,6 +160,7 @@ export default function App() {
                 <Route path="network/credentials" element={<Credentials />} />
                 <Route path="network/profiles" element={<Profiles />} />
                 <Route path="network/profiles/:id" element={<ProfileDetail />} />
+                <Route path="network/faceplate-layouts" element={<FaceplateLayouts />} />
                 <Route path="network/mibs" element={<MibLibrary />} />
                 <Route path="network/polling" element={<NetworkSettings />} />
                 <Route path="backups" element={<BackupsSettings />} />
