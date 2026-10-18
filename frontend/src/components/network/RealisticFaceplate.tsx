@@ -116,13 +116,24 @@ function DrawnUnit({
   selected: number | null
   onSelect: (ifIndex: number) => void
 }) {
-  // This unit's physical ports by the number printed on the case. Only
-  // physical ones: a VLAN sub-interface (eth10.10) can share a number.
-  const byNumber = useMemo(() => {
-    const m = new Map<number, PortView>()
-    for (const p of ports) if (p.physical && (unit.unit === 0 || (p.stack_unit ?? 0) === unit.unit)) m.set(p.number, p)
-    return m
-  }, [ports, unit.unit])
+  // The unit's ports as its faceplate placed them: main ports by number,
+  // module ports ("Module N" blocks) by slot then number. Going through
+  // the blocks keeps a module's Te1/2/1 from standing in for main port 1,
+  // and a VLAN sub-interface (eth10.10) from standing in for a port.
+  const { byNumber, modules } = useMemo(() => {
+    const byIndex = new Map(ports.map((p) => [p.if_index, p]))
+    const main = new Map<number, PortView>()
+    const mods = new Map<number, Map<number, PortView>>()
+    for (const b of unit.blocks) {
+      const slot = b.label ? Number(b.label.replace(/^Module /, '')) : 0
+      const into = slot ? (mods.get(slot) ?? mods.set(slot, new Map()).get(slot)!) : main
+      for (const fp of [...b.top, ...b.bottom]) {
+        const p = byIndex.get(fp.if_index)
+        if (p) into.set(fp.number, p)
+      }
+    }
+    return { byNumber: main, modules: mods }
+  }, [ports, unit.blocks])
   const Drawing = entry.component
   return (
     <div>
@@ -137,6 +148,7 @@ function DrawnUnit({
           <Drawing
             unit={unit}
             byNumber={byNumber}
+            modules={modules}
             dark={dark}
             indicators={indicators}
             selected={selected}

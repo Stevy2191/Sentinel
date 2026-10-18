@@ -9,7 +9,10 @@ import type { CagePort, Hit } from '@/components/network/drawings/parts'
  *  port data ("" when unknown), and undefined otherwise. */
 export interface DrawingProps {
   unit: UnitFaceplate
+  /** The unit's main ports by the number printed by them. */
   byNumber: Map<number, PortView>
+  /** Network module ports: slot, then the number printed by them. */
+  modules: Map<number, Map<number, PortView>>
   dark: boolean
   indicators?: FaceplateIndicators
   selected: number | null
@@ -37,5 +40,17 @@ export function kit(p: DrawingProps) {
   const light = (n: number, opts?: { tenGigWhite?: boolean }): Light => (p.dark ? 'off' : portLight(port(n), opts))
   const fl = (n: number): Flicker => (p.dark ? '' : flicker(port(n)))
   const cage = (n: number): CagePort => ({ hit: hit(n), light: light(n), flicker: fl(n) })
-  return { port, hit, light, fl, cage }
+  // The same for a port on network module slot.
+  const mport = (slot: number, n: number) => p.modules.get(slot)?.get(n)
+  const mcage = (slot: number, n: number): CagePort => {
+    const pv = mport(slot, n)
+    const s = pv && !p.dark ? portState(pv) : undefined
+    return {
+      hit: { port: pv, selected: p.selected, onSelect: p.onSelect, lastKnown: p.lastKnown, alert: s === 'critical' ? 'red' : s === 'warning' ? 'yellow' : undefined },
+      light: p.dark ? 'off' : portLight(pv),
+      flicker: p.dark ? '' : flicker(pv),
+    }
+  }
+  const hasModule = (slot: number) => (p.modules.get(slot)?.size ?? 0) > 0
+  return { port, hit, light, fl, cage, mport, mcage, hasModule }
 }

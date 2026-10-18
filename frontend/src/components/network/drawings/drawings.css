@@ -177,3 +177,25 @@
 .rf-sfpwhite { position: absolute; background: #e9ebed; border-radius: 2px; }
 .rf-sfpwhite .rf-t { position: absolute; left: 0; right: 0; text-align: center; font: 600 5.5px/1 Inter, system-ui, sans-serif; color: #5d636a; }
 .rf-pill2 { position: absolute; height: 6px; border-radius: 1.5px; background: #8d939a; font: 700 4.5px/6px Inter, system-ui, sans-serif; color: #fff; text-align: center; }
+
+/* Catalyst 4500-X: silver chassis, black top channel, square vents */
+.rf-c45 { border-radius: 2px; background: linear-gradient(#cfd2d5, #b9bdc1 60%, #aeb2b6); box-shadow: inset 0 1px 0 #e9ebed, 0 10px 26px rgba(0, 0, 0, 0.55); }
+.rf-c45-top { position: absolute; left: 6px; right: 6px; top: 4px; height: 9px; background: linear-gradient(#0d0e10, #2a2d31); border-radius: 1px; }
+.rf-c45-top i { position: absolute; top: 0; bottom: 0; width: 2px; background: #8d939a; }
+.rf-c45-vents { position: absolute; }
+.rf-c45-vents i { position: absolute; width: 6px; height: 6px; background: #2b2e32; border-radius: 1px; }
+.rf-c45-logo { position: absolute; font: 700 6px/1 Inter, system-ui, sans-serif; color: #2b2e32; }
+.rf-c45-name { position: absolute; font: 600 8px/1 Inter, system-ui, sans-serif; color: #2b2e32; white-space: nowrap; }
+.rf-c45-btn { position: absolute; width: 11px; height: 11px; border-radius: 50%; background: radial-gradient(#e2e5e8, #7d838a); box-shadow: 0 0 0 1px #6b7178; }
+.rf-c45-lamp { position: absolute; width: 4px; height: 4px; border-radius: 50%; background: #4b5056; }
+.rf-c45-lamp.rf-on { background: #3fe07a; box-shadow: 0 0 5px #3fe07a; }
+.rf-c45-lbl { position: absolute; font: 600 4px/1 Inter, system-ui, sans-serif; color: #3e4247; white-space: nowrap; }
+.rf-c45-usb { position: absolute; width: 32px; height: 46px; border: 1px solid #6b7178; border-radius: 2px; background: linear-gradient(#d7dadd, #b4b9be); }
+.rf-c45-usb .rf-a { position: absolute; left: 6px; top: 6px; width: 20px; height: 8px; background: #1a1c1e; border: 1px solid #888; }
+.rf-c45-usb .rf-b { position: absolute; left: 9px; top: 22px; width: 14px; height: 12px; background: #1a1c1e; border-radius: 2px; }
+.rf-c45-frame { position: absolute; background: #9aa0a6; border: 1px solid #6b7178; border-radius: 1px; }
+.rf-c45 .rf-sfpbox { background: #16181a; border-color: #5d636a; }
+.rf-c45-blank { position: absolute; background: linear-gradient(#c3c7cb, #b2b7bc); border: 1px solid #9ca2a8; border-radius: 1px; }
+.rf-c45-module { position: absolute; background: linear-gradient(#c8cbce, #b5b9bd); border: 1px solid #8d939a; border-radius: 2px; }
+.rf-c45-screw { position: absolute; width: 11px; height: 11px; border-radius: 50%; background: radial-gradient(#f1f2f3, #9aa0a6); box-shadow: 0 0 0 1px #7b8188; }
+.rf-c45-oir { position: absolute; width: 11px; height: 11px; border-radius: 50%; background: radial-gradient(#3a3d41, #0d0e10); }

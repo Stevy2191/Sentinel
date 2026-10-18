@@ -3,6 +3,7 @@ import UdmSe, { UDM_SE_SIZE } from '@/components/network/drawings/UdmSe'
 import UswPro48Poe, { USW_PRO_48_POE_SIZE } from '@/components/network/drawings/UswPro48Poe'
 import Es16Xg, { ES_16_XG_SIZE } from '@/components/network/drawings/Es16Xg'
 import { EDGESWITCH_DRAWINGS } from '@/components/network/drawings/EdgeSwitch'
+import C4500X16, { C4500X_16_SIZE } from '@/components/network/drawings/C4500X'
 
 /** Realistic drawings by the key the backend sends (portmon/drawings.go). */
 export const DRAWINGS: Record<string, DrawingEntry> = {
@@ -10,4 +11,5 @@ export const DRAWINGS: Record<string, DrawingEntry> = {
   'usw-pro-48-poe': { component: UswPro48Poe, ...USW_PRO_48_POE_SIZE },
   'es-16-xg': { component: Es16Xg, ...ES_16_XG_SIZE },
   ...EDGESWITCH_DRAWINGS,
+  'c4500x-16': { component: C4500X16, ...C4500X_16_SIZE },
 }
