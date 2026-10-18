@@ -155,3 +155,29 @@ func TestDBFaceplateLayoutNoModel(t *testing.T) {
 		t.Errorf("blank model: %v", err)
 	}
 }
+
+// Saves that overlap never fail on the unique model key, and the in-memory
+// copy ends up matching what the database holds.
+func TestDBFaceplateLayoutConcurrentSaves(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	admin := testdb.NewUser(t, db, true)
+	svc := NewFaceplateLayoutService(db)
+	errs := make(chan error, 16)
+	for i := 0; i < 16; i++ {
+		go func(n int) {
+			_, _, err := svc.Save(ctx, "USW-RACE", []portmon.LayoutGroup{{First: 1, Last: 1 + n, Kind: portmon.GroupKindRJ45, Rows: 1}}, admin, nil)
+			errs <- err
+		}(i)
+	}
+	for i := 0; i < 16; i++ {
+		if err := <-errs; err != nil {
+			t.Errorf("concurrent save: %v", err)
+		}
+	}
+	var last int
+	testdb.Must(t, db.Raw(`SELECT (groups->0->>'last')::int FROM faceplate_layouts WHERE model_key = 'USW-RACE'`).Scan(&last).Error)
+	if l := svc.For("USW-RACE"); l == nil || l.Groups[0].Last != last {
+		t.Errorf("cache %+v, database last %d", l, last)
+	}
+}

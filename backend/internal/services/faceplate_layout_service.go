@@ -42,7 +42,11 @@ func validateGroups(gs []portmon.LayoutGroup) error {
 // FaceplateLayoutService keeps the admins' saved faceplate layouts, one per
 // device model, with an in-memory copy for the faceplate's many reads.
 type FaceplateLayoutService struct {
-	db      *gorm.DB
+	db *gorm.DB
+	// writeMu runs Save, Delete and Load one at a time, so overlapping
+	// writes neither race on the unique model key nor leave the in-memory
+	// copy behind the database.
+	writeMu sync.Mutex
 	mu      sync.RWMutex
 	byModel map[string]models.FaceplateLayout
 }
@@ -54,6 +58,8 @@ func NewFaceplateLayoutService(db *gorm.DB) *FaceplateLayoutService {
 // Load (re)reads every saved layout: at startup, after a change and after a
 // backup restore.
 func (s *FaceplateLayoutService) Load(ctx context.Context) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	var rows []models.FaceplateLayout
 	if err := s.db.WithContext(ctx).Find(&rows).Error; err != nil {
 		return fmt.Errorf("loading faceplate layouts: %w", err)
@@ -199,6 +205,8 @@ func (s *FaceplateLayoutService) Save(ctx context.Context, model string, groups 
 	if err := validateGroups(groups); err != nil {
 		return nil, nil, err
 	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var cur models.FaceplateLayout
 		switch err := tx.Where("model_key = ?", key).First(&cur).Error; {
@@ -230,12 +238,19 @@ func (s *FaceplateLayoutService) Save(ctx context.Context, model string, groups 
 	if err != nil {
 		return nil, nil, err
 	}
-	return before, after, s.Load(ctx)
+	// Committed: update the copy from the saved row rather than re-reading,
+	// so a committed change never reports a failure (or misses its audit).
+	s.mu.Lock()
+	s.byModel[key] = *after
+	s.mu.Unlock()
+	return before, after, nil
 }
 
 // Delete removes a saved layout; that model's devices go back to the
 // built-in table or the automatic rules.
 func (s *FaceplateLayoutService) Delete(ctx context.Context, id uuid.UUID) (*models.FaceplateLayout, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	var l models.FaceplateLayout
 	if err := s.db.WithContext(ctx).Where("id = ?", id).First(&l).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -246,5 +261,8 @@ func (s *FaceplateLayoutService) Delete(ctx context.Context, id uuid.UUID) (*mod
 	if err := s.db.WithContext(ctx).Delete(&l).Error; err != nil {
 		return nil, fmt.Errorf("deleting faceplate layout: %w", err)
 	}
-	return &l, s.Load(ctx)
+	s.mu.Lock()
+	delete(s.byModel, l.ModelKey)
+	s.mu.Unlock()
+	return &l, nil
 }

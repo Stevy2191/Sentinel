@@ -174,3 +174,18 @@ func TestPreviewFaceplate(t *testing.T) {
 		t.Errorf("preview should ignore the device's one-row setting: %+v", p)
 	}
 }
+
+// With no saved or built-in layout, the editor starts from the drawing the
+// device shows now, its own Edit details settings included.
+func TestFaceplateEditorStartUsesDeviceSettings(t *testing.T) {
+	f := newEditorFixture(t)
+	ctx := context.Background()
+	dev := seedModelDevice(t, f.db, "10.1.0.6", "USW-16")
+	seedPorts(t, f.db, dev, 0, 16) // "10G - Level": automatic draws SFP
+	testdb.Exec(t, f.db, `UPDATE devices SET faceplate_port_style = 'rj45' WHERE id = ?`, dev)
+	e, err := f.ports.FaceplateEditor(ctx, f.view(t, dev))
+	testdb.Must(t, err)
+	if len(e.Start) == 0 || e.Start[0].Kind != portmon.GroupKindRJ45 {
+		t.Errorf("start %+v, want the device's RJ45 drawing", e.Start)
+	}
+}

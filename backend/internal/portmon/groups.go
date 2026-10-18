@@ -131,8 +131,16 @@ func MainPortNumbers(ports []LayoutPort) []int {
 
 // FitUnits checks a layout against each stack member's main ports, in
 // LayoutUnits' order, and returns the first misfit, or nil when it fits all.
+// A device with no ports fits nothing: every number is reported as extra.
 func FitUnits(ports []LayoutPort, gs []LayoutGroup) *Fit {
-	for _, u := range unitGroups(ports) {
+	units := unitGroups(ports)
+	if len(units) == 0 {
+		if f := CheckFit(gs, nil); !f.OK() {
+			return &f
+		}
+		return nil
+	}
+	for _, u := range units {
 		if f := CheckFit(gs, MainPortNumbers(u.ports)); !f.OK() {
 			return &f
 		}

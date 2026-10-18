@@ -74,8 +74,8 @@ type FaceplateEditorView struct {
 	// DeviceSettings is whether the device's own Edit details faceplate
 	// settings are set (they override any model layout).
 	DeviceSettings bool `json:"device_settings"`
-	// Start is the saved layout, else the built-in one, else the automatic
-	// drawing as groups.
+	// Start is the saved layout, else the built-in one, else the device's
+	// current drawing as groups.
 	Start []portmon.LayoutGroup `json:"start"`
 }
 
@@ -97,7 +97,8 @@ func (s *PortService) FaceplateEditor(ctx context.Context, d *DeviceView) (*Face
 	case v.Builtin != nil:
 		v.Start = v.Builtin
 	default:
-		v.Start = portmon.GroupsFromFaceplate(portmon.Layout(first, portmon.LayoutOptions{Model: d.EffectiveModel, IgnoreDeviceSettings: true}))
+		// The drawing the device shows now, its own settings included.
+		v.Start = portmon.GroupsFromFaceplate(portmon.Layout(first, layoutOptions(d)))
 	}
 	return v, nil
 }

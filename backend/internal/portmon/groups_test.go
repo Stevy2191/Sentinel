@@ -160,3 +160,12 @@ func TestMainPortNumbersAndFitUnits(t *testing.T) {
 		t.Errorf("ES-16-XG fits, got %+v", f)
 	}
 }
+
+// A device with no ports to check against never "fits": every number the
+// layout places is reported as not on the device.
+func TestFitUnitsNoPorts(t *testing.T) {
+	f := FitUnits(nil, es16XGGroups())
+	if f == nil || !reflect.DeepEqual(f.Extra, seq(1, 16)) || len(f.Missing) != 0 {
+		t.Errorf("no ports: %+v", f)
+	}
+}
