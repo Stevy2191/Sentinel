@@ -170,7 +170,14 @@ func portThresholds(row models.DeviceInterface, def portmon.Thresholds) portmon.
 // uptimeSeconds is the device's sysUpTime from this poll (< 0 if unknown).
 func (m *PortMonitor) PollStats(ctx context.Context, d models.Device, t snmp.Target, uptimeSeconds int64) {
 	began := m.now()
+	// The run is recorded only once port data was read: last_stats_at is
+	// when Sentinel last knew the ports, and a realistic drawing goes dark
+	// when it gets old. A poll that read nothing must not freshen it.
+	read := false
 	defer func() {
+		if !read {
+			return
+		}
 		if err := m.store.SaveStatsRun(ctx, d.ID, began, m.now().Sub(began)); err != nil {
 			m.logger.Printf("[snmp] recording stats run for %s: %v", d.Host, err)
 		}
@@ -198,6 +205,7 @@ func (m *PortMonitor) PollStats(ctx context.Context, d models.Device, t snmp.Tar
 	if len(stats) == 0 {
 		return
 	}
+	read = true
 	if hc && ds.hc == nil {
 		learned := false
 		for _, st := range stats {

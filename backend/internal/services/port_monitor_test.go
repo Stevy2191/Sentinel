@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -21,6 +22,7 @@ type pmSNMP struct {
 	mu        sync.Mutex
 	values    map[string]any
 	requested []string
+	err       error // every GET fails with this, when set
 }
 
 func newPMSNMP() *pmSNMP { return &pmSNMP{values: map[string]any{}} }
@@ -28,6 +30,9 @@ func newPMSNMP() *pmSNMP { return &pmSNMP{values: map[string]any{}} }
 func (f *pmSNMP) Get(_ context.Context, _ snmp.Target, oids []string) ([]snmp.PDU, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, f.err
+	}
 	out := make([]snmp.PDU, 0, len(oids))
 	for _, o := range oids {
 		f.requested = append(f.requested, o)
@@ -437,5 +442,23 @@ func TestPortLabelIncludesStackUnit(t *testing.T) {
 	row.Name = "Te1/1/4"
 	if got, want := portLabel(portmon.Numbering{}, row), "port 1/4"; got != want {
 		t.Errorf("portLabel (module port) = %q, want %q", got, want)
+	}
+}
+
+// A stats poll that reads nothing (the agent answers sysUpTime but times out
+// on the port tables) is not recorded as a stats run: last_stats_at is when
+// port data was last read, and a realistic drawing goes dark on it.
+func TestPortMonitorRecordsStatsRunOnlyWhenRead(t *testing.T) {
+	r := newPMRig(false)
+	r.snmp.err = errors.New("request timeout")
+	r.poll(100)
+	if r.store.runs != 0 {
+		t.Fatalf("a poll that read nothing recorded %d stats runs", r.store.runs)
+	}
+	r.snmp.err = nil
+	r.snmp.port(1, 0, 0, true, 1000)
+	r.poll(160)
+	if r.store.runs != 1 {
+		t.Fatalf("a poll that read the port recorded %d stats runs, want 1", r.store.runs)
 	}
 }

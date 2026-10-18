@@ -5,6 +5,12 @@ import { DRAWINGS } from '@/components/network/drawings/registry'
 import { offline, type FaceplateDeviceState, type FaceplateIndicators } from '@/utils/faceplateLights'
 import '@/components/network/drawings/drawings.css'
 
+// Unscaled heights around each drawn unit: its "Switch N" label (text-xs
+// plus mb-1), the badge's room above it, and space-y-2 between units.
+const UNIT_LABEL_H = 20
+const BADGE_H = 12
+const UNIT_GAP = 8
+
 interface Props {
   faceplates: UnitFaceplate[]
   ports: PortView[]
@@ -26,14 +32,14 @@ interface Props {
  *  says why. */
 export default function RealisticFaceplate({ faceplates, ports, deviceState, indicators, title, subtitle, selected, onSelect, fit, isPublic }: Props) {
   const wrap = useRef<HTMLDivElement>(null)
-  const [width, setWidth] = useState(0)
+  const [size, setSize] = useState({ width: 0, height: 0 })
   const [now, setNow] = useState(() => new Date())
   useLayoutEffect(() => {
     const el = wrap.current
     if (!el) return
-    const ro = new ResizeObserver(([e]) => setWidth(e.contentRect.width))
+    const ro = new ResizeObserver(([e]) => setSize({ width: e.contentRect.width, height: e.contentRect.height }))
     ro.observe(el)
-    setWidth(el.clientWidth)
+    setSize({ width: el.clientWidth, height: el.clientHeight })
     return () => ro.disconnect()
   }, [])
   // Re-check "old port data" without waiting for a refetch.
@@ -44,8 +50,20 @@ export default function RealisticFaceplate({ faceplates, ports, deviceState, ind
   const state = offline(deviceState, now, isPublic)
   const lastKnown = state.dark ? (state.since ?? '') : undefined
 
+  // A widget shows the whole device: one scale for every unit, fitting the
+  // widget's width and its height after the unit labels, the badge and the
+  // gaps between units (which don't scale).
+  const drawn = faceplates.flatMap((u) => (u.drawing && DRAWINGS[u.drawing] ? [{ u, e: DRAWINGS[u.drawing] }] : []))
+  let widgetScale = 1.5
+  for (const { e } of drawn) if (size.width > 0) widgetScale = Math.min(widgetScale, size.width / e.width)
+  if (fit === 'widget' && size.height > 0 && drawn.length > 0 && drawn.length === faceplates.length) {
+    const fixed = drawn.reduce((h, { u }) => h + (u.label ? UNIT_LABEL_H : 0) + (state.badge ? BADGE_H : 0), 0) + (drawn.length - 1) * UNIT_GAP
+    const tall = drawn.reduce((h, { e }) => h + e.height, 0)
+    widgetScale = Math.min(widgetScale, Math.max(0.05, (size.height - fixed) / tall))
+  }
+
   return (
-    <div ref={wrap} className={fit === 'page' ? 'space-y-4 overflow-x-auto pb-1' : 'space-y-2'}>
+    <div ref={wrap} className={fit === 'page' ? 'space-y-4 overflow-x-auto pb-1' : 'h-full space-y-2 overflow-hidden'}>
       {faceplates.map((unit) => {
         const entry = unit.drawing ? DRAWINGS[unit.drawing] : undefined
         if (!entry) {
@@ -53,8 +71,8 @@ export default function RealisticFaceplate({ faceplates, ports, deviceState, ind
             <Faceplate key={unit.unit} faceplates={[unit]} ports={ports} title={title} subtitle={subtitle} selected={selected} onSelect={onSelect} />
           )
         }
-        const raw = width > 0 ? width / entry.width : 1
-        const scale = fit === 'page' ? Math.min(1.5, Math.max(0.6, raw)) : Math.min(1.5, raw)
+        const raw = size.width > 0 ? size.width / entry.width : 1
+        const scale = fit === 'page' ? Math.min(1.5, Math.max(0.6, raw)) : widgetScale
         return (
           <DrawnUnit
             key={unit.unit}
@@ -109,7 +127,7 @@ function DrawnUnit({
   return (
     <div>
       {unit.label && <p className="mb-1 text-xs font-semibold text-slate-400">{unit.label}</p>}
-      <div className="relative" style={{ width: entry.width * scale, height: entry.height * scale, marginTop: badge ? 12 : 0 }}>
+      <div className="relative" style={{ width: entry.width * scale, height: entry.height * scale, marginTop: badge ? BADGE_H : 0 }}>
         {badge && (
           <span className={`rf-badge${badge === 'Paused' || badge.startsWith('Waiting') ? ' rf-badge-quiet' : ''}`} role="status">
             {badge}
