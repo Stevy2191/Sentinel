@@ -524,3 +524,27 @@ func TestPollerRunsProfilePoll(t *testing.T) {
 		t.Fatal("profile poll ran after a failed poll")
 	}
 }
+
+type recordingDriveBay struct{ polled, forgot int }
+
+func (r *recordingDriveBay) PollDriveBay(context.Context, models.Device, snmp.Target) { r.polled++ }
+func (r *recordingDriveBay) Forget(uuid.UUID)                                         { r.forgot++ }
+
+// A device that is not up has its drive bay state forgotten, so a drawing
+// never keeps flickering for a device Sentinel cannot reach.
+func TestPollerForgetsDriveBayWhenNotUp(t *testing.T) {
+	p, _, _, _ := newTestPoller(&fakeSNMP{})
+	rec := &recordingDriveBay{}
+	p.SetDriveBay(rec)
+	p.PollOnce(context.Background(), device(models.DeviceStatusUp, 0))
+	if rec.polled != 1 || rec.forgot != 0 {
+		t.Fatalf("up: polled %d forgot %d", rec.polled, rec.forgot)
+	}
+	p, _, _, _ = newTestPoller(&fakeSNMP{getErr: errors.New("timeout")})
+	rec = &recordingDriveBay{}
+	p.SetDriveBay(rec)
+	p.PollOnce(context.Background(), device(models.DeviceStatusUp, 0))
+	if rec.polled != 0 || rec.forgot != 1 {
+		t.Errorf("failed poll: polled %d forgot %d", rec.polled, rec.forgot)
+	}
+}

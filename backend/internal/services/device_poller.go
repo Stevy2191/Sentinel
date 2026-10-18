@@ -103,6 +103,13 @@ type ProfilePoller interface {
 	PollProfiles(ctx context.Context, d models.Device, t snmp.Target, uptimeSeconds int64)
 }
 
+// DriveBayPoller reads a device's drive bay (DriveBayMonitor), and forgets
+// it when the device is not up.
+type DriveBayPoller interface {
+	PollDriveBay(ctx context.Context, d models.Device, t snmp.Target)
+	Forget(deviceID uuid.UUID)
+}
+
 // DevicePoller polls every enabled device for reachability on a bounded
 // worker pool, and refreshes inventory when it is due.
 type DevicePoller struct {
@@ -114,6 +121,7 @@ type DevicePoller struct {
 	stats     PortStatsPoller
 	ups       UPSPoller
 	profiles  ProfilePoller
+	drives    DriveBayPoller
 
 	// Replaceable in tests.
 	resolve func(ctx context.Context, host string) (net.IP, error)
@@ -175,6 +183,9 @@ func (p *DevicePoller) SetUPS(u UPSPoller) { p.ups = u }
 // SetProfiles makes every successful poll of an up device run its profile
 // poll (custom metrics) too.
 func (p *DevicePoller) SetProfiles(pp ProfilePoller) { p.profiles = pp }
+
+// SetDriveBay enables the drive bay poll for drawings with a drive bay.
+func (p *DevicePoller) SetDriveBay(b DriveBayPoller) { p.drives = b }
 
 // TargetFor builds the SNMP target for a device at a resolved address.
 func TargetFor(d models.Device, host string, cred snmp.Credential) snmp.Target {
@@ -310,6 +321,14 @@ func (p *DevicePoller) PollOnce(ctx context.Context, d models.Device) {
 
 	if result == PollOK && tr.Status == models.DeviceStatusUp && p.profiles != nil {
 		p.profiles.PollProfiles(ctx, d, target, up)
+	}
+
+	if p.drives != nil {
+		if result == PollOK && tr.Status == models.DeviceStatusUp {
+			p.drives.PollDriveBay(ctx, d, target)
+		} else {
+			p.drives.Forget(d.ID)
+		}
 	}
 
 	if result == PollOK && (d.LastInventoryAt == nil || now.Sub(*d.LastInventoryAt) >= inventoryInterval) {
