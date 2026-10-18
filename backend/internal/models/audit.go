@@ -48,6 +48,9 @@ const (
 	ActionMetricUpdated  = "custom_metric_updated"
 	ActionMetricDeleted  = "custom_metric_deleted"
 
+	ActionFaceplateLayoutSaved   = "faceplate_layout_saved"
+	ActionFaceplateLayoutDeleted = "faceplate_layout_deleted"
+
 	ActionDashboardCreated     = "dashboard_created"
 	ActionDashboardUpdated     = "dashboard_updated"
 	ActionDashboardDeleted     = "dashboard_deleted"
@@ -77,6 +80,8 @@ const (
 	ResourceMIBModule     = "mib_module"
 	ResourceMetricProfile = "metric_profile"
 	ResourceCustomMetric  = "custom_metric"
+
+	ResourceFaceplateLayout = "faceplate_layout"
 
 	ResourceDashboard = "dashboard"
 

@@ -48,3 +48,40 @@ func TestDBRestoreWithMetrics(t *testing.T) {
 		t.Errorf("after restore: %d devices, %d series, %d samples; want 1, 1, 1", devices, series, samples)
 	}
 }
+
+// Saved faceplate layouts are configuration: a config backup brings them
+// back, and Load picks them up again.
+func TestDBRestoreKeepsFaceplateLayouts(t *testing.T) {
+	container := os.Getenv("SENTINEL_TEST_DB_CONTAINER")
+	if container == "" {
+		t.Skip("SENTINEL_TEST_DB_CONTAINER not set; run `make test-db`")
+	}
+	db := testdb.Open(t)
+	ctx := context.Background()
+	layouts := NewFaceplateLayoutService(db)
+	if _, _, err := layouts.Save(ctx, "UBNT-ES16XG", es16XGGroups(), testdb.NewUser(t, db, true), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	var name string
+	testdb.Must(t, db.Raw("SELECT current_database()").Scan(&name).Error)
+	b := &BackupService{db: DBConfig{Host: "127.0.0.1", Port: "5432", User: "sentinel", Name: name}}
+	dump, err := exec.Command("docker", append([]string{"exec", "-e", "PGPASSWORD=test", container, "pg_dump"}, b.dumpArgs()...)...).Output()
+	if err != nil {
+		t.Fatalf("pg_dump: %v", err)
+	}
+	testdb.Exec(t, db, `DELETE FROM faceplate_layouts`)
+	testdb.Must(t, layouts.Load(ctx))
+	if layouts.For("UBNT-ES16XG") != nil {
+		t.Fatal("layout still cached after delete")
+	}
+	restore := exec.Command("docker", append([]string{"exec", "-i", "-e", "PGPASSWORD=test", container, "psql"}, b.restoreArgs()...)...)
+	restore.Stdin = bytes.NewReader(dump)
+	if out, err := restore.CombinedOutput(); err != nil {
+		t.Fatalf("restore failed: %v\n%s", err, out)
+	}
+	testdb.Must(t, layouts.Load(ctx))
+	if l := layouts.For("UBNT-ES16XG"); l == nil || len(l.Groups) != 2 {
+		t.Errorf("after restore: %+v", l)
+	}
+}
