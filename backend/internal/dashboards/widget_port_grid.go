@@ -44,6 +44,10 @@ type PortGridData struct {
 	Model      string                  `json:"model"`
 	Ports      []services.PortView     `json:"ports"`
 	Faceplates []portmon.UnitFaceplate `json:"faceplates"`
+	// DeviceState and Indicators drive a realistic drawing's lights; a
+	// public viewer gets no StatusDetail (error text can name hosts).
+	DeviceState services.FaceplateDeviceState `json:"device_state"`
+	Indicators  *services.FaceplateIndicators `json:"indicators,omitempty"`
 }
 
 type portGridWidget struct {
@@ -79,11 +83,13 @@ func (w portGridWidget) Resolve(ctx context.Context, _ json.RawMessage, in Resol
 	if len(view.Ports) == 0 {
 		return nil, ErrNoData
 	}
+	state := view.DeviceState
 	if in.Viewer.Public {
 		for i := range view.Ports {
 			trimPort(&view.Ports[i])
 		}
+		state.StatusDetail = ""
 	}
 	return PortGridData{DeviceID: idFor(in.Viewer, d.ID), DeviceName: d.Name, Model: d.EffectiveModel,
-		Ports: view.Ports, Faceplates: view.Faceplates}, nil
+		Ports: view.Ports, Faceplates: view.Faceplates, DeviceState: state, Indicators: view.Indicators}, nil
 }

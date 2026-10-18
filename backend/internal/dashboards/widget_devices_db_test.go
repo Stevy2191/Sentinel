@@ -39,6 +39,29 @@ func TestDBPortGridTrimsForPublic(t *testing.T) {
 	}
 }
 
+// A public link sees that a device is in error, never the error's text,
+// which can name internal hosts.
+func TestDBPortGridPublicTrimsStatusDetail(t *testing.T) {
+	db := testdb.Open(t)
+	d := realDeps(t, db)
+	w := portGridWidget{devices: d.Devices, ports: d.Ports}
+	dev := newDevice(t, db, newSite(t, db, "HQ"), "core", "10.0.0.1")
+	newPort(t, db, dev, 1, "Gi1/0/1", "uplink")
+	testdb.Exec(t, db, `UPDATE devices SET status = 'error', status_detail = 'timeout to 10.0.0.9' WHERE id = ?`, dev)
+	cfg := fmt.Sprintf(`{"device_id":"%s"}`, dev)
+
+	data, err := resolveWidget(t, w, cfg, ResolveInput{Visible: Subjects{Devices: []uuid.UUID{dev}}})
+	testdb.Must(t, err)
+	if pg := data.(PortGridData); pg.DeviceState.Status != "error" || pg.DeviceState.StatusDetail != "timeout to 10.0.0.9" {
+		t.Errorf("signed in: %+v", pg.DeviceState)
+	}
+	data, err = resolveWidget(t, w, cfg, ResolveInput{Visible: Subjects{Devices: []uuid.UUID{dev}}, Viewer: PublicViewer})
+	testdb.Must(t, err)
+	if pg := data.(PortGridData); pg.DeviceState.Status != "error" || pg.DeviceState.StatusDetail != "" {
+		t.Errorf("public: %+v", pg.DeviceState)
+	}
+}
+
 func TestDBDeviceHealthNoDataWithoutProfiles(t *testing.T) {
 	db := testdb.Open(t)
 	d := realDeps(t, db)

@@ -23,6 +23,7 @@ type PortService struct {
 	incidents *IncidentService
 	settings  *SettingsService
 	layouts   FaceplateLayoutLookup
+	bays      DriveBayStates
 }
 
 func NewPortService(db *gorm.DB, metrics *MetricsStore, incidents *IncidentService, settings *SettingsService) *PortService {
@@ -221,6 +222,11 @@ type DevicePortsView struct {
 	// LayoutNotice is set when the saved layout for the device's model does
 	// not fit its ports, so it is drawn automatically instead.
 	LayoutNotice *FaceplateLayoutNotice `json:"layout_notice,omitempty"`
+	// DeviceState lets a realistic drawing go dark when the device is not
+	// being heard from.
+	DeviceState FaceplateDeviceState `json:"device_state"`
+	// Indicators are a drawing's non-port lights (the UDM-SE drive bay).
+	Indicators *FaceplateIndicators `json:"indicators,omitempty"`
 }
 
 type PortDetailView struct {
@@ -310,6 +316,8 @@ func (s *PortService) DevicePorts(ctx context.Context, d *DeviceView) (*DevicePo
 		}
 	}
 	out.Faceplates = portmon.LayoutUnits(layout, opts)
+	out.DeviceState = faceplateDeviceState(d)
+	out.Indicators = s.indicators(d, out.Faceplates)
 	return out, nil
 }
 

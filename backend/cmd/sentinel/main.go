@@ -486,6 +486,11 @@ func run() error {
 	pollWorkers := settingsService.GetInt(context.Background(), models.SettingSNMPPollWorkers, 16)
 	devicePoller := services.NewDevicePoller(deviceService, snmpClient, incidentService, notificationManager, pollWorkers)
 	devicePoller.SetPortStats(services.NewPortMonitor(portService, metricsStore, incidentService, notificationManager, snmpClient, settingsService))
+	// Realistic drawings with a drive bay (the UDM-SE): the poller reads
+	// the bay disk each poll, the ports view serves its light.
+	driveBays := services.NewDriveBayMonitor(snmpClient)
+	devicePoller.SetDriveBay(driveBays)
+	portService.SetDriveBays(driveBays)
 	devicePoller.SetUPS(services.NewUPSMonitor(metricsStore, incidentService, notificationManager, snmpClient, settingsService, portService))
 	devicePoller.SetProfiles(services.NewProfileMonitor(profileService, metricsStore, incidentService, notificationManager, snmpClient, portService))
 	go devicePoller.Start(loopCtx)
