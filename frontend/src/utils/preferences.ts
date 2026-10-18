@@ -14,6 +14,7 @@ export const PREF = {
   dateFormat: 'sentinel:dateFormat',
   reportRange: 'sentinel:reportRange',
   logo: 'sentinel:logo',
+  faceplateView: 'sentinel:faceplate-view',
 } as const
 
 export const DEFAULTS = {

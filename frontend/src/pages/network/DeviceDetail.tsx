@@ -12,6 +12,8 @@ import DeviceFormModal from '@/components/network/DeviceFormModal'
 import EditDetailsModal from '@/components/network/EditDetailsModal'
 import FaceplateLayoutEditor from '@/components/network/FaceplateLayoutEditor'
 import Faceplate, { FaceplateLegend } from '@/components/network/Faceplate'
+import RealisticFaceplate from '@/components/network/RealisticFaceplate'
+import { getString, PREF, setString } from '@/utils/preferences'
 import HealthSection from '@/components/network/HealthSection'
 import TrafficChart from '@/components/network/TrafficChart'
 import UPSPanel from '@/components/network/UPSPanel'
@@ -95,6 +97,14 @@ export default function DeviceDetail() {
   const [editing, setEditing] = useState(false)
   const [editingDetails, setEditingDetails] = useState(false)
   const [fixingLayout, setFixingLayout] = useState(false)
+  // Realistic | Simple, remembered in this browser.
+  const [view, setView] = useState<'realistic' | 'simple'>(() =>
+    getString(PREF.faceplateView, 'realistic') === 'simple' ? 'simple' : 'realistic'
+  )
+  const chooseView = (v: 'realistic' | 'simple') => {
+    setView(v)
+    setString(PREF.faceplateView, v)
+  }
   const [searchParams, setSearchParams] = useSearchParams()
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -155,6 +165,8 @@ export default function DeviceDetail() {
       ? `${DEVICE_TYPE_LABEL[device.device_type] ?? 'Other'} (your choice; detected as ${detectedLabel})`
       : (DEVICE_TYPE_LABEL[type] ?? 'Other')
   const ports = portsView?.ports ?? []
+  const hasDrawing = portsView?.faceplates.some((f) => !!f.drawing) ?? false
+  const realistic = hasDrawing && view === 'realistic'
   const showFaceplate = FACEPLATE_TYPES.has(type) && (portsView?.faceplates.some((f) => f.blocks.length > 0) ?? false)
   const selectedPort = ports.find((p) => p.if_index === selected) ?? null
 
@@ -284,17 +296,46 @@ export default function DeviceDetail() {
                   Fix layout
                 </button>
               )}
+              {hasDrawing && (
+                <div className="inline-flex overflow-hidden rounded-md border border-white/10 text-xs" role="group" aria-label="Front panel view">
+                  {(['realistic', 'simple'] as const).map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      aria-pressed={view === v}
+                      onClick={() => chooseView(v)}
+                      className={`px-2.5 py-1 capitalize ${view === v ? 'bg-primary-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                    >
+                      {v}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
-            <FaceplateLegend />
+            {!realistic && <FaceplateLegend />}
           </div>
-          <Faceplate
-            faceplates={portsView.faceplates}
-            ports={ports}
-            title={device.name}
-            subtitle={device.effective_model || device.host}
-            selected={selected}
-            onSelect={(i) => setSelected((s) => (s === i ? null : i))}
-          />
+          {realistic ? (
+            <RealisticFaceplate
+              faceplates={portsView.faceplates}
+              ports={ports}
+              deviceState={portsView.device_state}
+              indicators={portsView.indicators}
+              title={device.name}
+              subtitle={device.effective_model || device.host}
+              selected={selected}
+              onSelect={(i) => setSelected((s) => (s === i ? null : i))}
+              fit="page"
+            />
+          ) : (
+            <Faceplate
+              faceplates={portsView.faceplates}
+              ports={ports}
+              title={device.name}
+              subtitle={device.effective_model || device.host}
+              selected={selected}
+              onSelect={(i) => setSelected((s) => (s === i ? null : i))}
+            />
+          )}
           {currentUser?.is_admin && portsView.layout_notice && (
             <p className="flex items-start gap-2 text-sm text-amber-400">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
@@ -357,6 +398,7 @@ export default function DeviceDetail() {
         <FaceplateLayoutEditor
           device={device}
           ports={ports}
+          hasDrawing={hasDrawing}
           onClose={() => setFixingLayout(false)}
           onSaved={() => {
             setFixingLayout(false)

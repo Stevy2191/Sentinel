@@ -19,6 +19,9 @@ const inputCls =
 interface Props {
   device: Device
   ports: PortView[]
+  /** The model has a realistic drawing, so this layout only shapes the
+   *  Simple view. */
+  hasDrawing?: boolean
   onClose: () => void
   onSaved: () => void
 }
@@ -26,7 +29,7 @@ interface Props {
 /** Fix layout: an admin arranges a model's front panel as groups of ports,
  *  previewed live on this device, and saves it for every device of the
  *  model. */
-export default function FaceplateLayoutEditor({ device, ports, onClose, onSaved }: Props) {
+export default function FaceplateLayoutEditor({ device, ports, hasDrawing, onClose, onSaved }: Props) {
   const { data: editor, loading, error: loadError } = useFaceplateEditor(device.id)
   const [groups, setGroups] = useState<LayoutGroup[] | null>(null)
   const [preview, setPreview] = useState<FaceplatePreviewData | null>(null)
@@ -230,6 +233,11 @@ export default function FaceplateLayoutEditor({ device, ports, onClose, onSaved 
             </div>
 
             <div className="space-y-2">
+              {hasDrawing && (
+                <p className="rounded-md border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sm text-sky-200">
+                  This model has a realistic drawing; this layout applies to the Simple view.
+                </p>
+              )}
               <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500">
                 Preview {previewing && <Loader2 className="h-3 w-3 animate-spin" aria-label="Updating preview" />}
               </div>
