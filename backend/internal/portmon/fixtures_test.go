@@ -133,3 +133,18 @@ func cisco4500X() []fixtureIf {
 	}
 	return out
 }
+
+// EdgeSwitch 16 XG (model UBNT-ES16XG), as the user's work install reads it:
+// ports 1-12 are SFP+ cages and 13-16 10GBASE-T RJ45, but the firmware
+// describes all sixteen as "10G - Level", so nothing tells them apart.
+func es16XG() []fixtureIf {
+	var out []fixtureIf
+	for i := 1; i <= 16; i++ {
+		out = append(out, fixtureIf{i, fmt.Sprintf("0/%d", i), fmt.Sprintf("Slot: 0 Port: %d 10G - Level", i), 6})
+	}
+	out = append(out, fixtureIf{17, "CPU Interface:  5/1", "CPU Interface for Slot: 5 Port: 1", 1})
+	for i := 1; i <= 6; i++ {
+		out = append(out, fixtureIf{17 + i, fmt.Sprintf("3/%d", i), fmt.Sprintf("Link Aggregate %d", i), 161})
+	}
+	return out
+}

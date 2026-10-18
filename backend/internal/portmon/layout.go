@@ -31,8 +31,12 @@ type FacePort struct {
 // 1st, 3rd, 5th... port of the block and Bottom the 2nd, 4th...
 type FaceBlock struct {
 	// Label names a module block ("Module 1"); empty for the main ports.
-	Label  string     `json:"label,omitempty"`
-	SFP    bool       `json:"sfp"`
+	Label string `json:"label,omitempty"`
+	SFP   bool   `json:"sfp"`
+	// Rows is set only by a model layout whose blocks differ in height (the
+	// EdgeSwitch 16 XG's one row of RJ45 beside two rows of SFP+); 0 means
+	// the faceplate's Rows.
+	Rows   int        `json:"rows,omitempty"`
 	Top    []FacePort `json:"top"`
 	Bottom []FacePort `json:"bottom"`
 }
@@ -185,6 +189,13 @@ func Layout(ports []LayoutPort, o LayoutOptions) Faceplate {
 	}
 	byNumber(copper)
 	byNumber(sfp)
+	// A model in the table (models.go) is drawn as the real switch, unless
+	// the user has set the faceplate themselves or it has network modules.
+	if len(modules) == 0 && o.Style == PortStyleAuto && o.Rows == nil && len(o.SFPPorts) == 0 {
+		if fp, ok := modelFaceplate(o.Model, append(append([]FacePort{}, copper...), sfp...)); ok {
+			return fp
+		}
+	}
 
 	rows := 1
 	if len(copper) > maxOneRowPorts || (len(copper) == 0 && len(sfp) > blockSize) {

@@ -38,6 +38,9 @@ export interface FaceBlock {
   /** "Module N" for a network module block; absent for the main ports. */
   label?: string
   sfp: boolean
+  /** Set only when this block's height differs from the faceplate's (a
+   *  known model such as the EdgeSwitch 16 XG); absent means Faceplate.rows. */
+  rows?: number
   top: FacePort[]
   bottom: FacePort[]
 }

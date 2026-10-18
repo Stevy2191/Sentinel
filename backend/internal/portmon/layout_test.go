@@ -327,3 +327,60 @@ func TestLayoutCisco4500X(t *testing.T) {
 		t.Errorf("module block %+v", mod)
 	}
 }
+
+func es16XGLayoutPorts() []LayoutPort {
+	var ps []LayoutPort
+	for _, f := range es16XG() {
+		if IsPhysical(info(f)) {
+			ps = append(ps, LayoutPort{IfIndex: f.Index, Name: f.Name, Descr: f.Descr})
+		}
+	}
+	return ps
+}
+
+// The EdgeSwitch 16 XG draws like the real switch: twelve SFP+ cages two
+// high with odd ports on top, then the four RJ45 ports in one row.
+func TestLayoutES16XG(t *testing.T) {
+	for _, model := range []string{"UBNT-ES16XG", "ES-16-XG", "EdgeSwitch 16XG"} {
+		fp := Layout(es16XGLayoutPorts(), LayoutOptions{Model: model})
+		if fp.Rows != 2 || len(fp.Blocks) != 2 {
+			t.Fatalf("%s: rows %d blocks %d", model, fp.Rows, len(fp.Blocks))
+		}
+		sfp, rj45 := fp.Blocks[0], fp.Blocks[1]
+		if !sfp.SFP || sfp.Rows != 2 ||
+			!reflect.DeepEqual(numbers(sfp.Top), []int{1, 3, 5, 7, 9, 11}) ||
+			!reflect.DeepEqual(numbers(sfp.Bottom), []int{2, 4, 6, 8, 10, 12}) {
+			t.Errorf("%s: SFP block %+v", model, sfp)
+		}
+		if rj45.SFP || rj45.Rows != 1 || len(rj45.Bottom) != 0 ||
+			!reflect.DeepEqual(numbers(rj45.Top), []int{13, 14, 15, 16}) {
+			t.Errorf("%s: RJ45 block %+v", model, rj45)
+		}
+	}
+}
+
+// A model layout yields to the user's own faceplate settings, and to a port
+// list it does not match exactly (a firmware that numbers ports differently).
+func TestLayoutModelFallsBack(t *testing.T) {
+	two := 2
+	for name, o := range map[string]LayoutOptions{
+		"rows set":  {Model: "UBNT-ES16XG", Rows: &two},
+		"style set": {Model: "UBNT-ES16XG", Style: PortStyleRJ45},
+		"sfp ports": {Model: "UBNT-ES16XG", SFPPorts: []int{1}},
+	} {
+		fp := Layout(es16XGLayoutPorts(), o)
+		for _, b := range fp.Blocks {
+			if b.Rows != 0 {
+				t.Errorf("%s: model layout used: %+v", name, fp)
+			}
+		}
+	}
+	short := es16XGLayoutPorts()[:15]
+	if fp := Layout(short, LayoutOptions{Model: "UBNT-ES16XG"}); len(fp.Blocks) != 1 || fp.Blocks[0].Rows != 0 {
+		t.Errorf("15 ports: want the automatic layout, got %+v", fp)
+	}
+	// Other models keep the automatic layout, with no per-block rows.
+	if fp := Layout(uswLayoutPorts(), LayoutOptions{Model: "UBNT-US48PRO-POE"}); fp.Blocks[0].Rows != 0 {
+		t.Errorf("USW-Pro-48 block rows %d", fp.Blocks[0].Rows)
+	}
+}

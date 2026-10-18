@@ -65,6 +65,10 @@ function Block({
   onSelect: (ifIndex: number) => void
 }) {
   const cols = Math.max(block.top.length, block.bottom.length)
+  // A one-row block beside two-row ones (the 16 XG's RJ45 ports next to its
+  // SFP+ cages) sits centred with its numbers below, as on the real switch.
+  const blockRows = block.rows ?? rows
+  const numsBelow = blockRows === 1 && rows === 2
   const cell = (fp: FacePort | undefined, flip: boolean) =>
     fp ? (
       <PortCell fp={fp} port={byIndex.get(fp.if_index)} sfp={block.sfp} flip={flip} selected={selected === fp.if_index} onSelect={onSelect} />
@@ -82,10 +86,11 @@ function Block({
       )}
       {Array.from({ length: cols }, (_, c) => (
         <div key={c} className="flex flex-col items-center gap-1">
-          <Num fp={block.top[c]} />
+          {!numsBelow && <Num fp={block.top[c]} />}
           {cell(block.top[c], false)}
-          {rows === 2 && cell(block.bottom[c], true)}
-          {rows === 2 && <Num fp={block.bottom[c]} />}
+          {blockRows === 2 && cell(block.bottom[c], true)}
+          {blockRows === 2 && <Num fp={block.bottom[c]} />}
+          {numsBelow && <Num fp={block.top[c]} />}
         </div>
       ))}
     </div>
