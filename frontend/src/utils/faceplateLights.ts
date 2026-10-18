@@ -21,9 +21,10 @@ export interface FaceplateIndicators {
   drive_bay?: string
 }
 
-/** A port's light: Sentinel's state colour; on a speed panel (the ES-16-XG)
- *  a 10G link is white, as the real legend shows. */
-export function portLight(p: PortView | undefined, opts?: { tenGigWhite?: boolean }): Light {
+/** A port's light: white for a 10G (or faster) link and green for a slower
+ *  one, as the switches' own legends show, unless Sentinel sees a problem
+ *  (yellow) or an important port down (red). */
+export function portLight(p: PortView | undefined): Light {
   if (!p) return 'off'
   switch (portState(p)) {
     case 'warning':
@@ -31,7 +32,7 @@ export function portLight(p: PortView | undefined, opts?: { tenGigWhite?: boolea
     case 'critical':
       return 'red'
     case 'up':
-      return opts?.tenGigWhite && p.speed_bps >= 10_000_000_000 ? 'white' : 'green'
+      return p.speed_bps >= 10_000_000_000 ? 'white' : 'green'
     default:
       return 'off'
   }

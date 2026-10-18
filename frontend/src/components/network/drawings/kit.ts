@@ -37,7 +37,7 @@ export function kit(p: DrawingProps) {
     return s === 'critical' ? 'red' : s === 'warning' ? 'yellow' : undefined
   }
   const hit = (n: number): Hit => ({ port: port(n), selected: p.selected, onSelect: p.onSelect, lastKnown: p.lastKnown, alert: alert(n) })
-  const light = (n: number, opts?: { tenGigWhite?: boolean }): Light => (p.dark ? 'off' : portLight(port(n), opts))
+  const light = (n: number): Light => (p.dark ? 'off' : portLight(port(n)))
   const fl = (n: number): Flicker => (p.dark ? '' : flicker(port(n)))
   const cage = (n: number): CagePort => ({ hit: hit(n), light: light(n), flicker: fl(n) })
   // The same for a port on network module slot.

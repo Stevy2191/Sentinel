@@ -31,7 +31,7 @@ function Legend({ kind }: { kind: string }) {
 export default function Es16Xg(props: DrawingProps) {
   const k = kit(props)
   const lamp = (n: number) => (
-    <PanelLight key={n} number={n} light={k.light(n, { tenGigWhite: true })} flicker={k.fl(n)} hit={k.hit(n)} />
+    <PanelLight key={n} number={n} light={k.light(n)} flicker={k.fl(n)} hit={k.hit(n)} />
   )
   const plain = (n: number) => ({ ...k.cage(n), light: 'off' as const, flicker: '' as const })
   return (

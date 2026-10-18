@@ -45,7 +45,7 @@
 .rf-cage .rf-clip { position: absolute; right: 3px; top: 3px; width: 7px; height: 18px; border: 1px solid #4d5258; border-left: none; }
 .rf-bar { position: absolute; left: 1px; right: 1px; top: 26px; height: 7px; background: #c9cdd1; font: 700 5px/7px Inter, system-ui, sans-serif; }
 .rf-bar.rf-plain { background: linear-gradient(#d3d7db, #9ca3aa); }
-.rf-bar span { position: absolute; color: #f2f4f6; }
+.rf-bar span { position: absolute; color: #7d838a; font-size: 6.5px; line-height: 7px; }
 .rf-bar .rf-a { left: 9px; }
 .rf-bar .rf-b { right: 9px; }
 
@@ -68,13 +68,16 @@
 .rf-k.rf-k-w { background: #f4f6f8; }
 
 /* light colours: the LED, the panel dot, an arrow, a device light */
-.rf-led.rf-l-green, .rf-dot.rf-l-green { background: #3fe07a; box-shadow: 0 0 5px #3fe07a; }
-.rf-led.rf-l-white, .rf-dot.rf-l-white { background: #f4f6f8; box-shadow: 0 0 5px #fff; }
-.rf-led.rf-l-yellow, .rf-dot.rf-l-yellow { background: #ffd23a; box-shadow: 0 0 5px #ffd23a; }
-.rf-led.rf-l-red, .rf-dot.rf-l-red { background: #ff4d4d; box-shadow: 0 0 5px #ff4d4d; }
-.rf-bar span.rf-l-green { color: #3fe07a; text-shadow: 0 0 4px #3fe07a; }
-.rf-bar span.rf-l-yellow { color: #ffd23a; text-shadow: 0 0 4px #ffd23a; }
-.rf-bar span.rf-l-red { color: #ff4d4d; text-shadow: 0 0 4px #ff4d4d; }
+/* a lit light gets a thin dark ring, so white and green still read against
+   a light grey jack or bar, and a wide glow */
+.rf-led.rf-l-green, .rf-dot.rf-l-green { background: #4dff8e; box-shadow: 0 0 0 1px rgba(10, 40, 20, 0.55), 0 0 6px 2px rgba(63, 224, 122, 0.85); }
+.rf-led.rf-l-white, .rf-dot.rf-l-white { background: #fff; box-shadow: 0 0 0 1px rgba(30, 34, 40, 0.6), 0 0 6px 2px rgba(255, 255, 255, 0.9); }
+.rf-led.rf-l-yellow, .rf-dot.rf-l-yellow { background: #ffe14d; box-shadow: 0 0 0 1px rgba(60, 45, 0, 0.55), 0 0 6px 2px rgba(255, 210, 58, 0.85); }
+.rf-led.rf-l-red, .rf-dot.rf-l-red { background: #ff5c5c; box-shadow: 0 0 0 1px rgba(60, 0, 0, 0.55), 0 0 6px 2px rgba(255, 77, 77, 0.85); }
+.rf-bar span.rf-l-green { color: #4dff8e; text-shadow: 0 0 1px #0a2814, 0 0 4px #3fe07a, 0 0 8px #3fe07a; }
+.rf-bar span.rf-l-white { color: #fff; text-shadow: 0 0 1px #1e2228, 0 0 1px #1e2228, 0 0 5px #fff, 0 0 9px #fff; }
+.rf-bar span.rf-l-yellow { color: #ffe14d; text-shadow: 0 0 1px #3c2d00, 0 0 4px #ffd23a, 0 0 8px #ffd23a; }
+.rf-bar span.rf-l-red { color: #ff5c5c; text-shadow: 0 0 1px #3c0000, 0 0 4px #ff4d4d, 0 0 8px #ff4d4d; }
 @keyframes rf-blink { 50% { opacity: 0.3; } }
 @media (prefers-reduced-motion: no-preference) {
   .rf-fl-slow { animation: rf-blink 1s steps(2) infinite; }
