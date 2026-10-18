@@ -1,0 +1,117 @@
+<style>
+  .stage { background:#0b1220; border-radius:10px; padding:24px 28px; overflow-x:auto; margin-bottom:14px; }
+  .case { position:relative; border-radius:5px; background:linear-gradient(#f4f5f6 0%,#e6e8ea 55%,#d8dbde 100%);
+    box-shadow:inset 0 1px 0 #fff, inset 0 -2px 0 #b6bbc0, 0 10px 26px rgba(0,0,0,.55); }
+  /* the port section is drawn once at a base size and scaled */
+  .ports { position:absolute; width:300px; height:100px; transform-origin:0 0; }
+  .lbl { position:absolute; font:500 7px/1 Inter,system-ui; color:#5d636a; white-space:nowrap; }
+  .lbl svg { width:6px; height:7px; vertical-align:-1px; margin-left:1px; }
+  .pill { position:absolute; height:7px; border-radius:1.5px; background:#c3c7cb; font:600 5px/7px Inter,system-ui; color:#fff; text-align:center; letter-spacing:.2px; }
+  /* LAN block: dark edge, light housing */
+  .rjblock { position:absolute; left:0; top:12px; width:138px; height:62px; background:#c9cdd1; border:2px solid #23262a; border-radius:1px; box-sizing:border-box; }
+  .jack { position:absolute; width:31px; height:27px; background:linear-gradient(#bfc4c9,#adb3b8); cursor:pointer; }
+  .jack .hole { position:absolute; left:4px; right:4px; top:3px; bottom:3px; background:#3a3d41;
+    clip-path:polygon(0 18%,34% 18%,34% 0,66% 0,66% 18%,100% 18%,100% 100%,0 100%); }
+  .jack .pins { position:absolute; left:7px; right:7px; bottom:5px; height:7px;
+    background:repeating-linear-gradient(90deg,#24272a 0 1px,#7d8288 1px 2.2px); }
+  .jack.dn .hole { clip-path:polygon(0 0,100% 0,100% 82%,66% 82%,66% 100%,34% 100%,34% 82%,0 82%); }
+  .jack.dn .pins { bottom:auto; top:5px; }
+  .jack .led { position:absolute; right:2px; top:2px; width:7px; height:4px; border-radius:1.5px; background:#8b9096; }
+  .jack.dn .led { top:auto; bottom:2px; }
+  /* port state on the LED */
+  .up .led { background:#3fe07a; box-shadow:0 0 5px #3fe07a; }
+  .warn .led { background:#ffd23a; box-shadow:0 0 5px #ffd23a; }
+  .crit .led { background:#ff4d4d; box-shadow:0 0 5px #ff4d4d; }
+  .busy .led { animation:blink .5s steps(2) infinite; }
+  .sel { outline:1.5px solid #38bdf8; outline-offset:1px; }
+  @keyframes blink { 50% { opacity:.35; } }
+  /* WAN 9 */
+  .wan { position:absolute; left:154px; top:42px; width:37px; height:33px; background:#c9cdd1; border:2px solid #4a4e53; border-radius:1px; box-sizing:border-box; }
+  /* SFP+ housing: two cages and the arrow bar between them */
+  .sfpbox { position:absolute; left:204px; top:12px; width:44px; height:63px; background:#1c1e21; border:2px solid #3e4247; border-radius:1px; box-sizing:border-box; }
+  .cage { position:absolute; left:1px; right:1px; height:24px; background:#141618; cursor:pointer; }
+  .cage .edge { position:absolute; left:0; top:8px; width:19px; height:6px; background:#d9dde1;
+    background-image:repeating-linear-gradient(90deg,#d9dde1 0 1px,#8f959b 1px 2px); border:1px solid #6e747a; }
+  .cage .clip { position:absolute; right:3px; top:3px; width:7px; height:18px; border:1px solid #4d5258; border-left:none; }
+  .cage .sled { position:absolute; right:-9px; top:9px; width:4px; height:4px; border-radius:50%; background:#8b9096; }
+  .cage.up .sled { background:#3fe07a; box-shadow:0 0 5px #3fe07a; }
+  .cage.mod { background:linear-gradient(#cfd4d9,#a7aeb5); }
+  .cage.mod .edge { display:none; }
+  .cage.mod::before { content:""; position:absolute; left:10px; top:8px; width:6px; height:8px; background:#1a1c1e; box-shadow:10px 0 0 #1a1c1e; border-radius:1px; }
+  .cage.mod::after { content:""; position:absolute; left:2px; right:2px; bottom:1px; height:2px; background:#2f6fd6; }
+  .arrows { position:absolute; left:1px; right:1px; top:26px; height:7px; background:#c9cdd1; font:700 5px/7px Inter,system-ui; color:#fff; }
+  .arrows span { position:absolute; color:#f2f4f6; } .arrows span.up { color:#3fe07a; text-shadow:0 0 4px #3fe07a; } .arrows span.warn { color:#ffd23a; text-shadow:0 0 4px #ffd23a; } .arrows .a { left:9px; } .arrows .b { right:9px; }
+  .reset { position:absolute; left:266px; top:79px; width:6px; height:6px; border-radius:50%; background:#2b2f34; }
+  .resetl { position:absolute; left:276px; top:79.5px; font:500 6px/1 Inter,system-ui; color:#5d636a; }
+  /* whole-case details */
+  .vents { position:absolute; top:7px; left:86px; right:16px; display:flex; gap:9px; }
+  .vents i { flex:1; height:3px; border-radius:2px; background:#25292d; box-shadow:0 1px 0 #fff; }
+  .touch { position:absolute; left:16px; top:20px; width:54px; height:54px; border-radius:5px; background:radial-gradient(circle at 50% 42%,#12304a,#04070b 72%); box-shadow:inset 0 0 0 2px #24292f; }
+  .touch::after { content:""; position:absolute; left:19px; top:20px; width:13px; height:13px; border-radius:50%; border:2px solid #3fa0ff; box-shadow:0 0 7px #3fa0ff; }
+  .name { position:absolute; left:16px; top:82px; font:600 6.5px/1 Inter,system-ui; color:#4b5157; }
+  .bay { position:absolute; left:330px; top:22px; width:222px; height:62px; border-radius:3px; background:linear-gradient(#eceef0,#dadde0); box-shadow:inset 0 0 0 1px #a9afb5, inset 0 2px 4px rgba(0,0,0,.18); }
+  .bay::after { content:""; position:absolute; right:12px; top:28px; width:5px; height:5px; border-radius:50%; background:#5a6067; }
+  .cap { font-size:12px; color:#94a3b8; margin:4px 2px 12px; }
+</style>
+
+<h2>The ports, fourth pass</h2>
+<p class="subtitle">RESET moved down to the label row, level with 11. Port 11 is now the same cage as port 10, its connector edge facing port 10's across the arrow bar as on the real one. Close-up first, then the whole device at the size it would show on its page. The SFP+ cages have no lights of their own on the real case, so each cage's state shows on its arrow: ▲ is port 10, ▼ is port 11. The LED sits where the real one does; its colour is the port's Sentinel state (green link, yellow problem, red important port down, grey nothing plugged in), and it flickers while the port is busy. Hover a port for a tooltip; port 5 is shown selected.</p>
+
+<template id="ports">
+  <!-- labels above -->
+  <div class="lbl" style="left:9px;top:2px">1<svg viewBox="0 0 6 7"><path d="M3.6 0 0.8 4h1.9L2.3 7 5.2 3H3.3z" fill="#5d636a"/></svg><sup style="font-size:5px">+</sup></div>
+  <div class="lbl" style="left:43px;top:2px">3<svg viewBox="0 0 6 7"><path d="M3.6 0 0.8 4h1.9L2.3 7 5.2 3H3.3z" fill="#5d636a"/></svg></div>
+  <div class="lbl" style="left:76px;top:2px">5<svg viewBox="0 0 6 7"><path d="M3.6 0 0.8 4h1.9L2.3 7 5.2 3H3.3z" fill="#5d636a"/></svg></div>
+  <div class="lbl" style="left:109px;top:2px">7<svg viewBox="0 0 6 7"><path d="M3.6 0 0.8 4h1.9L2.3 7 5.2 3H3.3z" fill="#5d636a"/></svg></div>
+  <div class="rjblock">
+    <div class="jack up busy" style="left:1px;top:1px" title="Port 1 · In use · 412 Mbps"><i class="hole"></i><i class="pins"></i><i class="led"></i></div>
+    <div class="jack up" style="left:34px;top:1px" title="Port 3 · In use"><i class="hole"></i><i class="pins"></i><i class="led"></i></div>
+    <div class="jack up busy sel" style="left:67px;top:1px" title="Port 5 · selected"><i class="hole"></i><i class="pins"></i><i class="led"></i></div>
+    <div class="jack up" style="left:100px;top:1px" title="Port 7 · In use"><i class="hole"></i><i class="pins"></i><i class="led"></i></div>
+    <div class="jack dn up" style="left:1px;top:30px" title="Port 2 · In use"><i class="hole"></i><i class="pins"></i><i class="led"></i></div>
+    <div class="jack dn warn" style="left:34px;top:30px" title="Port 4 · Problem: errors"><i class="hole"></i><i class="pins"></i><i class="led"></i></div>
+    <div class="jack dn up busy" style="left:67px;top:30px" title="Port 6 · In use"><i class="hole"></i><i class="pins"></i><i class="led"></i></div>
+    <div class="jack dn" style="left:100px;top:30px" title="Port 8 · Nothing plugged in"><i class="hole"></i><i class="pins"></i><i class="led"></i></div>
+  </div>
+  <div class="lbl" style="left:9px;top:79px">2<svg viewBox="0 0 6 7"><path d="M3.6 0 0.8 4h1.9L2.3 7 5.2 3H3.3z" fill="#5d636a"/></svg><sup style="font-size:5px">+</sup></div>
+  <div class="lbl" style="left:43px;top:79px">4<svg viewBox="0 0 6 7"><path d="M3.6 0 0.8 4h1.9L2.3 7 5.2 3H3.3z" fill="#5d636a"/></svg></div>
+  <div class="lbl" style="left:76px;top:79px">6<svg viewBox="0 0 6 7"><path d="M3.6 0 0.8 4h1.9L2.3 7 5.2 3H3.3z" fill="#5d636a"/></svg></div>
+  <div class="lbl" style="left:109px;top:79px">8<svg viewBox="0 0 6 7"><path d="M3.6 0 0.8 4h1.9L2.3 7 5.2 3H3.3z" fill="#5d636a"/></svg></div>
+  <!-- WAN 9 -->
+  <div class="wan"><div class="jack up busy" style="left:1px;top:1px" title="Port 9 · 2.5G WAN · In use"><i class="hole"></i><i class="pins"></i><i class="led"></i></div></div>
+  <div class="lbl" style="left:165px;top:79px">9<svg viewBox="0 0 8 8" style="width:7px;height:7px"><circle cx="4" cy="4" r="3.4" fill="none" stroke="#5b8fe0" stroke-width=".9"/><path d="M.6 4h6.8M4 .6c-1.6 2-1.6 4.8 0 6.8M4 .6c1.6 2 1.6 4.8 0 6.8" stroke="#5b8fe0" stroke-width=".7" fill="none"/></svg></div>
+  <div class="pill" style="left:154px;top:88px;width:37px">2.5G</div>
+  <!-- SFP+ 10 over 11 -->
+  <div class="lbl" style="left:217px;top:2px">10<svg viewBox="0 0 8 8" style="width:7px;height:7px"><circle cx="4" cy="4" r="3.4" fill="none" stroke="#5b8fe0" stroke-width=".9"/><path d="M.6 4h6.8M4 .6c-1.6 2-1.6 4.8 0 6.8M4 .6c1.6 2 1.6 4.8 0 6.8" stroke="#5b8fe0" stroke-width=".7" fill="none"/></svg></div>
+  <div class="sfpbox">
+    <div class="cage" style="top:1px" title="Port 10 · SFP+ WAN · Nothing plugged in"><i class="edge" style="top:12px"></i><i class="clip"></i></div>
+    <div class="arrows"><span class="a" title="Port 10 · Nothing plugged in">▲</span><span class="b up" title="Port 11 · In use">▼</span></div>
+    <div class="cage" style="top:35px" title="Port 11 · SFP+ · In use"><i class="edge" style="top:4px"></i><i class="clip"></i></div>
+  </div>
+  <div class="lbl" style="left:222px;top:79px">11</div>
+  <div class="pill" style="left:204px;top:88px;width:44px">10G</div>
+  <div class="reset"></div><div class="resetl">RESET</div>
+</template>
+
+<div class="stage">
+  <div class="case" style="width:640px;height:220px">
+    <div class="vents" style="left:0;right:110px;top:10px;gap:20px"><i style="flex:.5"></i><i></i></div>
+    <div class="ports" id="zoom" style="left:20px;top:22px;transform:scale(2)"></div>
+  </div>
+</div>
+<p class="cap">Close-up, twice the size it would show.</p>
+
+<div class="stage">
+  <div class="case" style="width:920px;height:112px">
+    <div class="vents"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="touch"></div><div class="name">Dream Machine SE</div>
+    <div class="bay"></div>
+    <div class="ports" id="full" style="left:600px;top:10px"></div>
+  </div>
+</div>
+<p class="cap">The whole device, at the size it would show on its page.</p>
+
+<script>
+  const t = document.getElementById('ports');
+  for (const id of ['zoom', 'full']) document.getElementById(id).appendChild(t.content.cloneNode(true));
+</script>

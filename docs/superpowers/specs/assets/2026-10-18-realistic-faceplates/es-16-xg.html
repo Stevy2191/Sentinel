@@ -1,0 +1,106 @@
+<style>
+  .stage { background:#0b1220; border-radius:10px; padding:24px 28px; overflow-x:auto; margin-bottom:14px; }
+  .case { position:relative; border-radius:5px; background:linear-gradient(#f4f5f6 0%,#e6e8ea 55%,#d8dbde 100%);
+    box-shadow:inset 0 1px 0 #fff, inset 0 -2px 0 #b6bbc0, 0 10px 26px rgba(0,0,0,.55); }
+  /* the port section is drawn once at a base size and scaled */
+  .ports { position:absolute; width:300px; height:100px; transform-origin:0 0; }
+  .lbl { position:absolute; font:500 7px/1 Inter,system-ui; color:#5d636a; white-space:nowrap; }
+  .lbl svg { width:6px; height:7px; vertical-align:-1px; margin-left:1px; }
+  .pill { position:absolute; height:7px; border-radius:1.5px; background:#c3c7cb; font:600 5px/7px Inter,system-ui; color:#fff; text-align:center; letter-spacing:.2px; }
+  /* LAN block: dark edge, light housing */
+  .rjblock { position:absolute; left:0; top:12px; width:138px; height:62px; background:#c9cdd1; border:2px solid #23262a; border-radius:1px; box-sizing:border-box; }
+  .jack { position:absolute; width:31px; height:27px; background:linear-gradient(#bfc4c9,#adb3b8); cursor:pointer; }
+  .jack .hole { position:absolute; left:4px; right:4px; top:3px; bottom:3px; background:#3a3d41;
+    clip-path:polygon(0 18%,34% 18%,34% 0,66% 0,66% 18%,100% 18%,100% 100%,0 100%); }
+  .jack .pins { position:absolute; left:7px; right:7px; bottom:5px; height:7px;
+    background:repeating-linear-gradient(90deg,#24272a 0 1px,#7d8288 1px 2.2px); }
+  .jack.dn .hole { clip-path:polygon(0 0,100% 0,100% 82%,66% 82%,66% 100%,34% 100%,34% 82%,0 82%); }
+  .jack.dn .pins { bottom:auto; top:5px; }
+  .jack .led { position:absolute; right:2px; top:2px; width:7px; height:4px; border-radius:1.5px; background:#8b9096; }
+  .jack.dn .led { top:auto; bottom:2px; }
+  /* port state on the LED */
+  .up .led { background:#3fe07a; box-shadow:0 0 5px #3fe07a; }
+  .warn .led { background:#ffd23a; box-shadow:0 0 5px #ffd23a; }
+  .crit .led { background:#ff4d4d; box-shadow:0 0 5px #ff4d4d; }
+  .busy .led { animation:blink .5s steps(2) infinite; }
+  .sel { outline:1.5px solid #38bdf8; outline-offset:1px; }
+  @keyframes blink { 50% { opacity:.35; } }
+  /* WAN 9 */
+  .wan { position:absolute; left:154px; top:42px; width:37px; height:33px; background:#c9cdd1; border:2px solid #4a4e53; border-radius:1px; box-sizing:border-box; }
+  /* SFP+ housing: two cages and the arrow bar between them */
+  .sfpbox { position:absolute; left:204px; top:12px; width:44px; height:63px; background:#1c1e21; border:2px solid #3e4247; border-radius:1px; box-sizing:border-box; }
+  .cage { position:absolute; left:1px; right:1px; height:24px; background:#141618; cursor:pointer; }
+  .cage .edge { position:absolute; left:0; top:8px; width:19px; height:6px; background:#d9dde1;
+    background-image:repeating-linear-gradient(90deg,#d9dde1 0 1px,#8f959b 1px 2px); border:1px solid #6e747a; }
+  .cage .clip { position:absolute; right:3px; top:3px; width:7px; height:18px; border:1px solid #4d5258; border-left:none; }
+  .cage .sled { position:absolute; right:-9px; top:9px; width:4px; height:4px; border-radius:50%; background:#8b9096; }
+  .cage.up .sled { background:#3fe07a; box-shadow:0 0 5px #3fe07a; }
+  .cage.mod { background:linear-gradient(#cfd4d9,#a7aeb5); }
+  .cage.mod .edge { display:none; }
+  .cage.mod::before { content:""; position:absolute; left:10px; top:8px; width:6px; height:8px; background:#1a1c1e; box-shadow:10px 0 0 #1a1c1e; border-radius:1px; }
+  .cage.mod::after { content:""; position:absolute; left:2px; right:2px; bottom:1px; height:2px; background:#2f6fd6; }
+  .arrows { position:absolute; left:1px; right:1px; top:26px; height:7px; background:#c9cdd1; font:700 5px/7px Inter,system-ui; color:#fff; }
+  .arrows span { position:absolute; color:#f2f4f6; } .arrows span.up { color:#3fe07a; text-shadow:0 0 4px #3fe07a; } .arrows span.warn { color:#ffd23a; text-shadow:0 0 4px #ffd23a; } .arrows .a { left:9px; } .arrows .b { right:9px; }
+  .reset { position:absolute; left:266px; top:79px; width:6px; height:6px; border-radius:50%; background:#2b2f34; }
+  .resetl { position:absolute; left:276px; top:79.5px; font:500 6px/1 Inter,system-ui; color:#5d636a; }
+  /* whole-case details */
+  .vents { position:absolute; top:7px; left:86px; right:16px; display:flex; gap:9px; }
+  .vents i { flex:1; height:3px; border-radius:2px; background:#25292d; box-shadow:0 1px 0 #fff; }
+  .touch { position:absolute; left:16px; top:20px; width:54px; height:54px; border-radius:5px; background:radial-gradient(circle at 50% 42%,#12304a,#04070b 72%); box-shadow:inset 0 0 0 2px #24292f; }
+  .touch::after { content:""; position:absolute; left:19px; top:20px; width:13px; height:13px; border-radius:50%; border:2px solid #3fa0ff; box-shadow:0 0 7px #3fa0ff; }
+  .name { position:absolute; left:16px; top:82px; font:600 6.5px/1 Inter,system-ui; color:#4b5157; }
+  .bay { position:absolute; left:330px; top:22px; width:222px; height:62px; border-radius:3px; background:linear-gradient(#eceef0,#dadde0); box-shadow:inset 0 0 0 1px #a9afb5, inset 0 2px 4px rgba(0,0,0,.18); }
+  .bay::after { content:""; position:absolute; right:12px; top:28px; width:5px; height:5px; border-radius:50%; background:#5a6067; }
+  .cap { font-size:12px; color:#94a3b8; margin:4px 2px 12px; }
+
+  .es { position:relative; width:1110px; height:96px; border-radius:4px; background:linear-gradient(#2d3035,#1c1e21 55%,#151719); box-shadow:inset 0 1px 0 #474c52, 0 10px 26px rgba(0,0,0,.6); }
+  .es .lbl { color:#b6bcc2; } .es .resetl { color:#b6bcc2; font-size:5px; } .es .reset { background:#050506; box-shadow:0 0 0 1px #4b4f54; width:5px; height:5px; }
+  .es .sfpbox { top:12px; width:48px; background:#141618; border-color:#55595e; }
+  .es .arrows.plain { background:linear-gradient(#d3d7db,#9ca3aa); top:26px; height:7px; }
+  .es .rjblock { background:#c9cdd1; border-color:#e5e7e9; border-width:2px; }
+  .logo { position:absolute; left:26px; top:22px; display:flex; align-items:center; gap:10px; color:#f2f4f6; }
+  .logo .u { font:800 15px/1 Inter,system-ui; }
+  .logo .bar { width:1px; height:14px; background:#8a9097; }
+  .logo .nm { font:italic 600 11.5px/1 Inter,system-ui; letter-spacing:-.2px; }
+  .logo .nm em { font-style:normal; font-size:6.5px; background:#e6e8ea; color:#1c1e21; padding:1px 2px; border-radius:1px; margin-left:3px; vertical-align:2px; }
+  .pwr { position:absolute; left:28px; top:46px; width:6px; height:6px; border-radius:50%; background:#f2f4f6; box-shadow:0 0 6px #fff; }
+  .panel { position:absolute; top:42px; display:flex; align-items:flex-start; }
+  .lamp { width:14px; display:flex; flex-direction:column; align-items:center; gap:4px; }
+  .pl { width:5px; height:5px; border-radius:50%; background:#3d4247; }
+  .pl.g { background:#3fe07a; box-shadow:0 0 5px #3fe07a; }
+  .pl.w { background:#f4f6f8; box-shadow:0 0 5px #fff; }
+  .pl.y { background:#ffd23a; box-shadow:0 0 5px #ffd23a; }
+  .pl.busy { animation:blink .5s steps(2) infinite; }
+  .pnum { font:500 6px/1 Inter,system-ui; color:#aab0b6; }
+  .legend { margin-left:8px; margin-top:-6px; display:flex; flex-direction:column; gap:1.5px; font:600 4.8px/1 Inter,system-ui; color:#c3c8cd; }
+  .legend b { font-weight:700; }
+  .k { display:inline-block; width:4px; height:4px; border-radius:50%; margin-right:2px; vertical-align:-.5px; }
+  .k.off { box-shadow:inset 0 0 0 1px #c3c8cd; } .k.g { background:#3fe07a; } .k.w { background:#f4f6f8; }
+  .jack.nolamp .led { display:none; }
+</style>
+<h2>EdgeSwitch 16 XG, third pass</h2>
+<p class="subtitle">Ports 13–16 now sit level with the bottom row of SFP+ cages, with their numbers on the same line as 2, 4 … 12, and RESET is on the case, low and just right of port 16. The status panel now works like the real one: each light has its number under it, and the legend reads DOWN / 1G / 10G. A light is white for a 10G link, green for 1G and off when down, and Sentinel adds yellow for a problem and red for an important port that's down. It flickers while busy. One SFP+ housing per column with a metal divider between its two cages; ports 13–16 in one silver frame. Hover a light or a port.</p>
+<div class="stage">
+  <div class="es">
+    <div class="logo"><span class="u">U</span><span class="bar"></span><span class="nm">EdgeSwitch 16<em>XG</em></span></div>
+    <div class="pwr" title="Power"></div>
+    
+<div class="panel" style="left:150px"><div class="lamp"><span class="pl g" title="Port 1 · In use · 1 Gbps"></span><span class="pnum">1</span></div><div class="lamp"><span class="pl g" title="Port 2 · In use · 1 Gbps"></span><span class="pnum">2</span></div><div class="lamp"><span class="pl w" title="Port 3 · In use · 10 Gbps"></span><span class="pnum">3</span></div><div class="lamp"><span class="pl g" title="Port 4 · In use · 1 Gbps"></span><span class="pnum">4</span></div><div class="lamp"><span class="pl g busy" title="Port 5 · In use · 1 Gbps · busy"></span><span class="pnum">5</span></div><div class="lamp"><span class="pl g" title="Port 6 · In use · 1 Gbps"></span><span class="pnum">6</span></div><div class="lamp"><span class="pl w" title="Port 7 · In use · 10 Gbps"></span><span class="pnum">7</span></div><div class="lamp"><span class="pl g" title="Port 8 · In use · 1 Gbps"></span><span class="pnum">8</span></div><div class="lamp"><span class="pl g" title="Port 9 · In use · 1 Gbps"></span><span class="pnum">9</span></div><div class="lamp"><span class="pl w" title="Port 10 · In use · 10 Gbps"></span><span class="pnum">10</span></div><div class="lamp"><span class="pl w" title="Port 11 · In use · 10 Gbps"></span><span class="pnum">11</span></div><div class="lamp"><span class="pl g busy" title="Port 12 · In use · 1 Gbps · busy"></span><span class="pnum">12</span></div><div class="legend"><b>SFP+</b><span><i class="k off"></i>DOWN</span><span><i class="k g"></i>1G</span><span><i class="k w"></i>10G</span></div></div>
+<div class="panel" style="left:430px"><div class="lamp"><span class="pl g" title="Port 13 · In use · 1 Gbps"></span><span class="pnum">13</span></div><div class="lamp"><span class="pl w" title="Port 14 · In use · 10 Gbps"></span><span class="pnum">14</span></div><div class="lamp"><span class="pl g" title="Port 15 · In use · 1 Gbps"></span><span class="pnum">15</span></div><div class="lamp"><span class="pl y" title="Port 16 · Problem: errors · 1 Gbps"></span><span class="pnum">16</span></div><div class="legend"><b>RJ45</b><span><i class="k off"></i>DOWN</span><span><i class="k g"></i>1G</span><span><i class="k w"></i>10G</span></div></div>
+
+    <div class="ports" style="left:580px;top:3px;width:500px"><div class="lbl" style="left:18px;top:2px">1</div>
+<div class="sfpbox" style="left:0px"><div class="cage" style="top:1px" title="Port 1 · In use · 1 Gbps · SFP+"><i class="edge" style="top:12px"></i><i class="clip"></i></div><div class="arrows plain"></div><div class="cage" style="top:35px" title="Port 2 · In use · 1 Gbps · SFP+"><i class="edge" style="top:4px"></i><i class="clip"></i></div></div>
+<div class="lbl" style="left:18px;top:79px">2</div><div class="lbl" style="left:76px;top:2px">3</div>
+<div class="sfpbox" style="left:58px"><div class="cage" style="top:1px" title="Port 3 · In use · 10 Gbps · SFP+"><i class="edge" style="top:12px"></i><i class="clip"></i></div><div class="arrows plain"></div><div class="cage" style="top:35px" title="Port 4 · In use · 1 Gbps · SFP+"><i class="edge" style="top:4px"></i><i class="clip"></i></div></div>
+<div class="lbl" style="left:76px;top:79px">4</div><div class="lbl" style="left:134px;top:2px">5</div>
+<div class="sfpbox" style="left:116px"><div class="cage" style="top:1px" title="Port 5 · In use · 1 Gbps · busy · SFP+"><i class="edge" style="top:12px"></i><i class="clip"></i></div><div class="arrows plain"></div><div class="cage" style="top:35px" title="Port 6 · In use · 1 Gbps · SFP+"><i class="edge" style="top:4px"></i><i class="clip"></i></div></div>
+<div class="lbl" style="left:134px;top:79px">6</div><div class="lbl" style="left:192px;top:2px">7</div>
+<div class="sfpbox" style="left:174px"><div class="cage" style="top:1px" title="Port 7 · In use · 10 Gbps · SFP+"><i class="edge" style="top:12px"></i><i class="clip"></i></div><div class="arrows plain"></div><div class="cage" style="top:35px" title="Port 8 · In use · 1 Gbps · SFP+"><i class="edge" style="top:4px"></i><i class="clip"></i></div></div>
+<div class="lbl" style="left:192px;top:79px">8</div><div class="lbl" style="left:250px;top:2px">9</div>
+<div class="sfpbox" style="left:232px"><div class="cage" style="top:1px" title="Port 9 · In use · 1 Gbps · SFP+"><i class="edge" style="top:12px"></i><i class="clip"></i></div><div class="arrows plain"></div><div class="cage" style="top:35px" title="Port 10 · In use · 10 Gbps · SFP+"><i class="edge" style="top:4px"></i><i class="clip"></i></div></div>
+<div class="lbl" style="left:250px;top:79px">10</div><div class="lbl" style="left:308px;top:2px">11</div>
+<div class="sfpbox" style="left:290px"><div class="cage" style="top:1px" title="Port 11 · In use · 10 Gbps · SFP+"><i class="edge" style="top:12px"></i><i class="clip"></i></div><div class="arrows plain"></div><div class="cage" style="top:35px" title="Port 12 · In use · 1 Gbps · busy · SFP+"><i class="edge" style="top:4px"></i><i class="clip"></i></div></div>
+<div class="lbl" style="left:308px;top:79px">12</div><div class="lbl" style="left:363px;top:79px">13</div><div class="lbl" style="left:396px;top:79px">14</div><div class="lbl" style="left:429px;top:79px">15</div><div class="lbl" style="left:462px;top:79px">16</div><div class="rjblock" style="left:352px;top:44px;width:135px;height:31px"><div class="jack nolamp" style="left:1px;top:1px" title="Port 13 · In use · 1 Gbps · 10GBASE-T"><i class="hole"></i><i class="pins"></i></div><div class="jack nolamp" style="left:34px;top:1px" title="Port 14 · In use · 10 Gbps · 10GBASE-T"><i class="hole"></i><i class="pins"></i></div><div class="jack nolamp" style="left:67px;top:1px" title="Port 15 · In use · 1 Gbps · 10GBASE-T"><i class="hole"></i><i class="pins"></i></div><div class="jack nolamp" style="left:100px;top:1px" title="Port 16 · Problem: errors · 1 Gbps · 10GBASE-T"><i class="hole"></i><i class="pins"></i></div></div><div class="reset" style="left:498px;top:63px"></div><div class="resetl" style="left:506px;top:63.5px">RESET</div></div>
+  </div>
+</div>
+<p class="cap">The whole switch at the size it would show on its page.</p>
