@@ -315,6 +315,9 @@ func byNumber(ps []FacePort) {
 type UnitFaceplate struct {
 	Unit  int    `json:"unit"`
 	Label string `json:"label"`
+	// Drawing is the realistic drawing for this unit (drawings.go), when
+	// its model has one and its ports are exactly the drawing's.
+	Drawing string `json:"drawing,omitempty"`
 	Faceplate
 }
 
@@ -332,9 +335,11 @@ type UnitFaceplate struct {
 // the port table, which is built independently of this function).
 func LayoutUnits(ports []LayoutPort, o LayoutOptions) []UnitFaceplate {
 	groups := unitGroups(ports)
+	drawing := DrawingFor(o.Model)
 	out := make([]UnitFaceplate, 0, len(groups))
 	for _, u := range groups {
-		out = append(out, UnitFaceplate{Unit: u.unit, Label: u.label, Faceplate: Layout(u.ports, o)})
+		out = append(out, UnitFaceplate{Unit: u.unit, Label: u.label, Faceplate: Layout(u.ports, o),
+			Drawing: drawingKey(drawing, u.ports, o.Numbering)})
 	}
 	return out
 }
