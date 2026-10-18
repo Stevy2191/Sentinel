@@ -56,7 +56,23 @@ Spec: `docs/superpowers/specs/2026-10-07-ux-reorganization-design.md` (agreed 20
 
 Spec `specs/2026-10-18-faceplate-model-layouts-design.md`, plan `plans/2026-10-18-faceplate-model-layouts.md`. The EdgeSwitch 16 XG is drawn as the real switch from a built-in table (`portmon/models.go`, on `dev`). On `feature/faceplate-layout-editor`, admins can save a layout for any model: **Fix layout** on a device's faceplate, and Settings → Faceplate layouts. Migration `062_faceplate_layouts.sql`.
 
+## Realistic faceplates
+
+Spec `specs/2026-10-18-realistic-faceplates-design.md` (approved mockups in `specs/assets/2026-10-18-realistic-faceplates/`), plan `plans/2026-10-18-realistic-faceplates.md`. The UDM-SE, USW-Pro-48-PoE and ES-16-XG draw as their real front panels (Realistic | Simple on the device page; always realistic on dashboards), with the UDM-SE drive bay light from UCD-DISKIO-MIB (bay disk `sdb`). A device Sentinel can't hear from goes dark with a badge. UniFi consoles now number ports from 1 (`portmon/numbering.go`). More models: add a drawing in `frontend/src/components/network/drawings/` and a line in `backend/internal/portmon/drawings.go`. PoE on UniFi switches waits for network phase 7 (the switch reports no PoE over SNMP).
+
 ## To be checked by the owner
+
+### Realistic faceplates (on the dev stack, port 3200)
+
+1. Quantum-Gate looks like `udm-se.html`. Hovering port 9 shows its popover, and clicking a jack selects it.
+2. The drive bay light is steady white or flickering with the drive in. With the drive pulled, within two polls it goes off, and the tooltip says "empty".
+3. QuantumLink looks like `usw-pro-48-poe.html`, with the PoE LEDs unlit.
+4. Realistic | Simple switches between the drawing and today's faceplate, and the choice survives a reload.
+5. A dashboard port grid widget for QuantumLink shows the whole drawing, scaled to fit.
+6. At work, the ES-16-XG looks like `es-16-xg.html`. The 10G ports light white and the 1G ports light green.
+7. Pause Quantum-Gate in Sentinel. Its drawing goes dark with "Paused", hovering a port shows "Last known", and Simple still shows the last known colours. Resume it, and it lights again after the next poll.
+8. At work: if any UniFi console had Edit details faceplate settings or a saved layout made before the port renumbering, re-check them. Their port numbers are now one higher.
+
 
 ### Faceplate layouts per model (on the dev stack, port 3200, with QuantumLink, the US-48 Pro)
 
