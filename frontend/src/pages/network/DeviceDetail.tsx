@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, CheckCircle2, Loader2, Pause, Pencil, Play, Radar, RefreshCw, SlidersHorizontal, Trash2 } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Loader2, Pause, Pencil, Play, Radar, RefreshCw, SlidersHorizontal, Trash2, Waypoints } from 'lucide-react'
 import { useSite } from '@/hooks/useSites'
 import { DEVICE_TYPE_LABEL, formatSpeed, useDevice, useDeviceActions, type Device } from '@/hooks/useDevices'
 import { useIncidents, formatDuration, DEFAULT_FILTERS } from '@/hooks/useIncidents'
@@ -194,6 +194,11 @@ export default function DeviceDetail() {
           {device.status_detail && <p className="mt-1 text-sm text-amber-400">{device.status_detail}</p>}
         </div>
         <div className="flex flex-wrap gap-2">
+          {CONNECTED_TYPES.has(type) && (
+            <Link className="btn-secondary flex items-center gap-2" to={`/network/sites/${device.site_id}/map?device=${device.id}`}>
+              <Waypoints className="h-4 w-4" /> Show on site map
+            </Link>
+          )}
           {canUseNetTools(currentUser) && (
             <Link
               className="btn-secondary flex items-center gap-2"

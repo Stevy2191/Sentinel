@@ -46,6 +46,8 @@ const ToolRunDetail = lazy(() => import('@/pages/ToolRunDetail'))
 const SavedReports = lazy(() => import('@/pages/SavedReports'))
 const SavedReportDetail = lazy(() => import('@/pages/SavedReportDetail'))
 const PublicDashboardPage = lazy(() => import('@/pages/dashboards/PublicDashboard'))
+const PublicSiteMapPage = lazy(() => import('@/pages/PublicSiteMapPage'))
+const SiteMapPage = lazy(() => import('@/pages/network/SiteMapPage'))
 const PublicReport = lazy(() => import('@/pages/PublicReport'))
 const StatusPages = lazy(() => import('@/pages/StatusPages'))
 const Notifications = lazy(() => import('@/pages/Notifications'))
@@ -85,6 +87,7 @@ export default function App() {
             <Route path="/invitation/:token" element={<InvitationAccept />} />
             <Route path="/public/status/:slug" element={<PublicStatus />} />
             <Route path="/public/dashboards/:token" element={<PublicDashboardPage />} />
+            <Route path="/public/maps/:token" element={<PublicSiteMapPage />} />
             {/* Shared reports are reachable by token without signing in. */}
             <Route path="/reports/share/:token" element={<PublicReport />} />
 
@@ -118,6 +121,7 @@ export default function App() {
               <Route path="/network" element={<Navigate to="/network/sites" replace />} />
               <Route path="/network/sites" element={<Sites />} />
               <Route path="/network/sites/:id" element={<SiteDetail />} />
+              <Route path="/network/sites/:id/map" element={<SiteMapPage />} />
               <Route path="/network/devices" element={<MonitoringRedirect show="devices" />} />
               <Route path="/network/devices/:id" element={<DeviceDetail />} />
               <Route path="/network/devices/:id/ports/:ifIndex" element={<PortDetail />} />

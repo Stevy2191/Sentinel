@@ -4,6 +4,7 @@ import { LayoutDashboard, MapPin, Pencil, Plus, Radar, Trash2 } from 'lucide-rea
 import { siteAddressLines, useSite, useSiteActions } from '@/hooks/useSites'
 import { useDevices } from '@/hooks/useDevices'
 import { useDashboards } from '@/hooks/useDashboards'
+import SiteMapCard from '@/components/network/sitemap/SiteMapCard'
 import { useSiteProfile, useSiteProfileActions } from '@/hooks/useSiteProfile'
 import { useAllMonitors } from '@/hooks/useAllMonitors'
 import { useAgents } from '@/hooks/useAgents'
@@ -261,6 +262,7 @@ export default function SiteDetail() {
 
         {/* What is there, one tab at a time. */}
         <div className="min-w-0 space-y-5">
+          <SiteMapCard siteId={site.id} />
           <div className="-mx-1 flex gap-1 overflow-x-auto border-b border-white/10 px-1" role="tablist" aria-label="What is at this site">
             {tabs.map((t) => (
               <button
