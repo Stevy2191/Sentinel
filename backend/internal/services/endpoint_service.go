@@ -668,6 +668,27 @@ func (s *EndpointService) Get(ctx context.Context, v Viewer, mac string) (*Endpo
 }
 
 // SetName sets (or, when empty, clears) the user's name for a MAC. It
+
+// Placements is where piece B places each of macs: the switch port (and how:
+// "wired" on an edge port, "behind" on the link port with the fewest MACs).
+// MACs seen on no switch are left out. It reads every site, so callers check
+// access themselves; site maps use it to guess links between switches.
+func (s *EndpointService) Placements(ctx context.Context, macs []string) (map[string]l2.Placement, error) {
+	w, err := s.load(ctx, Viewer{IsAdmin: true})
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]l2.Placement{}
+	for _, mac := range macs {
+		e, ok := w.records[mac]
+		if !ok || e.DeviceID == nil || e.IfIndex == nil {
+			continue
+		}
+		out[mac] = l2.Placement{MAC: mac, Port: &l2.PortKey{Device: *e.DeviceID, IfIndex: *e.IfIndex}, VLAN: e.VLAN, Via: e.Via, How: e.How, LastSeen: e.LastSeen}
+	}
+	return out, nil
+}
+
 // needs editable access to the site the record is placed on.
 func (s *EndpointService) SetName(ctx context.Context, v Viewer, mac, name string) (before, after string, err error) {
 	w, e, err := s.record(ctx, v, mac)

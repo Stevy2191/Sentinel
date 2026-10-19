@@ -354,3 +354,36 @@ func TestDBEndpointLLDPName(t *testing.T) {
 		t.Errorf("%+v", got)
 	}
 }
+
+// A switch's own MAC is placed on the nearest switch port that learnt it:
+// the distribution switch's port 2 (6 MACs), not the core's port 49 (41).
+func TestPlacementsForSwitchMAC(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	core := seedDevice(t, db, "Work", "10.20.0.1")
+	dist := seedDeviceInSite(t, db, core.SiteID, "10.20.0.2")
+	acc := seedDeviceInSite(t, db, core.SiteID, "10.20.0.3")
+	for _, id := range []uuid.UUID{core.DeviceID, dist, acc} {
+		testdb.Exec(t, db, `UPDATE devices SET device_type = 'switch' WHERE id = ?`, id)
+	}
+	const accMAC = "02:00:00:00:0a:01"
+	testdb.Exec(t, db, `INSERT INTO device_interfaces (device_id, if_index, name, mac, present) VALUES (?, 49, '0/49', ?, true)`, acc, accMAC)
+	sight(t, db, core.DeviceID, 49, accMAC)
+	for i := 0; i < 40; i++ {
+		sight(t, db, core.DeviceID, 49, fmt.Sprintf("02:00:00:01:00:%02x", i))
+	}
+	sight(t, db, dist, 2, accMAC)
+	for i := 0; i < 5; i++ {
+		sight(t, db, dist, 2, fmt.Sprintf("02:00:00:02:00:%02x", i))
+	}
+
+	got, err := NewEndpointService(db, NewSiteService(db), &fakeResolver{}).Placements(ctx, []string{accMAC, "02:00:00:09:09:09"})
+	testdb.Must(t, err)
+	p, ok := got[accMAC]
+	if !ok || p.Port == nil || p.Port.Device != dist || p.Port.IfIndex != 2 || (p.How != "behind" && p.How != "wired") {
+		t.Fatalf("placement = %+v, want the distribution switch's port 2", p)
+	}
+	if _, ok := got["02:00:00:09:09:09"]; ok {
+		t.Error("a MAC nobody saw was placed")
+	}
+}
