@@ -51,6 +51,7 @@ type l2Neighbor struct {
 	DeviceID  uuid.UUID `gorm:"column:device_id;primaryKey"`
 	IfIndex   int       `gorm:"column:if_index;primaryKey"`
 	ChassisID string    `gorm:"column:chassis_id;primaryKey"`
+	Protocol  string    `gorm:"column:protocol;primaryKey"`
 	SysName   string    `gorm:"column:sys_name"`
 	PortID    string    `gorm:"column:port_id"`
 	PortDescr string    `gorm:"column:port_descr"`
@@ -210,11 +211,11 @@ func (m *L2Monitor) writeNeighbors(ctx context.Context, d models.Device, t snmp.
 		ix := bridgeToIfIndex(n.LocalPort, base, ifIndexes)
 		if k := [2]any{ix, n.ChassisID}; !seen[k] {
 			seen[k] = true
-			rows = append(rows, l2Neighbor{DeviceID: d.ID, IfIndex: ix, ChassisID: n.ChassisID, SysName: n.SysName,
+			rows = append(rows, l2Neighbor{DeviceID: d.ID, IfIndex: ix, ChassisID: n.ChassisID, Protocol: "lldp", SysName: n.SysName,
 				PortID: n.PortID, PortDescr: n.PortDescr, Caps: int(n.Caps), LastSeen: now})
 		}
 	}
-	m.upsert(ctx, d, "neighbors", rows, []string{"device_id", "if_index", "chassis_id"}, []string{"sys_name", "port_id", "port_descr", "caps", "last_seen"})
+	m.upsert(ctx, d, "neighbors", rows, []string{"device_id", "if_index", "protocol", "chassis_id"}, []string{"sys_name", "port_id", "port_descr", "caps", "last_seen"})
 	// A complete walk is the whole truth: a neighbour it no longer lists
 	// (an AP moved, a switch swapped for a PC) must stop classing its port.
 	if err := m.db.WithContext(ctx).Exec(`DELETE FROM l2.neighbors WHERE device_id = ? AND last_seen < ?`, d.ID, now).Error; err != nil {
