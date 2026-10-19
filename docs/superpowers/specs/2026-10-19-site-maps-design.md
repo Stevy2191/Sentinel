@@ -15,14 +15,11 @@ The owner asked to skip the questions, so everything not in those sources is **m
 
 ## Purpose
 
-A site map is a live picture of one site's network. It shows the devices Sentinel monitors there, how they're cabled to each other, and what's flowing over each cable right now.
+A site map is a live picture of one site's **network structure**: its routers and firewalls, its switches, how they're cabled to each other, and what's flowing over each cable right now.
 
-At home, that is:
-- the router, Quantum-Gate (a UDM-SE)
-- the switch QuantumLink (a USW-Pro-48-PoE) under it
-- under the switch, the two access points (KitchenAP, MBU7IW), the NAS (UNAS-Pro), the NVR (Overwatch) and TS5410R81E
+At home, that's Quantum-Gate (a UDM-SE) and QuantumLink (a USW-Pro-48-PoE) under it. At work, it's the router or firewall, the core switch, and the tree of distribution and access switches under it, EdgeSwitches and Cisco.
 
-At work it's the EdgeSwitches and the Cisco switches.
+**Decided by the owner (2026-10-19, after the first mockup):** "I am looking for just a network structure topology on this site map. If the site has a router/firewall and the network switches and how they all connect. I don't need to see end points." So access points, NAS, NVR, UPS and other devices are not on the map. The second mockup, with 19 example switches, is the reference for the layout.
 
 A glance at the map should answer three questions:
 - What's down, and what does it cut off?
@@ -45,13 +42,12 @@ A glance at the map should answer three questions:
 
 ## Non-goals
 
-- **Endpoints** (PCs, phones, cameras, printers). The switch map from piece B shows those. The site map shows a count on each switch ("37 connected") that opens that switch's Connected section **(call)**.
+- **Endpoints of any kind,** the owner's decision. That covers PCs, phones, cameras and printers, but also access points, NAS, NVRs, UPSes and servers. The switch map from piece B shows what's plugged into a switch. The map's device panel says "82 end devices are plugged into it" in one line, with no chip on the map **(call)**.
 - **The org map** of every site: that's piece D.
 - **Floor plans or photos behind the map** **(call)**: later, if wanted.
 - **More than one map per site** **(call)**: one map per site.
 - **Wireless client counts and AP radio details**: these wait for the UniFi controller source (phase 7).
 - **Keeping the fast samples as history.** The regular poll keeps writing port history as today.
-- **Servers and uptime checks on the map** **(call)**. Sentinel doesn't know how they're cabled. They stay on the site page.
 
 ## Anti-goals
 
@@ -79,7 +75,9 @@ A glance at the map should answer three questions:
 
 ### Devices
 
-- **Which devices:** every monitored device at the site, of every type: switch, router, AP, NVR, UPS and other.
+- **Which devices:** the site's monitored **routers and switches**, with firewalls counted as routers.
+  - A firewall or switch Sentinel has filed as Other can be put on the map by an editor ("Add a device to the map") **(call)**.
+  - APs, NVRs, UPSes and other devices never appear on their own.
 - **Realistic view:**
   - A device with a front-panel drawing is drawn as its front panel, scaled down, with live port lights as on its device page. Today that's the UDM-SE, the USW-Pro-48-PoE, the ES-16-XG, the EdgeSwitch family and the Catalyst 4500-X-16.
   - Every other device is a card showing its type icon, name, model and status.
@@ -89,7 +87,6 @@ A glance at the map should answer three questions:
   - Down devices have a red outline and "Down 4 min".
   - Paused devices are greyed.
   - Error devices have an amber outline with the error as a tooltip.
-- **Connected count:** a switch or router with endpoints shows a chip such as "37 connected", from piece B's data. It opens that device's Connected section.
 - **Hiding:** editors can hide a device from the map, for example a lab switch. A hidden device is listed under Edit → "Hidden (1)", where it can be shown again.
 
 ### Links
@@ -108,11 +105,13 @@ Links come from four places. When several describe the same cable, they make one
         - A device that gives every port the same MAC can't be matched this way. QuantumLink does that.
      4. otherwise the link attaches to the device itself, with no port
    - **Seen from both ends:** the two entries make one link, with both ports known.
+   - **Only map devices count:** an LLDP neighbour that isn't a router or switch on the map is ignored.
    - **On the owner's data:**
-     - QuantumLink's ports 4, 5, 48 and 51 connect to MBU7IW, TS5410R81E, KitchenAP and Quantum-Gate.
-     - TS5410R81E reports QuantumLink's "Port 5" back, so that link has both ends.
+     - QuantumLink's port 51 connects to Quantum-Gate's eth10 (port 11). That's the one link on the home map.
+     - QuantumLink's LLDP also sees MBU7IW, TS5410R81E and KitchenAP on ports 4, 5 and 48. They're not switches, so they're not drawn.
+     - TS5410R81E reporting QuantumLink's port as "Port 5" stays as test data for the "Port N" rule.
 4. **MAC table guess:** one of a monitored device's interface MACs is learnt on a switch's edge port at this site in the last 24 hours, as piece B places MACs.
-   - This is how devices that don't speak LLDP show up, such as the NAS or the NVR.
+   - This is how a switch that doesn't send LLDP shows up, such as a basic managed switch with LLDP turned off. Only a link between two map devices is guessed; a guess never brings an AP or other device onto the map.
    - A guess is drawn **dashed with a "?"** until an editor clicks **Keep** (it then becomes a hand-drawn link) or **Hide**.
    - A guess is never drawn where LLDP or a port setting already links that device.
 
@@ -164,13 +163,22 @@ Links come from four places. When several describe the same cable, they make one
 
 ## Automatic layout
 
-- **When:** the first time a map opens, and for any device with no saved position.
-- **How:** in layers.
-  - Routers go at the top.
-  - Then devices by how many links they are from a router, with switches before APs and other devices.
-  - Each device is placed under the device it hangs off, and ties go by name.
-- **Unlinked devices** sit in a row at the bottom, under "Not linked".
-- **After an edit:** once an editor moves anything, every position is saved. A device added later goes next to the device it's linked to, or in the bottom row.
+It's a tree, laid out the way the second mockup draws it:
+- **Rows:**
+  - Routers at the top.
+  - Under them, the core: the switch or switches the router plugs into.
+  - Then the distribution switches, the core's switch neighbours, in one row.
+- **Columns:** each distribution switch heads a column. Its access switches stack under it, one per row, in the order of the distribution switch's ports.
+- **Deeper switches:** a switch hanging off an access switch (a daisy chain) goes straight below its parent in the same column.
+- **Tier labels:** the rows are labelled Router, Core, Distribution and Access in faint text at the left. The labels come from position in the tree, not from a setting **(call)**.
+- **Unlinked switches** sit in a row at the bottom, under "Not linked".
+- **Small sites:** with no distribution layer (a router and one or two switches), the tree is just as many rows as it needs.
+- **How links are drawn:**
+  - Links between rows are curves.
+  - A link from a distribution switch down to its access switches runs down a lane to the left of the column, then across and into the port from above, with the lanes of one column side by side. This keeps 20 switches readable.
+- **Folding:** a switch with others below it shows "▾ 5 below". Clicking it folds that branch into one line, such as "5 switches folded · 1 down". The folding is remembered per browser **(call)**.
+- **Scale:** realistic drawings are scaled by tier. Routers and core are the largest, then distribution, then access. Fit, the mouse wheel and the zoom buttons move between the overview and a close look at one branch.
+- **After an edit:** once an editor moves anything, every position is saved. A device added later goes into its place in the tree, or the bottom row.
 
 ## Live updates and fast polling
 
@@ -224,9 +232,13 @@ Migration `064_site_maps.sql`, in `public` so it's backed up:
     - QuantumLink ports 4, 5, 48 and 51
     - TS5410R81E ↔ QuantumLink "Port 5", making one link with both ends
     - the chassis-ID and system-name fallbacks
-    - guesses for UNAS-Pro and Overwatch
+    - a guess between two switches, and no guess ever bringing a non-switch onto the map
     - combining links from several sources, with hidden overrides applied
-  - **Layout:** the layers, and the bottom row for unlinked devices.
+  - **Layout:**
+    - the rows, the columns per distribution switch and daisy chains
+    - small sites with no distribution layer
+    - the bottom row for unlinked switches
+    - folding
 - **Database tests:**
   - positions, links and overrides, including cascades and site moves
   - access for admins, editable sharers and read-only sharers
