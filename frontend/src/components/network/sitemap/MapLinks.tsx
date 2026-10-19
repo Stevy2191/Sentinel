@@ -29,6 +29,10 @@ function clock(iso: string | null): string {
  *  way; grey for no data, dashed for a guess, a down device or a stale link. */
 export default function MapLinks({ links, geoms, traffic, devices, selected, now, onSelect }: Props) {
   const names = new Map([...devices].map(([id, d]) => [id, { name: d.name, type: d.type }] as const))
+  const titled = links.flatMap((l) => {
+    const g = geoms.get(l.key)
+    return g ? [{ l, g, title: linkTitle(l, traffic?.links[l.key], names) + (l.guess ? ' · guessed from a MAC table' : '') }] : []
+  })
   return (
     <svg className="pointer-events-none absolute left-0 top-0 overflow-visible" width="100%" height="100%" aria-hidden={false}>
       {links.map((l) => {
@@ -71,7 +75,6 @@ export default function MapLinks({ links, geoms, traffic, devices, selected, now
         const fwd = flows && fromStart != null ? flowSeconds(fromStart) : null
         const rev = flows && toStart != null ? flowSeconds(toStart) : null
         const dotW = Math.max(1.4, width * 0.45)
-        const title = linkTitle(l, r, names) + (l.guess ? ' · guessed from a MAC table' : '') + (note ? ` · ${note}` : '')
         return (
           <g key={l.key} data-link={l.key} opacity={opacity}>
             {selected === l.key && (
@@ -92,30 +95,6 @@ export default function MapLinks({ links, geoms, traffic, devices, selected, now
                 style={{ animationDuration: `${rev}s` }}
               />
             )}
-            <path
-              d={g.d}
-              fill="none"
-              stroke="transparent"
-              strokeWidth={14}
-              className="cursor-pointer"
-              style={{ pointerEvents: 'stroke' }}
-              data-hit={l.key}
-              onClick={(e) => {
-                e.stopPropagation()
-                onSelect(l.key)
-              }}
-            >
-              <title>{title}</title>
-            </path>
-            {l.guess && (
-              <g transform={`translate(${g.mid[0]},${g.mid[1]})`} style={{ pointerEvents: 'all', cursor: 'pointer' }} onClick={() => onSelect(l.key)}>
-                <circle r={9} fill="#0f172a" stroke="#fbbf24" />
-                <text x={-3.4} y={4.2} fontSize={12} fontWeight={700} fill="#fde68a">
-                  ?
-                </text>
-                <title>{title}</title>
-              </g>
-            )}
             {note && (
               <text x={g.mid[0] + 12} y={g.mid[1] + 4} fontSize={10.5} fill="#94a3b8">
                 {note}
@@ -129,6 +108,48 @@ export default function MapLinks({ links, geoms, traffic, devices, selected, now
           </g>
         )
       })}
+      {/* Hit areas above every drawn link, no wider than the lanes are apart,
+          so a click lands on the link under the pointer; then the guesses'
+          "?" above those. */}
+      {titled.map(({ l, g, title }) => (
+        <path
+          key={`hit-${l.key}`}
+          d={g.d}
+          fill="none"
+          stroke="transparent"
+          strokeWidth={9}
+          className="cursor-pointer"
+          style={{ pointerEvents: 'stroke' }}
+          data-hit={l.key}
+          onClick={(e) => {
+            e.stopPropagation()
+            onSelect(l.key)
+          }}
+        >
+          <title>{title}</title>
+        </path>
+      ))}
+      {titled
+        .filter(({ l }) => l.guess)
+        .map(({ l, g, title }) => (
+          <g
+            key={`q-${l.key}`}
+            data-hit={l.key}
+            data-guess={l.key}
+            transform={`translate(${g.mid[0]},${g.mid[1]})`}
+            style={{ pointerEvents: 'all', cursor: 'pointer' }}
+            onClick={(e) => {
+              e.stopPropagation()
+              onSelect(l.key)
+            }}
+          >
+            <circle r={9} fill="#0f172a" stroke="#fbbf24" />
+            <text x={-3.4} y={4.2} fontSize={12} fontWeight={700} fill="#fde68a">
+              ?
+            </text>
+            <title>{title}</title>
+          </g>
+        ))}
     </svg>
   )
 }

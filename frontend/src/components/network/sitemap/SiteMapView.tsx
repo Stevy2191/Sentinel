@@ -240,7 +240,7 @@ export default function SiteMapView(p: Props) {
               onFold={toggleFold}
               selected={selected}
               onSelect={(s) => !adding && setSelected(s)}
-              onMove={(id, x, y) => run(actions.setPositions([{ device_id: id, x, y }]))}
+              onMove={(positions) => run(actions.setPositions(positions))}
               onPick={pick}
               fitKey={`${view}:${side ? 1 : 0}`}
             />

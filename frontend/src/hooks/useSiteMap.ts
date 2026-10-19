@@ -21,12 +21,18 @@ function parse<T>(e: MessageEvent): T | null {
 
 const enc = encodeURIComponent
 
+/** A closed stream is retried after this long, doubling up to the max. */
+const RETRY_MIN_MS = 2000
+const RETRY_MAX_MS = 60_000
+
 /**
  * useSiteMap follows a site's map live: the whole map on connect, after each
  * edit and every few minutes, and the links' traffic about every 10 s, over
  * SSE (GET /network/sites/:id/map/stream, or the public link's stream).
- * EventSource reconnects by itself; while it does, live says so. Frames from
- * a closed source are ignored, so a late frame can't land on another site.
+ * EventSource reconnects by itself; when it gives up (the server was away,
+ * the sign-in expired) this tries again with a growing pause, until the map
+ * answers 404. Frames from a closed source are ignored, so a late frame
+ * can't land on another site.
  */
 export function useSiteMap(siteId: string | undefined, opts?: { publicToken?: string }) {
   const token = opts?.publicToken
@@ -35,22 +41,35 @@ export function useSiteMap(siteId: string | undefined, opts?: { publicToken?: st
   const [live, setLive] = useState<LiveState>({ kind: 'connecting' })
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
+  const backoff = useRef(RETRY_MIN_MS)
+  const shown = useRef<string | null>(null)
 
   useEffect(() => {
-    setMap(null)
-    setTraffic(null)
-    setError(null)
-    setLive({ kind: 'connecting' })
+    const key = `${siteId ?? ''}|${token ?? ''}`
+    if (shown.current !== key) {
+      // A different map: start clean. A reconnect keeps the last one shown.
+      shown.current = key
+      setMap(null)
+      setTraffic(null)
+      setError(null)
+      setLive({ kind: 'connecting' })
+      backoff.current = RETRY_MIN_MS
+    }
     if (!siteId && !token) return
     let open = true
+    let disposed = false
+    let retry = 0
     const url = token ? `${apiBaseURL}/public/maps/${enc(token)}/stream` : `${apiBaseURL}/network/sites/${enc(siteId!)}/map/stream`
+    const probe = token ? `/public/maps/${enc(token)}` : `/network/sites/${enc(siteId!)}/map`
     const src = new EventSource(url, { withCredentials: !token })
     src.addEventListener('map', (e: MessageEvent) => {
       if (!open) return
       const m = parse<MapSnapshot>(e)
       if (m) {
         setMap(m)
+        setError(null)
         setLive({ kind: 'live' })
+        backoff.current = RETRY_MIN_MS
       }
     })
     src.addEventListener('traffic', (e: MessageEvent) => {
@@ -63,19 +82,34 @@ export function useSiteMap(siteId: string | undefined, opts?: { publicToken?: st
     })
     src.onerror = () => {
       if (!open) return
-      if (src.readyState === EventSource.CLOSED) {
-        // The browser gave up: the request was refused (no access, a
-        // revoked link) or the map is gone.
-        open = false
-        src.close()
-        setLive({ kind: 'stopped', error: 'Live updates stopped' })
-        setError((cur) => cur ?? 'This map is not available')
-        return
-      }
       setLive((cur) => (cur.kind === 'reconnecting' ? cur : { kind: 'reconnecting', since: Date.now() }))
+      if (src.readyState !== EventSource.CLOSED) return // the browser retries by itself
+      // The browser gave up (a 502 while the server restarts, a 401 after
+      // the sign-in expired, or a 404). Ask once why: a 404 means the map
+      // or the link is gone for good; anything else, try again later, so a
+      // wall display recovers by itself.
+      open = false
+      src.close()
+      void api
+        .get(probe)
+        .then(() => true)
+        .catch((err: ApiError) => err.status !== 404)
+        .then((again) => {
+          if (disposed || shown.current !== key) return
+          if (!again) {
+            setLive({ kind: 'stopped', error: 'Live updates stopped' })
+            setError('This map is not available')
+            return
+          }
+          const wait = backoff.current
+          backoff.current = Math.min(RETRY_MAX_MS, wait * 2)
+          retry = window.setTimeout(() => setAttempt((n) => n + 1), wait)
+        })
     }
     return () => {
       open = false
+      disposed = true
+      window.clearTimeout(retry)
       src.close()
     }
   }, [siteId, token, attempt])

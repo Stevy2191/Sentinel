@@ -35,7 +35,13 @@ export const LAYOUT = {
   /** A router or core slot's width, for centring a row. */
   topSlot: 580,
   looseSlot: 360,
+  /** How far apart a column's lanes run. */
+  laneGap: 10,
 }
+
+/** A node's widest drawing in its tier, for the box the map fits to. */
+const NODE_W: Record<Tier, number> = { router: 600, core: 600, dist: 504, access: 460, loose: 460 }
+const NODE_H = 80
 
 /** The number in a port label, for ordering ("49" → 49, "1/4" → 104). */
 function portOrder(label: string | undefined): number {
@@ -57,7 +63,14 @@ const byName = (a: MapDevice, b: MapDevice) => a.name.localeCompare(b.name, unde
 export function layout(
   map: MapSnapshot,
   folds: Set<string>
-): { placed: Map<string, Placed>; width: number; height: number; folded: { id: string; count: number; down: number }[] } {
+): {
+  placed: Map<string, Placed>
+  width: number
+  height: number
+  /** Everything drawn, saved positions included: what Fit frames. */
+  bounds: { minX: number; minY: number; maxX: number; maxY: number }
+  folded: { id: string; count: number; down: number }[]
+} {
   const devs = new Map(map.devices.map((d) => [d.id, d] as const))
   // Neighbours, each with the port on this side that leads there.
   const adj = new Map<string, { id: string; port: number }[]>()
@@ -94,7 +107,8 @@ export function layout(
       order.push(k.id)
     }
   }
-  const children = (id: string) => sortedKids(id).filter((k) => parent.get(k.id) === id).map((k) => k.id)
+  // A neighbour reached by two cables (a LAG, a redundant pair) is still one child.
+  const children = (id: string) => [...new Set(sortedKids(id).filter((k) => parent.get(k.id) === id).map((k) => k.id))]
   const below = (id: string): number => children(id).reduce((n, c) => n + 1 + below(c), 0)
   const descendants = (id: string): string[] => children(id).flatMap((c) => [c, ...descendants(c)])
 
@@ -115,14 +129,22 @@ export function layout(
     placed.set(id, { id, ...p, x: d.x ?? p.x, y: d.y ?? p.y, below: below(id) })
   }
 
+  // The width: the distribution columns, or a wide router or core row.
+  const dists = order.filter((id) => depth.get(id) === 2)
+  const topRows = (['router', 'core'] as const).map((t) => order.filter((id) => tierOf(depth.get(id)!) === t))
+  const cols = Math.max(3, dists.length)
+  const width = Math.max(
+    LAYOUT.width,
+    LAYOUT.colX(cols) + LAYOUT.colPad,
+    ...topRows.map((row) => row.length * LAYOUT.topSlot + 2 * LAYOUT.colX(0))
+  )
   // The top rows, centred.
-  for (const t of ['router', 'core'] as const) {
-    const row = order.filter((id) => tierOf(depth.get(id)!) === t)
-    const left = (LAYOUT.width - row.length * LAYOUT.topSlot) / 2
+  for (const [i, t] of (['router', 'core'] as const).entries()) {
+    const row = topRows[i]
+    const left = (width - row.length * LAYOUT.topSlot) / 2
     row.forEach((id, i) => put(id, { tier: t, col: null, row: 0, parent: parent.get(id) ?? null, x: left + i * LAYOUT.topSlot, y: LAYOUT.rowY[t] }))
   }
   // A column per distribution switch, in the order of the ports they hang off.
-  const dists = order.filter((id) => depth.get(id) === 2)
   let maxRows = 0
   dists.forEach((id, c) => {
     const x = LAYOUT.colX(c) + LAYOUT.colPad
@@ -132,8 +154,6 @@ export function layout(
     stack.forEach((d, row) => put(d, { tier: 'access', col: c, row, parent: parent.get(d) ?? null, x, y: LAYOUT.accessY + row * LAYOUT.step }))
     maxRows = Math.max(maxRows, stack.length)
   })
-  const cols = Math.max(3, dists.length)
-  const width = Math.max(LAYOUT.width, LAYOUT.colX(cols) + LAYOUT.colPad)
   // Everything the tree didn't reach.
   const loose = map.devices.filter((d) => !depth.has(d.id)).sort(byName)
   const bottom = dists.length ? LAYOUT.accessY + maxRows * LAYOUT.step + LAYOUT.looseGap : order.length ? LAYOUT.rowY.dist : LAYOUT.rowY.router
@@ -151,8 +171,17 @@ export function layout(
   for (const id of hidden) placed.delete(id)
 
   let height = 0
-  for (const p of placed.values()) height = Math.max(height, p.y + 140)
-  return { placed, width, height: Math.max(height, 400), folded }
+  const bounds = { minX: 0, minY: 0, maxX: width, maxY: 0 }
+  for (const p of placed.values()) {
+    height = Math.max(height, p.y + 140)
+    bounds.minX = Math.min(bounds.minX, p.x)
+    bounds.minY = Math.min(bounds.minY, p.y - 30)
+    bounds.maxX = Math.max(bounds.maxX, p.x + NODE_W[p.tier])
+    bounds.maxY = Math.max(bounds.maxY, p.y + NODE_H)
+  }
+  height = Math.max(height, 400)
+  bounds.maxY = Math.max(bounds.maxY, height)
+  return { placed, width, height, bounds, folded }
 }
 
 export type LinkColour = 'idle' | 'ok' | 'warn' | 'bad'
@@ -237,7 +266,7 @@ export function routePath(
   opts?: { srcBottom: number; lane: number; tgtTop: number; outIndex: number }
 ): { d: string; mid: [number, number] } {
   if (kind !== 'curve' && opts) {
-    const yA = opts.srcBottom + 10 + (kind === 'lane' ? opts.outIndex * 6 : 0)
+    const yA = opts.srcBottom + 10 + (kind === 'lane' ? opts.outIndex * LAYOUT.laneGap : 0)
     if (kind === 'chain') {
       return { d: ortho([[a.x, a.y], [a.x, yA], [b.x + 0.01, yA], [b.x, b.y]]), mid: [(a.x + b.x) / 2, yA] }
     }

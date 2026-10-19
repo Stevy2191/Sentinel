@@ -21,7 +21,9 @@ interface Props {
   onFold: (id: string) => void
   selected?: MapSelection | null
   onSelect?: (s: MapSelection | null) => void
-  onMove?: (id: string, x: number, y: number) => void
+  /** A drag ended: the positions to save. Until the map has any saved, that
+   *  is every device's, so nothing else moves when the layout changes. */
+  onMove?: (positions: { device_id: string; x: number; y: number }[]) => void
   onPick?: (deviceId: string, ifIndex: number | null) => void
   /** Changes when the map should fit its box again. */
   fitKey?: unknown
@@ -31,6 +33,8 @@ interface Props {
 }
 
 const GRID = 8
+/** Screen pixels a pointer may move and still count as a click. */
+const CLICK_SLOP = 5
 const snap = (v: number) => Math.round(v / GRID) * GRID
 
 type Box = { left: number; top: number; right: number; bottom: number; cx: number }
@@ -54,7 +58,7 @@ export default function MapCanvas(p: Props) {
     return () => window.clearInterval(t)
   }, [])
 
-  const { placed: laid, width, height, folded } = useMemo(() => layout(p.map, p.folds), [p.map, p.folds])
+  const { placed: laid, width, height, bounds, folded } = useMemo(() => layout(p.map, p.folds), [p.map, p.folds])
   const placed = useMemo(() => {
     if (!drag) return laid
     const m = new Map(laid)
@@ -77,9 +81,11 @@ export default function MapCanvas(p: Props) {
     const w = el.clientWidth
     const h = el.clientHeight
     if (!w || !h) return
-    const zoom = Math.min(w / width, h / height, 1.5)
-    setCam({ zoom, x: (w - width * zoom) / 2, y: Math.max(6, (h - height * zoom) / 2) })
-  }, [width, height])
+    const bw = bounds.maxX - bounds.minX
+    const bh = bounds.maxY - bounds.minY
+    const zoom = Math.min(w / bw, h / bh, 1.5)
+    setCam({ zoom, x: (w - bw * zoom) / 2 - bounds.minX * zoom, y: Math.max(6, (h - bh * zoom) / 2) - bounds.minY * zoom })
+  }, [bounds])
 
   useLayoutEffect(() => fit(), [fit, p.fitKey])
   useEffect(() => {
@@ -114,8 +120,9 @@ export default function MapCanvas(p: Props) {
       const r = rel(el.getBoundingClientRect())
       return { x: r.cx, y: (r.top + r.bottom) / 2 }
     }
-    // Card ends share a side out, in the order of their far ends.
-    const sideSlots = new Map<string, string[]>()
+    // Card ends share a side out, one slot per link, in the order of their
+    // far ends (two cables to the same switch get two slots).
+    const sideSlots = new Map<string, { key: string; far: string }[]>()
     const orient = links.map((l) => {
       const pa = placed.get(l.a.device_id)!
       const pb = placed.get(l.b.device_id)!
@@ -129,14 +136,15 @@ export default function MapCanvas(p: Props) {
       ] as const) {
         const k = `${end.device_id}:${side}`
         const list = sideSlots.get(k) ?? []
-        list.push(far.device_id)
+        list.push({ key: o.l.key, far: far.device_id })
         sideSlots.set(k, list)
       }
     }
-    for (const list of sideSlots.values()) list.sort((x, y) => (placed.get(x)!.x - placed.get(y)!.x) || (placed.get(x)!.y - placed.get(y)!.y))
-    const cardPoint = (id: string, side: 'up' | 'down', far: string, box: Box) => {
-      const list = sideSlots.get(`${id}:${side}`) ?? [far]
-      const i = Math.max(0, list.indexOf(far))
+    for (const list of sideSlots.values())
+      list.sort((x, y) => placed.get(x.far)!.x - placed.get(y.far)!.x || placed.get(x.far)!.y - placed.get(y.far)!.y || x.key.localeCompare(y.key))
+    const cardPoint = (id: string, side: 'up' | 'down', key: string, box: Box) => {
+      const list = sideSlots.get(`${id}:${side}`) ?? []
+      const i = Math.max(0, list.findIndex((x) => x.key === key))
       return { x: box.left + ((box.right - box.left) * (i + 1)) / (list.length + 1), y: side === 'down' ? box.bottom : box.top }
     }
     const laneIndex = new Map<string, string[]>()
@@ -145,8 +153,8 @@ export default function MapCanvas(p: Props) {
       const ub = boxOf(o.upper.device_id)
       const lb = boxOf(o.lower.device_id)
       if (!ub || !lb) continue
-      const a = portOf(o.upper.device_id, o.upper.if_index) ?? cardPoint(o.upper.device_id, 'down', o.lower.device_id, ub)
-      const b = portOf(o.lower.device_id, o.lower.if_index) ?? cardPoint(o.lower.device_id, 'up', o.upper.device_id, lb)
+      const a = portOf(o.upper.device_id, o.upper.if_index) ?? cardPoint(o.upper.device_id, 'down', o.l.key, ub)
+      const b = portOf(o.lower.device_id, o.lower.if_index) ?? cardPoint(o.lower.device_id, 'up', o.l.key, lb)
       const up = placed.get(o.upper.device_id)!
       const lo = placed.get(o.lower.device_id)!
       const child = lo.parent === up.id
@@ -160,7 +168,7 @@ export default function MapCanvas(p: Props) {
         list.push(lo.id)
         laneIndex.set(up.id, list)
       }
-      const lane = Math.min(ub.left, lb.left) - 12 - outIndex * 6
+      const lane = Math.min(ub.left, lb.left) - 12 - outIndex * LAYOUT.laneGap
       const route = routePath(kind, a, b, { srcBottom: ub.bottom, lane, tgtTop: lb.top, outIndex })
       out.set(o.l.key, { d: route.d, mid: route.mid, startsAtA: o.aUpper })
     }
@@ -214,9 +222,11 @@ export default function MapCanvas(p: Props) {
     } else if (g.kind === 'pan') {
       setCam((c) => ({ ...c, x: g.cx + e.clientX - g.sx, y: g.cy + e.clientY - g.sy }))
     } else if (g.kind === 'node') {
+      // A drag starts after 5 screen pixels, whatever the zoom, so a tap
+      // with a little jitter is still a click.
+      if (Math.abs(e.clientX - g.sx) + Math.abs(e.clientY - g.sy) > CLICK_SLOP) g.moved = true
       const dx = (e.clientX - g.sx) / cam.zoom
       const dy = (e.clientY - g.sy) / cam.zoom
-      if (Math.abs(dx) + Math.abs(dy) > 3) g.moved = true
       if (g.moved && p.editing && !p.picking) setDrag({ id: g.id, x: snap(g.ox + dx), y: snap(g.oy + dy) })
     }
   }
@@ -228,7 +238,11 @@ export default function MapCanvas(p: Props) {
     if (!g) return
     if (g.kind === 'node') {
       if (g.moved && p.editing && !p.picking && drag) {
-        p.onMove?.(drag.id, drag.x, drag.y)
+        const unsaved = p.map.devices.some((d) => d.x == null || d.y == null)
+        const all = unsaved
+          ? [...placed.values()].map((q) => ({ device_id: q.id, x: q.id === drag.id ? drag.x : snap(q.x), y: q.id === drag.id ? drag.y : snap(q.y) }))
+          : [{ device_id: drag.id, x: drag.x, y: drag.y }]
+        p.onMove?.(all)
         // Keep the dropped place until the new map arrives with it.
         return
       }
@@ -236,7 +250,7 @@ export default function MapCanvas(p: Props) {
         if (p.picking) p.onPick?.(g.id, null)
         else p.onSelect?.({ kind: 'device', id: g.id })
       }
-    } else if (g.kind === 'pan' && Math.abs(e.clientX - g.sx) + Math.abs(e.clientY - g.sy) < 3) {
+    } else if (g.kind === 'pan' && Math.abs(e.clientX - g.sx) + Math.abs(e.clientY - g.sy) <= CLICK_SLOP) {
       p.onSelect?.(null)
     }
   }
