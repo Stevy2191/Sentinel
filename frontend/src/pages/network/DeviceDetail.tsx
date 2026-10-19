@@ -19,6 +19,7 @@ import TrafficChart from '@/components/network/TrafficChart'
 import UPSPanel from '@/components/network/UPSPanel'
 import PortTable from '@/components/network/PortTable'
 import PortEventList from '@/components/network/PortEventList'
+import ConnectedSection from '@/components/network/ConnectedSection'
 import { CONDITION_LABEL, PORT_STATE, portState, portTitle, portTraffic, WARNING_CONDITIONS } from '@/utils/network'
 import type { ApiError } from '@/services/api'
 import { useAuthContext } from '@/context/AuthContext'
@@ -29,6 +30,8 @@ import BackLink from '@/components/BackLink'
 
 /** Device types drawn as a faceplate; the rest get the port table only. */
 const FACEPLATE_TYPES = new Set(['switch', 'router'])
+/** Device types with a Connected section (what is plugged into them). */
+const CONNECTED_TYPES = new Set(['switch', 'router'])
 
 const TRAFFIC_LINES = [
   { metric: 'if_in_bps', label: 'In', colour: '#22d3ee' },
@@ -352,6 +355,10 @@ export default function DeviceDetail() {
           )}
           {selectedPort && <PortQuickPanel deviceId={device.id} port={selectedPort} />}
         </section>
+      )}
+
+      {CONNECTED_TYPES.has(type) && (
+        <ConnectedSection deviceId={device.id} deviceName={device.name} canEdit={canEdit} highlight={searchParams.get('endpoint')} />
       )}
 
       {deviceIsUPS && <UPSPanel deviceId={device.id} status={upsStatus} />}

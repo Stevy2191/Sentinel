@@ -5,6 +5,7 @@ import { useAuthContext } from '@/context/AuthContext'
 import { useAppConfig } from '@/context/AppConfigContext'
 import { canUseNetTools } from '@/utils/netTools'
 import { NAV, SETTINGS_NAV, isNavActive } from '@/utils/navigation'
+import FindDevice from '@/components/network/FindDevice'
 
 /**
  * Type size for the sidebar wordmark. A configurable name can be far longer
@@ -156,9 +157,9 @@ export default function Layout() {
       )}
 
       <div className="p-4 md:ml-56 md:p-8">
-        {/* Top bar: greeting on the left, refresh on the right. */}
-        <div className="mb-8 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        {/* Top bar: greeting and Find a device on the left, refresh on the right. */}
+        <div className="mb-8 flex items-center justify-between gap-4">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             <button
               onClick={() => setDrawerOpen(true)}
               className="rounded-md p-1 text-slate-400 transition hover:text-white md:hidden"
@@ -166,7 +167,8 @@ export default function Layout() {
             >
               <Menu className="h-6 w-6" />
             </button>
-            <div className="text-sm text-slate-500">{greeting()}</div>
+            <div className="hidden shrink-0 text-sm text-slate-500 sm:block">{greeting()}</div>
+            <FindDevice />
           </div>
           <div className="flex items-center gap-4">
             <button
