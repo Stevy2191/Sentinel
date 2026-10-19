@@ -149,12 +149,21 @@ func TestPortPatchRole(t *testing.T) {
 		t.Errorf("updates %v", u)
 	}
 
-	for _, body := range []string{`{"role":"toaster"}`, `{"role":null}`} {
-		var bad PortPatch
-		_ = json.Unmarshal([]byte(body), &bad)
-		if bad.Validate() == nil {
-			t.Errorf("%s accepted", body)
-		}
+	var bad PortPatch
+	_ = json.Unmarshal([]byte(`{"role":"toaster"}`), &bad)
+	if bad.Validate() == nil {
+		t.Error(`{"role":"toaster"} accepted`)
+	}
+
+	// Null is back to automatic: valid, and left to UpdatePort to write
+	// (the column is never NULL).
+	var auto PortPatch
+	_ = json.Unmarshal([]byte(`{"role":null}`), &auto)
+	if err := auto.Validate(); err != nil {
+		t.Errorf(`{"role":null}: %v`, err)
+	}
+	if _, ok := auto.Updates()["role"]; ok {
+		t.Errorf("updates %v, want no role", auto.Updates())
 	}
 }
 
