@@ -179,6 +179,23 @@ func resolveDeviceHost(ctx context.Context, host string) (net.IP, error) {
 	return nil, fmt.Errorf("%s has no addresses", host)
 }
 
+// Target builds the SNMP target for a device the way PollOnce does: its
+// credential, its host resolved now, and the network policy's block list.
+func (p *DevicePoller) Target(ctx context.Context, d models.Device) (snmp.Target, error) {
+	cred, err := p.store.DeviceCredential(ctx, d.CredentialID)
+	if err != nil {
+		return snmp.Target{}, err
+	}
+	ip, err := p.resolve(ctx, d.Host)
+	if err != nil {
+		return snmp.Target{}, fmt.Errorf("cannot resolve host: %w", err)
+	}
+	if p.blocked(ip) {
+		return snmp.Target{}, fmt.Errorf("%s is blocked by network policy", ip)
+	}
+	return TargetFor(d, ip.String(), cred), nil
+}
+
 // SetPortStats makes every successful poll of an up device run its stats
 // poll too.
 func (p *DevicePoller) SetPortStats(s PortStatsPoller) { p.stats = s }

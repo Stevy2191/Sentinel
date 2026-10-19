@@ -86,9 +86,10 @@ type MapSnapshot struct {
 
 // BoundPort is a port at a link's rate end: what the fast poll reads.
 type BoundPort struct {
-	DeviceID uuid.UUID
-	IfIndex  int
-	LinkKey  string
+	DeviceID    uuid.UUID
+	IfIndex     int
+	InterfaceID uuid.UUID
+	LinkKey     string
 }
 
 // PositionInput is one device's new place on the map.
@@ -140,6 +141,7 @@ type mapDeviceRow struct {
 }
 
 type mapPortRow struct {
+	ID               uuid.UUID
 	DeviceID         uuid.UUID
 	IfIndex          int
 	Name             string
@@ -213,7 +215,7 @@ func (s *SiteMapService) load(ctx context.Context, siteID uuid.UUID) (*mapWorld,
 	}
 
 	var ports []mapPortRow
-	if err := db.Raw(`SELECT device_id, if_index, COALESCE(name, '') AS name, COALESCE(descr, '') AS descr,
+	if err := db.Raw(`SELECT id, device_id, if_index, COALESCE(name, '') AS name, COALESCE(descr, '') AS descr,
 		COALESCE(alias, '') AS alias, COALESCE(mac, '') AS mac, COALESCE(if_type, 0) AS if_type, connector_present,
 		COALESCE(speed_bps, 0) AS speed_bps, util_threshold_pct, neighbor_device_id, neighbor_if_index
 		FROM device_interfaces WHERE device_id IN ? AND present`, ids).Scan(&ports).Error; err != nil {
@@ -489,7 +491,8 @@ func (s *SiteMapService) BoundPorts(ctx context.Context, siteID uuid.UUID) ([]Bo
 		if l.RateEnd == "" || e.IfIndex == nil {
 			continue
 		}
-		out = append(out, BoundPort{DeviceID: e.DeviceID, IfIndex: *e.IfIndex, LinkKey: l.Key})
+		port := w.ports[sitemap.End{DeviceID: e.DeviceID, IfIndex: *e.IfIndex}]
+		out = append(out, BoundPort{DeviceID: e.DeviceID, IfIndex: *e.IfIndex, InterfaceID: port.ID, LinkKey: l.Key})
 	}
 	return out, nil
 }

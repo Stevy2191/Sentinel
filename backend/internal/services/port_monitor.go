@@ -63,6 +63,10 @@ type PortMonitor struct {
 
 	mu      sync.Mutex
 	devices map[uuid.UUID]*deviceStats
+	// learnedHC is each device's 64-bit counter support once learned, kept
+	// apart from deviceStats (which only the poll's own goroutine touches)
+	// so HC can be read from elsewhere under mu.
+	learnedHC map[uuid.UUID]bool
 }
 
 // deviceStats is what the monitor remembers about a device between polls.
@@ -81,7 +85,7 @@ type portStats struct {
 func NewPortMonitor(store PortStore, metrics MetricsWriter, incidents PortIncidents, notifier Notifier, client snmp.Client, thresholds ThresholdSource) *PortMonitor {
 	return &PortMonitor{
 		store: store, metrics: metrics, incidents: incidents, notifier: notifier, client: client, thresholds: thresholds,
-		now: time.Now, logger: log.Default(), devices: map[uuid.UUID]*deviceStats{},
+		now: time.Now, logger: log.Default(), devices: map[uuid.UUID]*deviceStats{}, learnedHC: map[uuid.UUID]bool{},
 	}
 }
 
@@ -101,6 +105,16 @@ func (m *PortMonitor) Forget(deviceID uuid.UUID) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.devices, deviceID)
+	delete(m.learnedHC, deviceID)
+}
+
+// HC reports whether a device has 64-bit (ifHC*) counters, once a stats
+// poll has learned it; known is false until then.
+func (m *PortMonitor) HC(deviceID uuid.UUID) (hc, known bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	hc, known = m.learnedHC[deviceID]
+	return hc, known
 }
 
 func (ds *deviceStats) port(row models.DeviceInterface) *portStats {
@@ -215,6 +229,9 @@ func (m *PortMonitor) PollStats(ctx context.Context, d models.Device, t snmp.Tar
 			}
 		}
 		ds.hc = &learned
+		m.mu.Lock()
+		m.learnedHC[d.ID] = learned
+		m.mu.Unlock()
 		if !learned {
 			return // no 64-bit counters: the next poll reads the 32-bit ones
 		}
