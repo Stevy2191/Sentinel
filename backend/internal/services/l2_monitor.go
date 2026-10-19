@@ -33,6 +33,9 @@ const (
 // they change slowly and a busy switch's tables are large.
 const l2PollInterval = 5 * time.Minute
 
+// l2Concurrent is how many devices' tables are walked at once.
+const l2Concurrent = 4
+
 type l2Sighting struct {
 	DeviceID  uuid.UUID `gorm:"column:device_id;primaryKey"`
 	IfIndex   int       `gorm:"column:if_index;primaryKey"`
@@ -74,24 +77,34 @@ type L2Monitor struct {
 	now    func() time.Time
 	logger *log.Logger
 
-	mu   sync.Mutex
-	last map[uuid.UUID]time.Time
+	sem chan struct{}
+
+	mu      sync.Mutex
+	last    map[uuid.UUID]time.Time
+	running map[uuid.UUID]bool
 }
 
 func NewL2Monitor(db *gorm.DB, client snmp.Client) *L2Monitor {
-	return &L2Monitor{db: db, client: client, now: time.Now, logger: log.New(os.Stderr, "", log.LstdFlags), last: map[uuid.UUID]time.Time{}}
+	return &L2Monitor{db: db, client: client, now: time.Now, logger: log.New(os.Stderr, "", log.LstdFlags),
+		sem: make(chan struct{}, l2Concurrent), last: map[uuid.UUID]time.Time{}, running: map[uuid.UUID]bool{}}
 }
 
-// due records a poll of the device now, unless it had one in the last
-// five minutes.
-func (m *L2Monitor) due(id uuid.UUID, now time.Time) bool {
+// start records a poll of the device now, unless it had one in the last
+// five minutes or one is still running; done must follow a true.
+func (m *L2Monitor) start(id uuid.UUID, now time.Time) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if last, ok := m.last[id]; ok && now.Sub(last) < l2PollInterval {
+	if last, ok := m.last[id]; m.running[id] || (ok && now.Sub(last) < l2PollInterval) {
 		return false
 	}
-	m.last[id] = now
+	m.last[id], m.running[id] = now, true
 	return true
+}
+
+func (m *L2Monitor) done(id uuid.UUID) {
+	m.mu.Lock()
+	delete(m.running, id)
+	m.mu.Unlock()
 }
 
 // walk reads one table; a failure is logged and leaves that table alone.
@@ -107,10 +120,18 @@ func (m *L2Monitor) walk(ctx context.Context, d models.Device, t snmp.Target, ro
 // PollL2 walks the device's tables and upserts what it finds with
 // last_seen = now; rows not seen keep their old last_seen until the purge.
 // Each table is written on its own, so one failing walk keeps the others.
-// A UPS (a network card with no MAC table) is skipped.
+// A UPS (a network card with no MAC table) is skipped. At most l2Concurrent
+// devices are walked at once, and one poll per device.
 func (m *L2Monitor) PollL2(ctx context.Context, d models.Device, t snmp.Target) {
 	now := m.now().UTC()
-	if IsUPS(d) || !m.due(d.ID, now) {
+	if IsUPS(d) || !m.start(d.ID, now) {
+		return
+	}
+	defer m.done(d.ID)
+	select {
+	case m.sem <- struct{}{}:
+		defer func() { <-m.sem }()
+	case <-ctx.Done():
 		return
 	}
 	var known []int

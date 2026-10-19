@@ -549,24 +549,60 @@ func TestPollerForgetsDriveBayWhenNotUp(t *testing.T) {
 	}
 }
 
-type recordingL2 struct{ polled int }
+type recordingL2 struct {
+	mu     sync.Mutex
+	polled int
+	hold   chan struct{} // when set, PollL2 waits for it to close
+	done   chan struct{}
+}
 
-func (r *recordingL2) PollL2(context.Context, models.Device, snmp.Target) { r.polled++ }
+func (r *recordingL2) PollL2(context.Context, models.Device, snmp.Target) {
+	if r.hold != nil {
+		<-r.hold
+	}
+	r.mu.Lock()
+	r.polled++
+	r.mu.Unlock()
+	if r.done != nil {
+		r.done <- struct{}{}
+	}
+}
 
-// An up device gets its L2 poll; a failed poll runs none.
+func (r *recordingL2) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.polled
+}
+
+// An up device gets its L2 poll, in the background: a slow MAC table walk
+// never holds up the device's poll. A failed poll runs none.
 func TestPollerRunsL2Poll(t *testing.T) {
 	p, _, _, _ := newTestPoller(&fakeSNMP{})
-	rec := &recordingL2{}
+	rec := &recordingL2{hold: make(chan struct{}), done: make(chan struct{}, 1)}
 	p.SetL2(rec)
-	p.PollOnce(context.Background(), device(models.DeviceStatusUp, 0))
-	if rec.polled != 1 {
-		t.Fatalf("up: polled %d", rec.polled)
+	returned := make(chan struct{})
+	go func() {
+		p.PollOnce(context.Background(), device(models.DeviceStatusUp, 0))
+		close(returned)
+	}()
+	select {
+	case <-returned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("PollOnce waited for the L2 poll")
 	}
+	close(rec.hold)
+	select {
+	case <-rec.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the L2 poll never ran")
+	}
+
 	p, _, _, _ = newTestPoller(&fakeSNMP{getErr: errors.New("timeout")})
 	rec = &recordingL2{}
 	p.SetL2(rec)
 	p.PollOnce(context.Background(), device(models.DeviceStatusUp, 0))
-	if rec.polled != 0 {
+	time.Sleep(50 * time.Millisecond)
+	if rec.count() != 0 {
 		t.Error("L2 poll ran after a failed poll")
 	}
 }

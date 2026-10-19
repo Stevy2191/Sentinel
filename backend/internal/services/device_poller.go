@@ -111,7 +111,7 @@ type DriveBayPoller interface {
 }
 
 // L2Poller reads a device's MAC, LLDP and ARP tables (L2Monitor), which
-// keeps its own pace.
+// keeps its own pace. The poller calls it on a goroutine of its own.
 type L2Poller interface {
 	PollL2(ctx context.Context, d models.Device, t snmp.Target)
 }
@@ -341,8 +341,10 @@ func (p *DevicePoller) PollOnce(ctx context.Context, d models.Device) {
 		}
 	}
 
+	// In the background: a big MAC table can take seconds to walk, and it
+	// must never hold up this worker's next device.
 	if result == PollOK && tr.Status == models.DeviceStatusUp && p.l2 != nil {
-		p.l2.PollL2(ctx, d, target)
+		go p.l2.PollL2(ctx, d, target)
 	}
 
 	if result == PollOK && (d.LastInventoryAt == nil || now.Sub(*d.LastInventoryAt) >= inventoryInterval) {
