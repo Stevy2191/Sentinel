@@ -134,7 +134,9 @@ export default function MonitoringList(p: Props) {
       {/* One box scrolls both ways so the sticky header stays pinned (the
           same arrangement as the device and port tables). */}
       <div className="max-h-[65vh] overflow-auto">
-        <table className="w-full text-sm">
+        {/* Fixed layout on phones, so the one card cell takes the box width and
+            long lines truncate instead of pushing the status off screen. */}
+        <table className="w-full table-fixed text-sm md:table-auto">
           <thead className="sticky top-0 z-10 hidden bg-slate-900 md:table-header-group">
             <tr className="border-b border-white/10 text-left text-xs text-slate-400">
               {COLUMNS.map((c, i) => {
