@@ -1,3 +1,4 @@
+import type { MapSnapshot, MapTraffic } from '@/types/siteMap'
 import type { FaceplateDeviceState, FaceplateIndicators } from '@/utils/faceplateLights'
 import type { MetricPoint, MetricsRange } from '@/hooks/useMetrics'
 import type { PortView, UnitFaceplate } from '@/hooks/usePorts'
@@ -7,7 +8,7 @@ import type { DeviceStatus, DeviceType } from '@/hooks/useDevices'
 export type DashboardAccess = 'none' | 'view' | 'edit' | 'manage'
 
 export type WidgetType =
-  | 'label' | 'timeseries' | 'stat' | 'port_grid' | 'device_health' | 'site_power'
+  | 'label' | 'timeseries' | 'stat' | 'port_grid' | 'device_health' | 'site_power' | 'site_map'
   | 'top_n' | 'event_log' | 'device_table' | 'open_incidents' | 'monitors'
 
 export type WidgetState = 'ok' | 'no_access' | 'removed' | 'no_data'
@@ -156,6 +157,12 @@ export interface UPSCard {
   conditions: string[]
   low_battery_pct: number
   high_load_pct: number
+}
+
+/** A site's map and its latest traffic (Simple view only). */
+export interface SiteMapData {
+  map: MapSnapshot
+  traffic: MapTraffic
 }
 
 export interface SitePowerData {

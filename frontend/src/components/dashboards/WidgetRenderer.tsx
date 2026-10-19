@@ -1,4 +1,4 @@
-import type { DeviceHealthData, DeviceTableData, EventLogData, LabelData, MonitorsData, OpenIncidentsData, PortGridData, SitePowerData, StatData, TimeseriesData, TopNData, WidgetType } from '@/types/dashboards'
+import type { DeviceHealthData, DeviceTableData, EventLogData, LabelData, MonitorsData, OpenIncidentsData, PortGridData, SiteMapData, SitePowerData, StatData, TimeseriesData, TopNData, WidgetType } from '@/types/dashboards'
 import TopNWidget from '@/components/dashboards/widgets/TopNWidget'
 import EventLogWidget from '@/components/dashboards/widgets/EventLogWidget'
 import DeviceTableWidget from '@/components/dashboards/widgets/DeviceTableWidget'
@@ -7,6 +7,7 @@ import MonitorsWidget from '@/components/dashboards/widgets/MonitorsWidget'
 import PortGridWidget from '@/components/dashboards/widgets/PortGridWidget'
 import DeviceHealthWidget from '@/components/dashboards/widgets/DeviceHealthWidget'
 import SitePowerWidget from '@/components/dashboards/widgets/SitePowerWidget'
+import SiteMapWidget from '@/components/dashboards/widgets/SiteMapWidget'
 import LabelWidget from '@/components/dashboards/widgets/LabelWidget'
 import TimeseriesWidget from '@/components/dashboards/widgets/TimeseriesWidget'
 import StatWidget from '@/components/dashboards/widgets/StatWidget'
@@ -34,6 +35,8 @@ export default function WidgetRenderer({ type, data, linkable }: Props) {
       return <DeviceHealthWidget data={data as DeviceHealthData} linkable={linkable} />
     case 'site_power':
       return <SitePowerWidget data={data as SitePowerData} linkable={linkable} />
+    case 'site_map':
+      return <SiteMapWidget data={data as SiteMapData} linkable={linkable} />
     case 'top_n':
       return <TopNWidget data={data as TopNData} linkable={linkable} />
     case 'event_log':

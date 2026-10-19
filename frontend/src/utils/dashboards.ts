@@ -28,6 +28,7 @@ export const WIDGET_TYPES: WidgetTypeInfo[] = [
   { type: 'port_grid', label: 'Port grid', description: "A device's faceplate with live port status.", w: 8, h: 3, minW: 4, minH: 2, timeBased: false },
   { type: 'device_health', label: 'Device health', description: 'CPU, temperatures, fans and power supplies.', w: 6, h: 4, minW: 3, minH: 2, timeBased: false },
   { type: 'site_power', label: 'Site power', description: 'Every UPS in a site at a glance.', w: 4, h: 4, minW: 3, minH: 2, timeBased: false },
+  { type: 'site_map', label: 'Site map', description: 'A site’s routers and switches and their links, live.', w: 6, h: 6, minW: 4, minH: 3, timeBased: false },
   { type: 'top_n', label: 'Top ports', description: 'The busiest ports, or those with the most errors.', w: 6, h: 4, minW: 3, minH: 3, timeBased: true },
   { type: 'event_log', label: 'Event log', description: 'Recent port events and incidents.', w: 6, h: 4, minW: 3, minH: 3, timeBased: false },
   { type: 'device_table', label: 'Device table', description: "A site's devices and how they are doing.", w: 12, h: 5, minW: 6, minH: 3, timeBased: false },
@@ -145,6 +146,7 @@ export function defaultConfig(type: WidgetType, siteId: string | null): Record<s
     case 'monitors':
       return { monitors: [], agents: [], style: 'list', window: '24h' }
     case 'site_power':
+    case 'site_map':
     case 'device_table':
       return siteId ? { site_id: siteId } : {}
     default:

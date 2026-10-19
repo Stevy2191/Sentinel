@@ -31,6 +31,7 @@ export default function WidgetSettings({ type, config, siteId, onChange }: Props
     case 'device_health':
       return <DeviceSettings {...props} />
     case 'site_power':
+    case 'site_map':
       return <SiteSettings {...props} />
     case 'top_n':
       return <TopNSettings {...props} />
