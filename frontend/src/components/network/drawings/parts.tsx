@@ -19,8 +19,9 @@ export interface Hit {
 export const lightClass = (light: Light, fl: Flicker = '') =>
   `${light === 'off' ? '' : `rf-l-${light}`}${fl ? ` rf-fl-${fl}` : ''}`
 
-/** A port's button: hover or focus shows the port popover, click selects
- *  it, as PortCell does on the simple faceplate. */
+/** A port's button: hover or keyboard focus shows the port popover, click
+ *  selects it, as PortCell does on the simple faceplate. A click's focus
+ *  doesn't count, or the popover would stay open after the mouse leaves. */
 function PortHit({
   hit,
   className,
@@ -56,7 +57,7 @@ function PortHit({
         onClick={() => hit.onSelect(port.if_index)}
         onMouseEnter={() => setHovering(true)}
         onMouseLeave={() => setHovering(false)}
-        onFocus={() => setFocused(true)}
+        onFocus={(e) => setFocused(e.currentTarget.matches(':focus-visible'))}
         onBlur={() => setFocused(false)}
       >
         {children}

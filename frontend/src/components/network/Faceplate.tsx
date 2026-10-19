@@ -119,7 +119,9 @@ function PortCell({
   const ref = useRef<HTMLButtonElement>(null)
   // Hover and keyboard focus are tracked separately: a mouse leaving a
   // popover that was opened by tabbing to the port must not close it — only
-  // blur or Escape should. show is either one.
+  // blur or Escape should. show is either one. Only keyboard focus
+  // (:focus-visible) counts: a click focuses the button too, and that focus
+  // outlived the hover, so the popover stuck open after clicking a port.
   const [hovering, setHovering] = useState(false)
   const [focused, setFocused] = useState(false)
   const state: PortState = port ? portState(port) : 'down'
@@ -139,7 +141,7 @@ function PortCell({
         onClick={() => onSelect(fp.if_index)}
         onMouseEnter={() => setHovering(true)}
         onMouseLeave={() => setHovering(false)}
-        onFocus={() => setFocused(true)}
+        onFocus={(e) => setFocused(e.currentTarget.matches(':focus-visible'))}
         onBlur={() => setFocused(false)}
         aria-label={label}
         aria-pressed={selected}
