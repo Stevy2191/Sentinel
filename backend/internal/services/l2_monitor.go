@@ -55,6 +55,7 @@ type l2Neighbor struct {
 	SysName   string    `gorm:"column:sys_name"`
 	PortID    string    `gorm:"column:port_id"`
 	PortDescr string    `gorm:"column:port_descr"`
+	Address   string    `gorm:"column:address"`
 	Caps      int       `gorm:"column:caps"`
 	LastSeen  time.Time `gorm:"column:last_seen"`
 }
@@ -83,7 +84,13 @@ type L2Monitor struct {
 	mu      sync.Mutex
 	last    map[uuid.UUID]time.Time
 	running map[uuid.UUID]bool
+
+	afterPoll func(ctx context.Context, deviceID uuid.UUID)
 }
+
+// SetAfterPoll runs f at the end of each poll that ran (the port role
+// rules read what the poll wrote).
+func (m *L2Monitor) SetAfterPoll(f func(ctx context.Context, deviceID uuid.UUID)) { m.afterPoll = f }
 
 func NewL2Monitor(db *gorm.DB, client snmp.Client) *L2Monitor {
 	return &L2Monitor{db: db, client: client, now: time.Now, logger: log.New(os.Stderr, "", log.LstdFlags),
@@ -149,7 +156,136 @@ func (m *L2Monitor) PollL2(ctx context.Context, d models.Device, t snmp.Target) 
 
 	m.writeSightings(ctx, d, t, base, ifIndexes, now)
 	m.writeNeighbors(ctx, d, t, base, ifIndexes, now)
+	m.writeCDP(ctx, d, t, ifIndexes, now)
 	m.writeARP(ctx, d, t, now)
+	m.writeLAG(ctx, d, t)
+	if isRouter(d) {
+		m.writeWAN(ctx, d, t)
+	}
+	if m.afterPoll != nil {
+		m.afterPoll(ctx, d.ID)
+	}
+}
+
+func isRouter(d models.Device) bool {
+	if d.DeviceType != nil {
+		return *d.DeviceType == models.DeviceTypeRouter
+	}
+	return d.DeviceTypeDetected == models.DeviceTypeRouter
+}
+
+// writeLAG records which aggregator each port belongs to. A failed walk
+// leaves what's stored; a complete one rewrites every port of the device.
+func (m *L2Monitor) writeLAG(ctx context.Context, d models.Device, t snmp.Target) {
+	dot3ad, ok := m.walk(ctx, d, t, l2.OIDDot3adAttachedAgg)
+	if !ok {
+		return
+	}
+	var lags []int
+	if err := m.db.WithContext(ctx).Model(&models.DeviceInterface{}).Where("device_id = ? AND if_type = 161", d.ID).
+		Pluck("if_index", &lags).Error; err != nil {
+		m.logger.Printf("[l2] %s: listing LAGs: %v", d.Host, err)
+		return
+	}
+	isLAG := map[int]bool{}
+	for _, ix := range lags {
+		isLAG[ix] = true
+	}
+	var stack []snmp.PDU
+	if len(l2.ParseLAG(dot3ad, nil, nil)) == 0 && len(lags) > 0 {
+		if stack, ok = m.walk(ctx, d, t, l2.OIDIfStackStatus); !ok {
+			return
+		}
+	}
+	members := l2.ParseLAG(dot3ad, stack, func(ix int) bool { return isLAG[ix] })
+	err := m.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.DeviceInterface{}).Where("device_id = ? AND lag_if_index IS NOT NULL", d.ID).
+			Update("lag_if_index", nil).Error; err != nil {
+			return err
+		}
+		for member, agg := range members {
+			if err := tx.Model(&models.DeviceInterface{}).Where("device_id = ? AND if_index = ?", d.ID, member).
+				Update("lag_if_index", agg).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		m.logger.Printf("[l2] %s: saving LAG members: %v", d.Host, err)
+	}
+}
+
+// writeCDP keeps the device's CDP neighbours beside its LLDP ones. Any
+// column failing leaves the stored rows; a complete walk (also an empty one,
+// from a device without CDP) drops the CDP rows it no longer lists.
+func (m *L2Monitor) writeCDP(ctx context.Context, d models.Device, t snmp.Target, ifIndexes map[int]bool, now time.Time) {
+	cols := map[string][]snmp.PDU{}
+	for _, col := range []string{"3", "4", "6", "7", "8"} {
+		pdus, ok := m.walk(ctx, d, t, l2.OIDCDPCache+"."+col)
+		if !ok {
+			return
+		}
+		cols[col] = pdus
+	}
+	seen := map[[2]any]bool{}
+	var rows []l2Neighbor
+	for _, n := range l2.ParseCDP(cols) {
+		k := [2]any{n.IfIndex, n.DeviceID}
+		if !ifIndexes[n.IfIndex] || seen[k] {
+			continue
+		}
+		seen[k] = true
+		rows = append(rows, l2Neighbor{DeviceID: d.ID, IfIndex: n.IfIndex, ChassisID: n.DeviceID, Protocol: "cdp", SysName: n.SysName,
+			PortID: n.Port, PortDescr: n.Platform, Address: n.Address, LastSeen: now})
+	}
+	m.upsert(ctx, d, "neighbors", rows, []string{"device_id", "if_index", "protocol", "chassis_id"},
+		[]string{"sys_name", "port_id", "port_descr", "address", "last_seen"})
+	if err := m.db.WithContext(ctx).Exec(`DELETE FROM l2.neighbors WHERE device_id = ? AND protocol = 'cdp' AND last_seen < ?`, d.ID, now).Error; err != nil {
+		m.logger.Printf("[l2] %s: dropping gone CDP neighbours: %v", d.Host, err)
+	}
+}
+
+// writeWAN records, per port of a router, whether a default route goes out
+// of it or it holds a public IPv4 address. Without the address table it
+// writes nothing; a failed route walk counts as no default route.
+func (m *L2Monitor) writeWAN(ctx context.Context, d models.Device, t snmp.Target) {
+	addrPDUs, ok := m.walk(ctx, d, t, l2.OIDIPAdEntIfIndex)
+	if !ok {
+		return
+	}
+	cidr, _ := m.walk(ctx, d, t, l2.OIDCidrRouteIfIndexDefault)
+	var route []snmp.PDU
+	if len(cidr) == 0 {
+		route, _ = m.walk(ctx, d, t, l2.OIDRouteIfIndex)
+	}
+	evidence := map[int]string{}
+	for ix, ips := range l2.ParseAddresses(addrPDUs) {
+		for _, ip := range ips {
+			if l2.IsPublicIPv4(ip) {
+				evidence[ix] = models.WANEvidencePublicAddress
+			}
+		}
+	}
+	for _, ix := range l2.ParseDefaultRoutes(cidr, route) {
+		evidence[ix] = models.WANEvidenceDefaultRoute
+	}
+	err := m.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.DeviceInterface{}).Where("device_id = ? AND wan_evidence <> ''", d.ID).
+			Update("wan_evidence", "").Error; err != nil {
+			return err
+		}
+		for ix, ev := range evidence {
+			if err := tx.Model(&models.DeviceInterface{}).Where("device_id = ? AND if_index = ?", d.ID, ix).
+				Update("wan_evidence", ev).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		m.logger.Printf("[l2] %s: saving WAN evidence: %v", d.Host, err)
+	}
 }
 
 // bridgeToIfIndex maps a bridge port to its ifIndex: through
@@ -218,7 +354,7 @@ func (m *L2Monitor) writeNeighbors(ctx context.Context, d models.Device, t snmp.
 	m.upsert(ctx, d, "neighbors", rows, []string{"device_id", "if_index", "protocol", "chassis_id"}, []string{"sys_name", "port_id", "port_descr", "caps", "last_seen"})
 	// A complete walk is the whole truth: a neighbour it no longer lists
 	// (an AP moved, a switch swapped for a PC) must stop classing its port.
-	if err := m.db.WithContext(ctx).Exec(`DELETE FROM l2.neighbors WHERE device_id = ? AND last_seen < ?`, d.ID, now).Error; err != nil {
+	if err := m.db.WithContext(ctx).Exec(`DELETE FROM l2.neighbors WHERE device_id = ? AND protocol = 'lldp' AND last_seen < ?`, d.ID, now).Error; err != nil {
 		m.logger.Printf("[l2] %s: dropping gone neighbours: %v", d.Host, err)
 	}
 }
