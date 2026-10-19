@@ -1,7 +1,7 @@
 # Monitoring as one list — design
 
 **Date:** 2026-10-19
-**Status:** draft for the owner's review
+**Status:** approved by the owner 2026-10-19, with the mockup
 **Source:** the owner, 2026-10-19: "the monitoring page is hard to navigate with it broken up into monitoring, servers and devices. Monitoring should just be everything and then I can filter down myself. Can we just combine everything into one list and then make it to where I can just filter anything I want?" The owner skipped the questions, so every choice below not in that quote is **my call**, marked as such.
 
 ## Why
