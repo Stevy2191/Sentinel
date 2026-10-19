@@ -11,6 +11,7 @@ import {
   facetCounts,
   filterPills,
   kindValueLabel,
+  toggleKind,
   uptimeOnly,
   type GroupBy,
   type KindValue,
@@ -122,7 +123,12 @@ export default function ListFilterBar({ rows, filters, onChange, sites, groups, 
           multi
           options={kindOptions}
           selected={filters.kinds}
-          onChange={(v) => onChange({ ...filters, kinds: v as KindValue[] })}
+          onChange={(v) => {
+            // FilterMenu hands back the whole list; the one value that changed
+            // goes through toggleKind, so a type under its ticked kind narrows.
+            const changed = [...v.filter((k) => !filters.kinds.includes(k as KindValue)), ...filters.kinds.filter((k) => !v.includes(k))][0]
+            if (changed) onChange({ ...filters, kinds: toggleKind(filters.kinds, changed as KindValue) })
+          }}
         />
         <FilterMenu
           label="Status"

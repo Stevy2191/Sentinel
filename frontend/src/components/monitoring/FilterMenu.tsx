@@ -11,6 +11,9 @@ export interface FilterOption {
   separatorBefore?: boolean
 }
 
+/** The menu's minimum width, min-w-[220px] below. */
+const MENU_WIDTH = 220
+
 interface Props {
   label: string
   options: FilterOption[]
@@ -27,6 +30,9 @@ interface Props {
  *  Escape. */
 export default function FilterMenu({ label, options, selected, multi, onChange, hint }: Props) {
   const [open, setOpen] = useState(false)
+  // Opens leftwards when there is no room to the right (a button that wrapped
+  // to the right of a phone screen).
+  const [alignRight, setAlignRight] = useState(false)
   const box = useRef<HTMLDivElement>(null)
   const id = useId()
 
@@ -62,7 +68,10 @@ export default function FilterMenu({ label, options, selected, multi, onChange, 
         aria-haspopup="true"
         aria-expanded={open}
         aria-controls={id}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          if (!open && box.current) setAlignRight(box.current.getBoundingClientRect().left + MENU_WIDTH > window.innerWidth - 16)
+          setOpen((o) => !o)
+        }}
       >
         {set ? `${label} · ${set}` : label}
         <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
@@ -72,7 +81,7 @@ export default function FilterMenu({ label, options, selected, multi, onChange, 
           id={id}
           role="group"
           aria-label={label}
-          className="absolute left-0 z-30 mt-1 max-h-[60vh] min-w-[220px] overflow-auto rounded-lg border border-white/10 bg-slate-900 p-1.5 shadow-xl"
+          className={`absolute ${alignRight ? 'right-0' : 'left-0'} z-30 mt-1 max-h-[60vh] w-max min-w-[220px] max-w-[calc(100vw-2rem)] overflow-auto rounded-lg border border-white/10 bg-slate-900 p-1.5 shadow-xl`}
         >
           {hint && <div className="px-2 pb-1 pt-0.5 text-xs text-slate-500">{hint}</div>}
           {!multi && (

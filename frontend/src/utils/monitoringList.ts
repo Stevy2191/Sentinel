@@ -214,6 +214,16 @@ export function buildListParams(v: ListView): URLSearchParams {
   return p
 }
 
+/** toggleKind is a tick or untick in the Kind menu. A type ticked while its
+ *  whole kind is ticked narrows to that type (otherwise the tick would change
+ *  nothing); a kind ticked takes the place of its types. */
+export function toggleKind(kinds: KindValue[], v: KindValue): KindValue[] {
+  if (kinds.includes(v)) return kinds.filter((k) => k !== v)
+  const parent = leafParent(v)
+  if (parent) return [...kinds.filter((k) => k !== parent), v]
+  return [...kinds.filter((k) => leafParent(k) !== v), v]
+}
+
 export function filtersActive(f: ListFilters): boolean {
   return f.q.trim() !== '' || f.kinds.length > 0 || f.statuses.length > 0 || f.sites.length > 0 || f.group !== null || f.tags.length > 0
 }

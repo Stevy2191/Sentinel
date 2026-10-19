@@ -40,6 +40,8 @@ const COLUMNS: { label: string; key?: SortKey }[] = [
   { label: '' },
 ]
 
+const EMPTY_GROUP = 'No monitors in this group yet — assign one from a row’s Group dropdown.'
+
 /** Everything Sentinel watches in one table: uptime checks, servers and
  *  devices side by side, optionally under collapsible headings. */
 export default function MonitoringList(p: Props) {
@@ -78,34 +80,44 @@ export default function MonitoringList(p: Props) {
     const id = `${p.by}:${g.key}`
     const shut = !!collapsed.on[id]
     const mg = g.monitorGroup
+    const edge = { borderLeftColor: mg?.color ?? 'transparent' }
+    const content = (
+      <div className="flex items-center gap-3">
+        <button className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => collapsed.toggle(id)} aria-expanded={!shut}>
+          {shut ? <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" /> : <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />}
+          <span className="truncate text-sm font-medium text-white">{g.label}</span>
+          <span className="shrink-0 rounded-full bg-white/5 px-2 py-0.5 text-xs tabular-nums text-slate-300">{g.rows.length}</span>
+          {g.down > 0 && (
+            <span className="shrink-0 rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-400">
+              {g.down} down
+            </span>
+          )}
+        </button>
+        {mg && (
+          <>
+            <span className={`shrink-0 text-sm font-medium tabular-nums ${uptimeColor(mg.group_uptime)}`}>{mg.group_uptime.toFixed(1)}%</span>
+            <button
+              onClick={() => p.onEditGroup(mg)}
+              className="shrink-0 rounded p-1 text-slate-400 hover:bg-white/10 hover:text-white"
+              title="Edit group"
+              aria-label={`Edit group ${mg.name}`}
+            >
+              <Pencil className="h-4 w-4" />
+            </button>
+          </>
+        )}
+      </div>
+    )
     return (
       <tr key={'h:' + g.key} className="bg-slate-900/70" data-group-heading={g.label}>
-        <td colSpan={9} className="border-l-4 px-3 py-2" style={{ borderLeftColor: mg?.color ?? 'transparent' }}>
-          <div className="flex items-center gap-3">
-            <button className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => collapsed.toggle(id)} aria-expanded={!shut}>
-              {shut ? <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" /> : <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />}
-              <span className="truncate text-sm font-medium text-white">{g.label}</span>
-              <span className="shrink-0 rounded-full bg-white/5 px-2 py-0.5 text-xs tabular-nums text-slate-300">{g.rows.length}</span>
-              {g.down > 0 && (
-                <span className="shrink-0 rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-400">
-                  {g.down} down
-                </span>
-              )}
-            </button>
-            {mg && (
-              <>
-                <span className={`shrink-0 text-sm font-medium tabular-nums ${uptimeColor(mg.group_uptime)}`}>{mg.group_uptime.toFixed(1)}%</span>
-                <button
-                  onClick={() => p.onEditGroup(mg)}
-                  className="shrink-0 rounded p-1 text-slate-400 hover:bg-white/10 hover:text-white"
-                  title="Edit group"
-                  aria-label={`Edit group ${mg.name}`}
-                >
-                  <Pencil className="h-4 w-4" />
-                </button>
-              </>
-            )}
-          </div>
+        {/* Two cells, one per breakpoint, never one colSpan cell: on phones
+            the table's fixed layout takes its columns from the first row, and
+            a 9-wide heading there would squeeze every card to a ninth. */}
+        <td colSpan={8} className="hidden border-l-4 px-3 py-2 md:table-cell" style={edge}>
+          {content}
+        </td>
+        <td className="border-l-4 px-3 py-2 md:hidden" style={edge}>
+          {content}
         </td>
       </tr>
     )
@@ -119,9 +131,10 @@ export default function MonitoringList(p: Props) {
           return [
             heading(g),
             <tr key={'e:' + g.key}>
-              <td colSpan={9} className="px-4 py-2 text-sm text-slate-400">
-                No monitors in this group yet &mdash; assign one from a row&rsquo;s Group dropdown.
+              <td colSpan={8} className="hidden px-4 py-2 text-sm text-slate-400 md:table-cell">
+                {EMPTY_GROUP}
               </td>
+              <td className="px-4 py-2 text-sm text-slate-400 md:hidden">{EMPTY_GROUP}</td>
             </tr>,
           ]
         }
