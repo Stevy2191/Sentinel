@@ -4,7 +4,7 @@
 // Only type imports from `@/` and relative value imports, so it can be
 // checked on its own.
 import type { Monitor, MonitorGroup, MonitorType } from '@/types'
-import type { Agent } from '@/hooks/useAgents'
+import type { Agent, AgentMetric } from '@/hooks/useAgents'
 import type { Device, DeviceType } from '@/hooks/useDevices'
 import { deviceType, vendorModel } from './devices'
 import { VIEW_STATUS_LABEL, deviceState, monitorState, serverState, type Section, type ViewStatus } from './monitoringView'
@@ -59,8 +59,9 @@ export type ListRow =
   | (RowBase & { kind: 'devices'; leaf: DeviceType; groupId: null; tags: []; device: Device })
 
 /** toRows turns the three loaded lists into one, checks then servers then
- *  devices. */
-export function toRows(monitors: Monitor[], agents: Agent[], devices: Device[]): ListRow[] {
+ *  devices. knownGroups, once the groups have loaded, files a check whose
+ *  group this user cannot see (or that is gone) as ungrouped. */
+export function toRows(monitors: Monitor[], agents: Agent[], devices: Device[], knownGroups?: Set<string>): ListRow[] {
   const out: ListRow[] = []
   for (const m of monitors) {
     out.push({
@@ -73,7 +74,7 @@ export function toRows(monitors: Monitor[], agents: Agent[], devices: Device[]):
       status: monitorState(m),
       seenAt: m.last_check_at,
       leaf: m.type,
-      groupId: m.group_id || null,
+      groupId: m.group_id && (!knownGroups || knownGroups.has(m.group_id)) ? m.group_id : null,
       tags: m.tags ?? [],
       monitor: m,
     })
@@ -137,8 +138,8 @@ export interface ListFilters {
 
 export const NO_FILTERS: ListFilters = { q: '', kinds: [], statuses: [], sites: [], group: null, tags: [] }
 
-export type SortKey = 'status' | 'name' | 'kind' | 'site' | 'seen'
-const SORT_KEYS: readonly SortKey[] = ['status', 'name', 'kind', 'site', 'seen']
+export type SortKey = 'status' | 'name' | 'address' | 'kind' | 'site' | 'health' | 'uptime' | 'seen'
+const SORT_KEYS: readonly SortKey[] = ['status', 'name', 'address', 'kind', 'site', 'health', 'uptime', 'seen']
 export interface ListSort {
   key: SortKey
   desc: boolean
@@ -308,18 +309,87 @@ export function facetCounts(rows: ListRow[], f: ListFilters): FacetCounts {
 // Needs attention first; paused sinks below healthy - dormant is not urgent.
 const URGENCY: Record<ViewStatus, number> = { down: 0, error: 1, maintenance: 2, pending: 3, up: 4, paused: 5 }
 
+/** What Health and Uptime sort by that the rows do not carry: each check's
+ *  24-hour uptime and each server's latest metrics, by agent id. */
+export interface SortContext {
+  checkUptime: Map<string, number>
+  serverLatest: Map<string, Pick<AgentMetric, 'cpu_percent' | 'memory_percent' | 'disk_percent'> | null>
+}
+const NO_CONTEXT: SortContext = { checkUptime: new Map(), serverLatest: new Map() }
+
+/** rowAddress is the host a row is reached at: a check's host (from its URL
+ *  or bare address), a server's IP or hostname, a device's host. */
+export function rowAddress(r: ListRow): string {
+  if (r.kind === 'servers') return r.agent.ip_address || r.agent.hostname || r.agent.agent_id
+  if (r.kind === 'devices') return r.device.host
+  const rest = r.monitor.url.trim().replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').replace(/^[^@/]*@/, '')
+  return rest.split(/[/?#]/)[0].replace(/:\d+$/, '').toLowerCase()
+}
+
+/** Sorts IPv4 addresses numerically (10.0.0.9 before 10.0.0.10), names after. */
+function addressKey(host: string): string {
+  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+  return m ? m.slice(1).map((n) => n.padStart(3, '0')).join('.') : `~${host.toLowerCase()}`
+}
+
+const plainCompare = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0)
+
+const KIND_ORDER: Record<ListRow['kind'], number> = { uptime: 0, servers: 1, devices: 2 }
+
+/** badness is the Health column as a number, higher being worse, compared
+ *  only within a kind: a check's response time, a server's busiest of CPU,
+ *  memory and disk, a device's shortness of uptime (failing worst of all).
+ *  Null when there is nothing to go on. */
+function badness(r: ListRow, ctx: SortContext): number | null {
+  if (r.kind === 'uptime') return r.status === 'paused' || r.monitor.last_response_time_ms <= 0 ? null : r.monitor.last_response_time_ms
+  if (r.kind === 'servers') {
+    const m = ctx.serverLatest.get(r.agent.agent_id)
+    const vals = [m?.cpu_percent, m?.memory_percent, m?.disk_percent].filter((v): v is number => v != null)
+    return vals.length ? Math.max(...vals) : null
+  }
+  if (r.status === 'down' || r.status === 'error') return Number.POSITIVE_INFINITY
+  return r.device.sys_uptime_seconds == null ? null : -r.device.sys_uptime_seconds
+}
+
+/** uptimePct is the Uptime column as a percentage: a check's 24 hours, a
+ *  device's 30 days. Servers show running time, not a percentage. */
+function uptimePct(r: ListRow, ctx: SortContext): number | null {
+  if (r.kind === 'uptime') return ctx.checkUptime.get(r.monitor.id) ?? null
+  if (r.kind === 'devices') return r.device.availability_30d ?? null
+  return null
+}
+
+/** Compares two possibly-missing numbers, missing last whichever way. */
+function byValue(x: number | null, y: number | null, dir: number): number | null {
+  if ((x === null) !== (y === null)) return x === null ? 1 : -1
+  if (x === null || y === null || x === y) return null
+  return dir * (x < y ? -1 : 1)
+}
+
 const byName = (a: ListRow, b: ListRow) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
 
-/** sortRows returns a sorted copy. Rows with no site or never seen stay last
- *  whichever way the sort runs; ties go by name. */
-export function sortRows(rows: ListRow[], s: ListSort): ListRow[] {
+/** sortRows returns a sorted copy. Rows with no site, never seen or with
+ *  nothing to measure stay last whichever way the sort runs; ties go by name.
+ *  Health keeps each kind together (checks, servers, devices), worst first;
+ *  Uptime starts with the lowest percentage. */
+export function sortRows(rows: ListRow[], s: ListSort, ctx: SortContext = NO_CONTEXT): ListRow[] {
   const dir = s.desc ? -1 : 1
   return [...rows].sort((a, b) => {
     switch (s.key) {
       case 'name':
         return dir * byName(a, b) || a.key.localeCompare(b.key)
-      case 'kind':
-        return dir * kindLabel(a).localeCompare(kindLabel(b)) || byName(a, b)
+      case 'address':
+        // Plain comparison: localeCompare would sort the "~" before digits.
+        return dir * plainCompare(addressKey(rowAddress(a)), addressKey(rowAddress(b))) || byName(a, b)
+      case 'kind': {
+        // Within a kind, devices go by vendor and model.
+        const model = (r: ListRow) => (r.kind === 'devices' ? vendorModel(r.device).toLowerCase() : '')
+        return dir * (kindLabel(a).localeCompare(kindLabel(b)) || model(a).localeCompare(model(b))) || byName(a, b)
+      }
+      case 'health':
+        return KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || (byValue(badness(a, ctx), badness(b, ctx), -dir) ?? byName(a, b))
+      case 'uptime':
+        return byValue(uptimePct(a, ctx), uptimePct(b, ctx), dir) ?? byName(a, b)
       case 'site': {
         if (!a.siteName !== !b.siteName) return a.siteName ? -1 : 1
         return dir * (a.siteName ?? '').localeCompare(b.siteName ?? '') || byName(a, b)

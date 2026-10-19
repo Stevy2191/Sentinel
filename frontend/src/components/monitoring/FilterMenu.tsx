@@ -26,14 +26,16 @@ interface Props {
 }
 
 /** A filter button that opens a list of choices with their counts. The button
- *  says how many are chosen ("Kind · 2"). Closes on an outside click or
- *  Escape. */
+ *  says how many are chosen ("Kind · 2"). A disclosure, not an ARIA menu: the
+ *  list is ordinary checkboxes or radios, reached with Tab. Closes on an
+ *  outside click, on Escape, or when focus tabs out of it. */
 export default function FilterMenu({ label, options, selected, multi, onChange, hint }: Props) {
   const [open, setOpen] = useState(false)
   // Opens leftwards when there is no room to the right (a button that wrapped
   // to the right of a phone screen).
   const [alignRight, setAlignRight] = useState(false)
   const box = useRef<HTMLDivElement>(null)
+  const button = useRef<HTMLButtonElement>(null)
   const id = useId()
 
   useEffect(() => {
@@ -42,7 +44,10 @@ export default function FilterMenu({ label, options, selected, multi, onChange, 
       if (box.current && !box.current.contains(e.target as Node)) setOpen(false)
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
+      if (e.key !== 'Escape') return
+      setOpen(false)
+      // Back to the button, so the keyboard user is where they started.
+      button.current?.focus()
     }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
@@ -59,13 +64,21 @@ export default function FilterMenu({ label, options, selected, multi, onChange, 
   }
 
   return (
-    <div className="relative" ref={box}>
+    <div
+      className="relative"
+      ref={box}
+      onBlur={(e) => {
+        // Only a move to something outside: a click on the menu's own padding
+        // blurs to nothing and must not close it.
+        if (open && e.relatedTarget && !box.current?.contains(e.relatedTarget as Node)) setOpen(false)
+      }}
+    >
       <button
+        ref={button}
         type="button"
         className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition ${
           set ? 'border-primary-500/50 bg-primary-500/10 text-white' : 'border-white/10 bg-slate-800/60 text-slate-300 hover:text-white'
         }`}
-        aria-haspopup="true"
         aria-expanded={open}
         aria-controls={id}
         onClick={() => {

@@ -195,6 +195,46 @@ export function useAgentStatus(agentID: string | null, pollMs = 15000) {
   return { detail, loading, error, refetch }
 }
 
+/** The latest metrics of several agents, polled together: what the
+ *  Monitoring list shows and sorts its servers by. An agent whose status
+ *  could not be fetched keeps its last known metrics; one not loaded yet is
+ *  absent from the map. */
+export function useAgentsLatest(agentIDs: string[], pollMs = 20000): Map<string, AgentMetric | null> {
+  // A string key, so a new array with the same agents does not restart polling.
+  const key = [...agentIDs].sort().join(',')
+  const [latest, setLatest] = useState<Map<string, AgentMetric | null>>(() => new Map())
+
+  useEffect(() => {
+    const ids = key ? key.split(',') : []
+    if (ids.length === 0) {
+      setLatest(new Map())
+      return
+    }
+    let active = true
+    const load = async () => {
+      const results = await Promise.allSettled(ids.map((id) => api.get<{ data: AgentStatusDetail }>(`${BASE}/${id}/status`)))
+      if (!active) return
+      setLatest((prev) => {
+        const next = new Map<string, AgentMetric | null>()
+        ids.forEach((id, i) => {
+          const r = results[i]
+          if (r.status === 'fulfilled') next.set(id, r.value.data.data.latest)
+          else if (prev.has(id)) next.set(id, prev.get(id) ?? null)
+        })
+        return next
+      })
+    }
+    void load()
+    const t = window.setInterval(() => void load(), pollMs)
+    return () => {
+      active = false
+      window.clearInterval(t)
+    }
+  }, [key, pollMs])
+
+  return latest
+}
+
 /** Historical metrics for charting. */
 export function useAgentMetrics(agentID: string | null, duration = '1h') {
   const [metrics, setMetrics] = useState<AgentMetric[]>([])

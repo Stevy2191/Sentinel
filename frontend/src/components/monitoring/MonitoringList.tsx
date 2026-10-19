@@ -5,7 +5,7 @@ import MonitorListRow from '@/components/monitoring/MonitorListRow'
 import ServerListRow from '@/components/monitoring/ServerListRow'
 import DeviceListRow from '@/components/monitoring/DeviceListRow'
 import type { GroupBy, ListRow, ListSort, RowGroup, SortKey } from '@/utils/monitoringList'
-import type { Agent } from '@/hooks/useAgents'
+import type { Agent, AgentMetric } from '@/hooks/useAgents'
 import type { Device } from '@/hooks/useDevices'
 import type { MonitorGroup } from '@/types'
 
@@ -20,6 +20,8 @@ interface Props {
   isAdmin: boolean
   uptimeById: Map<string, number>
   usernameFor: (id: string | null | undefined) => string | undefined
+  /** Each server's latest metrics by agent id; absent until loaded. */
+  serverLatest: Map<string, AgentMetric | null>
   refreshKey: unknown
   push: (msg: string, type?: 'success' | 'error' | 'info') => void
   onMonitorsChanged: () => void
@@ -29,16 +31,28 @@ interface Props {
   onEditGroup: (g: MonitorGroup) => void
 }
 
-const COLUMNS: { label: string; key?: SortKey }[] = [
-  { label: 'Name', key: 'name' },
+// Name also sorts by address, from a second button beside it.
+const COLUMNS: { label: string; key?: SortKey; also?: { label: string; key: SortKey } }[] = [
+  { label: 'Name', key: 'name', also: { label: 'Address', key: 'address' } },
   { label: 'Kind', key: 'kind' },
   { label: 'Site', key: 'site' },
   { label: 'Status', key: 'status' },
-  { label: 'Health' },
-  { label: 'Uptime' },
+  { label: 'Health', key: 'health' },
+  { label: 'Uptime', key: 'uptime' },
   { label: 'Last seen', key: 'seen' },
   { label: '' },
 ]
+
+/** What a heading's sort puts on top, said only when it is the one applied
+ *  and running that way. */
+function sortHint(key: SortKey, s: ListSort): string | undefined {
+  if (s.key !== key) return undefined
+  if (key === 'status') return s.desc ? 'Paused first' : 'Down first'
+  if (key === 'health') return s.desc ? 'Healthiest first, in each kind' : 'Worst first, in each kind'
+  if (key === 'uptime') return s.desc ? 'Highest uptime first' : 'Lowest uptime first'
+  if (key === 'seen') return s.desc ? 'Newest first' : 'Oldest first'
+  return undefined
+}
 
 const EMPTY_GROUP = 'No monitors in this group yet — assign one from a row’s Group dropdown.'
 
@@ -67,6 +81,7 @@ export default function MonitoringList(p: Props) {
         <ServerListRow
           key={r.key}
           row={r}
+          latest={p.serverLatest.get(r.agent.agent_id)}
           isAdmin={p.isAdmin}
           onInstructions={() => p.onServerInstructions(r.agent)}
           onDelete={() => p.onServerDelete(r.agent)}
@@ -153,7 +168,23 @@ export default function MonitoringList(p: Props) {
           <thead className="sticky top-0 z-10 hidden bg-slate-900 md:table-header-group">
             <tr className="border-b border-white/10 text-left text-xs text-slate-400">
               {COLUMNS.map((c, i) => {
-                const on = c.key !== undefined && p.sort.key === c.key
+                const sortButton = (key: SortKey, label: string, muted = false) => {
+                  const on = p.sort.key === key
+                  return (
+                    <button
+                      type="button"
+                      className={`hover:text-slate-200 ${on ? 'text-slate-200' : muted ? 'text-slate-500' : ''}`}
+                      title={sortHint(key, p.sort)}
+                      aria-label={`Sort by ${label.toLowerCase()}`}
+                      aria-pressed={on}
+                      onClick={() => p.onSort(key)}
+                    >
+                      {label}
+                      {on ? (p.sort.desc ? ' ↓' : ' ↑') : ''}
+                    </button>
+                  )
+                }
+                const on = (c.key !== undefined && p.sort.key === c.key) || (c.also !== undefined && p.sort.key === c.also.key)
                 return (
                   <th
                     key={i}
@@ -161,15 +192,15 @@ export default function MonitoringList(p: Props) {
                     aria-sort={on ? (p.sort.desc ? 'descending' : 'ascending') : c.key ? 'none' : undefined}
                   >
                     {c.key ? (
-                      <button
-                        type="button"
-                        className="hover:text-slate-200"
-                        title={c.key === 'status' ? 'Down first' : undefined}
-                        onClick={() => p.onSort(c.key!)}
-                      >
-                        {c.label}
-                        {on ? (p.sort.desc ? ' ↓' : ' ↑') : ''}
-                      </button>
+                      <>
+                        {sortButton(c.key, c.label)}
+                        {c.also && (
+                          <>
+                            <span className="text-slate-600"> · </span>
+                            {sortButton(c.also.key, c.also.label, true)}
+                          </>
+                        )}
+                      </>
                     ) : (
                       c.label
                     )}

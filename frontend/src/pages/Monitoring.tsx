@@ -6,7 +6,7 @@ import { useAllMonitors } from '@/hooks/useAllMonitors'
 import { useMonitorGroups } from '@/hooks/useMonitorGroups'
 import { useSummaryReport } from '@/hooks/useReports'
 import { useUsers } from '@/hooks/useUsers'
-import { useAgentActions, useAgents, type Agent, type CreatedAgent } from '@/hooks/useAgents'
+import { useAgentActions, useAgents, useAgentsLatest, type Agent, type CreatedAgent } from '@/hooks/useAgents'
 import { useDevices, type Device } from '@/hooks/useDevices'
 import { useSites } from '@/hooks/useSites'
 import { useToasts, Toaster } from '@/components/Toast'
@@ -33,6 +33,8 @@ import {
   toRows,
   type GroupBy,
   type ListFilters,
+  type ListView,
+  type SortContext,
   type SortKey,
 } from '@/utils/monitoringList'
 import type { ApiError } from '@/services/api'
@@ -62,11 +64,21 @@ export default function Monitoring() {
   const [remembered, setRemembered] = useState<GroupBy>(storedGroupBy)
   const by = view.by ?? remembered
 
-  const setFilters = useCallback(
-    (next: ListFilters, replace = false) => setSearchParams(buildListParams({ ...view, filters: next }), { replace }),
-    [setSearchParams, view]
+  // Writes the view to the address, unless it would not change it: a click
+  // that changes nothing must not leave a Back step that does nothing.
+  const writeView = useCallback(
+    (next: ListView, replace = false) => {
+      const params = buildListParams(next)
+      if (params.toString() === searchParams.toString()) return
+      setSearchParams(params, { replace })
+    },
+    [searchParams, setSearchParams]
   )
-  const onSort = (key: SortKey) => setSearchParams(buildListParams({ ...view, sort: nextSort(sort, key) }))
+  const setFilters = useCallback(
+    (next: ListFilters, replace = false) => writeView({ ...view, filters: next }, replace),
+    [writeView, view]
+  )
+  const onSort = (key: SortKey) => writeView({ ...view, sort: nextSort(sort, key) })
   const onBy = (next: GroupBy) => {
     try {
       localStorage.setItem(GROUP_BY_KEY, next)
@@ -74,11 +86,11 @@ export default function Monitoring() {
       // Private browsing or a full quota: it applies now, just isn't kept.
     }
     setRemembered(next)
-    setSearchParams(buildListParams({ ...view, by: next }), { replace: true })
+    writeView({ ...view, by: next }, true)
   }
 
   const { monitors, loading: monitorsLoading, error: monitorsError, loadedAt, refetch: refetchMonitorList } = useAllMonitors()
-  const { groups, refetch: refetchGroups } = useMonitorGroups()
+  const { groups, loading: groupsLoading, error: groupsError, refetch: refetchGroups } = useMonitorGroups()
   const { agents, loading: agentsLoading, error: agentsError, refetch: refetchAgents } = useAgents()
   const { devices, loading: devicesLoading, error: devicesError, refetch: refetchDevices } = useDevices()
   usePageLabel('Monitoring')
@@ -117,8 +129,19 @@ export default function Monitoring() {
     [daySummary]
   )
 
-  const rows = useMemo(() => toRows(monitors, agents, devices), [monitors, agents, devices])
-  const shown = useMemo(() => sortRows(filterRows(rows, filters), sort), [rows, filters, sort])
+  // Every server's latest metrics, polled here rather than per row so the
+  // Health column can sort by them.
+  const serverLatest = useAgentsLatest(useMemo(() => agents.map((a) => a.agent_id), [agents]))
+  const sortContext = useMemo<SortContext>(() => ({ checkUptime: uptimeById, serverLatest }), [uptimeById, serverLatest])
+
+  // Once the groups are in, a check whose group this user cannot see counts
+  // as ungrouped everywhere: its heading, the Ungrouped filter, the counts.
+  const knownGroups = useMemo(
+    () => (groupsLoading || groupsError ? undefined : new Set(groups.map((g) => g.id))),
+    [groups, groupsLoading, groupsError]
+  )
+  const rows = useMemo(() => toRows(monitors, agents, devices, knownGroups), [monitors, agents, devices, knownGroups])
+  const shown = useMemo(() => sortRows(filterRows(rows, filters), sort, sortContext), [rows, filters, sort, sortContext])
   const grouped = useMemo(
     () => (by === 'none' ? null : groupRows(shown, by, { groups, includeEmptyGroups: !filtersActive(filters) })),
     [shown, by, groups, filters]
@@ -237,6 +260,7 @@ export default function Monitoring() {
             isAdmin={isAdmin}
             uptimeById={uptimeById}
             usernameFor={usernameFor}
+            serverLatest={serverLatest}
             refreshKey={loadedAt}
             push={push}
             onMonitorsChanged={() => void refetchMonitors()}
