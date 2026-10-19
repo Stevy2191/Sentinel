@@ -1,7 +1,7 @@
 # Site maps — design (network phase 6, piece C)
 
 **Date:** 2026-10-19
-**Status:** draft for the owner's review
+**Status:** approved by the owner 2026-10-19 ("looks good"), with the second mockup (`assets/2026-10-19-site-maps/site-map-topology.html`, open it next to `drawings2.js` and `drawings.css`)
 **Source:**
 - The phase 6 roadmap (`2026-09-28-network-monitoring-roadmap.md`), which lists:
   - LLDP-suggested links

@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Site map mockup — topology</title>
+<link rel="stylesheet" href="drawings.css">
+<style>
+  :root { --bg:#020617; --panel:#0f172a; --card:#1e293b; --line:rgba(255,255,255,.1); --text:#e2e8f0; --muted:#94a3b8; --dim:#64748b;
+          --idle:#64748b; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --accent:#38bdf8; }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 Inter, ui-sans-serif, system-ui, sans-serif; }
+  button { font:inherit; color:inherit; cursor:pointer }
+  .mock { background:#facc15; color:#1c1917; padding:8px 16px; font-size:13px; display:flex; flex-wrap:wrap; gap:6px 14px; align-items:center }
+  .mock b { font-weight:600 } .mock button { background:#1c1917; color:#fde68a; border:0; border-radius:6px; padding:3px 10px; font-size:12px }
+  .mock button.on { background:#7c2d12; color:#fff }
+  .page { padding:20px 24px; max-width:1700px; margin:0 auto }
+  .back { color:var(--muted); font-size:13px; text-decoration:none } .back:hover { color:#fff }
+  .head { display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between; gap:12px; margin:6px 0 14px }
+  h1 { font-size:34px; font-weight:300; margin:0; color:#fff } .sub { color:var(--muted); font-size:13px; margin-top:4px }
+  .tools { display:flex; flex-wrap:wrap; gap:8px; align-items:center }
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:8px; overflow:hidden }
+  .seg button { background:transparent; border:0; padding:6px 12px; color:var(--muted) } .seg button.on { background:#334155; color:#fff }
+  .btn { background:#1e293b; border:1px solid var(--line); border-radius:8px; padding:6px 12px; color:var(--text) } .btn:hover { background:#273449 }
+  .btn.on { background:#0c4a6e; border-color:#0369a1 }
+  .live { display:inline-flex; gap:6px; align-items:center; font-size:12.5px; color:var(--muted); padding:0 4px }
+  .live i { width:8px; height:8px; border-radius:50%; background:var(--ok); box-shadow:0 0 0 3px rgba(34,197,94,.18) }
+  .editbar { display:none; gap:8px; align-items:center; flex-wrap:wrap; background:#0c4a6e33; border:1px solid #0369a1; border-radius:8px; padding:7px 10px; margin-bottom:10px; font-size:13px }
+  body.edit .editbar { display:flex } .editbar .note { color:#7dd3fc; margin-left:auto; font-size:12px }
+  .wrap { display:flex; gap:14px; align-items:flex-start }
+  .viewport { position:relative; flex:1; min-width:0; height:760px; overflow:hidden; border:1px solid var(--line); border-radius:10px;
+              background-color:#0b1222; background-image:radial-gradient(rgba(148,163,184,.13) 1px, transparent 1px); background-size:24px 24px; touch-action:none }
+  .zoom { position:absolute; right:10px; bottom:10px; display:flex; flex-direction:column; gap:4px; z-index:20 }
+  .zoom button { width:30px; height:30px; background:#1e293b; border:1px solid var(--line); border-radius:6px; color:var(--muted) }
+  .canvas { position:absolute; left:0; top:0; transform-origin:0 0 }
+  .tier { position:absolute; left:8px; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:#475569 }
+  .node { position:absolute; user-select:none }
+  body.edit .node { cursor:grab; outline:1px dashed rgba(56,189,248,.5); outline-offset:6px; border-radius:6px }
+  body.edit .node.drag { cursor:grabbing; outline-color:#38bdf8 }
+  .node.down .draw, .node.down .card { outline:2px solid var(--bad); outline-offset:3px; border-radius:4px }
+  .nlabel { position:absolute; left:0; top:-21px; white-space:nowrap; font-size:12px; display:flex; gap:7px; align-items:center }
+  .nlabel b { font-weight:600; color:#fff } .nlabel span { color:var(--muted) } .nlabel .dn { color:#fca5a5; font-weight:600 }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--ok); display:inline-block } .dot.bad { background:var(--bad) }
+  .ex { font-size:10px; font-weight:600; color:#1c1917; background:#facc15; border-radius:4px; padding:0 5px }
+  .fold { font-size:11px; color:#cbd5e1; background:#1e293b; border:1px solid #334155; border-radius:999px; padding:0 8px; cursor:pointer }
+  .fold:hover { border-color:#64748b }
+  .draw { transform-origin:0 0; pointer-events:none } .draw button { pointer-events:auto }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:7px 10px; display:flex; gap:9px; align-items:center; cursor:pointer; height:44px }
+  .card:hover { border-color:#475569 }
+  .ic { width:26px; height:26px; flex:none; border-radius:6px; display:flex; align-items:center; justify-content:center; font-size:13px }
+  .ic.sw { background:#22c55e33; color:#86efac } .ic.rt { background:#38bdf833; color:#7dd3fc }
+  .card .t { font-weight:600; font-size:12.5px; color:#fff; white-space:nowrap } .card .s { font-size:11px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+  .collapsed { position:absolute; font-size:12px; color:var(--muted); background:#0f172a; border:1px dashed #334155; border-radius:8px; padding:8px 12px; cursor:pointer }
+  svg.links { position:absolute; left:0; top:0; overflow:visible; pointer-events:none }
+  svg.links .hit { pointer-events:stroke; cursor:pointer; stroke:transparent; fill:none }
+  .flow { fill:none; stroke:rgba(255,255,255,.85); stroke-linecap:round; animation:flow linear infinite } .flow.rev { animation-direction:reverse }
+  @keyframes flow { to { stroke-dashoffset:-64 } }
+  body.still .flow { display:none } .arrows { display:none } body.still .arrows { display:block }
+  .plabel { font:600 10px Inter, sans-serif; fill:#cbd5e1 } .plabelbg { fill:#0f172a; stroke:#334155 }
+  .q { fill:#0f172a; stroke:#fbbf24 } .qt { font:700 12px Inter, sans-serif; fill:#fde68a }
+  .tip { position:fixed; z-index:50; pointer-events:none; background:#0f172a; border:1px solid #334155; border-radius:7px; padding:6px 9px; font-size:12px; display:none; max-width:380px }
+  .side { width:330px; flex:none; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; display:none }
+  .side.open { display:block } .side h3 { margin:0 0 2px; font-size:15px; color:#fff } .side .x { float:right; background:none; border:0; color:var(--muted); font-size:18px }
+  .row { display:flex; justify-content:space-between; gap:10px; padding:6px 0; border-bottom:1px solid var(--line); font-size:13px } .row span:first-child { color:var(--muted) }
+  .src { font-size:12px; color:#bae6fd; background:#0c4a6e44; border-radius:6px; padding:6px 8px; margin:10px 0 } .src.guess { color:#fde68a; background:#78350f44 }
+  .acts { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap } .acts .btn.pri { background:#15803d; border-color:#16a34a }
+  a.pl { color:var(--accent); text-decoration:none; font-size:13px } a.pl:hover { text-decoration:underline }
+  .legend { display:flex; flex-wrap:wrap; gap:14px; font-size:12px; color:var(--muted); margin-top:10px } .legend i { display:inline-block; width:22px; height:4px; border-radius:2px; vertical-align:middle; margin-right:5px }
+  body.fs .mock, body.fs .page > .back, body.fs .head, body.fs .editbar, body.fs .legend, body.fs .side { display:none !important }
+  body.fs .page { padding:0; max-width:none } body.fs .viewport { height:100vh; border:0; border-radius:0 }
+  .fsbar { display:none; position:absolute; left:14px; top:12px; z-index:20; gap:12px; align-items:center; font-size:13px; color:var(--muted) }
+  body.fs .fsbar { display:flex } .fsbar b { color:#fff; font-size:16px; font-weight:500 }
+  body.phone .page { max-width:390px; padding:14px 16px } body.phone .viewport { height:460px } body.phone .side { display:none !important }
+  body.phone h1 { font-size:26px } body.phone .editbtn, body.phone .sharebtn { display:none }
+  .phonenote { display:none; font-size:12px; color:var(--muted); margin:-6px 0 8px } body.phone .phonenote { display:block }
+  .toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:#0c4a6e; border:1px solid #0369a1; border-radius:8px; padding:9px 14px; font-size:13px; display:none; z-index:60 }
+</style>
+</head>
+<body>
+<div class="mock">
+  <b>Mockup v2 — network structure only</b> · real: Quantum-Gate → QuantumLink (port 11 ↔ 51) ·
+  <b>example</b> (marked): the 19 switches below QuantumLink, their links, and all traffic · <b>simulated problems:</b> Paint-Booth down, Shop-Floor-1’s uplink at 88%, Annex-2’s at 55%, IT-Lab’s link a MAC-table guess
+  <span style="flex:1"></span>
+  <button id="bPhone">Phone width</button><button id="bStill">Reduced motion</button>
+</div>
+
+<div class="page">
+  <a class="back" href="#">← S6 Node</a>
+  <div class="head">
+    <div><h1>Site map</h1><div class="sub" id="sub"></div></div>
+    <div class="tools">
+      <span class="live"><i></i><span id="live">Live · updated just now</span></span>
+      <div class="seg"><button id="vReal" class="on">Realistic</button><button id="vSimple">Simple</button></div>
+      <button class="btn editbtn" id="bEdit">Edit</button>
+      <button class="btn" id="bFs">Fullscreen</button>
+      <button class="btn sharebtn" id="bShare">Share</button>
+    </div>
+  </div>
+  <div class="phonenote">View only on a phone · drag to move around, pinch to zoom</div>
+  <div class="editbar">
+    <b>Editing</b>
+    <button class="btn" id="bAdd">+ Add link</button>
+    <button class="btn" id="bHidden">Hidden (0)</button>
+    <button class="btn" id="bReset">Reset layout</button>
+    <span class="note">Drag switches to move them · changes save as you go</span>
+  </div>
+  <div class="wrap">
+    <div class="viewport" id="vp">
+      <div class="fsbar"><b>S6 Node</b><span class="live"><i></i><span class="livetxt">Live</span></span><button class="btn" id="bFsExit">Exit fullscreen</button></div>
+      <div class="canvas" id="cv"><svg class="links" id="links"></svg></div>
+      <div class="zoom"><button id="zIn">+</button><button id="zOut">−</button><button id="zFit" title="Fit">⤢</button></div>
+    </div>
+    <aside class="side" id="side"></aside>
+  </div>
+  <div class="legend">
+    <span><i style="background:var(--idle)"></i>idle (&lt;1%)</span><span><i style="background:var(--ok)"></i>under 40%</span>
+    <span><i style="background:var(--warn)"></i>40–80%</span><span><i style="background:var(--bad)"></i>80%+ (the port’s busy threshold)</span>
+    <span><i style="background:repeating-linear-gradient(90deg,#fbbf24 0 5px,transparent 5px 9px)"></i>guessed from a MAC table</span>
+    <span><i style="background:repeating-linear-gradient(90deg,#475569 0 5px,transparent 5px 9px)"></i>device down</span>
+    <span>width = link speed · dots = traffic, in the direction it flows</span>
+  </div>
+</div>
+<div class="tip" id="tip"></div>
+<div class="toast" id="toast"></div>
+
+<script src="drawings2.js"></script>
+<script>
+const W = 1960, H = 1250
+const COLS = [120, 740, 1360]
+const STEP = 104, ACCESS_Y = 540
+// tier: scale for the drawing
+const TS = { router: 0.5, core: 0.5, dist: 0.42, access: 0.38 }
+const DEV = {
+  gw: { name: 'Quantum-Gate', model: 'UDM-SE', role: 'Router', tier: 'router', ip: '10.1.255.1', up: '21 d' },
+  sw: { name: 'QuantumLink', model: 'USW-Pro-48-PoE', role: 'Core switch', tier: 'core', ip: '10.1.255.10', up: '21 d', connected: 82 },
+  d1: { name: 'Dist-Main', model: 'ES-16-XG', tier: 'dist', col: 0, ex: 1 },
+  d2: { name: 'Dist-Shop', model: 'ES-16-XG', tier: 'dist', col: 1, ex: 1 },
+  d3: { name: 'Dist-Annex', model: 'Catalyst 4500-X-16', tier: 'dist', col: 2, ex: 1 },
+  a1: { name: 'Office-1', model: 'ES-48-500W', col: 0, row: 0, ex: 1 }, a2: { name: 'Office-2', model: 'ES-48-500W', col: 0, row: 1, ex: 1 },
+  a3: { name: 'Office-3', model: 'ES-24-250W', col: 0, row: 2, ex: 1 }, a4: { name: 'Conf-Rooms', model: 'ES-8-150W', col: 0, row: 3, ex: 1 },
+  a5: { name: 'Lobby', model: 'ES-24-500W', col: 0, row: 4, ex: 1 },
+  b1: { name: 'Shop-Floor-1', model: 'ES-48-750W', col: 1, row: 0, ex: 1 }, b2: { name: 'Shop-Floor-2', model: 'ES-48-750W', col: 1, row: 1, ex: 1 },
+  b3: { name: 'Warehouse', model: 'ES-24-250W', col: 1, row: 2, ex: 1 }, b4: { name: 'Dock', model: 'ES-8-150W', col: 1, row: 3, ex: 1 },
+  b5: { name: 'Paint-Booth', model: 'ES-24-500W', col: 1, row: 4, ex: 1, down: '4 min' },
+  c1: { name: 'Annex-1', model: 'USW-Pro-48-PoE', col: 2, row: 0, ex: 1 }, c2: { name: 'Annex-2', model: 'ES-48-500W', col: 2, row: 1, ex: 1 },
+  c3: { name: 'Annex-3', model: 'ES-24-250W', col: 2, row: 2, ex: 1 }, c4: { name: 'IT-Lab', model: 'ES-8-150W', col: 2, row: 3, ex: 1 },
+  c5: { name: 'Security', model: 'ES-24-500W', col: 2, row: 4, ex: 1 },
+  x1: { name: 'Spare-SW', model: 'ES-8-150W', tier: 'loose', ex: 1 },
+}
+for (const [k, d] of Object.entries(DEV)) { d.k = k; d.tier = d.tier || 'access'; d.role = d.role || (d.tier === 'dist' ? 'Distribution switch' : 'Switch'); d.ip = d.ip || `10.20.${Object.keys(DEV).indexOf(k)}.2`; d.up = d.up || `${(Object.keys(DEV).indexOf(k) * 7) % 90 + 3} d` }
+const BRANCH = { d1: ['a1', 'a2', 'a3', 'a4', 'a5'], d2: ['b1', 'b2', 'b3', 'b4', 'b5'], d3: ['c1', 'c2', 'c3', 'c4', 'c5'] }
+const G = 1000
+// a: [device, port]; b: [device, port]; down = a→b, up = b→a, Mb/s
+const LINKS = [
+  ['gw', 11, 'sw', 51, 10 * G, 38, 412, 'Found by LLDP, from QuantumLink port 51', { real: 1 }],
+  ['sw', 49, 'd1', 1, 10 * G, 1800, 900, 'Found by LLDP, seen from both ends'],
+  ['sw', 50, 'd2', 1, 10 * G, 3100, 1200, 'Found by LLDP, seen from both ends'],
+  ['sw', 52, 'd3', 1, 10 * G, 600, 240, 'Found by LLDP, seen from both ends (Cisco)'],
+  ['d1', 2, 'a1', 49, 10 * G, 300, 90, 'Found by LLDP, seen from both ends'],
+  ['d1', 3, 'a2', 49, 10 * G, 120, 40, 'Found by LLDP, seen from both ends'],
+  ['d1', 4, 'a3', 25, 10 * G, 80, 22, 'Found by LLDP, seen from both ends'],
+  ['a3', 26, 'a4', 9, G, 40, 12, 'Found by LLDP, seen from both ends'],
+  ['d1', 5, 'a5', 25, 10 * G, 15, 6, 'Found by LLDP, seen from both ends'],
+  ['d2', 2, 'b1', 49, 10 * G, 8800, 700, 'Found by LLDP, seen from both ends', { sim: 1 }],
+  ['d2', 3, 'b2', 49, 10 * G, 2000, 400, 'Found by LLDP, seen from both ends'],
+  ['d2', 4, 'b3', 25, 10 * G, 400, 120, 'Found by LLDP, seen from both ends'],
+  ['b3', 26, 'b4', 9, G, 100, 30, 'Found by LLDP, seen from both ends'],
+  ['d2', 5, 'b5', 25, 10 * G, 0, 0, 'Found by LLDP, last seen 4 min ago (Paint-Booth is down)', { sim: 1 }],
+  ['d3', 3, 'c1', 49, 10 * G, 900, 260, 'Found by LLDP, seen from both ends'],
+  ['d3', 4, 'c2', 49, 10 * G, 5500, 800, 'Found by LLDP, seen from both ends', { sim: 1 }],
+  ['d3', 5, 'c3', 25, 10 * G, 50, 14, 'Found by LLDP, seen from both ends'],
+  ['d3', 6, 'c4', 9, G, 20, 8, 'Guessed: IT-Lab’s MAC is learnt on Dist-Annex port 6, and IT-Lab sends no LLDP', { guess: 1, sim: 1 }],
+  ['d3', 7, 'c5', 25, 10 * G, 300, 70, 'Set on the port: Dist-Annex port 7 is a Network link to Security'],
+].map(([a, ap, b, bp, speed, down, up, src, f], i) => ({ id: 'l' + i, a: [a, ap], b: [b, bp], speed, down, up, src, ...(f || {}) }))
+const hidden = new Set(), folded = new Set()
+let view = 'real', zoom = 1, pan = { x: 0, y: 0 }, selected = null, age = 0
+
+function homePos() {
+  const p = {}
+  const sz = (k) => size(k)
+  p.gw = { x: (W - sz('gw').w) / 2, y: 70 }
+  p.sw = { x: (W - sz('sw').w) / 2, y: 220 }
+  for (const k of ['d1', 'd2', 'd3']) p[k] = { x: COLS[DEV[k].col] + 40, y: 390 }
+  for (const [k, d] of Object.entries(DEV)) if (d.tier === 'access') p[k] = { x: COLS[d.col] + 40, y: ACCESS_Y + d.row * STEP }
+  p.x1 = { x: COLS[0] + 40, y: ACCESS_Y + 5 * STEP + 70 }
+  return p
+}
+function size(k) {
+  const d = DEV[k], s = TS[d.tier === 'loose' ? 'access' : d.tier]
+  if (view === 'real') { const dr = DRAWINGS2[k]; return { w: dr.w * s, h: dr.h * s } }
+  return { w: d.tier === 'router' || d.tier === 'core' ? 320 : 290, h: 44 }
+}
+let pos
+
+const $ = (s) => document.querySelector(s)
+const cv = $('#cv'), svg = $('#links'), vp = $('#vp'), side = $('#side'), tip = $('#tip')
+cv.style.width = W + 'px'; cv.style.height = H + 'px'; svg.setAttribute('width', W); svg.setAttribute('height', H)
+const mbps = (v) => (v >= 1000 ? (v / 1000).toFixed(1) + ' Gb/s' : v >= 10 ? Math.round(v) + ' Mb/s' : v.toFixed(1) + ' Mb/s')
+const util = (l) => (Math.max(l.down, l.up) / l.speed) * 100
+const colour = (u) => (u < 1 ? 'var(--idle)' : u < 40 ? 'var(--ok)' : u < 80 ? 'var(--warn)' : 'var(--bad)')
+const width = (s) => (s >= 25 * G ? 7 : s >= 10 * G ? 5 : s >= 2500 ? 4 : s >= G ? 3 : 2)
+const speedTxt = (s) => (s >= G ? s / G + ' Gb' : s + ' Mb')
+const isHiddenNode = (k) => Object.entries(BRANCH).some(([d, ks]) => folded.has(d) && ks.includes(k))
+const linkDown = (l) => DEV[l.a[0]].down || DEV[l.b[0]].down
+
+function buildNodes() {
+  cv.querySelectorAll('.node,.tier,.collapsed').forEach((n) => n.remove())
+  const tiers = [['Router', 52], ['Core', 202], ['Distribution', 372], ['Access', ACCESS_Y - 30], ['Not linked', ACCESS_Y + 5 * STEP + 40]]
+  for (const [t, y] of tiers) { const el = document.createElement('div'); el.className = 'tier'; el.style.top = y + 'px'; el.textContent = t; cv.appendChild(el) }
+  for (const [k, d] of Object.entries(DEV)) {
+    if (isHiddenNode(k)) continue
+    const el = document.createElement('div')
+    el.className = 'node' + (d.down ? ' down' : ''); el.dataset.k = k
+    el.style.left = pos[k].x + 'px'; el.style.top = pos[k].y + 'px'
+    const sz = size(k), s = TS[d.tier === 'loose' ? 'access' : d.tier]
+    const fold = BRANCH[k] ? `<span class="fold" data-fold="${k}">${folded.has(k) ? '▸' : '▾'} ${BRANCH[k].length} below</span>` : ''
+    const label = `<div class="nlabel"><span class="dot ${d.down ? 'bad' : ''}"></span><b>${d.name}</b><span>${d.model}</span>${d.down ? `<span class="dn">Down ${d.down}</span>` : ''}${d.ex ? '<span class="ex">example</span>' : ''}${fold}</div>`
+    if (view === 'real') {
+      el.style.width = sz.w + 'px'; el.style.height = sz.h + 'px'
+      el.innerHTML = `${label}<div class="draw" style="width:${DRAWINGS2[k].w}px;height:${DRAWINGS2[k].h}px;transform:scale(${s})">${DRAWINGS2[k].html}</div>`
+    } else {
+      el.innerHTML = `<div class="card" style="width:${sz.w}px"><div class="ic ${d.tier === 'router' ? 'rt' : 'sw'}">${d.tier === 'router' ? '⇄' : '⇅'}</div><div style="min-width:0;flex:1"><div class="t">${d.name} ${d.ex ? '<span class="ex">example</span>' : ''}</div><div class="s">${d.role} · ${d.model}${d.down ? ' · <span style="color:#fca5a5">Down ' + d.down + '</span>' : ''}</div></div>${fold}</div>`
+    }
+    cv.appendChild(el)
+  }
+  for (const d of folded) {
+    const el = document.createElement('div'); el.className = 'collapsed'; el.dataset.unfold = d
+    el.style.left = pos[d].x + 'px'; el.style.top = pos[d].y + size(d).h + 50 + 'px'
+    const n = BRANCH[d].length, down = BRANCH[d].filter((k) => DEV[k].down).length
+    el.innerHTML = `▸ ${n} switches folded${down ? ` · <span style="color:#fca5a5">${down} down</span>` : ''} · click to show`
+    cv.appendChild(el)
+  }
+  cv.appendChild(svg)
+}
+
+// A link end: the port on the drawing (its jack or cage, not its status light), or a point on the card's edge.
+function anchor(end, other, dir) {
+  const node = cv.querySelector(`.node[data-k="${end[0]}"]`)
+  const cr = cv.getBoundingClientRect()
+  const f = (r) => ({ x: (r.left + r.width / 2 - cr.left) / zoom, y: (r.top + r.height / 2 - cr.top) / zoom })
+  if (view === 'real') {
+    const btn = [...node.querySelectorAll('button.rf-jack[aria-label], button.rf-cage[aria-label]')].find((b) => b.getAttribute('aria-label').startsWith(`Port ${end[1]}:`))
+    if (btn) return f(btn.getBoundingClientRect())
+  }
+  const box = (node.querySelector('.card') || node).getBoundingClientRect()
+  const left = (box.left - cr.left) / zoom, w = box.width / zoom, top = (box.top - cr.top) / zoom, h = box.height / zoom
+  const same = LINKS.filter((l) => !hidden.has(l.id) && !isHiddenNode(l.a[0]) && !isHiddenNode(l.b[0]) && (l.a[0] === end[0] || l.b[0] === end[0]))
+    .map((l) => (l.a[0] === end[0] ? l.b[0] : l.a[0])).filter((k) => (pos[k].y > pos[end[0]].y) === (dir === 'down'))
+    .sort((p, q) => pos[p].y - pos[q].y || pos[p].x - pos[q].x)
+  const i = same.indexOf(other)
+  return { x: left + (w * (i + 1)) / (same.length + 1), y: dir === 'down' ? top + h : top }
+}
+
+// Rounded orthogonal path through the given points.
+function ortho(pts, r = 7) {
+  let d = `M${pts[0][0]},${pts[0][1]}`
+  for (let i = 1; i < pts.length - 1; i++) {
+    const [x0, y0] = pts[i - 1], [x1, y1] = pts[i], [x2, y2] = pts[i + 1]
+    const a = Math.min(r, Math.hypot(x1 - x0, y1 - y0) / 2), b = Math.min(r, Math.hypot(x2 - x1, y2 - y1) / 2)
+    const ux = Math.sign(x1 - x0), uy = Math.sign(y1 - y0), vx = Math.sign(x2 - x1), vy = Math.sign(y2 - y1)
+    d += ` L${x1 - ux * a},${y1 - uy * a} Q${x1},${y1} ${x1 + vx * b},${y1 + vy * b}`
+  }
+  const z = pts[pts.length - 1]
+  return d + ` L${z[0]},${z[1]}`
+}
+
+function route(l) {
+  const [ka, kb] = [l.a[0], l.b[0]]
+  const A = anchor(l.a, kb, 'down'), B = anchor(l.b, ka, 'up')
+  const tierB = DEV[kb].tier
+  if (tierB === 'access' && pos[kb].y > pos[ka].y + 20) {
+    // down a lane to the left of the column, then across into the port from above
+    const srcBottom = pos[ka].y + size(ka).h
+    const outs = LINKS.filter((x) => x.a[0] === ka && !hidden.has(x.id) && !isHiddenNode(x.b[0]))
+    const k = outs.indexOf(l)
+    const chained = DEV[ka].tier === 'access'
+    const yA = srcBottom + 10 + (chained ? 0 : k * 6)
+    const yB = pos[kb].y - 30
+    if (chained) return { d: ortho([[A.x, A.y], [A.x, yA], [B.x + 0.01, yA], [B.x, B.y]]), mid: [(A.x + B.x) / 2, yA] }
+    const lane = Math.min(pos[ka].x, pos[kb].x) - 12 - k * 6
+    return { d: ortho([[A.x, A.y], [A.x, yA], [lane, yA], [lane, yB], [B.x, yB], [B.x, B.y]]), mid: [lane, (yA + yB) / 2] }
+  }
+  const dy = Math.max(40, Math.abs(B.y - A.y) * 0.5), s = A.y < B.y ? 1 : -1
+  return { d: `M${A.x},${A.y} C${A.x},${A.y + s * dy} ${B.x},${B.y - s * dy} ${B.x},${B.y}`, mid: [(A.x + B.x) / 2, (A.y + B.y) / 2] }
+}
+
+function drawLinks() {
+  let h = ''
+  for (const l of LINKS) {
+    if (hidden.has(l.id) || isHiddenNode(l.a[0]) || isHiddenNode(l.b[0])) continue
+    const { d, mid } = route(l)
+    const dn = linkDown(l), u = util(l), w = width(l.speed)
+    const c = dn ? '#475569' : l.guess ? '#fbbf24' : colour(u)
+    const dash = dn || l.guess ? ' stroke-dasharray="7 6"' : ''
+    h += `<g>`
+    if (selected === l.id) h += `<path d="${d}" fill="none" stroke="#38bdf8" stroke-opacity=".35" stroke-width="${w + 8}" stroke-linecap="round" stroke-linejoin="round"/>`
+    h += `<path d="${d}" fill="none" stroke="${c}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round"${dash}/>`
+    if (!dn) {
+      const dur = (v) => (v <= 0.5 ? 0 : Math.max(0.5, 7 - 1.5 * Math.log10(v + 1)))
+      const sw = Math.max(1.4, w * 0.45)
+      if (dur(l.down)) h += `<path class="flow" d="${d}" stroke-width="${sw}" stroke-dasharray="1.5 30" style="animation-duration:${dur(l.down)}s"/>`
+      if (dur(l.up)) h += `<path class="flow rev" d="${d}" stroke-width="${sw}" stroke-dasharray="1.5 30" stroke-dashoffset="16" style="animation-duration:${dur(l.up)}s;stroke:rgba(186,230,253,.9)"/>`
+    }
+    h += `<path class="hit" d="${d}" stroke-width="14" data-hit="${l.id}"/>`
+    if (l.guess) h += `<g transform="translate(${mid[0]},${mid[1]})" style="pointer-events:all;cursor:pointer" data-hit="${l.id}"><circle class="q" r="9"/><text class="qt" x="-3.4" y="4.2">?</text></g>`
+    h += `<text class="arrows plabel" x="${mid[0] + 10}" y="${mid[1] + 4}">↓${mbps(l.down)} ↑${mbps(l.up)}</text></g>`
+  }
+  svg.innerHTML = h
+  svg.querySelectorAll('[data-hit]').forEach((p) => {
+    const l = LINKS.find((x) => x.id === p.dataset.hit)
+    p.onmousemove = (e) => showTip(e, `<b>${DEV[l.a[0]].name} port ${l.a[1]} ↔ ${DEV[l.b[0]].name} port ${l.b[1]}</b><br>${linkDown(l) ? '<span style="color:#fca5a5">no traffic: ' + DEV[l.b[0]].name + ' is down</span>' : `↓ ${mbps(l.down)} · ↑ ${mbps(l.up)} · ${speedTxt(l.speed)} · busiest ${util(l).toFixed(util(l) < 1 ? 1 : 0)}%`}${l.guess ? '<br><span style="color:#fde68a">guessed from the MAC table</span>' : ''}${l.sim ? ' <span class=ex>simulated</span>' : ''}`)
+    p.onmouseleave = () => (tip.style.display = 'none')
+    p.onclick = (e) => { e.stopPropagation(); selected = l.id; openLink(l); drawLinks() }
+  })
+}
+function showTip(e, html) { tip.innerHTML = html; tip.style.display = 'block'; tip.style.left = e.clientX + 14 + 'px'; tip.style.top = e.clientY + 14 + 'px' }
+
+function spark(l) {
+  const pts = Array.from({ length: 30 }, (_, i) => Math.max(l.down, l.up) * (0.75 + 0.35 * Math.abs(Math.sin(i / 4 + l.speed / 997))))
+  const toY = (v) => 44 - (v / l.speed) * 40
+  const d = pts.map((v, i) => `${i ? 'L' : 'M'}${i * 10},${toY(v).toFixed(1)}`).join(' ')
+  return `<svg viewBox="0 0 290 48" width="100%" height="48"><path d="${d}" fill="none" stroke="${colour(util(l))}" stroke-width="2"/><line x1="0" x2="290" y1="${toY(l.speed * 0.8)}" y2="${toY(l.speed * 0.8)}" stroke="#ef4444" stroke-dasharray="3 3" stroke-opacity=".5"/></svg>`
+}
+
+function openLink(l) {
+  const editing = document.body.classList.contains('edit')
+  const A = DEV[l.a[0]], B = DEV[l.b[0]]
+  side.innerHTML = `<button class="x" id="sx">×</button><h3>Link</h3>
+    <div style="display:flex;flex-direction:column;gap:3px;margin:8px 0"><a class="pl" href="#">${A.name} · port ${l.a[1]} →</a><a class="pl" href="#">${B.name} · port ${l.b[1]} →</a></div>
+    <div class="row"><span>Speed</span><span>${speedTxt(l.speed)}</span></div>
+    ${linkDown(l) ? `<div class="row"><span>Traffic</span><span style="color:#fca5a5">none — ${B.name} is down</span></div>` : `
+    <div class="row"><span>To ${B.name}</span><span>${mbps(l.down)} · ${((l.down / l.speed) * 100).toFixed(1)}%</span></div>
+    <div class="row"><span>To ${A.name}</span><span>${mbps(l.up)} · ${((l.up / l.speed) * 100).toFixed(1)}%</span></div>`}
+    <div class="row"><span>Busy threshold</span><span>80% (port setting)</span></div>
+    <div style="font-size:12px;color:var(--muted);margin-top:10px">Last hour, from port history${l.real ? '' : ' <span class=ex>example</span>'}</div>${spark(l)}
+    <div class="src ${l.guess ? 'guess' : ''}">${l.src}</div>
+    ${l.guess ? `<div class="acts"><button class="btn pri" id="keep">Keep</button><button class="btn" id="hide">Hide</button></div>${editing ? '' : '<div style="font-size:11.5px;color:var(--dim);margin-top:6px">Keep and Hide are for admins and editors.</div>'}`
+      : editing ? `<div class="acts"><button class="btn" id="hide">Hide</button>${l.manual ? '<button class="btn">Change ports</button><button class="btn">Delete</button>' : ''}</div>` : ''}`
+  openSide()
+  const k = $('#keep'); if (k) k.onclick = () => { l.guess = false; l.manual = true; l.src = 'Drawn by hand (kept from a MAC-table guess) by you, just now'; openLink(l); drawLinks() }
+  const hb = $('#hide'); if (hb) hb.onclick = () => { hidden.add(l.id); closeSide(); $('#bHidden').textContent = `Hidden (${hidden.size})` }
+}
+function openDevice(k) {
+  const d = DEV[k]
+  const links = LINKS.filter((l) => !hidden.has(l.id) && (l.a[0] === k || l.b[0] === k))
+  side.innerHTML = `<button class="x" id="sx">×</button><h3>${d.name} ${d.ex ? '<span class="ex">example</span>' : ''}</h3><div style="color:var(--muted);font-size:12.5px;margin-bottom:8px">${d.role} · ${d.model}</div>
+    <div class="row"><span>Status</span>${d.down ? `<span style="color:#fca5a5">● Down ${d.down}</span>` : '<span style="color:#86efac">● Up</span>'}</div>
+    <div class="row"><span>Address</span><span>${d.ip}</span></div><div class="row"><span>Up for</span><span>${d.down ? '—' : d.up}</span></div>
+    <div style="font-size:12px;color:var(--muted);margin:10px 0 4px">Links</div>
+    ${links.map((l) => { const mine = l.a[0] === k ? l.a : l.b, other = l.a[0] === k ? l.b : l.a; return `<div style="font-size:12.5px;padding:3px 0">port ${mine[1]} → ${DEV[other[0]].name} port ${other[1]}</div>` }).join('')}
+    ${d.connected ? `<div style="font-size:12px;color:var(--muted);margin-top:10px">${d.connected} end devices are plugged into it; they’re on its own page, not the site map.</div>` : ''}
+    <div class="acts"><button class="btn pri">Open device →</button></div>`
+  openSide()
+}
+let wasOpen = false
+function openSide() { side.classList.add('open'); $('#sx').onclick = closeSide; if (!wasOpen) { wasOpen = true; requestAnimationFrame(() => { fit(); drawLinks() }) } }
+function closeSide() { side.classList.remove('open'); selected = null; wasOpen = false; requestAnimationFrame(() => { fit(); drawLinks() }) }
+
+function applyZoom() { cv.style.transform = `translate(${pan.x}px,${pan.y}px) scale(${zoom})` }
+function fit() { const r = vp.getBoundingClientRect(); zoom = Math.min(r.width / W, r.height / H); pan = { x: (r.width - W * zoom) / 2, y: Math.max(6, (r.height - H * zoom) / 2) }; applyZoom() }
+function render() { buildNodes(); applyZoom(); requestAnimationFrame(drawLinks) }
+
+function subline() {
+  const n = Object.keys(DEV).length, down = Object.values(DEV).filter((d) => d.down).length
+  $('#sub').innerHTML = `S6 Node · ${n} routers and switches · ${LINKS.length} links${down ? ` · <span style="color:#fca5a5">${down} down</span>` : ''}`
+}
+
+// clicks, drags, folds
+let drag = null
+cv.addEventListener('pointerdown', (e) => {
+  const fold = e.target.closest('[data-fold]'); if (fold) { e.stopPropagation(); const k = fold.dataset.fold; folded.has(k) ? folded.delete(k) : folded.add(k); render(); return }
+  const unf = e.target.closest('[data-unfold]'); if (unf) { folded.delete(unf.dataset.unfold); render(); return }
+  const n = e.target.closest('.node'); if (!n) return
+  if (!document.body.classList.contains('edit')) { if (!e.target.closest('button')) openDevice(n.dataset.k); return }
+  drag = { n, k: n.dataset.k, sx: e.clientX, sy: e.clientY, ox: pos[n.dataset.k].x, oy: pos[n.dataset.k].y }
+  n.classList.add('drag'); n.setPointerCapture(e.pointerId)
+})
+cv.addEventListener('pointermove', (e) => {
+  if (!drag) return
+  const snap = (v) => Math.round(v / 8) * 8
+  pos[drag.k] = { x: snap(drag.ox + (e.clientX - drag.sx) / zoom), y: snap(drag.oy + (e.clientY - drag.sy) / zoom) }
+  drag.n.style.left = pos[drag.k].x + 'px'; drag.n.style.top = pos[drag.k].y + 'px'; drawLinks()
+})
+cv.addEventListener('pointerup', () => { if (drag) { drag.n.classList.remove('drag'); drag = null; toast('Saved') } })
+cv.addEventListener('click', (e) => { const b = e.target.closest('.draw button'); if (b && !document.body.classList.contains('edit')) toast(b.getAttribute('aria-label').split(':')[0] + ' — opens the port page') })
+function toast(t) { const el = $('#toast'); el.textContent = t; el.style.display = 'block'; clearTimeout(el._t); el._t = setTimeout(() => (el.style.display = 'none'), 1800) }
+
+setInterval(() => {
+  age++
+  if (age >= 10) {
+    age = 0
+    for (const l of LINKS) { if (linkDown(l)) continue; const j = () => 0.85 + Math.random() * 0.3; l.down *= j(); l.up *= j(); if (l.id === 'l9') l.down = Math.min(9500, Math.max(8100, l.down)); if (l.id === 'l15') l.down = Math.min(7000, Math.max(4600, l.down)) }
+    drawLinks(); if (selected) openLink(LINKS.find((x) => x.id === selected))
+  }
+  const t = age === 0 ? 'Live · updated just now' : `Live · updated ${age}s ago`
+  $('#live').textContent = t; document.querySelectorAll('.livetxt').forEach((x) => (x.textContent = t))
+}, 1000)
+
+$('#vReal').onclick = () => { view = 'real'; $('#vReal').classList.add('on'); $('#vSimple').classList.remove('on'); pos = homePos(); render() }
+$('#vSimple').onclick = () => { view = 'simple'; $('#vSimple').classList.add('on'); $('#vReal').classList.remove('on'); pos = homePos(); render() }
+$('#bEdit').onclick = () => { document.body.classList.toggle('edit'); $('#bEdit').classList.toggle('on'); $('#bEdit').textContent = document.body.classList.contains('edit') ? 'Done' : 'Edit'; if (selected) openLink(LINKS.find((x) => x.id === selected)) }
+$('#bFs').onclick = () => { document.body.classList.add('fs'); requestAnimationFrame(() => { fit(); drawLinks() }) }
+$('#bFsExit').onclick = () => { document.body.classList.remove('fs'); requestAnimationFrame(() => { fit(); drawLinks() }) }
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document.body.classList.contains('fs')) $('#bFsExit').click() })
+$('#bShare').onclick = () => toast('Share: a read-only public link (admins) — names, status and traffic only; no IPs or MACs')
+$('#bAdd').onclick = () => toast('Click a switch, pick its port (or click the port on its drawing), then click the other switch')
+$('#bHidden').onclick = () => { if (!hidden.size) return toast('Nothing hidden'); hidden.clear(); $('#bHidden').textContent = 'Hidden (0)'; drawLinks(); toast('Hidden links shown again') }
+$('#bReset').onclick = () => { pos = homePos(); render(); toast('Back to the automatic layout') }
+$('#zIn').onclick = () => { zoom *= 1.25; applyZoom(); drawLinks() }
+$('#zOut').onclick = () => { zoom /= 1.25; applyZoom(); drawLinks() }
+$('#zFit').onclick = () => { fit(); drawLinks() }
+vp.addEventListener('wheel', (e) => { e.preventDefault(); const r = vp.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, f = e.deltaY < 0 ? 1.12 : 1 / 1.12
+  pan = { x: mx - (mx - pan.x) * f, y: my - (my - pan.y) * f }; zoom *= f; applyZoom(); drawLinks() }, { passive: false })
+$('#bStill').onclick = () => { document.body.classList.toggle('still'); $('#bStill').classList.toggle('on') }
+$('#bPhone').onclick = () => { document.body.classList.toggle('phone'); $('#bPhone').classList.toggle('on'); if (document.body.classList.contains('phone')) { document.body.classList.remove('edit'); $('#bEdit').textContent = 'Edit'; $('#bEdit').classList.remove('on') } requestAnimationFrame(() => { fit(); drawLinks() }) }
+let panning = null
+vp.addEventListener('pointerdown', (e) => { if (e.target.closest('.node') || e.target.closest('[data-hit]') || e.target.closest('button') || e.target.closest('[data-unfold]')) return; panning = { sx: e.clientX, sy: e.clientY, ox: pan.x, oy: pan.y } })
+window.addEventListener('pointermove', (e) => { if (!panning) return; pan = { x: panning.ox + e.clientX - panning.sx, y: panning.oy + e.clientY - panning.sy }; applyZoom() })
+window.addEventListener('pointerup', () => (panning = null))
+window.addEventListener('resize', () => { fit(); drawLinks() })
+
+pos = homePos(); subline(); render(); requestAnimationFrame(() => { fit(); drawLinks() })
+</script>
+</body>
+</html>
