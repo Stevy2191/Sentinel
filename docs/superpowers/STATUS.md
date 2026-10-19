@@ -21,7 +21,7 @@ Roadmap: `docs/superpowers/specs/2026-09-28-network-monitoring-roadmap.md`. Each
 | 3 | MIB library and custom metrics: upload/browse/test-walk MIBs, profiles, Cisco switch health, Health section, metric-rule alerts | Done (`dev`, 2026-10-02); follow-ups in `plans/2026-10-02-network-phase3-followups.md` |
 | 4 | Custom dashboards: grid editor, 11 widget types (incl. site power), sharing, fullscreen wall display, admin public links | Done (`dev`, 2026-10-03); follow-ups in `plans/2026-10-02-network-phase4-followups.md` |
 | 5 | Metric reports: a Metrics report type (ports, port roles, devices, sites), exact 95th percentiles, totals, previous-period comparison, scheduled and shared like the other reports | Done (`dev`, 2026-10-05); follow-ups in `plans/2026-10-03-network-phase5-followups.md` |
-| 6 | Live site maps (LLDP, SSE push) — needs phase 4 | Not started; unblocked by phase 4 |
+| 6 | Live site maps (LLDP, SSE push) — needs phase 4 | **In progress**, in pieces: A back navigation (done), B find a device and switch maps (done, `dev`), B2 Cisco (pending), C site maps, D org map |
 | 7 | UniFi controller source | **Next** |
 
 Phase 7 is next; phase 6 is unblocked (it needed phase 4, which is done) and can follow. Where both sit against the tools and security track below is the owner's call.
@@ -60,7 +60,21 @@ Spec `specs/2026-10-18-faceplate-model-layouts-design.md`, plan `plans/2026-10-1
 
 Spec `specs/2026-10-18-realistic-faceplates-design.md` (approved mockups in `specs/assets/2026-10-18-realistic-faceplates/`), plan `plans/2026-10-18-realistic-faceplates.md`. The UDM-SE, USW-Pro-48-PoE and ES-16-XG draw as their real front panels (Realistic | Simple on the device page; always realistic on dashboards), with the UDM-SE drive bay light from UCD-DISKIO-MIB (bay disk `sdb`). A device Sentinel can't hear from goes dark with a badge. UniFi consoles now number ports from 1 (`portmon/numbering.go`). Second batch (2026-10-18): the EdgeSwitch 8 150W, 24 250W, 48 500W (newer look) and 24 500W, 48 750W (older look), matched on the product name in sysDescr, since all report bare models like `UBNT-ES24`. The ES-48-750W's SFP+ pair is 49/50 (confirmed by the owner, 2026-10-18). Cisco: the Catalyst 4500-X-16 is drawn (module slot 2 empty or the 8-port SFP+ module; drawings now declare their module slots). Waiting on real port names and better photos: C9300-24P, WS-C2960CX-8PC-L, WS-C2960X-24PS-L, WS-C2960X-48FPD-L, WS-C2960X-48FPS-L (images in the owner's /home/sysadmin/images). More models: add a drawing in `frontend/src/components/network/drawings/` and a line in `backend/internal/portmon/drawings.go`. PoE on UniFi switches waits for network phase 7 (the switch reports no PoE over SNMP).
 
+## Find a device and switch maps (phase 6 piece B)
+
+Spec `specs/2026-10-18-find-device-switch-maps-design.md`, plan `plans/2026-10-18-find-device-switch-maps.md`. Every 5 minutes, each up device's MAC table (Q-BRIDGE, else dot1d), LLDP neighbours and ARP table are read into the `l2` schema (migration `063_l2.sql`; left out of config backups, kept 30 days). Each MAC is placed when read: on an edge port (wired), through an AP (wireless), behind a link port, or only in a router's ARP table. The top bar's **Find a device** searches name, IP, MAC (any notation) or maker; switch and router pages have a **Connected** section (Map | List) and open a device's record from `?endpoint=<mac>`. Users' names for devices are in `endpoint_names` (backed up, audited as `endpoint_named`). Makers come from the IEEE OUI list built in (`backend/internal/l2/oui.tsv.gz`).
+
+**Pending, B2 (Cisco):** per-VLAN MAC tables (community@vlan / SNMPv3 contexts) and CDP, after a read-only walk of a work Cisco. Until then Cisco switches show what their default context reports. The 8-MAC "behind" threshold and the 5-minute interval are first guesses, to tune on work data.
+
 ## To be checked by the owner
+
+### Find a device and switch maps (on the dev stack, port 3200)
+
+1. Search "KitchenAP", then a phone's IP. The phone shows "via KitchenAP, QuantumLink port …".
+2. QuantumLink's Connected map shows the NAS, both APs and the wired devices, and no Quantum-Gate uplink.
+3. Name a device, reload, and search for that name.
+4. Unplug something, and after the next poll it's faded with "last seen".
+5. At work: the EdgeSwitches' Connected maps fill in (expected: the same Q-BRIDGE table as the UniFi switch).
 
 ### Realistic faceplates (on the dev stack, port 3200)
 
