@@ -1,0 +1,174 @@
+package l2
+
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
+
+const (
+	// MaxEdgeMACs is how many MACs a port with nothing known on its far end
+	// may show before it is taken for a link to an unmanaged switch.
+	MaxEdgeMACs = 8
+	// RetentionDays is how long sightings, neighbours and ARP rows are kept.
+	RetentionDays = 30
+)
+
+// PortKey is one switch port, by the device and its ifIndex.
+type PortKey struct {
+	Device  uuid.UUID
+	IfIndex int
+}
+
+// PortInfo is what Sentinel knows about a port's far end. LinkedTo: the
+// port has a port link to another device. MonitoredNeighbor: its LLDP
+// chassis or sys name matches a monitored device.
+type PortInfo struct {
+	Neighbor          *Neighbor
+	LinkedTo          bool
+	Uplink            bool
+	MonitoredAP       bool
+	MonitoredNeighbor bool
+}
+
+// Sighting is a MAC learned on a port, as of its last poll.
+type Sighting struct {
+	Port     PortKey
+	VLAN     int
+	MAC      string
+	LastSeen time.Time
+}
+
+// PortClass is what a port is, for placing the MACs learned on it.
+type PortClass int
+
+const (
+	PortEdge   PortClass = iota // an endpoint is plugged in here
+	PortAP                      // an access point: its MACs are its wireless clients
+	PortLink                    // another switch or router
+	PortBehind                  // busy, with nothing known beyond: an unmanaged switch
+)
+
+func (c PortClass) String() string {
+	return [...]string{"edge", "ap", "link", "behind"}[c]
+}
+
+// ClassifyPort classes a port: an AP first, then a link (LLDP bridge or
+// router, a port link, the uplink role, a monitored neighbour), then more
+// than MaxEdgeMACs MACs with no LLDP neighbour (behind), else edge. A port
+// whose LLDP neighbour is neither bridge nor router is a host however many
+// MACs it shows (containers, VMs).
+func ClassifyPort(info PortInfo, macsOnPort int) PortClass {
+	n := info.Neighbor
+	switch {
+	case info.MonitoredAP || (n != nil && n.Caps.AP()):
+		return PortAP
+	case info.LinkedTo || info.Uplink || info.MonitoredNeighbor || (n != nil && (n.Caps.Bridge() || n.Caps.Router())):
+		return PortLink
+	case n == nil && macsOnPort > MaxEdgeMACs:
+		return PortBehind
+	default:
+		return PortEdge
+	}
+}
+
+// Placement is where one MAC is. How is "wired" (on an edge port),
+// "wireless" (through the AP on Port, named Via), "behind" (only seen on
+// link ports; Port is the one that saw the fewest MACs) or "router" (only
+// in an ARP table, added by the caller; Port nil).
+type Placement struct {
+	MAC      string
+	Port     *PortKey
+	VLAN     int
+	Via      string
+	How      string
+	LastSeen time.Time
+}
+
+// Place works out where each MAC in sightings is. ports holds what is
+// known about each port's far end (ports not in it have nothing known);
+// apNames names the AP on each AP port.
+func Place(sightings []Sighting, ports map[PortKey]PortInfo, apNames map[PortKey]string) map[string]Placement {
+	// A port's MAC count is from its switch's last poll, not the 30 days of
+	// history.
+	latest := map[uuid.UUID]time.Time{}
+	for _, s := range sightings {
+		if s.LastSeen.After(latest[s.Port.Device]) {
+			latest[s.Port.Device] = s.LastSeen
+		}
+	}
+	count := map[PortKey]map[string]bool{}
+	for _, s := range sightings {
+		if s.LastSeen.Before(latest[s.Port.Device].Add(-time.Minute)) {
+			continue
+		}
+		if count[s.Port] == nil {
+			count[s.Port] = map[string]bool{}
+		}
+		count[s.Port][s.MAC] = true
+	}
+	class := map[PortKey]PortClass{}
+	classOf := func(p PortKey) PortClass {
+		c, ok := class[p]
+		if !ok {
+			c = ClassifyPort(ports[p], len(count[p]))
+			class[p] = c
+		}
+		return c
+	}
+
+	type best struct {
+		rank int // 0 wired, 1 wireless, 2 behind
+		s    Sighting
+		macs int
+	}
+	byMAC := map[string]best{}
+	for _, s := range sightings {
+		c := classOf(s.Port)
+		rank := 2
+		switch {
+		case c == PortEdge:
+			rank = 0
+		case c == PortAP:
+			rank = 1
+			// The AP's own MAC is the AP, plugged into this port.
+			if n := ports[s.Port].Neighbor; n != nil && n.ChassisID == s.MAC {
+				rank = 0
+			}
+		}
+		cand := best{rank: rank, s: s, macs: len(count[s.Port])}
+		cur, ok := byMAC[s.MAC]
+		switch {
+		case !ok, cand.rank < cur.rank:
+		case cand.rank > cur.rank:
+			continue
+		case rank == 2 && cand.macs != cur.macs:
+			if cand.macs > cur.macs {
+				continue
+			}
+		case !s.LastSeen.After(cur.s.LastSeen):
+			continue
+		}
+		byMAC[s.MAC] = cand
+	}
+
+	out := make(map[string]Placement, len(byMAC))
+	for m, b := range byMAC {
+		port := b.s.Port
+		p := Placement{MAC: m, Port: &port, VLAN: b.s.VLAN, LastSeen: b.s.LastSeen}
+		switch b.rank {
+		case 0:
+			p.How = "wired"
+		case 1:
+			p.How = "wireless"
+			p.Via = apNames[port]
+			if p.Via == "" && ports[port].Neighbor != nil {
+				p.Via = ports[port].Neighbor.SysName
+			}
+		default:
+			p.How = "behind"
+		}
+		out[m] = p
+	}
+	return out
+}
