@@ -548,3 +548,25 @@ func TestPollerForgetsDriveBayWhenNotUp(t *testing.T) {
 		t.Errorf("failed poll: polled %d forgot %d", rec.polled, rec.forgot)
 	}
 }
+
+type recordingL2 struct{ polled int }
+
+func (r *recordingL2) PollL2(context.Context, models.Device, snmp.Target) { r.polled++ }
+
+// An up device gets its L2 poll; a failed poll runs none.
+func TestPollerRunsL2Poll(t *testing.T) {
+	p, _, _, _ := newTestPoller(&fakeSNMP{})
+	rec := &recordingL2{}
+	p.SetL2(rec)
+	p.PollOnce(context.Background(), device(models.DeviceStatusUp, 0))
+	if rec.polled != 1 {
+		t.Fatalf("up: polled %d", rec.polled)
+	}
+	p, _, _, _ = newTestPoller(&fakeSNMP{getErr: errors.New("timeout")})
+	rec = &recordingL2{}
+	p.SetL2(rec)
+	p.PollOnce(context.Background(), device(models.DeviceStatusUp, 0))
+	if rec.polled != 0 {
+		t.Error("L2 poll ran after a failed poll")
+	}
+}

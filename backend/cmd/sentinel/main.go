@@ -491,6 +491,10 @@ func run() error {
 	driveBays := services.NewDriveBayMonitor(snmpClient)
 	devicePoller.SetDriveBay(driveBays)
 	portService.SetDriveBays(driveBays)
+	// MAC, LLDP and ARP tables every five minutes, for Find a device and
+	// the switch maps; purged after 30 days by the nightly maintenance.
+	l2Monitor := services.NewL2Monitor(db, snmpClient)
+	devicePoller.SetL2(l2Monitor)
 	devicePoller.SetUPS(services.NewUPSMonitor(metricsStore, incidentService, notificationManager, snmpClient, settingsService, portService))
 	devicePoller.SetProfiles(services.NewProfileMonitor(profileService, metricsStore, incidentService, notificationManager, snmpClient, portService))
 	go devicePoller.Start(loopCtx)
@@ -498,7 +502,9 @@ func run() error {
 	if err := networkSettings.EnsureRetention(context.Background()); err != nil {
 		log.Printf("warning: could not apply the metrics retention setting: %v", err)
 	}
-	go services.NewNetworkMaintenance(metricsStore, settingsService).Start(loopCtx)
+	networkMaintenance := services.NewNetworkMaintenance(metricsStore, settingsService)
+	networkMaintenance.SetL2(l2Monitor)
+	go networkMaintenance.Start(loopCtx)
 
 	// 9. HTTP server. Every request's context derives from streamsCtx, which
 	// is cancelled just before Shutdown: open SSE streams and agent long-polls

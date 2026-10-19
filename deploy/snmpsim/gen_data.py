@@ -86,6 +86,30 @@ def entity(model, serial):
     return [f"{e}.5.1|2|3", f"{e}.11.1|4|{serial}", f"{e}.13.1|4|{model}"]
 
 
+def l2_tables():
+    """The EdgeSwitch's MAC table (3 MACs on 0/3, 12 on 0/48 behind an LLDP
+    switch, VLAN 1), bridge ports 1-52 as ifIndex 1-52, the LLDP neighbour on
+    0/48 (bridge capability) and 2 ARP rows."""
+    rows = [f"1.3.6.1.2.1.17.1.4.1.2.{i}|2|{i}" for i in range(1, 53)]
+    fdb = "1.3.6.1.2.1.17.7.1.2.2.1"
+    macs = [(3, [0x00, 0x11, 0x22, 0x33, 0x44, n]) for n in range(1, 4)]
+    macs += [(48, [0x02, 0x00, 0x00, 0x00, 0x30, n]) for n in range(1, 13)]
+    for port, mac in macs:
+        ix = "1." + ".".join(str(b) for b in mac)
+        rows += [f"{fdb}.2.{ix}|2|{port}", f"{fdb}.3.{ix}|2|3"]
+    lldp, row = "1.0.8802.1.1.2.1.4.1.1", "0.48.1"
+    rows += [
+        f"{lldp}.5.{row}|4x|245a4c0a0b0c",
+        f"{lldp}.7.{row}|4|0/1",
+        f"{lldp}.8.{row}|4|Uplink to core",
+        f"{lldp}.9.{row}|4|sim-core",
+        f"{lldp}.12.{row}|4x|20",
+    ]
+    arp = "1.3.6.1.2.1.4.35.1.4"
+    rows += [f"{arp}.1.1.4.10.0.0.10|4x|001122334401", f"{arp}.1.1.4.10.0.0.11|4x|001122334402"]
+    return rows
+
+
 def write(name, lines):
     os.makedirs(OUT, exist_ok=True)
     with open(os.path.join(OUT, name + ".snmprec"), "w") as f:
@@ -124,7 +148,8 @@ def cisco_health():
 
 edgeswitch = (system("EdgeSwitch 48-Port 500W, 1.9.3.5372984", "1.3.6.1.4.1.4413", "sim-edgeswitch", "Simulator rack", 123456789)
               + ports(52, "0/{i}", "Slot: 0 Port: {i} Gigabit - Level", 1_000_000_000)
-              + entity("ES-48-500W", "SIMSERIAL001"))
+              + entity("ES-48-500W", "SIMSERIAL001")
+              + l2_tables())
 cisco = (system("Cisco IOS Software, C2960X Software (C2960X-UNIVERSALK9-M), Version 15.2(7)E8", "1.3.6.1.4.1.9.1.1208",
                 "sim-cisco", "Simulator rack", 98765432)
          + ports(26, "Gi1/0/{i}", "GigabitEthernet1/0/{i}", 1_000_000_000, mac_base=0x00AABB000000)

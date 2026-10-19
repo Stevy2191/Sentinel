@@ -310,11 +310,14 @@ func (s *DeviceService) Delete(ctx context.Context, id uuid.UUID) (*models.Devic
 	if err != nil {
 		return nil, err
 	}
-	// The device's metric series go in the same transaction (metrics has no
-	// FKs to cascade them); their samples are removed by the nightly cleanup.
+	// The device's metric series and L2 rows go in the same transaction
+	// (neither schema has FKs to cascade them); their samples are removed by the nightly cleanup.
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Delete(&models.Device{}, "id = ?", id).Error; err != nil {
 			return fmt.Errorf("deleting device: %w", err)
+		}
+		if err := deleteDeviceL2(tx, id); err != nil {
+			return err
 		}
 		return deleteDeviceSeries(tx, id)
 	})

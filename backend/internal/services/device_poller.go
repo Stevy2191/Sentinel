@@ -110,6 +110,12 @@ type DriveBayPoller interface {
 	Forget(deviceID uuid.UUID)
 }
 
+// L2Poller reads a device's MAC, LLDP and ARP tables (L2Monitor), which
+// keeps its own pace.
+type L2Poller interface {
+	PollL2(ctx context.Context, d models.Device, t snmp.Target)
+}
+
 // DevicePoller polls every enabled device for reachability on a bounded
 // worker pool, and refreshes inventory when it is due.
 type DevicePoller struct {
@@ -122,6 +128,7 @@ type DevicePoller struct {
 	ups       UPSPoller
 	profiles  ProfilePoller
 	drives    DriveBayPoller
+	l2        L2Poller
 
 	// Replaceable in tests.
 	resolve func(ctx context.Context, host string) (net.IP, error)
@@ -186,6 +193,9 @@ func (p *DevicePoller) SetProfiles(pp ProfilePoller) { p.profiles = pp }
 
 // SetDriveBay enables the drive bay poll for drawings with a drive bay.
 func (p *DevicePoller) SetDriveBay(b DriveBayPoller) { p.drives = b }
+
+// SetL2 makes successful polls of an up device run its L2 poll too.
+func (p *DevicePoller) SetL2(l L2Poller) { p.l2 = l }
 
 // TargetFor builds the SNMP target for a device at a resolved address.
 func TargetFor(d models.Device, host string, cred snmp.Credential) snmp.Target {
@@ -329,6 +339,10 @@ func (p *DevicePoller) PollOnce(ctx context.Context, d models.Device) {
 		} else {
 			p.drives.Forget(d.ID)
 		}
+	}
+
+	if result == PollOK && tr.Status == models.DeviceStatusUp && p.l2 != nil {
+		p.l2.PollL2(ctx, d, target)
 	}
 
 	if result == PollOK && (d.LastInventoryAt == nil || now.Sub(*d.LastInventoryAt) >= inventoryInterval) {

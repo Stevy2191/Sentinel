@@ -5,6 +5,8 @@ import (
 	"errors"
 	"log"
 	"time"
+
+	"github.com/Stevy2191/Sentinel/backend/internal/l2"
 )
 
 // NetworkMaintenanceHour is when the nightly network maintenance runs, local
@@ -12,11 +14,12 @@ import (
 const NetworkMaintenanceHour = 3
 
 // NetworkMaintenance is the nightly housekeeping of the metrics store:
-// removing deleted devices' samples and old port events, and recomputing each
-// port's usual speed.
+// removing deleted devices' samples and old port events, recomputing each
+// port's usual speed, and dropping L2 rows not seen for 30 days.
 type NetworkMaintenance struct {
 	metrics  *MetricsStore
 	settings *SettingsService
+	l2       *L2Monitor
 	now      func() time.Time
 	logger   *log.Logger
 }
@@ -25,7 +28,10 @@ func NewNetworkMaintenance(metrics *MetricsStore, settings *SettingsService) *Ne
 	return &NetworkMaintenance{metrics: metrics, settings: settings, now: time.Now, logger: log.Default()}
 }
 
-// RunOnce does one pass. Both halves run even if the first fails.
+// SetL2 adds the L2 purge to the nightly pass.
+func (n *NetworkMaintenance) SetL2(m *L2Monitor) { n.l2 = m }
+
+// RunOnce does one pass. Every part runs even if an earlier one fails.
 func (n *NetworkMaintenance) RunOnce(ctx context.Context) error {
 	res, cleanErr := n.metrics.Cleanup(ctx, n.settings.MetricsRawRetentionDays(ctx))
 	if cleanErr != nil {
@@ -40,7 +46,17 @@ func (n *NetworkMaintenance) RunOnce(ctx context.Context) error {
 	} else if updated > 0 {
 		n.logger.Printf("[metrics] usual speed set for %d ports", updated)
 	}
-	return errors.Join(cleanErr, speedErr)
+	var l2Err error
+	if n.l2 != nil {
+		var purged int64
+		purged, l2Err = n.l2.Purge(ctx, n.now().UTC().AddDate(0, 0, -l2.RetentionDays))
+		if l2Err != nil {
+			n.logger.Printf("[l2] purge: %v", l2Err)
+		} else if purged > 0 {
+			n.logger.Printf("[l2] purge removed %d rows", purged)
+		}
+	}
+	return errors.Join(cleanErr, speedErr, l2Err)
 }
 
 // Start runs a pass five minutes after startup, then nightly, until ctx ends.
