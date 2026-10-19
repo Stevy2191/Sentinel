@@ -163,13 +163,18 @@ export function useMapPublicLink(siteId: string) {
 const PORTS_MS = 60_000
 
 /** One map device's ports, for its realistic drawing: the device page's own
- *  data, or the public map's trimmed copy, every minute. */
-export function useMapDevicePorts(deviceId: string, publicToken?: string): DevicePorts | null {
+ *  data, or the public map's trimmed copy, every minute; nothing while
+ *  enabled is false (the simple view). */
+export function useMapDevicePorts(deviceId: string, publicToken?: string, enabled = true): DevicePorts | null {
   const [data, setData] = useState<DevicePorts | null>(null)
   const url = publicToken ? `/public/maps/${enc(publicToken)}/devices/${enc(deviceId)}/ports` : `/devices/${enc(deviceId)}/ports`
   const current = useRef(url)
   current.current = url
   useEffect(() => {
+    if (!enabled) {
+      setData(null)
+      return
+    }
     let live = true
     const load = () =>
       api
@@ -185,6 +190,6 @@ export function useMapDevicePorts(deviceId: string, publicToken?: string): Devic
       live = false
       window.clearInterval(t)
     }
-  }, [url])
+  }, [url, enabled])
   return data
 }

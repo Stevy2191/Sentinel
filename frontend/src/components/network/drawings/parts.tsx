@@ -54,6 +54,7 @@ function PortHit({
         style={style}
         aria-label={label}
         aria-pressed={selected}
+        data-if-index={port.if_index}
         onClick={() => hit.onSelect(port.if_index)}
         onMouseEnter={() => setHovering(true)}
         onMouseLeave={() => setHovering(false)}

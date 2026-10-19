@@ -27,6 +27,25 @@ export interface DrawingEntry {
   height: number
 }
 
+/** A unit's ports as its faceplate placed them: main ports by number,
+ *  module ports ("Module N" blocks) by slot then number. Going through the
+ *  blocks keeps a module's Te1/2/1 from standing in for main port 1, and a
+ *  VLAN sub-interface (eth10.10) from standing in for a port. */
+export function unitPorts(unit: UnitFaceplate, ports: PortView[]): { byNumber: Map<number, PortView>; modules: Map<number, Map<number, PortView>> } {
+  const byIndex = new Map(ports.map((p) => [p.if_index, p]))
+  const byNumber = new Map<number, PortView>()
+  const modules = new Map<number, Map<number, PortView>>()
+  for (const b of unit.blocks) {
+    const slot = b.label ? Number(b.label.replace(/^Module /, '')) : 0
+    const into = slot ? (modules.get(slot) ?? modules.set(slot, new Map()).get(slot)!) : byNumber
+    for (const fp of [...b.top, ...b.bottom]) {
+      const p = byIndex.get(fp.if_index)
+      if (p) into.set(fp.number, p)
+    }
+  }
+  return { byNumber, modules }
+}
+
 /** The helpers every drawing uses to look up a port and its lights. */
 export function kit(p: DrawingProps) {
   const port = (n: number) => p.byNumber.get(n)

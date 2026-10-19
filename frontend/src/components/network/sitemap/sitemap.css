@@ -1,0 +1,31 @@
+/* Site map: dots flowing along links, and a calmer map for people who ask
+   for reduced motion (no dots; each link's figures at its middle). */
+.sm-flow {
+  fill: none;
+  stroke-linecap: round;
+  animation: sm-flow linear infinite;
+}
+.sm-flow-rev {
+  animation-direction: reverse;
+}
+@keyframes sm-flow {
+  to {
+    stroke-dashoffset: -64;
+  }
+}
+.sm-still {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sm-flow {
+    display: none;
+  }
+  .sm-still {
+    display: inline;
+  }
+}
+.sm-grid {
+  background-color: #0b1222;
+  background-image: radial-gradient(rgba(148, 163, 184, 0.13) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
