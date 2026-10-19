@@ -55,6 +55,8 @@ import MonitorTypeBadge from '@/components/MonitorTypeBadge'
 import MonitorPerformance from '@/components/MonitorPerformance'
 import { Sparkline, hourlySparklinePoints, STATUS_COLOR, uptimeColor as windowUptimeColor } from '@/components/UptimeSparkline'
 import { monitoringPath } from '@/utils/monitoringView'
+import { usePageLabel } from '@/utils/navHistory'
+import BackLink from '@/components/BackLink'
 
 // Format a Date for a datetime-local input (local time, minute precision).
 function toLocalInput(d: Date): string {
@@ -111,6 +113,7 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
   const { currentUser } = useAuthContext()
 
   const { monitor, loading } = useMonitor(mode === 'create' ? undefined : id)
+  usePageLabel(monitor?.name)
 
   // Stats window: last 24 hours (memoized so the report hook doesn't refetch).
   const range = useMemo(() => {
@@ -345,12 +348,13 @@ export default function MonitorDetail({ mode }: { mode: Mode }) {
           click away and the trail says which list this came from. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <Link
-            to={monitoringPath('uptime')}
-            className="inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white"
-          >
-            <ArrowLeft className="h-4 w-4" /> Back to Monitoring
-          </Link>
+          <BackLink fallbackTo={monitoringPath('uptime')} fallbackLabel="Monitoring" className="inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white">
+            {(label) => (
+              <>
+                <ArrowLeft className="h-4 w-4" /> Back to {label}
+              </>
+            )}
+          </BackLink>
           <nav aria-label="Breadcrumb" className="mt-1 text-xs text-slate-600">
             <Link to={monitoringPath('uptime')} className="transition hover:text-slate-400">
               Monitoring

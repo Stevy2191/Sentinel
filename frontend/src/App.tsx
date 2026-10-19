@@ -8,6 +8,7 @@ import Layout from '@/components/Layout'
 import LegacyRedirect from '@/components/LegacyRedirect'
 import MonitoringRedirect from '@/components/MonitoringRedirect'
 import Auth from '@/pages/Auth'
+import { NavTracker } from '@/utils/navHistory'
 
 // Route components load on demand. The app shipped as one ~950 KB chunk, so a
 // visitor downloaded every page - the report builder, the wizard, admin users -
@@ -75,6 +76,7 @@ export default function App() {
       <AppConfigProvider>
         <AuthProvider>
           <BrowserRouter>
+          <NavTracker />
           <Suspense fallback={<RouteFallback />}>
             <Routes>
             {/* Public routes. */}

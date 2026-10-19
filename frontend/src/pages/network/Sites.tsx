@@ -8,12 +8,14 @@ import { useAllMonitors } from '@/hooks/useAllMonitors'
 import { useAgents } from '@/hooks/useAgents'
 import { useDevices } from '@/hooks/useDevices'
 import { siteCounts, siteCountsText } from '@/utils/siteProfile'
+import { usePageLabel } from '@/utils/navHistory'
 
 export default function Sites() {
   const navigate = useNavigate()
   const { currentUser } = useAuthContext()
   const isAdmin = !!currentUser?.is_admin
   const { sites, loading, error, refetch } = useSites()
+  usePageLabel('Sites')
   const [adding, setAdding] = useState(false)
   // A list that has not loaded, or failed, is left out of each card's line
   // rather than counted as zero.

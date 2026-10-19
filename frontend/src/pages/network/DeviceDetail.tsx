@@ -24,6 +24,8 @@ import type { ApiError } from '@/services/api'
 import { useAuthContext } from '@/context/AuthContext'
 import { canUseNetTools, toolsQuery } from '@/utils/netTools'
 import { monitoringPath } from '@/utils/monitoringView'
+import { usePageLabel } from '@/utils/navHistory'
+import BackLink from '@/components/BackLink'
 
 /** Device types drawn as a faceplate; the rest get the port table only. */
 const FACEPLATE_TYPES = new Set(['switch', 'router'])
@@ -86,6 +88,7 @@ export default function DeviceDetail() {
   const navigate = useNavigate()
   const { currentUser } = useAuthContext()
   const { device, loading, notFound, refetch } = useDevice(id)
+  usePageLabel(device?.name)
   const { site } = useSite(device?.site_id)
   const { data: portsView, refetch: refetchPorts } = useDevicePorts(id)
   const { events } = usePortEvents({ deviceId: id }, 15)
@@ -174,9 +177,9 @@ export default function DeviceDetail() {
     <div className="space-y-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <Link to={`/network/sites/${device.site_id}`} className="text-sm text-slate-400 hover:text-slate-300">
-            ← {device.site_name}
-          </Link>
+          <BackLink fallbackTo={`/network/sites/${device.site_id}`} fallbackLabel={device.site_name ?? 'Site'} className="text-sm text-slate-400 hover:text-slate-300">
+            {(label) => <>← {label}</>}
+          </BackLink>
           <div className="mt-2 flex flex-wrap items-center gap-3">
             <h1 className="break-words text-4xl font-light text-white">{device.name}</h1>
             <DeviceStatusBadge status={device.status} />

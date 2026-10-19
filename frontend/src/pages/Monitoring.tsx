@@ -40,6 +40,7 @@ import {
   type Section,
 } from '@/utils/monitoringView'
 import type { MonitorGroup } from '@/types'
+import { usePageLabel } from '@/utils/navHistory'
 
 const GROUPS_REFRESH_MS = 30_000
 
@@ -57,6 +58,7 @@ export default function Monitoring() {
   const { groups, refetch: refetchGroups } = useMonitorGroups()
   const { agents, loading: agentsLoading, error: agentsError, refetch: refetchAgents } = useAgents()
   const { devices, loading: devicesLoading, error: devicesError, refetch: refetchDevices } = useDevices()
+  usePageLabel('Monitoring')
   const { sites } = useSites()
   const { usernameFor } = useUsers()
   const { toasts, push } = useToasts()

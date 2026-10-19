@@ -27,6 +27,7 @@ import SiteTrafficCharts from '@/components/network/SiteTrafficCharts'
 import PortEventList from '@/components/network/PortEventList'
 import { CONDITION_LABEL, formatPct, portTitle } from '@/utils/network'
 import type { ApiError } from '@/services/api'
+import { usePageLabel } from '@/utils/navHistory'
 
 function PortRefList({ title, refs, empty, detail }: { title: string; refs: PortRef[]; empty: string; detail: (r: PortRef) => string }) {
   return (
@@ -80,6 +81,7 @@ export default function SiteDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { site, loading, notFound, refetch } = useSite(id)
+  usePageLabel(site?.name)
   const { devices, refetch: refetchDevices } = useDevices({ siteId: id })
   const { remove, busy } = useSiteActions()
   const { data: summary } = useSitePortSummary(id)

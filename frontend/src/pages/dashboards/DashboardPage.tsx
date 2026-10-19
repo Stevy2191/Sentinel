@@ -13,10 +13,12 @@ import RangeOverride from '@/components/dashboards/RangeOverride'
 import DashboardSharingPanel from '@/components/dashboards/DashboardSharingPanel'
 import PublicLinkPanel from '@/components/dashboards/PublicLinkPanel'
 import { isTimeBased, KIOSK_HINT } from '@/utils/dashboards'
+import { usePageLabel } from '@/utils/navHistory'
 
 export default function DashboardPage({ mode }: { mode: 'view' | 'edit' }) {
   const { id } = useParams()
   const { dashboard, setDashboard, loading, notFound, error, refetch } = useDashboard(id)
+  usePageLabel(dashboard?.name)
   const navigate = useNavigate()
   const [override, setOverride] = useState<MetricsRange | ''>('')
   const { currentUser } = useAuthContext()

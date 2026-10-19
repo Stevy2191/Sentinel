@@ -9,6 +9,7 @@ import {
   type IncidentFilters,
   type Incident,
 } from '@/hooks/useIncidents'
+import { usePageLabel } from '@/utils/navHistory'
 
 const PAGE_SIZES = [10, 25, 50, 100]
 
@@ -46,6 +47,7 @@ export default function Incidents() {
   }, [debouncedSearch])
 
   const { monitors } = useMonitors()
+  usePageLabel('Incidents')
   const { incidents, total, loading, error, refetch } = useIncidents(filters)
 
   // Sorted by name so the list is scannable; the API filters by id.

@@ -14,6 +14,7 @@ import { useCardShimmer } from '@/hooks/useCardShimmer'
 import ShimmerStatCard from '@/components/ShimmerStatCard'
 import { REPORT_PERIODS, type ReportPeriod } from '@/utils/reportPeriods'
 import { monitoringPath } from '@/utils/monitoringView'
+import { usePageLabel } from '@/utils/navHistory'
 
 const REFRESH_MS = 30_000
 
@@ -61,6 +62,7 @@ function ResourceMeter({
 export default function Overview() {
   const navigate = useNavigate()
   const { monitors, refetch } = useMonitors()
+  usePageLabel('Overview')
   const agentSummary = useAgentSummary()
   const sslSummary = useSSLSummary()
   const siteSummary = useSiteSummary()

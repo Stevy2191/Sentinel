@@ -6,6 +6,7 @@ import { useAuthContext } from '@/context/AuthContext'
 import { useDashboards } from '@/hooks/useDashboards'
 import NewDashboardModal from '@/components/dashboards/NewDashboardModal'
 import type { Dashboard } from '@/types/dashboards'
+import { usePageLabel } from '@/utils/navHistory'
 
 function DashboardList({ title, items, empty }: { title: string; items: Dashboard[]; empty: string }) {
   return (
@@ -40,6 +41,7 @@ function DashboardList({ title, items, empty }: { title: string; items: Dashboar
 }
 
 export default function Dashboards() {
+  usePageLabel('Dashboards')
   const navigate = useNavigate()
   const { currentUser } = useAuthContext()
   const { dashboards, loading, error } = useDashboards()

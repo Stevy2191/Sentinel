@@ -22,6 +22,8 @@ import {
 } from '@/utils/network'
 import type { ApiError } from '@/services/api'
 import { monitoringPath } from '@/utils/monitoringView'
+import { usePageLabel } from '@/utils/navHistory'
+import BackLink from '@/components/BackLink'
 
 const inputCls =
   'w-32 rounded-md border border-white/10 bg-slate-900/60 px-3 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary-500'
@@ -207,6 +209,7 @@ export default function PortDetail() {
   const { device } = useDevice(id)
   const { site } = useSite(device?.site_id)
   const { data: port, loading, notFound, refetch } = usePort(id, ifIndex)
+  usePageLabel(port ? portTitle(port) : undefined)
   const { events } = usePortEvents({ deviceId: id, ifIndex: ifIndex ? Number(ifIndex) : undefined }, 30)
   const { updatePort, busy } = usePortActions()
   const [error, setError] = useState<string | null>(null)
@@ -240,9 +243,9 @@ export default function PortDetail() {
   return (
     <div className="space-y-8">
       <div>
-        <Link to={`/network/devices/${id}`} className="text-sm text-slate-400 hover:text-slate-300">
-          ← {device?.name ?? 'Device'}
-        </Link>
+        <BackLink fallbackTo={`/network/devices/${id}`} fallbackLabel={device?.name ?? 'Device'} className="text-sm text-slate-400 hover:text-slate-300">
+          {(label) => <>← {label}</>}
+        </BackLink>
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <h1 className="break-words text-4xl font-light text-white">{portTitle(port)}</h1>
           <span className={`rounded-full border px-2.5 py-0.5 text-xs ${PORT_STATE[st].badge}`}>{PORT_STATE[st].label}</span>

@@ -17,6 +17,8 @@ import { useAppConfig } from '@/context/AppConfigContext'
 import type { ApiError } from '@/services/api'
 import { canUseNetTools, toolsQuery } from '@/utils/netTools'
 import { monitoringPath } from '@/utils/monitoringView'
+import { usePageLabel } from '@/utils/navHistory'
+import BackLink from '@/components/BackLink'
 
 /** Label and value, the shape every row in the sidebar takes. */
 function InfoRow({ label, value }: { label: string; value: string | null | undefined }) {
@@ -46,6 +48,7 @@ export default function ServerDetail() {
   const [editing, setEditing] = useState(false)
 
   const agent = detail?.agent
+  usePageLabel(agent?.name)
   const latest = detail?.latest ?? null
 
   // The tab is how someone finds this page again among several open servers,
@@ -106,12 +109,13 @@ export default function ServerDetail() {
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <Link
-            to={monitoringPath('servers')}
-            className="inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white"
-          >
-            <ArrowLeft className="h-4 w-4" /> Back to Monitoring
-          </Link>
+          <BackLink fallbackTo={monitoringPath('servers')} fallbackLabel="Monitoring" className="inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white">
+            {(label) => (
+              <>
+                <ArrowLeft className="h-4 w-4" /> Back to {label}
+              </>
+            )}
+          </BackLink>
           <nav aria-label="Breadcrumb" className="mt-1 text-xs text-slate-600">
             <Link to={monitoringPath('servers')} className="transition hover:text-slate-400">
               Monitoring
