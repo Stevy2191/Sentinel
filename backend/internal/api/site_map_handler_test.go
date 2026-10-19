@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -141,7 +142,24 @@ type mapRig struct {
 	audit   *fakeAudit
 	hub     *stream.Hub
 	sites   *flipSites
+	users   *flipUsers
 	h       *SiteMapHandler
+}
+
+// flipUsers is the users table: a test can demote or delete someone.
+type flipUsers struct {
+	mu    sync.Mutex
+	admin map[uuid.UUID]bool // absent: the user is gone
+}
+
+func (f *flipUsers) GetUserByID(_ context.Context, id uuid.UUID) (*models.User, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	a, ok := f.admin[id]
+	if !ok {
+		return nil, errors.New("user not found")
+	}
+	return &models.User{ID: id, IsAdmin: a}, nil
 }
 
 // flipSites answers site access from fakeMaps' levels, so a test can take
@@ -156,12 +174,22 @@ func newMapRig() *mapRig {
 	r := &mapRig{maps: &fakeMaps{site: uuid.New(), levels: map[uuid.UUID]services.SiteAccessLevel{}, token: strings.Repeat("t", 43), onMap: map[uuid.UUID]bool{}},
 		traffic: &fakeTraffic{}, audit: &fakeAudit{}, hub: stream.NewHub(16)}
 	r.sites = &flipSites{r.maps}
-	r.h = NewSiteMapHandler(r.maps, r.traffic, r.sites, &fakeDevices{}, fakeMapPorts{}, r.hub, r.audit)
+	r.users = &flipUsers{admin: map[uuid.UUID]bool{}}
+	r.h = NewSiteMapHandler(r.maps, r.traffic, r.sites, r.users, &fakeDevices{}, fakeMapPorts{}, r.hub, r.audit)
 	r.h.recheck, r.h.keepAlive = 30*time.Millisecond, time.Hour
 	return r
 }
 
 func (r *mapRig) router(user uuid.UUID, admin bool) *gin.Engine {
+	return r.routerExp(user, admin, time.Now().Add(time.Hour))
+}
+
+func (r *mapRig) routerExp(user uuid.UUID, admin bool, exp time.Time) *gin.Engine {
+	r.users.mu.Lock()
+	if _, ok := r.users.admin[user]; !ok {
+		r.users.admin[user] = admin
+	}
+	r.users.mu.Unlock()
 	gin.SetMode(gin.TestMode)
 	g := gin.New()
 	RegisterPublicSiteMapRoutes(g, r.h)
@@ -170,6 +198,7 @@ func (r *mapRig) router(user uuid.UUID, admin bool) *gin.Engine {
 		c.Set("user_id", user)
 		c.Set("username", "someone")
 		c.Set("is_admin", admin)
+		c.Set("token_exp", exp)
 		c.Next()
 	})
 	RegisterSiteMapRoutes(authed, r.h)
@@ -323,5 +352,34 @@ func TestMapStreamEndsOnRevoke(t *testing.T) {
 	}
 	if !waitClosed(mine, time.Second) {
 		t.Error("the user's stream stayed open after their share was removed")
+	}
+}
+
+// Review: a stream must not outlive its viewer's rights — a demoted admin,
+// a deleted user, or an expired sign-in.
+func TestMapStreamEndsWhenViewerChanges(t *testing.T) {
+	r := newMapRig()
+	admin, gone := uuid.New(), uuid.New()
+	srvA := httptest.NewServer(r.router(admin, true))
+	t.Cleanup(srvA.Close)
+	srvB := httptest.NewServer(r.router(gone, true))
+	t.Cleanup(srvB.Close)
+	srvC := httptest.NewServer(r.routerExp(uuid.New(), true, time.Now().Add(80*time.Millisecond)))
+	t.Cleanup(srvC.Close)
+	path := "/api/v1/network/sites/" + r.maps.site.String() + "/map/stream"
+	a, b, c := openMapStream(t, srvA, path), openMapStream(t, srvB, path), openMapStream(t, srvC, path)
+	for _, s := range []*sseStream{a, b, c} {
+		if f := s.next(t); f.event != "map" {
+			t.Fatalf("first frame = %+v", f)
+		}
+	}
+	r.users.mu.Lock()
+	r.users.admin[admin] = false // demoted: no share, so no access
+	delete(r.users.admin, gone)
+	r.users.mu.Unlock()
+	for name, s := range map[string]*sseStream{"demoted": a, "deleted": b, "expired": c} {
+		if !waitClosed(s, time.Second) {
+			t.Errorf("%s viewer's stream stayed open", name)
+		}
 	}
 }

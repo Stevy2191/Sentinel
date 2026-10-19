@@ -496,6 +496,10 @@ func AuthMiddleware(authService *services.AuthService) gin.HandlerFunc {
 		c.Set("user_id", userID)
 		c.Set("username", claims["username"])
 		c.Set("is_admin", claims["is_admin"])
+		// When the sign-in ends, for long-lived streams to stop with it.
+		if exp, ok := claims["exp"].(float64); ok {
+			c.Set("token_exp", time.Unix(int64(exp), 0))
+		}
 		c.Next()
 	}
 }

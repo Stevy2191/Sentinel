@@ -58,6 +58,7 @@ type SiteMapHandler struct {
 	maps    siteMapStore
 	traffic mapTraffic
 	sites   siteAccessChecker
+	users   adminChecker
 	devices mapDeviceGetter
 	ports   mapPortsReader
 	hub     *stream.Hub
@@ -69,9 +70,9 @@ type SiteMapHandler struct {
 	keepAlive, recheck, topology time.Duration
 }
 
-func NewSiteMapHandler(maps siteMapStore, traffic mapTraffic, sites siteAccessChecker, devices mapDeviceGetter, ports mapPortsReader,
+func NewSiteMapHandler(maps siteMapStore, traffic mapTraffic, sites siteAccessChecker, users adminChecker, devices mapDeviceGetter, ports mapPortsReader,
 	hub *stream.Hub, audit auditRecorder) *SiteMapHandler {
-	return &SiteMapHandler{maps: maps, traffic: traffic, sites: sites, devices: devices, ports: ports, hub: hub, audit: audit,
+	return &SiteMapHandler{maps: maps, traffic: traffic, sites: sites, users: users, devices: devices, ports: ports, hub: hub, audit: audit,
 		keepAlive: stream.KeepAlive, recheck: 10 * time.Second, topology: 5 * time.Minute}
 }
 
@@ -361,8 +362,21 @@ func (h *SiteMapHandler) follow(c *gin.Context) {
 		return
 	}
 	v := viewerFrom(c)
+	exp, _ := c.Get("token_exp")
+	expires, _ := exp.(time.Time)
 	snapshot := func(ctx context.Context) (*services.MapSnapshot, error) { return h.maps.Snapshot(ctx, v, site) }
+	// Each recheck reads the viewer again, so a stream ends with their
+	// rights: their sign-in expiring, their account going, their admin
+	// flag or site share being taken away.
 	allowed := func(ctx context.Context) bool {
+		if !expires.IsZero() && time.Now().After(expires) {
+			return false
+		}
+		u, err := h.users.GetUserByID(ctx, v.UserID)
+		if err != nil || u == nil {
+			return false
+		}
+		v.IsAdmin = u.IsAdmin
 		level, err := h.sites.SiteAccess(ctx, v.UserID, v.IsAdmin, site)
 		return err == nil && level >= services.SiteAccessReadonly
 	}

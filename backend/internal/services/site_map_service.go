@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -111,6 +112,29 @@ type SiteMapService struct {
 	settings  ThresholdSource
 	now       func() time.Time
 	onChange  []func(uuid.UUID)
+
+	// Piece B's placements cover every site and are costly to work out, so
+	// one copy serves every map for placementsTTL.
+	placedMu sync.Mutex
+	placedAt time.Time
+	placed   map[string]l2.Placement
+}
+
+// placementsTTL is how long one reading of piece B's placements is reused.
+const placementsTTL = 10 * time.Second
+
+func (s *SiteMapService) placements(ctx context.Context) (map[string]l2.Placement, error) {
+	s.placedMu.Lock()
+	defer s.placedMu.Unlock()
+	if s.placed != nil && s.now().Sub(s.placedAt) < placementsTTL {
+		return s.placed, nil
+	}
+	p, err := s.endpoints.Placements(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	s.placed, s.placedAt = p, s.now()
+	return p, nil
 }
 
 func NewSiteMapService(db *gorm.DB, sites *SiteService, endpoints mapPlacements, settings ThresholdSource) *SiteMapService {
@@ -171,6 +195,12 @@ type mapWorld struct {
 func onMapType(t string) bool { return t == models.DeviceTypeRouter || t == models.DeviceTypeSwitch }
 
 func (s *SiteMapService) load(ctx context.Context, siteID uuid.UUID) (*mapWorld, error) {
+	return s.loadWith(ctx, siteID, true)
+}
+
+// loadWith reads a site's map; without links it reads only the devices and
+// their places (enough to say which devices are drawn).
+func (s *SiteMapService) loadWith(ctx context.Context, siteID uuid.UUID, links bool) (*mapWorld, error) {
 	db := s.db.WithContext(ctx)
 	site, err := s.sites.Get(ctx, siteID)
 	if errors.Is(err, ErrSiteNotFound) {
@@ -210,7 +240,7 @@ func (s *SiteMapService) load(ctx context.Context, siteID uuid.UUID) (*mapWorld,
 		d := w.devices[id]
 		in.Devices = append(in.Devices, sitemap.Device{ID: id, Name: d.Name, SysName: d.SysName, SysDescr: d.SysDescr})
 	}
-	if len(ids) == 0 {
+	if len(ids) == 0 || !links {
 		return w, nil
 	}
 
@@ -262,7 +292,7 @@ func (s *SiteMapService) load(ctx context.Context, siteID uuid.UUID) (*mapWorld,
 
 	// Every placement at once: the guesses, and each switch's count of the
 	// end devices plugged into it.
-	w.placed, err = s.endpoints.Placements(ctx, nil)
+	w.placed, err = s.placements(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("placing MACs: %w", err)
 	}
@@ -467,14 +497,19 @@ func (s *SiteMapService) PublicSnapshot(ctx context.Context, siteID uuid.UUID) (
 	return m, nil
 }
 
-// BoundPorts is the rate-end port of each visible link: what the fast poll
-// reads while the map is watched.
-func (s *SiteMapService) BoundPorts(ctx context.Context, siteID uuid.UUID) ([]BoundPort, error) {
+// BoundPorts is the rate-end port of each visible link (what the fast poll
+// reads while the map is watched) and every device drawn on the map (whose
+// statuses each tick carries).
+func (s *SiteMapService) BoundPorts(ctx context.Context, siteID uuid.UUID) ([]BoundPort, []uuid.UUID, error) {
 	w, err := s.load(ctx, siteID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	snap := s.build(ctx, w, SiteAccessReadonly, true)
+	devices := make([]uuid.UUID, 0, len(snap.Devices))
+	for _, d := range snap.Devices {
+		devices = append(devices, d.ID)
+	}
 	var out []BoundPort
 	for _, l := range snap.Links {
 		e := l.A
@@ -487,5 +522,5 @@ func (s *SiteMapService) BoundPorts(ctx context.Context, siteID uuid.UUID) ([]Bo
 		port := w.ports[sitemap.End{DeviceID: e.DeviceID, IfIndex: *e.IfIndex}]
 		out = append(out, BoundPort{DeviceID: e.DeviceID, IfIndex: *e.IfIndex, InterfaceID: port.ID, LinkKey: l.Key})
 	}
-	return out, nil
+	return out, devices, nil
 }

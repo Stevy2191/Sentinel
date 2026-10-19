@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"github.com/Stevy2191/Sentinel/backend/internal/l2"
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
 	"github.com/Stevy2191/Sentinel/backend/internal/portmon"
 	"github.com/Stevy2191/Sentinel/backend/internal/sitemap"
@@ -418,7 +419,7 @@ func TestOnChangeCalled(t *testing.T) {
 func TestBoundPortsAreRateEnds(t *testing.T) {
 	db := testdb.Open(t)
 	h := seedHomeMap(t, db)
-	ps, err := newMapService(db).BoundPorts(context.Background(), h.site)
+	ps, _, err := newMapService(db).BoundPorts(context.Background(), h.site)
 	testdb.Must(t, err)
 	if len(ps) != 1 || ps[0].DeviceID != h.sw || ps[0].IfIndex != 51 {
 		t.Fatalf("bound ports = %+v, want QuantumLink 51", ps)
@@ -426,3 +427,38 @@ func TestBoundPortsAreRateEnds(t *testing.T) {
 }
 
 var _ = time.Second
+
+type countingPlacements struct {
+	inner mapPlacements
+	calls int
+}
+
+func (c *countingPlacements) Placements(ctx context.Context, macs []string) (map[string]l2.Placement, error) {
+	c.calls++
+	return c.inner.Placements(ctx, macs)
+}
+
+// Review: the org-wide L2 placements are read at most once per few seconds,
+// and not at all to resolve a public stand-in id.
+func TestSnapshotPlacementsCached(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	h := seedHomeMap(t, db)
+	count := &countingPlacements{inner: NewEndpointService(db, NewSiteService(db), &fakeResolver{})}
+	svc := NewSiteMapService(db, NewSiteService(db), count, fixedThresholds{})
+	for i := 0; i < 3; i++ {
+		_, err := svc.Snapshot(ctx, h.admin, h.site)
+		testdb.Must(t, err)
+	}
+	_, _, err := svc.BoundPorts(ctx, h.site)
+	testdb.Must(t, err)
+	if count.calls != 1 {
+		t.Errorf("placements read %d times, want 1", count.calls)
+	}
+	pub, err := svc.PublicSnapshot(ctx, h.site)
+	testdb.Must(t, err)
+	before := count.calls
+	if _, ok, _ := svc.PublicDevice(ctx, h.site, pub.Devices[0].ID); !ok || count.calls != before {
+		t.Errorf("PublicDevice: ok %v, placements +%d", ok, count.calls-before)
+	}
+}

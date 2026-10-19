@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"log"
 	"sync"
 	"time"
@@ -25,6 +26,9 @@ const (
 	// boundTTL is how long a site's linked ports are cached between reads
 	// of the map.
 	boundTTL = time.Minute
+	// tickDeadline bounds one tick, so a device that stops answering can't
+	// hold up the next one (or any other map's).
+	tickDeadline = 8 * time.Second
 )
 
 // LinkRate is one link's traffic, from its rate end's device: In is what
@@ -49,7 +53,9 @@ type MapTraffic struct {
 // LinkPollerDeps is what the fast poll needs from the rest of Sentinel.
 type LinkPollerDeps struct {
 	Maps interface {
-		BoundPorts(ctx context.Context, siteID uuid.UUID) ([]BoundPort, error)
+		// BoundPorts is the ports at the map's link ends, and every device
+		// drawn on the map.
+		BoundPorts(ctx context.Context, siteID uuid.UUID) ([]BoundPort, []uuid.UUID, error)
 	}
 	Devices interface {
 		Get(ctx context.Context, id uuid.UUID) (*DeviceView, error)
@@ -73,16 +79,19 @@ type portRef struct {
 }
 
 type boundCache struct {
-	at    time.Time
-	ports []BoundPort
+	at      time.Time
+	ports   []BoundPort
+	devices []uuid.UUID
 }
 
 // LinkPoller reads the ports at the ends of a site map's links every 10 s,
 // but only while someone is watching that map.
 type LinkPoller struct {
-	d      LinkPollerDeps
-	now    func() time.Time
-	logger *log.Logger
+	d           LinkPollerDeps
+	now         func() time.Time
+	logger      *log.Logger
+	tickTimeout time.Duration
+	sem         chan struct{} // fast polls in flight, across every map
 
 	mu       sync.Mutex
 	watchers map[uuid.UUID]int
@@ -95,7 +104,8 @@ type LinkPoller struct {
 }
 
 func NewLinkPoller(d LinkPollerDeps) *LinkPoller {
-	return &LinkPoller{d: d, now: time.Now, logger: log.Default(), watchers: map[uuid.UUID]int{}, lastSeen: map[uuid.UUID]time.Time{},
+	return &LinkPoller{d: d, now: time.Now, logger: log.Default(), tickTimeout: tickDeadline, sem: make(chan struct{}, fastWorkers),
+		watchers: map[uuid.UUID]int{}, lastSeen: map[uuid.UUID]time.Time{},
 		readings: map[portRef]*portmon.Reading{}, rates: map[portRef]LinkRate{}, latest: map[uuid.UUID]MapTraffic{},
 		bound: map[uuid.UUID]boundCache{}, busy: map[uuid.UUID]bool{}}
 }
@@ -164,45 +174,64 @@ func (p *LinkPoller) Run(ctx context.Context) {
 	}
 }
 
-func (p *LinkPoller) boundPorts(ctx context.Context, siteID uuid.UUID, now time.Time) []BoundPort {
+func (p *LinkPoller) boundPorts(ctx context.Context, siteID uuid.UUID, now time.Time) ([]BoundPort, []uuid.UUID) {
 	p.mu.Lock()
 	c, ok := p.bound[siteID]
 	p.mu.Unlock()
 	if ok && now.Sub(c.at) < boundTTL {
-		return c.ports
+		return c.ports, c.devices
 	}
-	ports, err := p.d.Maps.BoundPorts(ctx, siteID)
+	ports, devices, err := p.d.Maps.BoundPorts(ctx, siteID)
 	if err != nil {
 		p.logger.Printf("[sitemap] linked ports of site %s: %v", siteID, err)
-		return c.ports
+		return c.ports, c.devices
 	}
 	p.mu.Lock()
-	p.bound[siteID] = boundCache{at: now, ports: ports}
+	p.bound[siteID] = boundCache{at: now, ports: ports, devices: devices}
 	p.mu.Unlock()
-	return ports
+	return ports, devices
 }
 
-// Tick polls every watched site once and publishes its traffic.
+// Tick polls every watched site once, side by side and within a deadline,
+// and publishes each one's traffic.
 func (p *LinkPoller) Tick(ctx context.Context) {
 	now := p.now()
+	ctx, cancel := context.WithTimeout(ctx, p.tickTimeout)
+	defer cancel()
+	var wg sync.WaitGroup
 	for _, site := range p.watchedSites(now) {
-		ports := p.boundPorts(ctx, site, now)
+		wg.Add(1)
+		go func(site uuid.UUID) {
+			defer wg.Done()
+			p.tickSite(ctx, site, now)
+		}(site)
+	}
+	wg.Wait()
+}
+
+func (p *LinkPoller) tickSite(ctx context.Context, site uuid.UUID, now time.Time) {
+	{
+		ports, mapDevices := p.boundPorts(ctx, site, now)
 		byDevice := map[uuid.UUID][]int{}
 		for _, bp := range ports {
 			byDevice[bp.DeviceID] = append(byDevice[bp.DeviceID], bp.IfIndex)
 		}
 		statuses := map[uuid.UUID]string{}
 		var smu sync.Mutex
-		sem := make(chan struct{}, fastWorkers)
 		var wg sync.WaitGroup
 		for dev, indexes := range byDevice {
 			if !p.claim(dev) {
 				continue
 			}
 			wg.Add(1)
-			sem <- struct{}{}
 			go func(dev uuid.UUID, indexes []int) {
-				defer func() { <-sem; p.release(dev); wg.Done() }()
+				defer func() { p.release(dev); wg.Done() }()
+				select {
+				case p.sem <- struct{}{}:
+				case <-ctx.Done():
+					return
+				}
+				defer func() { <-p.sem }()
 				if status := p.pollDevice(ctx, dev, indexes, now); status != "" {
 					smu.Lock()
 					statuses[dev] = status
@@ -211,6 +240,16 @@ func (p *LinkPoller) Tick(ctx context.Context) {
 			}(dev, indexes)
 		}
 		wg.Wait()
+		// Every device on the map gets its status, measured end or not: the
+		// map is how people see what's down.
+		for _, dev := range mapDevices {
+			if _, ok := statuses[dev]; ok {
+				continue
+			}
+			if d, err := p.d.Devices.Get(ctx, dev); err == nil {
+				statuses[dev] = d.Status
+			}
+		}
 		t := MapTraffic{SiteID: site, At: now.UTC(), Links: map[string]LinkRate{}, Devices: statuses}
 		p.mu.Lock()
 		for _, bp := range ports {
@@ -270,7 +309,15 @@ func (p *LinkPoller) pollDevice(ctx context.Context, dev uuid.UUID, indexes []in
 		indexes = indexes[:maxPortsPerDevice]
 	}
 	uptime := int64(-1)
-	if pdus, err := p.d.Client.Get(ctx, target, []string{snmp.OIDSysUpTime}); err == nil && len(pdus) == 1 {
+	pdus, err := p.d.Client.Get(ctx, target, []string{snmp.OIDSysUpTime})
+	var refused *snmp.AgentError
+	switch {
+	case errors.As(err, &refused):
+		// It answered, it just won't give its uptime: read the ports anyway.
+	case err != nil:
+		// Not answering: don't spend the tick on its counters too.
+		return d.Status
+	case len(pdus) == 1:
 		if n, ok := pdus[0].Number(); ok {
 			uptime = int64(n / 100)
 		}
@@ -330,7 +377,7 @@ func (p *LinkPoller) Latest(ctx context.Context, siteID uuid.UUID) MapTraffic {
 	}
 	now := p.now()
 	out := MapTraffic{SiteID: siteID, At: now.UTC(), Links: map[string]LinkRate{}, Devices: map[uuid.UUID]string{}}
-	ports := p.boundPorts(ctx, siteID, now)
+	ports, _ := p.boundPorts(ctx, siteID, now)
 	ids := make([]uuid.UUID, 0, len(ports))
 	for _, bp := range ports {
 		ids = append(ids, bp.InterfaceID)

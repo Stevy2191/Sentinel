@@ -152,7 +152,7 @@ func PublicTraffic(siteID uuid.UUID, t MapTraffic) MapTraffic {
 
 // PublicDevice is the map device a public map's stand-in id stands for.
 func (s *SiteMapService) PublicDevice(ctx context.Context, siteID, alias uuid.UUID) (uuid.UUID, bool, error) {
-	w, err := s.load(ctx, siteID)
+	w, err := s.loadWith(ctx, siteID, false)
 	if err != nil {
 		return uuid.Nil, false, err
 	}

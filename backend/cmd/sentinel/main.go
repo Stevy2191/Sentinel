@@ -340,7 +340,7 @@ func run() error {
 	mapHub := stream.NewHub(64)
 	linkPoller := services.NewLinkPoller(services.LinkPollerDeps{Maps: siteMapService, Devices: deviceService, Targets: devicePoller,
 		HC: portMonitor, Live: portService, Client: snmpClient})
-	siteMapHandler := api.NewSiteMapHandler(siteMapService, linkPoller, siteService, deviceService, portService, mapHub, auditService)
+	siteMapHandler := api.NewSiteMapHandler(siteMapService, linkPoller, siteService, authService, deviceService, portService, mapHub, auditService)
 	linkPoller.SetPublish(siteMapHandler.PublishTraffic)
 	siteMapService.OnChange(siteMapHandler.Changed)
 

@@ -18,7 +18,10 @@ import (
 // fakeCounters answers sysUpTime and the IF-MIB stats OIDs from a table of
 // in/out octets per ifIndex, and counts requests.
 type fakeCounters struct {
-	mu       sync.Mutex
+	mu sync.Mutex
+	// block: requests to this host wait until their context ends.
+	block    string
+	blocked  int // requests to the blocked host
 	in, out  map[int]uint64
 	uptime   uint64
 	gets     int
@@ -35,8 +38,14 @@ func (f *fakeCounters) Walk(context.Context, snmp.Target, string) ([]snmp.PDU, e
 	return nil, nil
 }
 
-func (f *fakeCounters) Get(_ context.Context, _ snmp.Target, oids []string) ([]snmp.PDU, error) {
+func (f *fakeCounters) Get(ctx context.Context, t snmp.Target, oids []string) ([]snmp.PDU, error) {
 	f.mu.Lock()
+	if f.block != "" && t.Host == f.block {
+		f.blocked++
+		f.mu.Unlock()
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	defer f.mu.Unlock()
 	f.gets++
 	var out []snmp.PDU
@@ -71,12 +80,21 @@ type fakeLinkDeps struct {
 	devices map[uuid.UUID]*DeviceView
 	hc      map[uuid.UUID][2]bool // hc, known
 	live    map[uuid.UUID]LivePort
+	extra   map[uuid.UUID][]uuid.UUID // map devices with no bound port
 	mu      sync.Mutex
 	pub     []MapTraffic
 }
 
-func (f *fakeLinkDeps) BoundPorts(_ context.Context, site uuid.UUID) ([]BoundPort, error) {
-	return f.ports[site], nil
+func (f *fakeLinkDeps) BoundPorts(_ context.Context, site uuid.UUID) ([]BoundPort, []uuid.UUID, error) {
+	seen := map[uuid.UUID]bool{}
+	var devs []uuid.UUID
+	for _, p := range f.ports[site] {
+		if !seen[p.DeviceID] {
+			seen[p.DeviceID] = true
+			devs = append(devs, p.DeviceID)
+		}
+	}
+	return f.ports[site], append(devs, f.extra[site]...), nil
 }
 func (f *fakeLinkDeps) Get(_ context.Context, id uuid.UUID) (*DeviceView, error) {
 	if d, ok := f.devices[id]; ok {
@@ -114,7 +132,7 @@ type linkRig struct {
 func newLinkRig(t *testing.T, nPorts int) *linkRig {
 	t.Helper()
 	r := &linkRig{site: uuid.New(), dev: uuid.New(), client: newFakeCounters(), clock: time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)}
-	r.deps = &fakeLinkDeps{ports: map[uuid.UUID][]BoundPort{}, devices: map[uuid.UUID]*DeviceView{}, hc: map[uuid.UUID][2]bool{}, live: map[uuid.UUID]LivePort{}}
+	r.deps = &fakeLinkDeps{ports: map[uuid.UUID][]BoundPort{}, devices: map[uuid.UUID]*DeviceView{}, hc: map[uuid.UUID][2]bool{}, live: map[uuid.UUID]LivePort{}, extra: map[uuid.UUID][]uuid.UUID{}}
 	for i := 1; i <= nPorts; i++ {
 		r.deps.ports[r.site] = append(r.deps.ports[r.site], BoundPort{DeviceID: r.dev, IfIndex: i, InterfaceID: uuid.New(), LinkKey: fmt.Sprintf("link-%d", i)})
 	}
@@ -239,5 +257,48 @@ func TestLinkPollerLatestFallsBackToStored(t *testing.T) {
 	got := r.poller.Latest(context.Background(), r.site).Links["link-1"]
 	if got.InBps == nil || *got.InBps != 5e6 || got.OperUp == nil || !*got.OperUp {
 		t.Fatalf("fallback = %+v, want the stored 5 Mb/s", got)
+	}
+}
+
+// Review: a device that stops answering must not stall every map's traffic.
+func TestLinkPollerSlowDeviceDoesNotStall(t *testing.T) {
+	r := newLinkRig(t, 1)
+	other := uuid.New()
+	dev2 := uuid.New()
+	r.deps.ports[other] = []BoundPort{{DeviceID: dev2, IfIndex: 1, InterfaceID: uuid.New(), LinkKey: "other-1"}}
+	r.deps.devices[dev2] = &DeviceView{Device: models.Device{ID: dev2, Host: "10.0.0.9", Enabled: true, Status: models.DeviceStatusUp}}
+	r.deps.hc[dev2] = [2]bool{true, true}
+	r.client.block = "10.0.0.2" // the first site's switch hangs
+	r.poller.tickTimeout = 150 * time.Millisecond
+	defer r.poller.Watch(r.site)()
+	defer r.poller.Watch(other)()
+	start := time.Now()
+	r.tick(t, 10*time.Second)
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("tick took %v with one device hanging", d)
+	}
+	if _, ok := r.poller.Latest(context.Background(), other).Links["other-1"]; !ok {
+		t.Error("the other site's traffic wasn't published")
+	}
+	r.client.mu.Lock()
+	hung := r.client.blocked
+	r.client.mu.Unlock()
+	if hung != 1 {
+		t.Errorf("%d requests to the hanging device, want the uptime GET only", hung)
+	}
+}
+
+// Review: every device on the map gets its status each tick, not only those
+// whose port is measured.
+func TestLinkPollerStatusesForAllMapDevices(t *testing.T) {
+	r := newLinkRig(t, 1)
+	leaf := uuid.New()
+	r.deps.extra[r.site] = []uuid.UUID{leaf}
+	r.deps.devices[leaf] = &DeviceView{Device: models.Device{ID: leaf, Status: models.DeviceStatusDown}}
+	defer r.poller.Watch(r.site)()
+	r.tick(t, 10*time.Second)
+	got := r.poller.Latest(context.Background(), r.site).Devices
+	if got[leaf] != models.DeviceStatusDown || got[r.dev] != models.DeviceStatusUp {
+		t.Fatalf("statuses = %v, want the leaf down and the switch up", got)
 	}
 }
