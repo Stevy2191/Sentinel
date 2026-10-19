@@ -518,6 +518,10 @@ func run() error {
 	// MAC, LLDP and ARP tables every five minutes, for Find a device and
 	// the switch maps; purged after 30 days by the nightly maintenance.
 	l2Monitor := services.NewL2Monitor(db, snmpClient)
+	// After each L2 poll, mark the device's ports as network links or WAN
+	// from what it found (never over a role a person set).
+	portRoles := services.NewPortRoleService(db)
+	l2Monitor.SetAfterPoll(portRoles.Apply)
 	devicePoller.SetL2(l2Monitor)
 	devicePoller.SetUPS(services.NewUPSMonitor(metricsStore, incidentService, notificationManager, snmpClient, settingsService, portService))
 	devicePoller.SetProfiles(services.NewProfileMonitor(profileService, metricsStore, incidentService, notificationManager, snmpClient, portService))

@@ -7,7 +7,6 @@ import (
 	"github.com/Stevy2191/Sentinel/backend/internal/snmp"
 )
 
-
 func TestParseLAGDot3ad(t *testing.T) {
 	r := OIDDot3adAttachedAgg
 	got := ParseLAG([]snmp.PDU{pdu(r+".1", int64(0)), pdu(r+".49", int64(66)), pdu(r+".50", int64(66))}, nil, func(int) bool { return false })

@@ -18,6 +18,9 @@ import (
 type Device struct {
 	ID                      uuid.UUID
 	Name, SysName, SysDescr string
+	// Host is the address Sentinel polls it on; a CDP neighbour's address
+	// may match it.
+	Host string
 }
 
 // Port is one of a map device's interfaces.
@@ -42,7 +45,10 @@ type Neighbor struct {
 	DeviceID                              uuid.UUID
 	IfIndex                               int
 	ChassisID, SysName, PortID, PortDescr string
-	LastSeen                              time.Time
+	// Protocol is "lldp" or "cdp" ("" reads as LLDP); Address is the IPv4
+	// address a CDP neighbour sent.
+	Protocol, Address string
+	LastSeen          time.Time
 }
 
 // PortLink is a port's "Network link" setting.
