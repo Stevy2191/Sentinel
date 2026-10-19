@@ -35,6 +35,12 @@ func TestDBPublicLinkLeaksNothing(t *testing.T) {
 	port := newPort(t, db, dev, 1, "Gi1/0/1", "uplink")
 	testdb.Exec(t, db, `UPDATE device_interfaces SET mac = 'aa:bb:cc:dd:ee:ff' WHERE id = ?`, port)
 	ups := newDevice(t, db, site, "ups-1", "10.77.0.50")
+	// A switch and a router, so the site map widget draws something to trim.
+	testdb.Exec(t, db, `UPDATE devices SET device_type = 'switch' WHERE id = ?`, dev)
+	gw := newDevice(t, db, site, "gw", "10.77.0.1")
+	testdb.Exec(t, db, `UPDATE devices SET device_type = 'router' WHERE id = ?`, gw)
+	gwPort := newPort(t, db, gw, 2, "eth1", "uplink")
+	testdb.Exec(t, db, `UPDATE device_interfaces SET role = 'uplink', neighbor_device_id = ?, neighbor_if_index = 1 WHERE id = ?`, dev, gwPort)
 	testdb.Exec(t, db, `UPDATE device_interfaces SET role = 'uplink', neighbor_device_id = ? WHERE id = ?`, ups, port)
 	testdb.Exec(t, db, `UPDATE devices SET device_type = 'ups' WHERE id = ?`, ups)
 	mon := newMonitor(t, db, admin, "Intranet", "https://intranet.secret.test/health")
@@ -58,6 +64,7 @@ func TestDBPublicLinkLeaksNothing(t *testing.T) {
 		"port_grid":      fmt.Sprintf(`{"device_id":"%s"}`, dev),
 		"device_health":  fmt.Sprintf(`{"device_id":"%s"}`, dev),
 		"site_power":     fmt.Sprintf(`{"site_id":"%s"}`, site),
+		"site_map":       fmt.Sprintf(`{"site_id":"%s"}`, site),
 		"top_n":          fmt.Sprintf(`{"site_id":"%s","measure":"traffic","n":5,"range":"1h"}`, site),
 		"event_log":      fmt.Sprintf(`{"site_id":"%s","limit":10}`, site),
 		"device_table":   fmt.Sprintf(`{"site_id":"%s"}`, site),
@@ -78,7 +85,7 @@ func TestDBPublicLinkLeaksNothing(t *testing.T) {
 	publish(t, db, dash, admin)
 
 	secrets := []string{"10.77.0.9", "10.77.0.50", "i/o timeout", "intranet.secret.test", "cannot reach", "call Bob", "connection refused",
-		"aa:bb:cc:dd:ee:ff", site.String(), dev.String(), ups.String(), port.String(), mon.String(), agent.String(), incident.String()}
+		"aa:bb:cc:dd:ee:ff", site.String(), dev.String(), ups.String(), gw.String(), "10.77.0.1", port.String(), mon.String(), agent.String(), incident.String()}
 
 	d, err := svc.Get(ctx, Viewer{UserID: admin, IsAdmin: true}, dash)
 	testdb.Must(t, err)
@@ -104,6 +111,9 @@ func TestDBPublicLinkLeaksNothing(t *testing.T) {
 		resp, err := resolver.ResolvePublic(ctx, &d.Dashboard, w)
 		testdb.Must(t, err)
 		check(pw.Type+" widget", resp)
+		if pw.Type == "site_map" && resp.State != "ok" {
+			t.Errorf("site_map widget state %q, want ok so its trim is really checked", resp.State)
+		}
 		if pw.Type == "device_table" {
 			raw, err := json.Marshal(resp)
 			testdb.Must(t, err)

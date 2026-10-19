@@ -54,7 +54,9 @@ func (f *fakeMaps) PublicSnapshot(context.Context, uuid.UUID) (*services.MapSnap
 	s.Devices[0].Host = ""
 	return s, nil
 }
-func (f *fakeMaps) OnMap(_ context.Context, _, dev uuid.UUID) (bool, error) { return f.onMap[dev], nil }
+func (f *fakeMaps) PublicDevice(_ context.Context, _, alias uuid.UUID) (uuid.UUID, bool, error) {
+	return alias, f.onMap[alias], nil
+}
 func (f *fakeMaps) edit(v services.Viewer, site uuid.UUID) error {
 	switch l := f.level(v); {
 	case site != f.site || l == services.SiteAccessNone:

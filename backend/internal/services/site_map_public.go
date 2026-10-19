@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
+	"github.com/Stevy2191/Sentinel/backend/internal/sitemap"
 )
 
 // mapTokenLen is a base64url-encoded 32-byte token, as dashboards use.
@@ -102,4 +103,63 @@ func (s *SiteMapService) ResolveToken(ctx context.Context, token string) (uuid.U
 		return uuid.Nil, ErrSiteMapNotFound
 	}
 	return ids[0], nil
+}
+
+// publicID is a device's stand-in id on a public map: the same every time
+// for that site and device, but not the device's own id, which public views
+// never show (as public dashboards don't).
+func publicID(siteID, id uuid.UUID) uuid.UUID { return uuid.NewSHA1(siteID, id[:]) }
+
+// publicKey is a link key with its devices' stand-in ids.
+func publicKey(siteID uuid.UUID, key string) string {
+	a, b, ok := parseLinkKey(key)
+	if !ok {
+		return ""
+	}
+	a.DeviceID, b.DeviceID = publicID(siteID, a.DeviceID), publicID(siteID, b.DeviceID)
+	return sitemap.KeyOf(a, b)
+}
+
+// aliasSnapshot swaps every id in a public map for its stand-in.
+func aliasSnapshot(m *MapSnapshot) {
+	site := m.SiteID
+	for i := range m.Devices {
+		m.Devices[i].ID = publicID(site, m.Devices[i].ID)
+	}
+	for i := range m.Links {
+		l := &m.Links[i]
+		l.Key = publicKey(site, l.Key)
+		l.A.DeviceID, l.B.DeviceID = publicID(site, l.A.DeviceID), publicID(site, l.B.DeviceID)
+		l.ManualID = nil
+	}
+	m.SiteID = uuid.Nil
+}
+
+// PublicTraffic is a site's traffic as its public map shows it: keyed by the
+// public link keys, statuses by stand-in ids, and no site id.
+func PublicTraffic(siteID uuid.UUID, t MapTraffic) MapTraffic {
+	out := MapTraffic{At: t.At, Links: make(map[string]LinkRate, len(t.Links)), Devices: make(map[uuid.UUID]string, len(t.Devices))}
+	for k, r := range t.Links {
+		if pk := publicKey(siteID, k); pk != "" {
+			out.Links[pk] = r
+		}
+	}
+	for id, st := range t.Devices {
+		out.Devices[publicID(siteID, id)] = st
+	}
+	return out
+}
+
+// PublicDevice is the map device a public map's stand-in id stands for.
+func (s *SiteMapService) PublicDevice(ctx context.Context, siteID, alias uuid.UUID) (uuid.UUID, bool, error) {
+	w, err := s.load(ctx, siteID)
+	if err != nil {
+		return uuid.Nil, false, err
+	}
+	for id := range w.onMap {
+		if !w.positions[id].Hidden && publicID(siteID, id) == alias {
+			return id, true, nil
+		}
+	}
+	return uuid.Nil, false, nil
 }

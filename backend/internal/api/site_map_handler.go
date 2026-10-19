@@ -22,7 +22,7 @@ import (
 type siteMapStore interface {
 	Snapshot(ctx context.Context, v services.Viewer, siteID uuid.UUID) (*services.MapSnapshot, error)
 	PublicSnapshot(ctx context.Context, siteID uuid.UUID) (*services.MapSnapshot, error)
-	OnMap(ctx context.Context, siteID, deviceID uuid.UUID) (bool, error)
+	PublicDevice(ctx context.Context, siteID, alias uuid.UUID) (uuid.UUID, bool, error)
 	SetPositions(ctx context.Context, v services.Viewer, siteID uuid.UUID, ps []services.PositionInput) error
 	SetDevice(ctx context.Context, v services.Viewer, siteID, deviceID uuid.UUID, hidden, added *bool) error
 	AddLink(ctx context.Context, v services.Viewer, siteID uuid.UUID, a, b sitemap.End) (*models.SiteMapLink, error)
@@ -366,13 +366,21 @@ func (h *SiteMapHandler) follow(c *gin.Context) {
 		level, err := h.sites.SiteAccess(ctx, v.UserID, v.IsAdmin, site)
 		return err == nil && level >= services.SiteAccessReadonly
 	}
-	h.serveStream(c, site, snapshot, allowed)
+	h.serveStream(c, site, snapshot, allowed, nil)
 }
 
 // serveStream sends the map, then the latest traffic, then whatever the hub
 // brings: traffic as it is, and a fresh map after each edit and every few
-// minutes. It ends when the viewer may no longer see the map.
-func (h *SiteMapHandler) serveStream(c *gin.Context, site uuid.UUID, snapshot func(context.Context) (*services.MapSnapshot, error), allowed func(context.Context) bool) {
+// minutes. It ends when the viewer may no longer see the map. public, when
+// set, rewrites traffic for a public map (its stand-in ids).
+func (h *SiteMapHandler) serveStream(c *gin.Context, site uuid.UUID, snapshot func(context.Context) (*services.MapSnapshot, error),
+	allowed func(context.Context) bool, public func(services.MapTraffic) services.MapTraffic) {
+	traffic := func(t services.MapTraffic) services.MapTraffic {
+		if public != nil {
+			return public(t)
+		}
+		return t
+	}
 	ctx := c.Request.Context()
 	first, err := snapshot(ctx)
 	if err != nil {
@@ -389,7 +397,7 @@ func (h *SiteMapHandler) serveStream(c *gin.Context, site uuid.UUID, snapshot fu
 		respondInternal(c, "siteMap.stream", err)
 		return
 	}
-	if sendSSEJSON(w, "map", first) != nil || sendSSEJSON(w, "traffic", h.traffic.Latest(ctx, site)) != nil {
+	if sendSSEJSON(w, "map", first) != nil || sendSSEJSON(w, "traffic", traffic(h.traffic.Latest(ctx, site))) != nil {
 		return
 	}
 	sendMap := func() bool {
@@ -432,6 +440,13 @@ func (h *SiteMapHandler) serveStream(c *gin.Context, site uuid.UUID, snapshot fu
 			}
 			if m.Event == "changed" {
 				if !sendMap() {
+					return
+				}
+				continue
+			}
+			if public != nil && m.Event == "traffic" {
+				var t services.MapTraffic
+				if json.Unmarshal(m.Data, &t) != nil || sendSSEJSON(w, "traffic", public(t)) != nil {
 					return
 				}
 				continue

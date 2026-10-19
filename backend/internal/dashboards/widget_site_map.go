@@ -64,5 +64,9 @@ func (w siteMapWidget) Resolve(ctx context.Context, _ json.RawMessage, in Resolv
 	m.CanEdit, m.IsAdmin = false, false
 	m.HiddenDevices, m.HiddenLinks, m.Candidates = []services.MapDevice{}, []services.MapLink{}, []services.MapDevice{}
 	w.maps.Touch(site)
-	return SiteMapData{Map: m, Traffic: w.maps.Latest(ctx, site)}, nil
+	t := w.maps.Latest(ctx, site)
+	if in.Viewer.Public {
+		t = services.PublicTraffic(site, t)
+	}
+	return SiteMapData{Map: m, Traffic: t}, nil
 }

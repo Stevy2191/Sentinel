@@ -455,23 +455,16 @@ func (s *SiteMapService) Snapshot(ctx context.Context, v Viewer, siteID uuid.UUI
 }
 
 // PublicSnapshot is the map a public link shows: names, statuses and links,
-// with no addresses, status details or end-device counts, and nothing to edit.
+// with no addresses, status details or end-device counts, nothing to edit,
+// and stand-in ids in place of the devices' and site's own.
 func (s *SiteMapService) PublicSnapshot(ctx context.Context, siteID uuid.UUID) (*MapSnapshot, error) {
 	w, err := s.load(ctx, siteID)
 	if err != nil {
 		return nil, err
 	}
-	return s.build(ctx, w, SiteAccessReadonly, true), nil
-}
-
-// OnMap reports whether a device is drawn on the site's map (for the public
-// map's ports route).
-func (s *SiteMapService) OnMap(ctx context.Context, siteID, deviceID uuid.UUID) (bool, error) {
-	w, err := s.load(ctx, siteID)
-	if err != nil {
-		return false, err
-	}
-	return w.onMap[deviceID] && !w.positions[deviceID].Hidden, nil
+	m := s.build(ctx, w, SiteAccessReadonly, true)
+	aliasSnapshot(m)
+	return m, nil
 }
 
 // BoundPorts is the rate-end port of each visible link: what the fast poll

@@ -106,6 +106,7 @@ func realDeps(t *testing.T, db *gorm.DB) Deps {
 	devices := services.NewDeviceService(db, services.NewSNMPCredentialService(db), incidents)
 	devices.SetMetricsStore(metrics)
 	profiles := services.NewProfileService(db)
+	maps := services.NewSiteMapService(db, services.NewSiteService(db), services.NewEndpointService(db, services.NewSiteService(db), nil), services.NewSettingsService(db))
 	return Deps{
 		Metrics: metrics, Ports: ports, Devices: devices,
 		Health: func(ctx context.Context, d *services.DeviceView) (*services.DeviceHealthView, error) {
@@ -113,6 +114,10 @@ func realDeps(t *testing.T, db *gorm.DB) Deps {
 		},
 		Incidents: incidents, Monitors: services.NewMonitorService(db),
 		Checks: services.NewCheckService(db), Agents: services.NewAgentService(db),
+		SiteMaps: struct {
+			*services.SiteMapService
+			*services.LinkPoller
+		}{maps, services.NewLinkPoller(services.LinkPollerDeps{Maps: maps, Live: ports})},
 	}
 }
 

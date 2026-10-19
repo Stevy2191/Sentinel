@@ -18,7 +18,7 @@ const mapLinkGone = "This map link is no longer available"
 
 // RegisterPublicSiteMapRoutes mounts a site map's public link: the map, its
 // live stream and its devices' ports for the realistic drawings, all trimmed
-// of addresses and details, and rate-limited by address as dashboards are.
+// of addresses and details and using stand-in ids, and rate-limited by address as dashboards are.
 func RegisterPublicSiteMapRoutes(router *gin.Engine, h *SiteMapHandler) {
 	limiter := NewRateLimiter(600, time.Minute, 120)
 	g := router.Group("/api/v1/public/maps", limiter.Middleware("public-map", ByIP))
@@ -53,7 +53,7 @@ func (h *SiteMapHandler) publicMap(c *gin.Context) {
 		return
 	}
 	h.traffic.Touch(site)
-	respondSuccess(c, http.StatusOK, gin.H{"map": m, "traffic": h.traffic.Latest(c.Request.Context(), site)})
+	respondSuccess(c, http.StatusOK, gin.H{"map": m, "traffic": services.PublicTraffic(site, h.traffic.Latest(c.Request.Context(), site))})
 }
 
 func (h *SiteMapHandler) publicFollow(c *gin.Context) {
@@ -67,7 +67,7 @@ func (h *SiteMapHandler) publicFollow(c *gin.Context) {
 		s, err := h.maps.ResolveToken(ctx, token)
 		return err == nil && s == site
 	}
-	h.serveStream(c, site, snapshot, allowed)
+	h.serveStream(c, site, snapshot, allowed, func(t services.MapTraffic) services.MapTraffic { return services.PublicTraffic(site, t) })
 }
 
 func (h *SiteMapHandler) publicPorts(c *gin.Context) {
@@ -75,12 +75,12 @@ func (h *SiteMapHandler) publicPorts(c *gin.Context) {
 	if !ok {
 		return
 	}
-	dev, ok := uuidParam(c, "deviceId")
+	alias, ok := uuidParam(c, "deviceId")
 	if !ok {
 		return
 	}
 	ctx := c.Request.Context()
-	on, err := h.maps.OnMap(ctx, site, dev)
+	dev, on, err := h.maps.PublicDevice(ctx, site, alias)
 	if err != nil {
 		respondSiteMapError(c, "publicMapPorts", err)
 		return

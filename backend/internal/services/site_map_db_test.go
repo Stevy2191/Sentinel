@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -330,10 +331,40 @@ func TestPublicSnapshotTrimmed(t *testing.T) {
 	if m.CanEdit || len(m.Candidates) != 0 || len(m.HiddenLinks) != 0 {
 		t.Errorf("public snapshot offers editing: %+v", m)
 	}
+	real := map[uuid.UUID]bool{h.gw: true, h.sw: true, h.site: true}
 	for _, d := range m.Devices {
-		if d.Host != "" || d.StatusDetail != "" || d.Connected != nil {
+		if d.Host != "" || d.StatusDetail != "" || d.Connected != nil || real[d.ID] {
 			t.Errorf("public device leaks: %+v", d)
 		}
+	}
+	if m.SiteID != uuid.Nil || len(m.Links) != 1 {
+		t.Fatalf("public map = %+v", m)
+	}
+	l := m.Links[0]
+	if real[l.A.DeviceID] || real[l.B.DeviceID] || strings.Contains(l.Key, h.gw.String()) || strings.Contains(l.Key, h.sw.String()) {
+		t.Errorf("public link leaks ids: %+v", l)
+	}
+	ids := mapDeviceIDs(m.Devices)
+	if !ids[l.A.DeviceID] || !ids[l.B.DeviceID] {
+		t.Errorf("public link ends %v %v aren't the public devices", l.A.DeviceID, l.B.DeviceID)
+	}
+	// The same stand-ins every time, and traffic keyed to match.
+	again, _ := newMapService(db).PublicSnapshot(context.Background(), h.site)
+	if again.Links[0].Key != l.Key {
+		t.Errorf("stand-in ids changed between snapshots")
+	}
+	full, _ := newMapService(db).Snapshot(context.Background(), h.admin, h.site)
+	up := true
+	pt := PublicTraffic(h.site, MapTraffic{SiteID: h.site, Links: map[string]LinkRate{full.Links[0].Key: {OperUp: &up}}, Devices: map[uuid.UUID]string{h.sw: "up"}})
+	if _, ok := pt.Links[l.Key]; !ok || pt.SiteID != uuid.Nil || pt.Devices[h.sw] != "" || len(pt.Devices) != 1 {
+		t.Errorf("public traffic = %+v, want keyed by the public link key", pt)
+	}
+	dev, ok, err := newMapService(db).PublicDevice(context.Background(), h.site, l.A.DeviceID)
+	if err != nil || !ok || (dev != h.gw && dev != h.sw) {
+		t.Errorf("PublicDevice = %v %v %v", dev, ok, err)
+	}
+	if _, ok, _ := newMapService(db).PublicDevice(context.Background(), h.site, h.gw); ok {
+		t.Error("a real device id opened a public device")
 	}
 }
 
