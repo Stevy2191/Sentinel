@@ -65,6 +65,16 @@ func TestParseLLDP(t *testing.T) {
 	if nas := byName["TS5410R81E"]; nas.LocalPort != 34 || nas.Caps.Bridge() || nas.Caps.Router() || nas.Caps.AP() {
 		t.Errorf("NAS %+v", nas)
 	}
+	// Found on the sandbox: UniFi sends its port ID as raw MAC bytes, which
+	// are not UTF-8 and must not be stored as text.
+	bin := ParseLLDP(map[string][]snmp.PDU{
+		"5": {pdu(base+".5.0.48.4", []byte("84:78:48:fe:d0:e8"))},
+		"7": {pdu(base+".7.0.48.4", []byte{0x84, 0x78, 0x48, 0xfe, 0xd0, 0xe8})},
+		"8": {pdu(base+".8.0.48.4", []byte{0x84, 0xff, 0x01})},
+	})
+	if len(bin) != 1 || bin[0].PortID != "84:78:48:fe:d0:e8" || bin[0].PortDescr != "84ff01" {
+		t.Errorf("binary port ID: %+v", bin)
+	}
 	// UniFi sends its chassis ID as MAC text.
 	text := ParseLLDP(map[string][]snmp.PDU{"5": {pdu(base+".5.0.48.4", []byte("84:78:48:FE:D0:E8"))}})
 	if len(text) != 1 || text[0].ChassisID != "84:78:48:fe:d0:e8" || text[0].LocalPort != 48 {

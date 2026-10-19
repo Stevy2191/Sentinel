@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/Stevy2191/Sentinel/backend/internal/snmp"
 )
@@ -189,7 +190,9 @@ func lldpText(v any) string {
 	default:
 		return ""
 	}
-	printable := len(b) > 0
+	// Valid UTF-8 first: ranging over invalid bytes yields U+FFFD, which
+	// counts as printable, and Postgres refuses the bytes as text.
+	printable := len(b) > 0 && utf8.Valid(b)
 	for _, r := range string(b) {
 		if !unicode.IsPrint(r) {
 			printable = false
