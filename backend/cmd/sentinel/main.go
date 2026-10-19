@@ -325,6 +325,25 @@ func run() error {
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
+	// The SNMP poller and the port monitor are built here, ahead of the
+	// dashboards, because the site maps' fast poll (and so the site map
+	// widget) uses them; they are configured and started further down.
+	pollWorkers := settingsService.GetInt(context.Background(), models.SettingSNMPPollWorkers, 16)
+	devicePoller := services.NewDevicePoller(deviceService, snmpClient, incidentService, notificationManager, pollWorkers)
+	portMonitor := services.NewPortMonitor(portService, metricsStore, incidentService, notificationManager, snmpClient, settingsService)
+	endpointService := services.NewEndpointService(db, siteService, nil)
+	// Site maps (phase 6, piece C): the map service, the hub its live
+	// streams listen on, and the fast poll of linked ports while a map is
+	// watched. Edits nudge open streams to re-read the map; the fast poll
+	// sends its traffic straight to them.
+	siteMapService := services.NewSiteMapService(db, siteService, endpointService, settingsService)
+	mapHub := stream.NewHub(64)
+	linkPoller := services.NewLinkPoller(services.LinkPollerDeps{Maps: siteMapService, Devices: deviceService, Targets: devicePoller,
+		HC: portMonitor, Live: portService, Client: snmpClient})
+	siteMapHandler := api.NewSiteMapHandler(siteMapService, linkPoller, siteService, deviceService, portService, mapHub, auditService)
+	linkPoller.SetPublish(siteMapHandler.PublishTraffic)
+	siteMapService.OnChange(siteMapHandler.Changed)
+
 	// Dashboards (phase 4). The registry is shared by the service (to
 	// validate saves) and the resolver (to load widget data).
 	dashboardRegistry := dashboards.NewDefaultRegistry(dashboards.Deps{
@@ -338,6 +357,10 @@ func run() error {
 		Monitors:  monitorService,
 		Checks:    checkService,
 		Agents:    agentService,
+		SiteMaps: struct {
+			*services.SiteMapService
+			*services.LinkPoller
+		}{siteMapService, linkPoller},
 	})
 	dashboardChecker := dashboards.NewDBChecker(db, siteService, monitorService)
 	dashboardService := dashboards.NewService(db, siteService, dashboardRegistry, dashboardChecker)
@@ -370,6 +393,7 @@ func run() error {
 	api.RegisterPublicReportRoutes(router, reportBuilder)
 	// Public dashboard links: no login, like status pages and shared reports.
 	api.RegisterPublicDashboardRoutes(router, dashboardService, dashboardResolver)
+	api.RegisterPublicSiteMapRoutes(router, siteMapHandler)
 	// Agents authenticate with their own token, so their ingest routes sit
 	// outside the group behind the user session middleware.
 	api.RegisterAgentIngestRoutes(router, agentService)
@@ -414,7 +438,8 @@ func run() error {
 	api.RegisterMIBRoutes(v1, mibLibrary, auditService, authService)
 	api.RegisterProfileRoutes(v1, profileService, deviceService, siteService, auditService, authService, deviceWalker)
 	api.RegisterFaceplateLayoutRoutes(v1, faceplateLayouts, portService, deviceService, siteService, auditService, authService)
-	api.RegisterEndpointRoutes(v1, services.NewEndpointService(db, siteService, nil), deviceService, siteService, auditService)
+	api.RegisterEndpointRoutes(v1, endpointService, deviceService, siteService, auditService)
+	api.RegisterSiteMapRoutes(v1, siteMapHandler)
 	api.RegisterDeviceHealthRoute(v1, profileService, metricsStore, incidentService, deviceService, siteService)
 	api.RegisterDeviceMetricsRoute(v1, metricsStore, deviceService, siteService)
 	api.RegisterDashboardRoutes(v1, dashboardService, dashboardResolver, auditService, authService)
@@ -484,9 +509,7 @@ func run() error {
 	if err := faceplateLayouts.Load(context.Background()); err != nil {
 		log.Printf("[faceplate] loading saved layouts: %v", err)
 	}
-	pollWorkers := settingsService.GetInt(context.Background(), models.SettingSNMPPollWorkers, 16)
-	devicePoller := services.NewDevicePoller(deviceService, snmpClient, incidentService, notificationManager, pollWorkers)
-	devicePoller.SetPortStats(services.NewPortMonitor(portService, metricsStore, incidentService, notificationManager, snmpClient, settingsService))
+	devicePoller.SetPortStats(portMonitor)
 	// Realistic drawings with a drive bay (the UDM-SE): the poller reads
 	// the bay disk each poll, the ports view serves its light.
 	driveBays := services.NewDriveBayMonitor(snmpClient)
@@ -499,6 +522,7 @@ func run() error {
 	devicePoller.SetUPS(services.NewUPSMonitor(metricsStore, incidentService, notificationManager, snmpClient, settingsService, portService))
 	devicePoller.SetProfiles(services.NewProfileMonitor(profileService, metricsStore, incidentService, notificationManager, snmpClient, portService))
 	go devicePoller.Start(loopCtx)
+	go linkPoller.Run(loopCtx)
 	// A restored config may carry a different retention than the live policy.
 	if err := networkSettings.EnsureRetention(context.Background()); err != nil {
 		log.Printf("warning: could not apply the metrics retention setting: %v", err)

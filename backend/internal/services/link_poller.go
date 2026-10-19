@@ -100,6 +100,10 @@ func NewLinkPoller(d LinkPollerDeps) *LinkPoller {
 		bound: map[uuid.UUID]boundCache{}, busy: map[uuid.UUID]bool{}}
 }
 
+// SetPublish sets where each tick's traffic goes (the map streams), for
+// wiring that builds the streams after the poller.
+func (p *LinkPoller) SetPublish(f func(siteID uuid.UUID, t MapTraffic)) { p.d.Publish = f }
+
 // Watch counts a viewer of the site (an open stream) until release is called.
 func (p *LinkPoller) Watch(siteID uuid.UUID) (release func()) {
 	p.mu.Lock()

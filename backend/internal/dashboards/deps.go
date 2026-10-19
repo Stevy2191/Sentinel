@@ -82,6 +82,7 @@ type Deps struct {
 	Monitors  MonitorReader
 	Checks    CheckReader
 	Agents    AgentReader
+	SiteMaps  SiteMapReader
 }
 
 // NewDefaultRegistry registers every widget type Sentinel ships, in the order
@@ -94,6 +95,7 @@ func NewDefaultRegistry(d Deps) *Registry {
 		portGridWidget{devices: d.Devices, ports: d.Ports},
 		deviceHealthWidget{devices: d.Devices, health: d.Health},
 		sitePowerWidget{devices: d.Devices, ports: d.Ports},
+		siteMapWidget{maps: d.SiteMaps},
 		topNWidget{metrics: d.Metrics, ports: d.Ports, devices: d.Devices},
 		eventLogWidget{ports: d.Ports, incidents: d.Incidents},
 		deviceTableWidget{devices: d.Devices, incidents: d.Incidents},
