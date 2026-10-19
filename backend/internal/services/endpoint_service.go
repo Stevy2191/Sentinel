@@ -671,7 +671,8 @@ func (s *EndpointService) Get(ctx context.Context, v Viewer, mac string) (*Endpo
 
 // Placements is where piece B places each of macs: the switch port (and how:
 // "wired" on an edge port, "behind" on the link port with the fewest MACs).
-// MACs seen on no switch are left out. It reads every site, so callers check
+// MACs seen on no switch are left out; nil macs means every placed MAC.
+// It reads every site, so callers check
 // access themselves; site maps use it to guess links between switches.
 func (s *EndpointService) Placements(ctx context.Context, macs []string) (map[string]l2.Placement, error) {
 	w, err := s.load(ctx, Viewer{IsAdmin: true})
@@ -679,6 +680,11 @@ func (s *EndpointService) Placements(ctx context.Context, macs []string) (map[st
 		return nil, err
 	}
 	out := map[string]l2.Placement{}
+	if macs == nil {
+		for mac := range w.records {
+			macs = append(macs, mac)
+		}
+	}
 	for _, mac := range macs {
 		e, ok := w.records[mac]
 		if !ok || e.DeviceID == nil || e.IfIndex == nil {

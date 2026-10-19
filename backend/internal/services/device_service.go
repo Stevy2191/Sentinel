@@ -281,6 +281,13 @@ func (s *DeviceService) Update(ctx context.Context, id uuid.UUID, raw models.Dev
 				Updates(clear).Error; err != nil {
 				return fmt.Errorf("clearing links pointing at this device after a site move: %w", err)
 			}
+			// Its place and links on the old site's map go too.
+			if err := tx.Exec(`DELETE FROM site_map_positions WHERE device_id = ? AND site_id <> ?`, id, in.SiteID).Error; err != nil {
+				return fmt.Errorf("clearing this device's place on the old site map: %w", err)
+			}
+			if err := tx.Exec(`DELETE FROM site_map_links WHERE (a_device_id = ? OR b_device_id = ?) AND site_id <> ?`, id, id, in.SiteID).Error; err != nil {
+				return fmt.Errorf("clearing this device's links on the old site map: %w", err)
+			}
 		}
 		if pausing {
 			if _, err := s.incidents.CloseDeviceConditionIncidentsTx(tx, id, time.Now().UTC(), "Monitoring was paused."); err != nil {
