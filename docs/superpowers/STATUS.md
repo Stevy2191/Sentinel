@@ -66,7 +66,19 @@ Spec `specs/2026-10-18-find-device-switch-maps-design.md`, plan `plans/2026-10-1
 
 **Pending, B2 (Cisco):** per-VLAN MAC tables (community@vlan / SNMPv3 contexts) and CDP, after a read-only walk of a work Cisco. Until then Cisco switches show what their default context reports. The 8-MAC "behind" threshold and the 5-minute interval are first guesses, to tune on work data.
 
+## Monitoring as one list
+
+Spec `specs/2026-10-19-monitoring-one-list-design.md`, plan `plans/2026-10-19-monitoring-one-list.md`. The Monitoring page is one list of every uptime check, server and device, with no sections. Filters (search; Kind as a tree; Status, Site and Tags, each multi-select; Monitor group) combine freely, show counts, and live in the address (`kind`, `status`, `site`, `tags`, `group`, `q`, `sort`, `by`). Old `show=`, `type=` and `device_type=` links still land right. Sort by column (Down first by default); Group by None, Site, Kind or Monitor group, remembered per browser. The model is `frontend/src/utils/monitoringList.ts`. Deferred: per-kind sorts the old page had (lowest uptime, slowest, device address or availability), keyboard opening of rows, menu focus handling.
+
 ## To be checked by the owner
+
+### Monitoring as one list (on the dev stack, port 3200)
+
+1. Monitoring shows your checks, servers and devices in one list, Down first.
+2. Kind → Devices → Switch, then Status → Down: the pills read what's applied, and Clear all resets.
+3. Group by Site, leave the page and come back: still grouped.
+4. An old bookmark such as `/uptime` or `/network/devices` opens the list on that kind.
+5. On your phone: rows are two-line cards, and the filter menus fit the screen.
 
 ### Find a device and switch maps (on the dev stack, port 3200)
 
