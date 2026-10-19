@@ -79,7 +79,9 @@ export default function LinkPanel(p: Props) {
   const dir = directional(l, p.rate)
   const pct = (v: number | null) => (v == null || !l.speed_bps ? '' : ` · ${((v / l.speed_bps) * 100).toFixed(1)}%`)
   const end = (e: MapLink['a'], d: MapDevice | undefined) => {
-    const text = `${d?.name ?? '?'} · ${endText(e, d?.type)}${e.if_index != null && e.name && e.name !== e.label ? ` (${e.name})` : ''}`
+    const named = endText(e, d?.type)
+    // A port shown by its number also gets its interface name, once.
+    const text = `${d?.name ?? '?'} · ${named}${e.if_index != null && e.name && e.name !== e.label && !named.includes(e.name) ? ` (${e.name})` : ''}`
     return !p.isPublic && e.if_index != null ? (
       <Link className="text-sm text-sky-400 hover:underline" to={`/network/devices/${e.device_id}/ports/${e.if_index}`}>
         {text} →

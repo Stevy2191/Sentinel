@@ -53,7 +53,9 @@ export default function MapNode({ device, placed, view, publicToken, folded, edi
   const sel = selected ? 'ring-2 ring-sky-400/70 ring-offset-2 ring-offset-slate-950' : ''
   const Icon = device.type === 'router' ? Router : Network
   const fold =
-    placed.below > 0 || folded ? (
+    // Branches fold from a distribution or access switch; folding at the
+    // router or core would fold the whole map.
+    (placed.tier === 'dist' || placed.tier === 'access') && (placed.below > 0 || folded) ? (
       <button
         type="button"
         data-fold
@@ -75,6 +77,7 @@ export default function MapNode({ device, placed, view, publicToken, folded, edi
       style={{ left: placed.x, top: placed.y }}
       title={device.status === 'error' && device.status_detail ? device.status_detail : undefined}
     >
+      {drawn && (
       <div className="pointer-events-none absolute -top-[22px] left-0 flex items-center gap-2 whitespace-nowrap text-xs">
         <span className={`h-2 w-2 rounded-full ${down ? 'bg-red-500' : device.status === 'up' ? 'bg-emerald-500' : 'bg-slate-500'}`} />
         <b className="font-semibold text-white">{device.name}</b>
@@ -82,6 +85,7 @@ export default function MapNode({ device, placed, view, publicToken, folded, edi
         {down && <span className="font-semibold text-red-300">{downFor(device.down_since, now)}</span>}
         {fold}
       </div>
+      )}
       <div data-box className={`rounded ${ring} ${sel}`}>
         {drawn && ports ? (
           <MapDrawing ports={ports} scale={TIER_SCALE[placed.tier]} isPublic={!!publicToken} onPort={onPort} />
@@ -98,6 +102,7 @@ export default function MapNode({ device, placed, view, publicToken, folded, edi
                 {down ? ` · ${downFor(device.down_since, now)}` : ''}
               </span>
             </span>
+            {fold}
           </div>
         )}
       </div>

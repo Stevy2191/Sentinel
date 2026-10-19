@@ -222,7 +222,8 @@ export default function SiteMapView(p: Props) {
       )}
       {err && <p className="text-sm text-red-400">{err}</p>}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
-        <div className="min-w-0 flex-1 overflow-hidden rounded-xl border border-white/10" style={{ height: p.height }}>
+        {/* lg:flex-1 only: in the phone column a flex-1 basis would squash the box to nothing. */}
+        <div className="w-full min-w-0 overflow-hidden rounded-xl border border-white/10 lg:flex-1" style={{ height: p.height }}>
           {map.devices.length === 0 ? (
             <div className="flex h-full items-center justify-center p-6 text-center text-sm text-slate-400">
               No routers or switches are monitored at this site yet.
