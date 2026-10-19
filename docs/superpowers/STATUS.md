@@ -21,7 +21,7 @@ Roadmap: `docs/superpowers/specs/2026-09-28-network-monitoring-roadmap.md`. Each
 | 3 | MIB library and custom metrics: upload/browse/test-walk MIBs, profiles, Cisco switch health, Health section, metric-rule alerts | Done (`dev`, 2026-10-02); follow-ups in `plans/2026-10-02-network-phase3-followups.md` |
 | 4 | Custom dashboards: grid editor, 11 widget types (incl. site power), sharing, fullscreen wall display, admin public links | Done (`dev`, 2026-10-03); follow-ups in `plans/2026-10-02-network-phase4-followups.md` |
 | 5 | Metric reports: a Metrics report type (ports, port roles, devices, sites), exact 95th percentiles, totals, previous-period comparison, scheduled and shared like the other reports | Done (`dev`, 2026-10-05); follow-ups in `plans/2026-10-03-network-phase5-followups.md` |
-| 6 | Live site maps (LLDP, SSE push) — needs phase 4 | **In progress**, in pieces: A back navigation (done), B find a device and switch maps (done, `dev`), B2 Cisco (pending), C site maps, D org map |
+| 6 | Live site maps (LLDP, SSE push) — needs phase 4 | **In progress**, in pieces: A back navigation (done), B find a device and switch maps (done, `dev`), B2 Cisco (pending), C site maps (done, `dev`), D org map |
 | 7 | UniFi controller source | **Next** |
 
 Phase 7 is next; phase 6 is unblocked (it needed phase 4, which is done) and can follow. Where both sit against the tools and security track below is the owner's call.
@@ -70,7 +70,20 @@ Spec `specs/2026-10-18-find-device-switch-maps-design.md`, plan `plans/2026-10-1
 
 Spec `specs/2026-10-19-monitoring-one-list-design.md`, plan `plans/2026-10-19-monitoring-one-list.md`. The Monitoring page is one list of every uptime check, server and device, with no sections. Filters (search; Kind as a tree; Status, Site and Tags, each multi-select; Monitor group) combine freely, show counts, and live in the address (`kind`, `status`, `site`, `tags`, `group`, `q`, `sort`, `by`). Old `show=`, `type=` and `device_type=` links still land right. Sort by column (Down first by default); Group by None, Site, Kind or Monitor group, remembered per browser. The model is `frontend/src/utils/monitoringList.ts`. Health sorts each kind worst first (slowest checks, busiest servers, devices failing or most recently restarted); Uptime sorts by percentage; Name has an Address sort beside it. Server metrics are polled once for the page. Each row's name is a link: Tab reaches it, Enter opens it.
 
+## Site maps (phase 6 piece C)
+
+Spec `specs/2026-10-19-site-maps-design.md` (approved mockup in `specs/assets/2026-10-19-site-maps/`), plan `plans/2026-10-19-site-maps.md`. Each site has a live map of its **routers and switches only** (the owner: "just a network structure topology … I don't need to see end points"), at `/network/sites/:id/map`, a card on the site page, a "Show on site map" link on router and switch pages, a wall display, a read-only public link (admins; stand-in ids, no addresses) and a `site_map` dashboard widget (Simple view). Links come from hand-drawn links, ports' Network link settings, LLDP (`internal/sitemap`) and MAC-table guesses (piece B's placement; dashed with a "?" until kept). While a map is watched, the ports at link ends are read every 10 s (`services/link_poller.go`) and pushed over SSE; nothing extra is stored. Migration `064_site_maps.sql`.
+
 ## To be checked by the owner
+
+### Site maps (on the dev stack, port 3200)
+
+1. S6 Node's site page shows the Map card; Open map shows Quantum-Gate above QuantumLink, linked port 11 ↔ 51, with traffic moving.
+2. Hover the link: "QuantumLink port 51 ↔ Quantum-Gate eth10 · ↓ … ↑ … · 10 Gb"; click it for both ports and the last hour.
+3. Edit: drag QuantumLink, reload, and it stays where you put it; Reset layout puts it back.
+4. Share → create a public link, open it in a private window: the map, live, with no addresses.
+5. At work: the EdgeSwitches and Cisco switches form a tree (router, core, distribution columns); a switch without LLDP shows as a dashed "?" guess you can Keep.
+
 
 ### Monitoring as one list (on the dev stack, port 3200)
 
