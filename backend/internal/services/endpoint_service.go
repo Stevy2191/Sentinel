@@ -15,6 +15,7 @@ import (
 
 	"github.com/Stevy2191/Sentinel/backend/internal/l2"
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
+	"github.com/Stevy2191/Sentinel/backend/internal/portmon"
 )
 
 var (
@@ -126,6 +127,7 @@ type epDevice struct {
 	Host    string
 	SysName string
 	Type    string
+	Descr   string // sysDescr, for the device's port numbering
 }
 
 type epPort struct {
@@ -180,7 +182,7 @@ func (s *EndpointService) load(ctx context.Context, v Viewer) (*world, error) {
 
 	var devices []epDevice
 	if err := db.Raw(`SELECT id, site_id, name, host, COALESCE(sys_name, '') AS sys_name,
-		COALESCE(device_type, device_type_detected) AS type FROM devices`).Scan(&devices).Error; err != nil {
+		COALESCE(device_type, device_type_detected) AS type, COALESCE(sys_descr, '') AS descr FROM devices`).Scan(&devices).Error; err != nil {
 		return nil, fmt.Errorf("loading devices: %w", err)
 	}
 	for _, d := range devices {
@@ -228,16 +230,11 @@ func (s *EndpointService) load(ctx context.Context, v Viewer) (*world, error) {
 	return w, nil
 }
 
+// portLabel names a port as the faceplate and port table do ("14", or
+// "1/4" on a switch/slot/port device).
 func (w *world) portLabel(k l2.PortKey) string {
-	p, ok := w.ports[k]
-	switch {
-	case ok && p.Name != "":
-		return p.Name
-	case ok && p.Descr != "":
-		return p.Descr
-	default:
-		return fmt.Sprintf("port %d", k.IfIndex)
-	}
+	p := w.ports[k]
+	return portmon.NumberingFor(w.devices[k.Device].Descr).Label(p.Name, p.Descr, k.IfIndex)
 }
 
 // monitored finds the monitored device an LLDP neighbour is, by its chassis

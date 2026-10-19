@@ -103,7 +103,7 @@ func TestDBEndpointRecord(t *testing.T) {
 
 	cam := one(t)(s.Search(ctx, v, camMAC))
 	if cam.How != "wired" || cam.DeviceID == nil || *cam.DeviceID != sw.DeviceID || cam.IfIndex == nil || *cam.IfIndex != 5 ||
-		cam.PortLabel != "0/5" || cam.VLAN != 10 || cam.Kind != "camera" || len(cam.IPs) != 1 || cam.IPs[0] != "10.1.10.60" ||
+		cam.PortLabel != "5" || cam.VLAN != 10 || cam.Kind != "camera" || len(cam.IPs) != 1 || cam.IPs[0] != "10.1.10.60" ||
 		cam.SiteID != sw.SiteID || cam.Maker == "" {
 		t.Errorf("camera: %+v", cam)
 	}
