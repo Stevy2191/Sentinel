@@ -53,9 +53,11 @@ type MapDevice struct {
 	Connected     *int       `json:"connected,omitempty"`
 }
 
-// MapLink is one cable. RateEnd says which end's port the traffic figures
-// come from ("a", "b", or "" when neither port is known); SpeedBps and
-// ThresholdPct are that port's.
+// MapLink is one cable, or a bundle of them (Members: a LAG, or parallel
+// cables between the same two devices). RateEnd says which end's port the
+// traffic figures come from ("a", "b", or "" when neither port is known);
+// SpeedBps and ThresholdPct are that port's (a bundle's speed is its
+// members' sum; its traffic is theirs, added up by the browser).
 type MapLink struct {
 	Key          string     `json:"key"`
 	A            MapEnd     `json:"a"`
@@ -68,6 +70,8 @@ type MapLink struct {
 	SpeedBps     int64      `json:"speed_bps"`
 	ThresholdPct int        `json:"threshold_pct"`
 	RateEnd      string     `json:"rate_end"`
+	Members      []MapLink  `json:"members,omitempty"`
+	Lag          *MapLag    `json:"lag,omitempty"`
 }
 
 // MapSnapshot is a site's whole map for one viewer.
@@ -178,6 +182,7 @@ type mapPortRow struct {
 	UtilThresholdPct *int
 	NeighborDeviceID *uuid.UUID
 	NeighborIfIndex  *int
+	LagIfIndex       *int
 }
 
 // mapWorld is everything one site's map is built from.
@@ -238,7 +243,7 @@ func (s *SiteMapService) loadWith(ctx context.Context, siteID uuid.UUID, links b
 	in := sitemap.Input{Now: s.now()}
 	for _, id := range ids {
 		d := w.devices[id]
-		in.Devices = append(in.Devices, sitemap.Device{ID: id, Name: d.Name, SysName: d.SysName, SysDescr: d.SysDescr})
+		in.Devices = append(in.Devices, sitemap.Device{ID: id, Name: d.Name, SysName: d.SysName, SysDescr: d.SysDescr, Host: d.Host})
 	}
 	if len(ids) == 0 || !links {
 		return w, nil
@@ -247,7 +252,7 @@ func (s *SiteMapService) loadWith(ctx context.Context, siteID uuid.UUID, links b
 	var ports []mapPortRow
 	if err := db.Raw(`SELECT id, device_id, if_index, COALESCE(name, '') AS name, COALESCE(descr, '') AS descr,
 		COALESCE(alias, '') AS alias, COALESCE(mac, '') AS mac, COALESCE(if_type, 0) AS if_type, connector_present,
-		COALESCE(speed_bps, 0) AS speed_bps, util_threshold_pct, neighbor_device_id, neighbor_if_index
+		COALESCE(speed_bps, 0) AS speed_bps, util_threshold_pct, neighbor_device_id, neighbor_if_index, lag_if_index
 		FROM device_interfaces WHERE device_id IN ? AND present`, ids).Scan(&ports).Error; err != nil {
 		return nil, fmt.Errorf("loading map ports: %w", err)
 	}
@@ -276,18 +281,18 @@ func (s *SiteMapService) loadWith(ctx context.Context, siteID uuid.UUID, links b
 	}
 
 	var neighbors []struct {
-		DeviceID                              uuid.UUID
-		IfIndex                               int
-		ChassisID, SysName, PortID, PortDescr string
-		LastSeen                              time.Time
+		DeviceID                                                 uuid.UUID
+		IfIndex                                                  int
+		ChassisID, SysName, PortID, PortDescr, Protocol, Address string
+		LastSeen                                                 time.Time
 	}
-	if err := db.Raw(`SELECT device_id, if_index, chassis_id, sys_name, port_id, port_descr, last_seen
-		FROM l2.neighbors WHERE device_id IN ?`, ids).Scan(&neighbors).Error; err != nil {
-		return nil, fmt.Errorf("loading LLDP neighbours: %w", err)
+	if err := db.Raw(`SELECT device_id, if_index, chassis_id, sys_name, port_id, port_descr, protocol, address, last_seen
+		FROM l2.neighbors WHERE device_id IN ? ORDER BY protocol DESC, device_id, if_index`, ids).Scan(&neighbors).Error; err != nil {
+		return nil, fmt.Errorf("loading LLDP and CDP neighbours: %w", err)
 	}
 	for _, n := range neighbors {
 		in.Neighbors = append(in.Neighbors, sitemap.Neighbor{DeviceID: n.DeviceID, IfIndex: n.IfIndex, ChassisID: n.ChassisID,
-			SysName: n.SysName, PortID: n.PortID, PortDescr: n.PortDescr, LastSeen: n.LastSeen})
+			SysName: n.SysName, PortID: n.PortID, PortDescr: n.PortDescr, Protocol: n.Protocol, Address: n.Address, LastSeen: n.LastSeen})
 	}
 
 	// Every placement at once: the guesses, and each switch's count of the
@@ -420,6 +425,25 @@ func (w *mapWorld) mapDevice(id uuid.UUID, public bool) MapDevice {
 	return out
 }
 
+// lagOf names the aggregator an end's port is in: its ifName ("lag 1",
+// "3/1", "Po1"), else its ifDescr, else "LAG"; agg 0 when it's in none.
+func (w *mapWorld) lagOf(e MapEnd) (string, int) {
+	if e.IfIndex == nil {
+		return "", 0
+	}
+	p := w.ports[sitemap.End{DeviceID: e.DeviceID, IfIndex: *e.IfIndex}]
+	if p.LagIfIndex == nil || *p.LagIfIndex == 0 {
+		return "", 0
+	}
+	agg := w.ports[sitemap.End{DeviceID: e.DeviceID, IfIndex: *p.LagIfIndex}]
+	for _, name := range []string{agg.Name, agg.Descr} {
+		if name = strings.TrimSpace(name); name != "" {
+			return name, *p.LagIfIndex
+		}
+	}
+	return "LAG", *p.LagIfIndex
+}
+
 // isMapMAC reports a MAC belonging to one of the map's own devices.
 func (w *mapWorld) isMapMAC(mac string) bool { return w.ownMACs[mac] }
 
@@ -453,6 +477,9 @@ func (s *SiteMapService) build(ctx context.Context, w *mapWorld, level SiteAcces
 			out.HiddenLinks = append(out.HiddenLinks, w.mapLink(l, pct))
 		}
 	}
+	// Bundled after hiding, so a bundle half hidden shows as two cables.
+	out.Links = bundleLinks(out.Links, w.lagOf)
+	out.HiddenLinks = bundleLinks(out.HiddenLinks, w.lagOf)
 	byName := func(ds []MapDevice) {
 		sort.Slice(ds, func(i, j int) bool { return strings.ToLower(ds[i].Name) < strings.ToLower(ds[j].Name) })
 	}
@@ -497,9 +524,10 @@ func (s *SiteMapService) PublicSnapshot(ctx context.Context, siteID uuid.UUID) (
 	return m, nil
 }
 
-// BoundPorts is the rate-end port of each visible link (what the fast poll
-// reads while the map is watched) and every device drawn on the map (whose
-// statuses each tick carries).
+// BoundPorts is the rate-end port of each visible link, and of each cable
+// in a bundle, keyed by the cable's own key (what the fast poll reads while
+// the map is watched), and every device drawn on the map (whose statuses
+// each tick carries).
 func (s *SiteMapService) BoundPorts(ctx context.Context, siteID uuid.UUID) ([]BoundPort, []uuid.UUID, error) {
 	w, err := s.load(ctx, siteID)
 	if err != nil {
@@ -510,8 +538,16 @@ func (s *SiteMapService) BoundPorts(ctx context.Context, siteID uuid.UUID) ([]Bo
 	for _, d := range snap.Devices {
 		devices = append(devices, d.ID)
 	}
-	var out []BoundPort
+	var cables []MapLink
 	for _, l := range snap.Links {
+		if len(l.Members) > 0 {
+			cables = append(cables, l.Members...)
+		} else {
+			cables = append(cables, l)
+		}
+	}
+	var out []BoundPort
+	for _, l := range cables {
 		e := l.A
 		if l.RateEnd == "b" {
 			e = l.B

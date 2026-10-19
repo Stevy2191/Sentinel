@@ -82,12 +82,13 @@ const (
 	SourceManual      Source = "manual"
 	SourcePortSetting Source = "port_setting"
 	SourceLLDP        Source = "lldp"
+	SourceCDP         Source = "cdp"
 	SourceGuess       Source = "guess"
 )
 
 // Link is one cable on the map. Sources run from most to least trusted.
-// Guess: only a MAC-table guess says so. Stale: only LLDP or a guess says
-// so, and not for 24 hours.
+// Guess: only a MAC-table guess says so. Stale: only LLDP, CDP or a guess
+// says so, and not for 24 hours.
 type Link struct {
 	Key      string
 	A, B     End
@@ -153,8 +154,8 @@ func fill(a, b *End, x, y End) {
 // Find works out the map's links. A link found two ways is one link; a
 // device-level one merges into a port-level one between the same devices.
 // A guess is left out for any device something firmer already links. Links
-// only LLDP or a guess vouch for go stale after a day and are dropped after
-// a week. Hidden links are kept, marked Hidden.
+// only LLDP, CDP or a guess vouch for go stale after a day and are dropped
+// after a week. Hidden links are kept, marked Hidden.
 func Find(in Input) []Link {
 	onMap := map[uuid.UUID]Device{}
 	for _, d := range in.Devices {
@@ -209,7 +210,11 @@ func Find(in Input) []Link {
 		}
 		port := MatchNeighborPort(n, dev, in.Ports, portmon.NumberingFor(onMap[dev].SysDescr))
 		seen := n.LastSeen
-		add(End{n.DeviceID, n.IfIndex}, End{dev, port}, SourceLLDP, &seen, nil)
+		src := SourceLLDP
+		if n.Protocol == "cdp" {
+			src = SourceCDP
+		}
+		add(End{n.DeviceID, n.IfIndex}, End{dev, port}, src, &seen, nil)
 	}
 	linked := map[uuid.UUID]bool{}
 	for _, l := range links {

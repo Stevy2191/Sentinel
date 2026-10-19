@@ -219,35 +219,69 @@ func (w *mapWorld) findLink(key string) (sitemap.Link, bool) {
 }
 
 // SetLinkHidden hides a found link (it stays hidden when found again) or
-// shows it again.
+// shows it again. A bundle's key hides or shows every cable in it, all or
+// none.
 func (s *SiteMapService) SetLinkHidden(ctx context.Context, v Viewer, siteID uuid.UUID, key string, hidden bool) error {
 	w, err := s.editable(ctx, v, siteID)
 	if err != nil {
 		return err
 	}
-	a, b, ok := parseLinkKey(key)
-	if !ok {
-		return ErrSiteMapInvalid
+	keys := []string{key}
+	if isBundleKey(key) {
+		keys = bundleMembers(key)
 	}
-	if !hidden {
-		if err := s.db.WithContext(ctx).Exec(`DELETE FROM site_map_links WHERE site_id = ? AND kind = 'hidden'
-			AND ((a_device_id = ? AND COALESCE(a_if_index, 0) = ? AND b_device_id = ? AND COALESCE(b_if_index, 0) = ?)
-			  OR (a_device_id = ? AND COALESCE(a_if_index, 0) = ? AND b_device_id = ? AND COALESCE(b_if_index, 0) = ?))`,
-			siteID, a.DeviceID, a.IfIndex, b.DeviceID, b.IfIndex, b.DeviceID, b.IfIndex, a.DeviceID, a.IfIndex).Error; err != nil {
-			return fmt.Errorf("showing a map link: %w", err)
+	type cable struct {
+		a, b sitemap.End
+		hide bool
+	}
+	var cables []cable
+	for _, k := range keys {
+		a, b, ok := parseLinkKey(k)
+		if !ok {
+			return ErrSiteMapInvalid
 		}
-		s.changed(siteID)
+		c := cable{a: a, b: b}
+		if hidden {
+			l, ok := w.findLink(k)
+			if !ok {
+				return ErrSiteMapInvalid
+			}
+			c.hide = !l.Hidden
+		}
+		cables = append(cables, c)
+	}
+	by := v.UserID
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, c := range cables {
+			a, b := c.a, c.b
+			if !hidden {
+				if err := tx.Exec(`DELETE FROM site_map_links WHERE site_id = ? AND kind = 'hidden'
+					AND ((a_device_id = ? AND COALESCE(a_if_index, 0) = ? AND b_device_id = ? AND COALESCE(b_if_index, 0) = ?)
+					  OR (a_device_id = ? AND COALESCE(a_if_index, 0) = ? AND b_device_id = ? AND COALESCE(b_if_index, 0) = ?))`,
+					siteID, a.DeviceID, a.IfIndex, b.DeviceID, b.IfIndex, b.DeviceID, b.IfIndex, a.DeviceID, a.IfIndex).Error; err != nil {
+					return fmt.Errorf("showing a map link: %w", err)
+				}
+				continue
+			}
+			if !c.hide {
+				continue
+			}
+			row := &models.SiteMapLink{ID: uuid.New(), SiteID: siteID, Kind: models.SiteMapLinkHidden, ADeviceID: a.DeviceID,
+				AIfIndex: nullableIf(a.IfIndex), BDeviceID: b.DeviceID, BIfIndex: nullableIf(b.IfIndex), CreatedAt: time.Now().UTC()}
+			if by != uuid.Nil {
+				row.CreatedBy = &by
+			}
+			if err := tx.Create(row).Error; err != nil {
+				return fmt.Errorf("saving a map link: %w", err)
+			}
+		}
 		return nil
+	})
+	if err != nil {
+		return err
 	}
-	l, ok := w.findLink(key)
-	if !ok {
-		return ErrSiteMapInvalid
-	}
-	if l.Hidden {
-		return nil
-	}
-	_, err = s.insertLink(ctx, v, siteID, models.SiteMapLinkHidden, a, b)
-	return err
+	s.changed(siteID)
+	return nil
 }
 
 // KeepGuess turns a MAC-table guess into a hand-drawn link.

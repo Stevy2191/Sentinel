@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -127,12 +128,26 @@ func aliasSnapshot(m *MapSnapshot) {
 		m.Devices[i].ID = publicID(site, m.Devices[i].ID)
 	}
 	for i := range m.Links {
-		l := &m.Links[i]
-		l.Key = publicKey(site, l.Key)
-		l.A.DeviceID, l.B.DeviceID = publicID(site, l.A.DeviceID), publicID(site, l.B.DeviceID)
-		l.ManualID = nil
+		aliasLink(site, &m.Links[i])
 	}
 	m.SiteID = uuid.Nil
+}
+
+// aliasLink swaps a link's ids for stand-ins: a bundle's members each as a
+// link, and its key rebuilt from theirs.
+func aliasLink(site uuid.UUID, l *MapLink) {
+	l.A.DeviceID, l.B.DeviceID = publicID(site, l.A.DeviceID), publicID(site, l.B.DeviceID)
+	l.ManualID = nil
+	if len(l.Members) == 0 {
+		l.Key = publicKey(site, l.Key)
+		return
+	}
+	keys := make([]string, len(l.Members))
+	for i := range l.Members {
+		aliasLink(site, &l.Members[i])
+		keys[i] = l.Members[i].Key
+	}
+	l.Key = bundlePrefix + strings.Join(keys, ",")
 }
 
 // PublicTraffic is a site's traffic as its public map shows it: keyed by the

@@ -146,3 +146,38 @@ func TestFindStaleAndDropped(t *testing.T) {
 		t.Fatalf("port setting = %+v, want one live link", links)
 	}
 }
+
+// A CDP neighbour that names no MAC or name Sentinel knows still matches by
+// the address it sent.
+func TestMatchNeighborByAddress(t *testing.T) {
+	devs := homeDevices()
+	devs[1].Host = " 10.20.0.5 "
+	n := Neighbor{DeviceID: gwID, IfIndex: 4, ChassisID: "LAB-C3850.corp.example", SysName: "LAB-C3850", Protocol: "cdp", Address: "10.20.0.5"}
+	if got, ok := MatchNeighborDevice(n, devs, homePorts()); !ok || got != swID {
+		t.Errorf("matched %v %v, want QuantumLink by address", got, ok)
+	}
+	n.Address = ""
+	if _, ok := MatchNeighborDevice(n, devs, homePorts()); ok {
+		t.Error("matched with no address, MAC or name")
+	}
+}
+
+func TestFindCDPSource(t *testing.T) {
+	in := homeInput()
+	n := homeNeighbor(now.Add(-time.Minute))
+	n.Protocol = "cdp"
+	n.PortID, n.PortDescr = "eth10", ""
+	in.Neighbors = []Neighbor{n}
+	links := Find(in)
+	if len(links) != 1 || !reflect.DeepEqual(links[0].Sources, sources(SourceCDP)) {
+		t.Fatalf("links = %+v, want one found by CDP", links)
+	}
+	if ends := map[uuid.UUID]int{links[0].A.DeviceID: links[0].A.IfIndex, links[0].B.DeviceID: links[0].B.IfIndex}; ends[gwID] != 4 {
+		t.Errorf("ends = %+v, want Quantum-Gate:4 by the CDP port name", ends)
+	}
+	// Both protocols on one cable: one link, both sources.
+	in.Neighbors = append(in.Neighbors, homeNeighbor(now.Add(-time.Minute)))
+	if links := Find(in); len(links) != 1 || !reflect.DeepEqual(links[0].Sources, sources(SourceCDP, SourceLLDP)) {
+		t.Fatalf("links = %+v, want one found by CDP and LLDP", links)
+	}
+}

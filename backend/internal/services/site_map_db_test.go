@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -460,5 +461,125 @@ func TestSnapshotPlacementsCached(t *testing.T) {
 	before := count.calls
 	if _, ok, _ := svc.PublicDevice(ctx, h.site, pub.Devices[0].ID); !ok || count.calls != before {
 		t.Errorf("PublicDevice: ok %v, placements +%d", ok, count.calls-before)
+	}
+}
+
+// seedHomeBundle adds a second cable to the home map: QuantumLink 52 to
+// Quantum-Gate eth11, with QuantumLink's 51 and 52 in aggregator 3/1.
+func seedHomeBundle(t *testing.T, db *gorm.DB) homeMapIDs {
+	t.Helper()
+	h := seedHomeMap(t, db)
+	testdb.Exec(t, db, `INSERT INTO device_interfaces (device_id, if_index, name, mac, if_type, speed_bps, present) VALUES (?, 5, 'eth11', 'e4:38:83:20:f5:d1', 6, 10000000000, true)`, h.gw)
+	testdb.Exec(t, db, `INSERT INTO device_interfaces (device_id, if_index, name, mac, if_type, speed_bps, present) VALUES (?, 66, '3/1', 'f4:e2:c6:58:0c:b8', 161, 20000000000, true)`, h.sw)
+	testdb.Exec(t, db, `UPDATE device_interfaces SET lag_if_index = 66 WHERE device_id = ? AND if_index IN (51, 52)`, h.sw)
+	testdb.Exec(t, db, `INSERT INTO l2.neighbors (device_id, if_index, chassis_id, sys_name, port_id, port_descr) VALUES (?, 52, 'e4:38:83:20:f5:c6', 'Quantum-Gate', 'e4:38:83:20:f5:d1', 'eth11')`, h.sw)
+	return h
+}
+
+func TestDBSiteMapBundleSnapshot(t *testing.T) {
+	db := testdb.Open(t)
+	h := seedHomeBundle(t, db)
+	svc := newMapService(db)
+	m, err := svc.Snapshot(context.Background(), h.admin, h.site)
+	testdb.Must(t, err)
+	if len(m.Links) != 1 || len(m.Links[0].Members) != 2 {
+		t.Fatalf("links = %+v, want one bundle of two", m.Links)
+	}
+	b := m.Links[0]
+	if !isBundleKey(b.Key) || b.SpeedBps != 20_000_000_000 || b.Lag == nil {
+		t.Fatalf("bundle = %+v", b)
+	}
+	lagAt := map[uuid.UUID]string{b.A.DeviceID: b.Lag.A, b.B.DeviceID: b.Lag.B}
+	if lagAt[h.sw] != "3/1" || lagAt[h.gw] != "" {
+		t.Errorf("lag = %+v, want 3/1 on QuantumLink only", lagAt)
+	}
+	ps, _, err := svc.BoundPorts(context.Background(), h.site)
+	testdb.Must(t, err)
+	got := map[int]string{}
+	for _, p := range ps {
+		if p.DeviceID != h.sw {
+			t.Errorf("bound port %+v, want QuantumLink's", p)
+		}
+		got[p.IfIndex] = p.LinkKey
+	}
+	keys := bundleMembers(b.Key)
+	if len(ps) != 2 || got[51] == "" || got[52] == "" || got[51] == got[52] || !(got[51] == keys[0] || got[51] == keys[1]) || !(got[52] == keys[0] || got[52] == keys[1]) {
+		t.Errorf("bound ports = %+v, want QuantumLink 51 and 52 under the member keys %v", ps, keys)
+	}
+}
+
+// Review Focus 4: hiding a bundle hides each cable in it.
+func TestDBSiteMapHideBundleHidesMembers(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	h := seedHomeBundle(t, db)
+	svc := newMapService(db)
+	m, err := svc.Snapshot(ctx, h.admin, h.site)
+	testdb.Must(t, err)
+	key := m.Links[0].Key
+	hiddenRows := func() int {
+		var n int
+		testdb.Must(t, db.Raw(`SELECT count(*) FROM site_map_links WHERE site_id = ? AND kind = 'hidden'`, h.site).Scan(&n).Error)
+		return n
+	}
+
+	if err := svc.SetLinkHidden(ctx, h.admin, h.site, key+",nonsense", true); !errors.Is(err, ErrSiteMapInvalid) || hiddenRows() != 0 {
+		t.Fatalf("a bundle key with a bad member: %v, %d rows; want invalid and nothing hidden", err, hiddenRows())
+	}
+	testdb.Must(t, svc.SetLinkHidden(ctx, h.admin, h.site, key, true))
+	if n := hiddenRows(); n != 2 {
+		t.Errorf("hidden rows = %d, want one per cable", n)
+	}
+	m, _ = svc.Snapshot(ctx, h.admin, h.site)
+	if len(m.Links) != 0 || len(m.HiddenLinks) != 1 || m.HiddenLinks[0].Key != key {
+		t.Fatalf("links %+v, hidden %+v; want the bundle hidden as one", m.Links, m.HiddenLinks)
+	}
+	if ps, _, _ := svc.BoundPorts(ctx, h.site); len(ps) != 0 {
+		t.Errorf("bound ports %+v for a hidden bundle", ps)
+	}
+	testdb.Must(t, svc.SetLinkHidden(ctx, h.admin, h.site, key, false))
+	m, _ = svc.Snapshot(ctx, h.admin, h.site)
+	if len(m.Links) != 1 || len(m.HiddenLinks) != 0 || hiddenRows() != 0 {
+		t.Errorf("after showing: links %d, hidden %d, rows %d", len(m.Links), len(m.HiddenLinks), hiddenRows())
+	}
+}
+
+// Review Focus 5: a bundle's members carry no real ids onto a public map.
+func TestPublicSnapshotAliasesBundleMembers(t *testing.T) {
+	db := testdb.Open(t)
+	h := seedHomeBundle(t, db)
+	svc := newMapService(db)
+	m, err := svc.PublicSnapshot(context.Background(), h.site)
+	testdb.Must(t, err)
+	raw, err := json.Marshal(m)
+	testdb.Must(t, err)
+	for _, id := range []uuid.UUID{h.gw, h.sw, h.site} {
+		if strings.Contains(string(raw), id.String()) {
+			t.Errorf("public map carries %s: %s", id, raw)
+		}
+	}
+	if len(m.Links) != 1 || len(m.Links[0].Members) != 2 {
+		t.Fatalf("public links = %+v", m.Links)
+	}
+	b := m.Links[0]
+	var memberKeys []string
+	for _, mem := range b.Members {
+		memberKeys = append(memberKeys, mem.Key)
+	}
+	if b.Key != "bundle:"+strings.Join(memberKeys, ",") {
+		t.Errorf("public bundle key %q isn't built from its members' public keys %v", b.Key, memberKeys)
+	}
+	// Traffic, keyed by the real member keys, arrives under the public ones.
+	full, _ := svc.Snapshot(context.Background(), h.admin, h.site)
+	up := true
+	rates := map[string]LinkRate{}
+	for _, mem := range full.Links[0].Members {
+		rates[mem.Key] = LinkRate{OperUp: &up}
+	}
+	pt := PublicTraffic(h.site, MapTraffic{Links: rates})
+	for _, k := range memberKeys {
+		if _, ok := pt.Links[k]; !ok {
+			t.Errorf("public traffic %v has no rate for member %s", pt.Links, k)
+		}
 	}
 }

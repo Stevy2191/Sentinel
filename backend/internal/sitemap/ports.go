@@ -19,9 +19,10 @@ func physical(p Port) bool {
 	return portmon.IsPhysical(portmon.IfInfo{Name: p.Name, Descr: p.Descr, Type: p.IfType, ConnectorPresent: p.ConnectorPresent})
 }
 
-// MatchNeighborDevice finds the map device an LLDP neighbour is: by its
-// chassis ID among the devices' interface MACs, else by its system name
-// against a device's sysName or name, ignoring case. The device reporting
+// MatchNeighborDevice finds the map device an LLDP or CDP neighbour is: by
+// its chassis ID among the devices' interface MACs, else by its system name
+// against a device's sysName or name, ignoring case, else by the address it
+// sent against the host Sentinel polls the device on. The device reporting
 // the neighbour never matches itself.
 func MatchNeighborDevice(n Neighbor, devices []Device, ports []Port) (uuid.UUID, bool) {
 	onMap := map[uuid.UUID]bool{}
@@ -35,16 +36,21 @@ func MatchNeighborDevice(n Neighbor, devices []Device, ports []Port) (uuid.UUID,
 			}
 		}
 	}
-	name := strings.ToLower(strings.TrimSpace(n.SysName))
-	if name == "" {
-		return uuid.Nil, false
-	}
-	for _, d := range devices {
-		if d.ID == n.DeviceID {
-			continue
+	if name := strings.TrimSpace(n.SysName); name != "" {
+		for _, d := range devices {
+			if d.ID == n.DeviceID {
+				continue
+			}
+			if strings.EqualFold(strings.TrimSpace(d.SysName), name) || strings.EqualFold(strings.TrimSpace(d.Name), name) {
+				return d.ID, true
+			}
 		}
-		if strings.EqualFold(strings.TrimSpace(d.SysName), name) || strings.EqualFold(strings.TrimSpace(d.Name), name) {
-			return d.ID, true
+	}
+	if addr := strings.TrimSpace(n.Address); addr != "" {
+		for _, d := range devices {
+			if d.ID != n.DeviceID && strings.EqualFold(strings.TrimSpace(d.Host), addr) {
+				return d.ID, true
+			}
 		}
 	}
 	return uuid.Nil, false
