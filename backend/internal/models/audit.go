@@ -51,6 +51,8 @@ const (
 	ActionFaceplateLayoutSaved   = "faceplate_layout_saved"
 	ActionFaceplateLayoutDeleted = "faceplate_layout_deleted"
 
+	ActionEndpointNamed = "endpoint_named"
+
 	ActionDashboardCreated     = "dashboard_created"
 	ActionDashboardUpdated     = "dashboard_updated"
 	ActionDashboardDeleted     = "dashboard_deleted"
@@ -82,6 +84,8 @@ const (
 	ResourceCustomMetric  = "custom_metric"
 
 	ResourceFaceplateLayout = "faceplate_layout"
+
+	ResourceEndpoint = "endpoint"
 
 	ResourceDashboard = "dashboard"
 

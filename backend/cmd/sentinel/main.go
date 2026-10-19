@@ -414,6 +414,7 @@ func run() error {
 	api.RegisterMIBRoutes(v1, mibLibrary, auditService, authService)
 	api.RegisterProfileRoutes(v1, profileService, deviceService, siteService, auditService, authService, deviceWalker)
 	api.RegisterFaceplateLayoutRoutes(v1, faceplateLayouts, portService, deviceService, siteService, auditService, authService)
+	api.RegisterEndpointRoutes(v1, services.NewEndpointService(db, siteService, nil), deviceService, siteService, auditService)
 	api.RegisterDeviceHealthRoute(v1, profileService, metricsStore, incidentService, deviceService, siteService)
 	api.RegisterDeviceMetricsRoute(v1, metricsStore, deviceService, siteService)
 	api.RegisterDashboardRoutes(v1, dashboardService, dashboardResolver, auditService, authService)

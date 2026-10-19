@@ -20,13 +20,13 @@ import (
 var (
 	ErrEndpointNotFound    = errors.New("endpoint not found")
 	ErrEndpointForbidden   = errors.New("you can't rename devices on this site")
-	ErrEndpointNameTooLong = errors.New("name must be at most 100 characters")
+	ErrEndpointNameTooLong = errors.New("name must be at most 64 characters")
 )
 
 const (
 	endpointSearchLimit  = 50
 	endpointSightingsMax = 20
-	endpointNameMax      = 100
+	endpointNameMax      = 64
 )
 
 // Viewer is who is asking, for site access.
