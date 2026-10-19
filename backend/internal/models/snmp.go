@@ -198,6 +198,19 @@ const (
 
 var ValidPortRoles = map[string]bool{PortRoleAccess: true, PortRoleUplink: true, PortRoleWAN: true}
 
+// Who set a port's role (DeviceInterface.RoleSource).
+const (
+	PortRoleSourceDefault = "default" // nobody: an endpoint until the rules find otherwise.
+	PortRoleSourceUser    = "user"    // a person; the rules never change it.
+	PortRoleSourceAuto    = "auto"    // the port role rules.
+)
+
+// What the L2 poll found on a router's port (DeviceInterface.WANEvidence).
+const (
+	WANEvidenceDefaultRoute  = "default_route"
+	WANEvidencePublicAddress = "public_address"
+)
+
 // Device is an SNMP-polled device. It belongs to exactly one site.
 type Device struct {
 	ID                  uuid.UUID   `json:"id" gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
@@ -336,6 +349,16 @@ type DeviceInterface struct {
 	// StackUnit is this port's stack member (1, 2, ...) when the device is a
 	// stack of more than one switch, 0 otherwise. Set by inventory only.
 	StackUnit int `json:"stack_unit" gorm:"column:stack_unit;not null"`
+	// RoleSource is who set Role: a person (user), the port role rules
+	// (auto), or neither (default). RoleReason says why the rules chose it.
+	// Written only by PortService and PortRoleService, never by inventory.
+	RoleSource string `json:"role_source" gorm:"column:role_source;not null;default:default"`
+	RoleReason string `json:"role_reason" gorm:"column:role_reason;not null;default:''"`
+	// LagIfIndex is the aggregator this port is a member of; set by the L2 poll.
+	LagIfIndex *int `json:"lag_if_index" gorm:"column:lag_if_index"`
+	// WANEvidence is what the L2 poll found on a router's port
+	// (WANEvidenceDefaultRoute, WANEvidencePublicAddress or "").
+	WANEvidence string `json:"-" gorm:"column:wan_evidence;not null;default:''"`
 	// HasIfX: the ifXTable has answered for this interface at least once, so
 	// its name, alias and high speed are not overwritten by an inventory whose
 	// ifXTable walk failed.
