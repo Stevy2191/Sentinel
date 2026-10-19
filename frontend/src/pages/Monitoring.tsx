@@ -6,53 +6,76 @@ import { useAllMonitors } from '@/hooks/useAllMonitors'
 import { useMonitorGroups } from '@/hooks/useMonitorGroups'
 import { useSummaryReport } from '@/hooks/useReports'
 import { useUsers } from '@/hooks/useUsers'
-import { useAgents, type CreatedAgent } from '@/hooks/useAgents'
-import { useDevices } from '@/hooks/useDevices'
+import { useAgentActions, useAgents, type Agent, type CreatedAgent } from '@/hooks/useAgents'
+import { useDevices, type Device } from '@/hooks/useDevices'
 import { useSites } from '@/hooks/useSites'
-import { useRememberedToggles } from '@/hooks/useRememberedToggles'
 import { useToasts, Toaster } from '@/components/Toast'
 import CreateMonitorModal from '@/components/CreateMonitorModal'
 import AddServerAgentModal from '@/components/AddServerAgentModal'
 import DeviceFormModal from '@/components/network/DeviceFormModal'
 import AddMenu from '@/components/monitoring/AddMenu'
 import GroupModal from '@/components/monitoring/GroupModal'
-import MonitoringToolbar from '@/components/monitoring/MonitoringToolbar'
+import ListFilterBar from '@/components/monitoring/ListFilterBar'
+import MonitoringList from '@/components/monitoring/MonitoringList'
 import SummaryStrip from '@/components/monitoring/SummaryStrip'
-import UptimeSection from '@/components/monitoring/UptimeSection'
-import ServersSection from '@/components/monitoring/ServersSection'
-import DevicesSection from '@/components/monitoring/DevicesSection'
+import UnregisterServerDialog from '@/components/monitoring/UnregisterServerDialog'
+import { summaryCounts } from '@/utils/monitoringView'
 import {
   NO_FILTERS,
-  SECTION_LABEL,
-  buildMonitoringParams,
-  filterDevicesView,
-  filterMonitors,
-  filterServers,
-  filtersNarrow,
-  ownFiltersSet,
-  parseMonitoringParams,
-  sectionVisible,
+  buildListParams,
+  filterRows,
+  filtersActive,
+  groupRows,
+  nextSort,
+  parseListParams,
   siteFilterOptions,
-  statusOptions,
-  summaryCounts,
-  visibleSections,
-  type MonitoringFilters,
-  type Section,
-} from '@/utils/monitoringView'
+  sortRows,
+  toRows,
+  type GroupBy,
+  type ListFilters,
+  type SortKey,
+} from '@/utils/monitoringList'
+import type { ApiError } from '@/services/api'
 import type { MonitorGroup } from '@/types'
 import { usePageLabel } from '@/utils/navHistory'
 
 const GROUPS_REFRESH_MS = 30_000
+const GROUP_BY_KEY = 'sentinel:monitoringGroupBy'
+
+function storedGroupBy(): GroupBy {
+  try {
+    const v = localStorage.getItem(GROUP_BY_KEY)
+    return v === 'site' || v === 'kind' || v === 'group' ? v : 'none'
+  } catch {
+    return 'none'
+  }
+}
 
 export default function Monitoring() {
   const { currentUser } = useAuthContext()
   const isAdmin = !!currentUser?.is_admin
   const [searchParams, setSearchParams] = useSearchParams()
-  const filters = useMemo(() => parseMonitoringParams(searchParams), [searchParams])
+  const view = useMemo(() => parseListParams(searchParams), [searchParams])
+  const { filters, sort } = view
+  // Group by is remembered in this browser; an address that says otherwise
+  // (a shared link) wins while it is open.
+  const [remembered, setRemembered] = useState<GroupBy>(storedGroupBy)
+  const by = view.by ?? remembered
+
   const setFilters = useCallback(
-    (next: MonitoringFilters, replace = false) => setSearchParams(buildMonitoringParams(next), { replace }),
-    [setSearchParams]
+    (next: ListFilters, replace = false) => setSearchParams(buildListParams({ ...view, filters: next }), { replace }),
+    [setSearchParams, view]
   )
+  const onSort = (key: SortKey) => setSearchParams(buildListParams({ ...view, sort: nextSort(sort, key) }))
+  const onBy = (next: GroupBy) => {
+    try {
+      localStorage.setItem(GROUP_BY_KEY, next)
+    } catch {
+      // Private browsing or a full quota: it applies now, just isn't kept.
+    }
+    setRemembered(next)
+    setSearchParams(buildListParams({ ...view, by: next }), { replace: true })
+  }
 
   const { monitors, loading: monitorsLoading, error: monitorsError, loadedAt, refetch: refetchMonitorList } = useAllMonitors()
   const { groups, refetch: refetchGroups } = useMonitorGroups()
@@ -62,7 +85,7 @@ export default function Monitoring() {
   const { sites } = useSites()
   const { usernameFor } = useUsers()
   const { toasts, push } = useToasts()
-  const sectionToggles = useRememberedToggles('sentinel:monitoringCollapsed')
+  const { getWithToken, remove, busy } = useAgentActions()
 
   useEffect(() => {
     const t = window.setInterval(() => void refetchGroups(), GROUPS_REFRESH_MS)
@@ -83,47 +106,65 @@ export default function Monitoring() {
     await Promise.all([refetchMonitorList(), refetchGroups()])
   }, [refetchMonitorList, refetchGroups])
 
-  // 24-hour uptime per monitor (each row's figure until its own loads, and
-  // the "lowest uptime" sort) and 30-day incidents, fixed at mount.
+  // 24-hour uptime per monitor: each row's figure until its own loads.
   const windows = useMemo(() => {
     const end = new Date()
-    return {
-      day: new Date(end.getTime() - 24 * 3600e3).toISOString(),
-      month: new Date(end.getTime() - 30 * 24 * 3600e3).toISOString(),
-      end: end.toISOString(),
-    }
+    return { day: new Date(end.getTime() - 24 * 3600e3).toISOString(), end: end.toISOString() }
   }, [])
   const { report: daySummary } = useSummaryReport(windows.day, windows.end)
-  const { report: monthSummary } = useSummaryReport(windows.month, windows.end)
   const uptimeById = useMemo(
     () => new Map((daySummary?.monitors ?? []).map((r) => [r.monitor_id, r.uptime_percent] as const)),
     [daySummary]
   )
 
-  const shownMonitors = useMemo(() => filterMonitors(monitors, filters), [monitors, filters])
-  const shownAgents = useMemo(() => filterServers(agents, filters), [agents, filters])
-  const shownDevices = useMemo(() => filterDevicesView(devices, filters), [devices, filters])
+  const rows = useMemo(() => toRows(monitors, agents, devices), [monitors, agents, devices])
+  const shown = useMemo(() => sortRows(filterRows(rows, filters), sort), [rows, filters, sort])
+  const grouped = useMemo(
+    () => (by === 'none' ? null : groupRows(shown, by, { groups, includeEmptyGroups: !filtersActive(filters) })),
+    [shown, by, groups, filters]
+  )
   const counts = useMemo(() => summaryCounts(monitors, agents, devices), [monitors, agents, devices])
-  const siteOptions = useMemo(() => siteFilterOptions(sites, [...monitors, ...agents]), [sites, monitors, agents])
-  const narrowed = filtersNarrow(filters)
-  // Keeps the chosen section, so the user stays where they were.
-  const clearFilters = () => setFilters({ ...NO_FILTERS, show: filters.show })
+  const siteOptions = useMemo(() => siteFilterOptions(sites, rows), [sites, rows])
 
   const [createOpen, setCreateOpen] = useState(false)
   const [groupModal, setGroupModal] = useState<{ mode: 'create' | 'edit'; group?: MonitorGroup } | null>(null)
   const [agentModal, setAgentModal] = useState<{ existing: CreatedAgent | null } | null>(null)
-  const [addingDevice, setAddingDevice] = useState(false)
+  const [deviceModal, setDeviceModal] = useState<{ initial?: Device } | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<Agent | null>(null)
 
-  const state: Record<Section, { loading: boolean; error: string | null; total: number; shown: number; canAdd: boolean }> = {
-    uptime: { loading: monitorsLoading, error: monitorsError, total: monitors.length, shown: shownMonitors.length, canAdd: true },
-    servers: { loading: agentsLoading, error: agentsError, total: agents.length, shown: shownAgents.length, canAdd: isAdmin },
-    devices: { loading: devicesLoading, error: devicesError, total: devices.length, shown: shownDevices.length, canAdd: isAdmin },
+  const showInstructions = async (agent: Agent) => {
+    try {
+      // Re-fetched rather than held in memory: the token is not in the list
+      // payload, and the install command is meaningless without it.
+      setAgentModal({ existing: await getWithToken(agent.agent_id) })
+    } catch (err) {
+      push((err as ApiError).message || 'Could not load install instructions', 'error')
+    }
   }
-  const order = visibleSections(filters).filter((s) => sectionVisible({ ...state[s], narrowed, ownFilter: ownFiltersSet(s, filters) }))
-  const missing = (Object.keys(state) as Section[]).filter((s) => state[s].error).map((s) => SECTION_LABEL[s])
-  const allLoaded = !monitorsLoading && !agentsLoading && !devicesLoading
-  const nothingAtAll = allLoaded && missing.length === 0 && monitors.length + agents.length + devices.length === 0
-  const nothingMatches = allLoaded && !nothingAtAll && order.length === 0
+
+  const doDelete = async () => {
+    if (!confirmDelete) return
+    try {
+      await remove(confirmDelete.agent_id)
+      push(`${confirmDelete.name} unregistered`, 'success')
+      setConfirmDelete(null)
+      void refetchAgents()
+    } catch (err) {
+      push((err as ApiError).message || 'Could not unregister the agent', 'error')
+    }
+  }
+
+  const failed = [
+    { label: 'Uptime checks', error: monitorsError, retry: () => void refetchMonitors() },
+    { label: 'Servers', error: agentsError, retry: () => void refetchAgents() },
+    { label: 'Devices', error: devicesError, retry: () => void refetchDevices() },
+  ].filter((s) => s.error)
+  const settled = !monitorsLoading && !agentsLoading && !devicesLoading
+  const nothingAtAll = settled && failed.length === 0 && rows.length === 0
+  const nothingMatches = settled && rows.length > 0 && shown.length === 0
+  // A new device goes to the site being looked at, when that is one site.
+  const realSites = filters.sites.filter((s) => s !== 'none')
+  const addSite = realSites.length === 1 ? realSites[0] : undefined
 
   return (
     <div className="space-y-6">
@@ -135,12 +176,7 @@ export default function Monitoring() {
           <p className="mt-2 text-sm text-slate-400">Uptime checks, servers and network devices in one place</p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            className="btn-secondary px-2.5"
-            onClick={() => void refreshAll()}
-            aria-label="Refresh"
-            title="Refresh"
-          >
+          <button className="btn-secondary px-2.5" onClick={() => void refreshAll()} aria-label="Refresh" title="Refresh">
             <RefreshCw className={`h-4 w-4 ${refreshing || monitorsLoading ? 'animate-spin' : ''}`} />
           </button>
           <AddMenu
@@ -148,23 +184,37 @@ export default function Monitoring() {
             onMonitor={() => setCreateOpen(true)}
             onGroup={() => setGroupModal({ mode: 'create' })}
             onServer={() => setAgentModal({ existing: null })}
-            onDevice={() => setAddingDevice(true)}
+            onDevice={() => setDeviceModal({})}
           />
         </div>
       </div>
 
-      <MonitoringToolbar
-        filters={filters}
-        onChange={setFilters}
-        counts={{ uptime: monitors.length, servers: agents.length, devices: devices.length }}
-        statuses={statusOptions(monitors, devices, filters.status)}
-        sites={siteOptions}
-        groups={groups}
+      <ListFilterBar rows={rows} filters={filters} onChange={setFilters} sites={siteOptions} groups={groups} by={by} onBy={onBy} />
+
+      <SummaryStrip
+        counts={counts}
+        statuses={filters.statuses}
+        onPick={(status) => setFilters({ ...filters, statuses: status ? [status] : [] })}
       />
 
-      <SummaryStrip counts={counts} missing={missing} onPick={(status) => setFilters({ ...NO_FILTERS, status })} />
+      {failed.map((s) => (
+        <div key={s.label} className="flex items-center justify-between gap-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3">
+          <span className="text-sm text-red-400">
+            {s.label} couldn&rsquo;t be loaded <span className="text-red-400/70">— {s.error}</span>
+          </span>
+          <button className="btn-secondary" onClick={s.retry}>
+            Retry
+          </button>
+        </div>
+      ))}
 
-      {nothingAtAll ? (
+      {!settled ? (
+        <div className="space-y-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="h-12 animate-pulse rounded-lg border border-white/10 bg-slate-800/40" />
+          ))}
+        </div>
+      ) : nothingAtAll ? (
         <div className="rounded-lg border border-white/10 bg-slate-800/40 p-10 text-center text-sm text-slate-300">
           Nothing is being watched yet. Use <span className="font-medium text-white">Add</span> to start with an uptime monitor
           {isAdmin ? ', a server agent or a network device' : ''}.
@@ -177,67 +227,25 @@ export default function Monitoring() {
           </button>
         </div>
       ) : (
-        <div className="space-y-8">
-          {order.map((s) =>
-            s === 'uptime' ? (
-              <UptimeSection
-                key="uptime"
-                monitors={shownMonitors}
-                all={monitors}
-                groups={groups}
-                filters={filters}
-                onFilters={setFilters}
-                onClearFilters={clearFilters}
-                narrowed={narrowed}
-                uptimeById={uptimeById}
-                incidents30d={monthSummary?.aggregate.total_incidents ?? null}
-                usernameFor={usernameFor}
-                refreshKey={loadedAt}
-                collapsed={!!sectionToggles.on.uptime}
-                onToggle={() => sectionToggles.toggle('uptime')}
-                loading={monitorsLoading}
-                error={monitorsError}
-                onRetry={() => void refetchMonitors()}
-                onChanged={() => void refetchMonitors()}
-                onAdd={() => setCreateOpen(true)}
-                onEditGroup={(group) => setGroupModal({ mode: 'edit', group })}
-                push={push}
-              />
-            ) : s === 'servers' ? (
-              <ServersSection
-                key="servers"
-                agents={shownAgents}
-                total={agents.length}
-                isAdmin={isAdmin}
-                collapsed={!!sectionToggles.on.servers}
-                onToggle={() => sectionToggles.toggle('servers')}
-                loading={agentsLoading}
-                error={agentsError}
-                onRetry={() => void refetchAgents()}
-                onChanged={() => void refetchAgents()}
-                onAdd={() => setAgentModal({ existing: null })}
-                onInstructions={(existing) => setAgentModal({ existing })}
-                push={push}
-              />
-            ) : (
-              <DevicesSection
-                key="devices"
-                devices={shownDevices}
-                total={devices.length}
-                isAdmin={isAdmin}
-                filters={filters}
-                onFilters={setFilters}
-                onClearFilters={clearFilters}
-                collapsed={!!sectionToggles.on.devices}
-                onToggle={() => sectionToggles.toggle('devices')}
-                loading={devicesLoading}
-                error={devicesError}
-                onRetry={() => void refetchDevices()}
-                onAdd={() => setAddingDevice(true)}
-              />
-            )
-          )}
-        </div>
+        rows.length > 0 && (
+          <MonitoringList
+            rows={shown}
+            groups={grouped}
+            by={by}
+            sort={sort}
+            onSort={onSort}
+            isAdmin={isAdmin}
+            uptimeById={uptimeById}
+            usernameFor={usernameFor}
+            refreshKey={loadedAt}
+            push={push}
+            onMonitorsChanged={() => void refetchMonitors()}
+            onServerInstructions={(a) => void showInstructions(a)}
+            onServerDelete={setConfirmDelete}
+            onDeviceEdit={(d) => setDeviceModal({ initial: d })}
+            onEditGroup={(group) => setGroupModal({ mode: 'edit', group })}
+          />
+        )
       )}
 
       <CreateMonitorModal isOpen={createOpen} onClose={() => setCreateOpen(false)} onCreated={() => void refetchMonitors()} push={push} />
@@ -257,12 +265,16 @@ export default function Monitoring() {
         onCreated={() => void refetchAgents()}
         push={push}
       />
-      {addingDevice && (
+      {confirmDelete && (
+        <UnregisterServerDialog agent={confirmDelete} busy={busy} onCancel={() => setConfirmDelete(null)} onConfirm={() => void doDelete()} />
+      )}
+      {deviceModal && (
         <DeviceFormModal
-          siteId={filters.site && filters.site !== 'none' ? filters.site : undefined}
-          onClose={() => setAddingDevice(false)}
+          initial={deviceModal.initial}
+          siteId={deviceModal.initial ? undefined : addSite}
+          onClose={() => setDeviceModal(null)}
           onSaved={() => {
-            setAddingDevice(false)
+            setDeviceModal(null)
             void refetchDevices()
           }}
         />
