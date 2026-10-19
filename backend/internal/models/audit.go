@@ -61,6 +61,10 @@ const (
 	ActionDashboardLinkCreated = "dashboard_link_created"
 	ActionDashboardLinkRevoked = "dashboard_link_revoked"
 
+	ActionSiteMapEdited      = "site_map_edited"
+	ActionSiteMapLinkCreated = "site_map_link_created"
+	ActionSiteMapLinkRevoked = "site_map_link_revoked"
+
 	ActionToolRunStarted          = "tool_run_started"
 	ActionToolRunFinished         = "tool_run_finished"
 	ActionToolRunRefused          = "tool_run_refused"
@@ -88,6 +92,7 @@ const (
 	ResourceEndpoint = "endpoint"
 
 	ResourceDashboard = "dashboard"
+	ResourceSiteMap   = "site_map"
 
 	ResourceToolRun  = "tool_run"
 	ResourceSettings = "settings"
