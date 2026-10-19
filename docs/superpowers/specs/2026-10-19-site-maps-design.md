@@ -100,10 +100,13 @@ Links come from four places. When several describe the same cable, they make one
 2. **Port settings:** the phase 2 "Network link" neighbour on a port (`device_interfaces.neighbor_device_id` and `neighbor_if_index`).
 3. **LLDP:** an entry in `l2.neighbors` whose neighbour is a monitored device at this site.
    - **Finding the neighbour device:** the neighbour's chassis ID matches one of the device's interface MACs. Failing that, the neighbour's system name matches the device's `sys_name` or `name`, ignoring case.
-   - **Finding the neighbour's port:**
-     1. if the neighbour's port ID is one of that device's interface MACs, it's that port
-     2. otherwise, if the port ID or port description equals an interface's `ifName`, `ifDescr` or `ifAlias`, it's that port
-     3. otherwise the link attaches to the device itself, with no port
+   - **Finding the neighbour's port,** in this order:
+     1. if the neighbour's port ID or port description equals an interface's `ifName`, `ifDescr` or `ifAlias`, it's that port
+     2. if it reads "Port N", it's the port numbered N on the faceplate. TS5410R81E reports QuantumLink's port as "Port 5", while QuantumLink names it "0/5".
+     3. if the neighbour's port ID is one of that device's interface MACs, and only one physical port has that MAC, it's that port.
+        - VLAN sub-interfaces and bridges sharing the MAC don't count. Quantum-Gate's eth10 shares its MAC with a dozen `eth10.N` sub-interfaces.
+        - A device that gives every port the same MAC can't be matched this way. QuantumLink does that.
+     4. otherwise the link attaches to the device itself, with no port
    - **Seen from both ends:** the two entries make one link, with both ports known.
    - **On the owner's data:**
      - QuantumLink's ports 4, 5, 48 and 51 connect to MBU7IW, TS5410R81E, KitchenAP and Quantum-Gate.
