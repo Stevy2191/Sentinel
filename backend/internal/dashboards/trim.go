@@ -25,3 +25,7 @@ func trimPort(p *services.PortView) {
 	p.MAC = ""
 	p.NeighborDeviceID = nil
 }
+
+// TrimPortForPublic blanks what a public view must not see on a port, as
+// public widgets do; the public site map uses it for its drawings.
+func TrimPortForPublic(p *services.PortView) { trimPort(p) }
