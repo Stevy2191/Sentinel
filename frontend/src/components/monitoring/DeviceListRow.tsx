@@ -1,4 +1,3 @@
-import { useNavigate } from 'react-router-dom'
 import { Pencil } from 'lucide-react'
 import ListRowLayout, { ago } from '@/components/monitoring/ListRowLayout'
 import StatusPill from '@/components/monitoring/StatusPill'
@@ -14,7 +13,6 @@ interface Props {
 /** A network device on the Monitoring list: how long it has been up as its
  *  health (or why it is not answering), and its 30-day availability. */
 export default function DeviceListRow({ row, isAdmin, onEdit }: Props) {
-  const navigate = useNavigate()
   const d = row.device
   const failing = d.status === 'down' || d.status === 'error'
   const healthText = failing ? d.status_detail || 'not responding' : upFor(d.sys_uptime_seconds)
@@ -64,7 +62,7 @@ export default function DeviceListRow({ row, isAdmin, onEdit }: Props) {
           </button>
         )
       }
-      onOpen={() => navigate(`/network/devices/${d.id}`)}
+      to={`/network/devices/${d.id}`}
     />
   )
 }

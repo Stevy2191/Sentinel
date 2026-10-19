@@ -1,4 +1,3 @@
-import { useNavigate } from 'react-router-dom'
 import { Terminal, Trash2 } from 'lucide-react'
 import type { AgentMetric } from '@/hooks/useAgents'
 import ListRowLayout, { ago } from '@/components/monitoring/ListRowLayout'
@@ -36,7 +35,6 @@ interface Props {
 /** A server agent on the Monitoring list: CPU, memory and disk as its health,
  *  how long the host has been up. */
 export default function ServerListRow({ row, latest, isAdmin, onInstructions, onDelete }: Props) {
-  const navigate = useNavigate()
   const a = row.agent
   const m = latest
   const parts: [string, number | null | undefined][] = [
@@ -95,7 +93,7 @@ export default function ServerListRow({ row, latest, isAdmin, onInstructions, on
           </div>
         )
       }
-      onOpen={() => navigate(`/servers/${a.agent_id}`)}
+      to={`/servers/${a.agent_id}`}
     />
   )
 }

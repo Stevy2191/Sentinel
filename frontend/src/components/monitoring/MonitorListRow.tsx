@@ -1,4 +1,3 @@
-import { useNavigate } from 'react-router-dom'
 import { useMonitorUptime } from '@/hooks/useMonitorUptime'
 import { Sparkline, hourlySparklinePoints, uptimeColor } from '@/components/UptimeSparkline'
 import MonitorRowActions from '@/components/MonitorRowActions'
@@ -29,7 +28,6 @@ interface Props {
 /** An uptime check on the Monitoring list: response time, and the 24-hour
  *  strip with its uptime. */
 export default function MonitorListRow({ row, uptime24h, ownerUsername, refreshKey, onChanged, push }: Props) {
-  const navigate = useNavigate()
   const m = row.monitor
   // One fetch per row powers both the bar strip and the uptime percentage.
   const { data: uptime, loading } = useMonitorUptime(m.id, '24h', true, refreshKey)
@@ -80,7 +78,7 @@ export default function MonitorListRow({ row, uptime24h, ownerUsername, refreshK
       }
       seen={ago(m.last_check_at)}
       actions={<MonitorRowActions monitor={m} access={access} onChanged={onChanged} push={push} />}
-      onOpen={() => navigate(`/monitors/${m.id}`)}
+      to={`/monitors/${m.id}`}
     />
   )
 }
