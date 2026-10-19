@@ -24,7 +24,12 @@ type PortService struct {
 	settings  *SettingsService
 	layouts   FaceplateLayoutLookup
 	bays      DriveBayStates
+	roles     *PortRoleService
 }
+
+// SetRoles lets a port set back to automatic have its role worked out again
+// straight away; without it the next L2 poll does it.
+func (s *PortService) SetRoles(r *PortRoleService) { s.roles = r }
 
 func NewPortService(db *gorm.DB, metrics *MetricsStore, incidents *IncidentService, settings *SettingsService) *PortService {
 	return &PortService{db: db, metrics: metrics, incidents: incidents, settings: settings}
@@ -484,6 +489,13 @@ var ErrPortNeighborInvalid = errors.New("the neighbor must be a device in the sa
 // unless it already points somewhere else; losing or changing this port's
 // link clears a far port that pointed back here, resetting its role to
 // access.
+//
+// A role the user names, or a neighbor they choose, is theirs: role_source
+// user, which the role rules never overwrite; a far port pointed back is
+// theirs too, and one let go goes back to the rules. Role null puts the port
+// back to automatic: it clears like access, then the rules decide it
+// straight away (when SetRoles was called) and the port is returned as they
+// left it.
 func (s *PortService) UpdatePort(ctx context.Context, deviceID uuid.UUID, ifIndex int, p models.PortPatch) (*models.DeviceInterface, *models.DeviceInterface, error) {
 	if err := p.Validate(); err != nil {
 		return nil, nil, err
@@ -511,8 +523,12 @@ func (s *PortService) UpdatePort(ctx context.Context, deviceID uuid.UUID, ifInde
 	// touches role. Changing NeighborDeviceID without naming a port clears
 	// NeighborIfIndex too, rather than keeping a port number that belonged
 	// to a different device.
+	automatic := p.Role.Set && p.Role.Value == nil
 	afterRole := before.Role
-	if p.Role.Set {
+	switch {
+	case automatic:
+		afterRole = models.PortRoleAccess
+	case p.Role.Set:
 		afterRole = *p.Role.Value
 	}
 	clearingRole := p.Role.Set && (afterRole == models.PortRoleAccess || afterRole == models.PortRoleWAN)
@@ -586,11 +602,17 @@ func (s *PortService) UpdatePort(ctx context.Context, deviceID uuid.UUID, ifInde
 	}
 
 	updates := p.Updates()
+	switch {
+	case automatic:
+		updates["role"], updates["role_source"], updates["role_reason"] = models.PortRoleAccess, models.PortRoleSourceDefault, ""
+	case p.Role.Set:
+		updates["role_source"], updates["role_reason"] = models.PortRoleSourceUser, ""
+	}
 	if touchedNeighbor {
 		updates["neighbor_device_id"] = newNeighborDevice
 		updates["neighbor_if_index"] = newNeighborIfIndex
 		if !p.Role.Set && newNeighborDevice != nil {
-			updates["role"] = models.PortRoleUplink
+			updates["role"], updates["role_source"], updates["role_reason"] = models.PortRoleUplink, models.PortRoleSourceUser, ""
 		}
 	}
 
@@ -630,7 +652,8 @@ func (s *PortService) UpdatePort(ctx context.Context, deviceID uuid.UUID, ifInde
 			// here.
 			if err := tx.Model(&models.DeviceInterface{}).
 				Where("device_id = ? AND neighbor_device_id = ? AND neighbor_if_index = ?", *oldNeighborDevice, deviceID, ifIndex).
-				Updates(map[string]any{"neighbor_device_id": nil, "neighbor_if_index": nil, "role": models.PortRoleAccess, "updated_at": now}).Error; err != nil {
+				Updates(map[string]any{"neighbor_device_id": nil, "neighbor_if_index": nil, "role": models.PortRoleAccess,
+					"role_source": models.PortRoleSourceDefault, "role_reason": "", "updated_at": now}).Error; err != nil {
 				return fmt.Errorf("clearing the far port: %w", err)
 			}
 		}
@@ -643,7 +666,8 @@ func (s *PortService) UpdatePort(ctx context.Context, deviceID uuid.UUID, ifInde
 			if err := tx.Model(&models.DeviceInterface{}).
 				Where("device_id = ? AND if_index = ? AND neighbor_device_id IS NULL AND role <> ?",
 					*newNeighborDevice, *newNeighborIfIndex, models.PortRoleWAN).
-				Updates(map[string]any{"neighbor_device_id": deviceID, "neighbor_if_index": ifIndex, "role": models.PortRoleUplink, "updated_at": now}).Error; err != nil {
+				Updates(map[string]any{"neighbor_device_id": deviceID, "neighbor_if_index": ifIndex, "role": models.PortRoleUplink,
+					"role_source": models.PortRoleSourceUser, "role_reason": "", "updated_at": now}).Error; err != nil {
 				return fmt.Errorf("pointing the far port back: %w", err)
 			}
 		}
@@ -654,6 +678,14 @@ func (s *PortService) UpdatePort(ctx context.Context, deviceID uuid.UUID, ifInde
 	})
 	if err != nil {
 		return nil, nil, err
+	}
+	if automatic && s.roles != nil {
+		// The save stands whatever the rules do: a failure here is logged,
+		// and the next L2 poll decides the port instead.
+		s.roles.Apply(ctx, deviceID)
+		if err := s.db.WithContext(ctx).First(&after, "id = ?", before.ID).Error; err != nil {
+			return nil, nil, fmt.Errorf("reloading port: %w", err)
+		}
 	}
 	return &before, &after, nil
 }

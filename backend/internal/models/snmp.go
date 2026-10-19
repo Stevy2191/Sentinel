@@ -188,8 +188,10 @@ var ValidDeviceTypes = map[string]bool{
 	DeviceTypeSwitch: true, DeviceTypeRouter: true, DeviceTypeAccessPoint: true, DeviceTypeNVR: true, DeviceTypeUPS: true, DeviceTypeOther: true,
 }
 
-// Port roles: what each port connects to. Set by the user (PortPatch.Role);
-// inventory never writes it (SaveInventory's upsert omits the column).
+// Port roles: what each port connects to. Set by the user (PortPatch.Role)
+// or by the role rules after each L2 poll (PortRoleService), never over the
+// user's choice; inventory never writes it (SaveInventory's upsert omits the
+// column).
 const (
 	PortRoleAccess = "access" // a device is plugged in (camera, PC, AP).
 	PortRoleUplink = "uplink" // a link between the user's own network devices.
@@ -438,7 +440,8 @@ func (PortEvent) TableName() string { return "port_events" }
 
 // PortPatch is PATCH /devices/:id/ports/:ifIndex. Absent fields are left
 // alone; null clears an override back to the default (collect: back to the
-// classifier's choice; thresholds: back to the instance defaults).
+// classifier's choice; thresholds: back to the instance defaults; role: back
+// to automatic, for the role rules to decide).
 type PortPatch struct {
 	Important            Opt[bool]      `json:"important"`
 	Collect              Opt[bool]      `json:"collect"`
@@ -463,8 +466,11 @@ func (p PortPatch) Validate() error {
 	if p.Important.Set && p.Important.Value == nil {
 		return errors.New("important must be true or false")
 	}
-	if p.Role.Set && (p.Role.Value == nil || !ValidPortRoles[*p.Role.Value]) {
+	if p.Role.Set && p.Role.Value != nil && !ValidPortRoles[*p.Role.Value] {
 		return errors.New("role must be access, uplink or wan")
+	}
+	if p.Role.Set && p.Role.Value == nil && p.NeighborDeviceID.Set && p.NeighborDeviceID.Value != nil {
+		return errors.New("a port set back to automatic cannot have a neighbor device")
 	}
 	if p.NeighborIfIndex.Set && p.NeighborIfIndex.Value != nil && *p.NeighborIfIndex.Value < 1 {
 		return errors.New("neighbor port must be a positive port number")
@@ -509,7 +515,9 @@ func (p PortPatch) Updates() map[string]any {
 	if p.DownGraceSeconds.Set {
 		u["down_grace_seconds"] = optValue(p.DownGraceSeconds)
 	}
-	if p.Role.Set {
+	// A null role (back to automatic) is UpdatePort's to write: the column
+	// is never NULL.
+	if p.Role.Set && p.Role.Value != nil {
 		u["role"] = *p.Role.Value
 	}
 	if p.NeighborDeviceID.Set {

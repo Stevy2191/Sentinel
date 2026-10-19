@@ -522,6 +522,7 @@ func run() error {
 	// from what it found (never over a role a person set).
 	portRoles := services.NewPortRoleService(db)
 	l2Monitor.SetAfterPoll(portRoles.Apply)
+	portService.SetRoles(portRoles)
 	devicePoller.SetL2(l2Monitor)
 	devicePoller.SetUPS(services.NewUPSMonitor(metricsStore, incidentService, notificationManager, snmpClient, settingsService, portService))
 	devicePoller.SetProfiles(services.NewProfileMonitor(profileService, metricsStore, incidentService, notificationManager, snmpClient, portService))
