@@ -202,3 +202,9 @@
 .rf-c45-module { position: absolute; background: linear-gradient(#c8cbce, #b5b9bd); border: 1px solid #8d939a; border-radius: 2px; }
 .rf-c45-screw { position: absolute; width: 11px; height: 11px; border-radius: 50%; background: radial-gradient(#f1f2f3, #9aa0a6); box-shadow: 0 0 0 1px #7b8188; }
 .rf-c45-oir { position: absolute; width: 11px; height: 11px; border-radius: 50%; background: radial-gradient(#3a3d41, #0d0e10); }
+/* the 4500-X's port state is only its arrows: bigger, with a stronger glow,
+   on a slightly darker bar so a white (10G) arrow stands out */
+.rf-c45 .rf-bar { background: #aab0b5; }
+.rf-c45 .rf-bar span { font-size: 7.5px; line-height: 7px; }
+.rf-c45 .rf-bar span.rf-l-white { color: #fff; text-shadow: 0 0 1px #000, 0 0 1px #000, 0 0 4px #fff, 0 0 8px #fff, 0 0 12px rgba(255, 255, 255, 0.9); }
+.rf-c45 .rf-bar span.rf-l-green { color: #66ffa6; text-shadow: 0 0 1px #000, 0 0 4px #3fe07a, 0 0 8px #3fe07a, 0 0 12px rgba(63, 224, 122, 0.9); }
