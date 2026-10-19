@@ -65,6 +65,11 @@ func TestParseLLDP(t *testing.T) {
 	if nas := byName["TS5410R81E"]; nas.LocalPort != 34 || nas.Caps.Bridge() || nas.Caps.Router() || nas.Caps.AP() {
 		t.Errorf("NAS %+v", nas)
 	}
+	// UniFi sends its chassis ID as MAC text.
+	text := ParseLLDP(map[string][]snmp.PDU{"5": {pdu(base+".5.0.48.4", []byte("84:78:48:FE:D0:E8"))}})
+	if len(text) != 1 || text[0].ChassisID != "84:78:48:fe:d0:e8" || text[0].LocalPort != 48 {
+		t.Errorf("text chassis: %+v", text)
+	}
 	for b, check := range map[byte]func(Caps) bool{0x20: Caps.Bridge, 0x08: Caps.Router, 0x04: Caps.Phone} {
 		if !check(Caps(b)) {
 			t.Errorf("caps 0x%02x not recognised", b)
@@ -86,6 +91,12 @@ func TestParseARP(t *testing.T) {
 	got = ParseARP(nil, []snmp.PDU{pdu("1.3.6.1.2.1.4.22.1.2.59.10.1.10.61", mac)})
 	if len(got) != 1 || got[0].IP != "10.1.10.61" {
 		t.Errorf("media fallback: %+v", got)
+	}
+	// Review: a physical table holding only IPv6 rows (older Cisco IOS) still
+	// falls back to the media table for IPv4.
+	got = ParseARP(phys[1:], []snmp.PDU{pdu("1.3.6.1.2.1.4.22.1.2.59.10.1.10.61", mac)})
+	if len(got) != 1 || got[0].IP != "10.1.10.61" {
+		t.Errorf("IPv6-only physical: %+v", got)
 	}
 }
 

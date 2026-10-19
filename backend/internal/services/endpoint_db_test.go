@@ -286,3 +286,71 @@ func TestDBConnectedViewMonitoredAP(t *testing.T) {
 		t.Errorf("APs %+v", view.APs)
 	}
 }
+
+// Review: a monitored switch uplinked without LLDP or a port link: the
+// core's port that learns the switch's own MAC is a link, so the devices
+// behind it are placed on the switch, not flipping between the two.
+func TestDBConnectedViewMonitoredSwitchUplink(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	core := seedDevice(t, db, "HQ", "10.0.0.2")
+	edge := seedDeviceInSite(t, db, core.SiteID, "10.0.0.3")
+	testdb.Exec(t, db, `UPDATE devices SET device_type = 'switch' WHERE id = ?`, edge)
+	testdb.Exec(t, db, `INSERT INTO device_interfaces (device_id, if_index, name, mac) VALUES (?, 1, '0/1', '78:8a:20:00:00:99')`, edge)
+	sight(t, db, core.DeviceID, 10, "78:8a:20:00:00:99")
+	for i := 1; i <= 3; i++ {
+		m := fmt.Sprintf("00:11:22:33:44:%02x", i)
+		sight(t, db, core.DeviceID, 10, m)
+		sight(t, db, edge, 3+i, m)
+	}
+	s := newEndpoints(db, &fakeResolver{})
+	v := admin(t, db)
+	view, err := s.ForDevice(ctx, v, core.DeviceID)
+	testdb.Must(t, err)
+	if len(view.Endpoints) != 0 || len(view.Behind) != 0 {
+		t.Errorf("core shows the edge switch's devices: %+v", view)
+	}
+	e := one(t)(s.Search(ctx, v, "00:11:22:33:44:01"))
+	if e.How != "wired" || *e.DeviceID != edge || *e.IfIndex != 4 {
+		t.Errorf("placed %+v", e)
+	}
+}
+
+// Review: an AP monitored on a site the viewer can't see lends its name
+// and id to no one: the group shows the LLDP name only.
+func TestDBEndpointAPNameHiddenAcrossSites(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	sw := seedDevice(t, db, "HQ", "10.0.0.2")
+	other := seedDevice(t, db, "Secret", "10.0.0.40")
+	testdb.Exec(t, db, `UPDATE devices SET name = 'Secret-AP', sys_name = 'u7-lobby', device_type = 'access_point' WHERE id = ?`, other.DeviceID)
+	neighbor(t, db, sw.DeviceID, 8, "24:5a:4c:0a:0b:0d", "u7-lobby", 0x10)
+	sight(t, db, sw.DeviceID, 8, phoneMAC)
+	reader := Viewer{UserID: testdb.NewUser(t, db, false)}
+	testdb.Exec(t, db, `INSERT INTO site_sharing (site_id, shared_with_user_id, permission) VALUES (?, ?, 'readonly')`, sw.SiteID, reader.UserID)
+	s := newEndpoints(db, &fakeResolver{})
+	view, err := s.ForDevice(ctx, reader, sw.DeviceID)
+	testdb.Must(t, err)
+	if len(view.APs) != 1 || view.APs[0].Name != "u7-lobby" || view.APs[0].APDeviceID != nil {
+		t.Errorf("APs %+v", view.APs)
+	}
+	if e := one(t)(s.Search(ctx, reader, phoneMAC)); e.Via != "u7-lobby" {
+		t.Errorf("via %q", e.Via)
+	}
+}
+
+// Searching an AP's (or any LLDP neighbour's) name finds it, named from
+// LLDP when neither the user nor DNS names it, and lists its clients too.
+func TestDBEndpointLLDPName(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	sw := seedDevice(t, db, "HQ", "10.0.0.2")
+	neighbor(t, db, sw.DeviceID, 48, "84:78:48:fe:d0:e8", "KitchenAP", 0x10|0x20)
+	sight(t, db, sw.DeviceID, 48, "84:78:48:fe:d0:e8")
+	sight(t, db, sw.DeviceID, 48, phoneMAC)
+	got, err := newEndpoints(db, &fakeResolver{}).Search(ctx, admin(t, db), "kitchenap")
+	testdb.Must(t, err)
+	if len(got) != 2 || got[0].MAC != "84:78:48:fe:d0:e8" || got[0].Name != "KitchenAP" || got[0].NameSource != "lldp" || got[1].Via != "KitchenAP" {
+		t.Errorf("%+v", got)
+	}
+}

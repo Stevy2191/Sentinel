@@ -270,3 +270,45 @@ func TestL2SkipsUPS(t *testing.T) {
 		t.Errorf("walked %d tables on a UPS", c.walks)
 	}
 }
+
+// Review: a neighbour that has gone (an AP moved to another port) is
+// dropped by the next successful LLDP walk, so its old port is no longer
+// classed by it.
+func TestL2PollDropsGoneNeighbors(t *testing.T) {
+	db := testdb.Open(t)
+	d := l2Device(t, db, 7, 9)
+	lldp := oidL2LLDPRem
+	c := &fakeL2SNMP{rows: map[string][]snmp.PDU{
+		lldp + ".5": {p(lldp+".5.0.7.1", []byte{0x24, 0x5a, 0x4c, 1, 2, 3})},
+		lldp + ".9": {p(lldp+".9.0.7.1", []byte("KitchenAP"))},
+	}}
+	m := NewL2Monitor(db, c)
+	now := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	m.now = func() time.Time { return now }
+	m.PollL2(context.Background(), d, snmp.Target{})
+	c.rows[lldp+".5"] = []snmp.PDU{p(lldp+".5.0.9.1", []byte{0x24, 0x5a, 0x4c, 1, 2, 3})}
+	c.rows[lldp+".9"] = []snmp.PDU{p(lldp+".9.0.9.1", []byte("KitchenAP"))}
+	now = now.Add(6 * time.Minute)
+	m.PollL2(context.Background(), d, snmp.Target{})
+	var ports []int
+	testdb.Must(t, db.Raw(`SELECT if_index FROM l2.neighbors ORDER BY if_index`).Scan(&ports).Error)
+	if len(ports) != 1 || ports[0] != 9 {
+		t.Errorf("neighbour ports %v, want [9]", ports)
+	}
+}
+
+// Review: a device whose ipNetToPhysical table holds only IPv6 rows still
+// has its IPv4 ARP read from ipNetToMedia.
+func TestL2PollARPMediaWhenPhysicalIPv6Only(t *testing.T) {
+	db := testdb.Open(t)
+	d := l2Device(t, db)
+	mac := []byte{0x3c, 0xef, 0x8c, 0x12, 0x9a, 0x41}
+	c := &fakeL2SNMP{rows: map[string][]snmp.PDU{
+		oidL2IPNetToPhys:  {p(oidL2IPNetToPhys+".13.2.16.254.128.0.0.0.0.0.0.42.37.95.255.254.204.73.241", mac)},
+		oidL2IPNetToMedia: {p(oidL2IPNetToMedia+".59.10.1.10.61", mac)},
+	}}
+	NewL2Monitor(db, c).PollL2(context.Background(), d, snmp.Target{})
+	if n := l2Count(t, db, "arp"); n != 1 {
+		t.Errorf("arp rows %d, want 1", n)
+	}
+}

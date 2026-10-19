@@ -215,12 +215,19 @@ func (m *L2Monitor) writeNeighbors(ctx context.Context, d models.Device, t snmp.
 		}
 	}
 	m.upsert(ctx, d, "neighbors", rows, []string{"device_id", "if_index", "chassis_id"}, []string{"sys_name", "port_id", "port_descr", "caps", "last_seen"})
+	// A complete walk is the whole truth: a neighbour it no longer lists
+	// (an AP moved, a switch swapped for a PC) must stop classing its port.
+	if err := m.db.WithContext(ctx).Exec(`DELETE FROM l2.neighbors WHERE device_id = ? AND last_seen < ?`, d.ID, now).Error; err != nil {
+		m.logger.Printf("[l2] %s: dropping gone neighbours: %v", d.Host, err)
+	}
 }
 
 func (m *L2Monitor) writeARP(ctx context.Context, d models.Device, t snmp.Target, now time.Time) {
-	physical, ok := m.walk(ctx, d, t, oidL2IPNetToPhys)
+	physical, _ := m.walk(ctx, d, t, oidL2IPNetToPhys)
 	var media []snmp.PDU
-	if !ok || len(physical) == 0 {
+	// The older table too when the newer gives no IPv4 (some fill it with
+	// IPv6 only).
+	if len(l2.ParseARP(physical, nil)) == 0 {
 		media, _ = m.walk(ctx, d, t, oidL2IPNetToMedia)
 	}
 	seen := map[string]bool{}

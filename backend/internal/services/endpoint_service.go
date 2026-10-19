@@ -56,7 +56,7 @@ type Endpoint struct {
 	Kind       string       `json:"kind"`
 	IPs        []string     `json:"ips"`
 	Name       string       `json:"name"`
-	NameSource string       `json:"name_source"`
+	NameSource string       `json:"name_source"` // "user", "dns", "lldp" or ""
 	How        string       `json:"how"`
 	Via        string       `json:"via"`
 	DeviceID   *uuid.UUID   `json:"device_id"`
@@ -156,6 +156,8 @@ type world struct {
 	neighbors map[l2.PortKey]l2Neighbor
 	caps      map[string]l2.Caps // by chassis MAC
 	arp       []l2ARP
+	arpByMAC  map[string][]l2ARP // newest first
+	lldpName  map[string]string  // LLDP system name by chassis MAC
 	dns       map[string]epDNS
 	names     map[string]string
 
@@ -203,14 +205,22 @@ func (s *EndpointService) load(ctx context.Context, v Viewer) (*world, error) {
 	if err := db.Order("last_seen").Find(&neighbors).Error; err != nil {
 		return nil, fmt.Errorf("loading neighbours: %w", err)
 	}
+	w.lldpName = map[string]string{}
 	for _, n := range neighbors {
 		w.caps[n.ChassisID] = l2.Caps(n.Caps)
+		if n.SysName != "" {
+			w.lldpName[n.ChassisID] = n.SysName
+		}
 		if n.IfIndex > 0 {
 			w.neighbors[l2.PortKey{Device: n.DeviceID, IfIndex: n.IfIndex}] = n // the latest wins
 		}
 	}
 	if err := db.Order("last_seen DESC").Find(&w.arp).Error; err != nil {
 		return nil, fmt.Errorf("loading ARP: %w", err)
+	}
+	w.arpByMAC = map[string][]l2ARP{}
+	for _, a := range w.arp {
+		w.arpByMAC[a.MAC] = append(w.arpByMAC[a.MAC], a)
 	}
 	var dns []epDNS
 	if err := db.Raw(`SELECT ip, name, resolved_at FROM l2.dns_names`).Scan(&dns).Error; err != nil {
@@ -292,12 +302,27 @@ func (w *world) place() {
 				switch d.Type {
 				case models.DeviceTypeAccessPoint:
 					info.MonitoredAP = true
-					w.apNames[k], w.apDevice[k] = d.Name, d.ID
+					// Its name and page only for viewers of its own site.
+					if w.visible[d.SiteID] {
+						w.apNames[k], w.apDevice[k] = d.Name, d.ID
+					}
 				case models.DeviceTypeSwitch, models.DeviceTypeRouter:
 					info.MonitoredNeighbor = true
 				}
 			}
 		}
+		w.info[k] = info
+	}
+	// A port that learns a monitored switch's or router's own MAC is a link
+	// to it, LLDP or not.
+	for _, s := range w.sightings {
+		id, ok := w.byMAC[s.MAC]
+		if d := w.devices[id]; !ok || id == s.DeviceID || (d.Type != models.DeviceTypeSwitch && d.Type != models.DeviceTypeRouter) {
+			continue
+		}
+		k := l2.PortKey{Device: s.DeviceID, IfIndex: s.IfIndex}
+		info := w.info[k]
+		info.MonitoredNeighbor = true
 		w.info[k] = info
 	}
 
@@ -341,8 +366,8 @@ func (w *world) place() {
 func (w *world) finish(e Endpoint) Endpoint {
 	e.IPs = []string{}
 	seen := map[string]bool{}
-	for _, a := range w.arp {
-		if a.MAC == e.MAC && !seen[a.IP] && w.visible[w.devices[a.DeviceID].SiteID] {
+	for _, a := range w.arpByMAC[e.MAC] {
+		if !seen[a.IP] && w.visible[w.devices[a.DeviceID].SiteID] {
 			seen[a.IP] = true
 			e.IPs = append(e.IPs, a.IP)
 		}
@@ -358,6 +383,10 @@ func (w *world) finish(e Endpoint) Endpoint {
 				e.Name, e.NameSource = d.Name, "dns"
 				break
 			}
+		}
+		// Else the name it announces over LLDP (an AP, a NAS, a phone).
+		if e.Name == "" && w.lldpName[e.MAC] != "" {
+			e.Name, e.NameSource = w.lldpName[e.MAC], "lldp"
 		}
 	}
 	return e
@@ -418,7 +447,8 @@ func matchRank(e Endpoint, q, mac, prefix string) int {
 		}
 	}
 	if (prefix != "" && strings.HasPrefix(e.MAC, prefix)) || strings.Contains(e.MAC, q) ||
-		strings.Contains(strings.ToLower(e.Name), q) || strings.Contains(strings.ToLower(e.Maker), q) {
+		strings.Contains(strings.ToLower(e.Name), q) || strings.Contains(strings.ToLower(e.Maker), q) ||
+		(e.How == "wireless" && strings.Contains(strings.ToLower(e.Via), q)) {
 		return 1
 	}
 	for _, ip := range e.IPs {

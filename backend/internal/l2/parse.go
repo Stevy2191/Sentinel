@@ -97,7 +97,8 @@ func statuses(pdus []snmp.PDU, root string) map[string]uint64 {
 }
 
 // ParseQBridgeFDB reads dot1qTpFdbPort (index fdbId.mac) with its status
-// column, keeping learned rows.
+// column, keeping learned rows. VLAN is the FDB ID, which is the VLAN ID on
+// independent-learning switches (UniFi, EdgeSwitch) but not guaranteed to be.
 func ParseQBridgeFDB(port, status []snmp.PDU) []FDBEntry {
 	st := statuses(status, oidQFdbStatus)
 	var out []FDBEntry
@@ -250,11 +251,16 @@ func ParseLLDP(rows map[string][]snmp.PDU) []Neighbor {
 
 // chassisText prefers the MAC form for a 6-byte chassis ID, which is how
 // nearly every device sends it.
+// UniFi sends it as MAC text, which is normalised to the same form.
 func chassisText(v any) string {
 	if b, ok := v.([]byte); ok && len(b) == 6 {
 		return macFromBytes(b)
 	}
-	return lldpText(v)
+	t := lldpText(v)
+	if m, ok := NormalizeMAC(t); ok {
+		return m
+	}
+	return t
 }
 
 // ARPEntry is one IPv4 address and the MAC that holds it.
@@ -281,7 +287,7 @@ func arpRow(ip []int, v any) (ARPEntry, bool) {
 }
 
 // ParseARP reads ipNetToPhysicalPhysAddress (index ifIndex.type.len.addr,
-// IPv4 rows only) or, when the device has none, the older
+// IPv4 rows only) or, when that gives no IPv4 rows, the older
 // ipNetToMediaPhysAddress (index ifIndex.a.b.c.d).
 func ParseARP(physical, media []snmp.PDU) []ARPEntry {
 	var out []ARPEntry
@@ -301,7 +307,9 @@ func ParseARP(physical, media []snmp.PDU) []ARPEntry {
 			add(e)
 		}
 	}
-	if len(physical) > 0 {
+	// Some devices (older Cisco IOS) fill the physical table with IPv6 rows
+	// only; the media table then still has their IPv4 ARP.
+	if len(out) > 0 {
 		return out
 	}
 	for _, p := range media {

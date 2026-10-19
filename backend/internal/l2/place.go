@@ -12,6 +12,13 @@ const (
 	MaxEdgeMACs = 8
 	// RetentionDays is how long sightings, neighbours and ARP rows are kept.
 	RetentionDays = 30
+	// freshWindow: a MAC is placed by its sightings from about the latest
+	// round of polls (every switch polls it once in 5 minutes), not by its
+	// 30 days of history.
+	freshWindow = 10 * time.Minute
+	// countWindow: a port's MAC count covers a day, so an unmanaged switch's
+	// group stays a group overnight while its PCs sleep and age out.
+	countWindow = 24 * time.Hour
 )
 
 // PortKey is one switch port, by the device and its ifIndex.
@@ -53,17 +60,22 @@ func (c PortClass) String() string {
 	return [...]string{"edge", "ap", "link", "behind"}[c]
 }
 
-// ClassifyPort classes a port: an AP first, then a link (LLDP bridge or
-// router, a port link, the uplink role, a monitored neighbour), then more
+// ClassifyPort classes a port: an AP first, then a link (a port link, the
+// uplink role, a monitored neighbour, an LLDP bridge or router), then more
 // than MaxEdgeMACs MACs with no LLDP neighbour (behind), else edge. A port
 // whose LLDP neighbour is neither bridge nor router is a host however many
-// MACs it shows (containers, VMs).
+// MACs it shows (containers, VMs); so is an IP phone, which announces
+// bridge for its PC pass-through port.
 func ClassifyPort(info PortInfo, macsOnPort int) PortClass {
 	n := info.Neighbor
 	switch {
 	case info.MonitoredAP || (n != nil && n.Caps.AP()):
 		return PortAP
-	case info.LinkedTo || info.Uplink || info.MonitoredNeighbor || (n != nil && (n.Caps.Bridge() || n.Caps.Router())):
+	case info.LinkedTo || info.Uplink || info.MonitoredNeighbor:
+		return PortLink
+	case n != nil && n.Caps.Phone() && !n.Caps.Router():
+		return PortEdge
+	case n != nil && (n.Caps.Bridge() || n.Caps.Router()):
 		return PortLink
 	case n == nil && macsOnPort > MaxEdgeMACs:
 		return PortBehind
@@ -85,21 +97,27 @@ type Placement struct {
 	LastSeen time.Time
 }
 
-// Place works out where each MAC in sightings is. ports holds what is
+// Place works out where each MAC in sightings is, from its sightings in
+// the latest round of polls: an edge port (fewest MACs, then the most
+// recent), else an AP port, else the link port with the fewest MACs. ports holds what is
 // known about each port's far end (ports not in it have nothing known);
 // apNames names the AP on each AP port.
 func Place(sightings []Sighting, ports map[PortKey]PortInfo, apNames map[PortKey]string) map[string]Placement {
-	// A port's MAC count is from its switch's last poll, not the 30 days of
-	// history.
+	// A port's MAC count covers the last day of its switch's polls, not the
+	// 30 days of history.
 	latest := map[uuid.UUID]time.Time{}
+	newest := map[string]time.Time{}
 	for _, s := range sightings {
 		if s.LastSeen.After(latest[s.Port.Device]) {
 			latest[s.Port.Device] = s.LastSeen
 		}
+		if s.LastSeen.After(newest[s.MAC]) {
+			newest[s.MAC] = s.LastSeen
+		}
 	}
 	count := map[PortKey]map[string]bool{}
 	for _, s := range sightings {
-		if s.LastSeen.Before(latest[s.Port.Device].Add(-time.Minute)) {
+		if s.LastSeen.Before(latest[s.Port.Device].Add(-countWindow)) {
 			continue
 		}
 		if count[s.Port] == nil {
@@ -124,6 +142,11 @@ func Place(sightings []Sighting, ports map[PortKey]PortInfo, apNames map[PortKey
 	}
 	byMAC := map[string]best{}
 	for _, s := range sightings {
+		// Only the MAC's latest round of polls places it: an old port it
+		// has since left doesn't count.
+		if s.LastSeen.Before(newest[s.MAC].Add(-freshWindow)) {
+			continue
+		}
 		c := classOf(s.Port)
 		rank := 2
 		switch {
@@ -142,7 +165,10 @@ func Place(sightings []Sighting, ports map[PortKey]PortInfo, apNames map[PortKey
 		case !ok, cand.rank < cur.rank:
 		case cand.rank > cur.rank:
 			continue
-		case rank == 2 && cand.macs != cur.macs:
+		// Two edge ports in the same polls (a switch with no LLDP on an
+		// unrecognised uplink) or two links: the port with fewer MACs is
+		// closer to the device.
+		case rank != 1 && cand.macs != cur.macs:
 			if cand.macs > cur.macs {
 				continue
 			}
