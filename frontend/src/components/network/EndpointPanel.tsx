@@ -78,7 +78,7 @@ export default function EndpointPanel({
         <div className="min-w-0 flex-1">
           <p className="truncate font-medium text-white">{endpointTitle(e)}</p>
           <p className="text-xs text-slate-500">
-            {e.name_source === 'user' ? 'Your name for it' : e.name_source === 'dns' ? 'Name from DNS' : 'No name yet'}
+            {e.name_source === 'user' ? 'Your name for it' : e.name_source === 'dns' ? 'Name from DNS' : e.name_source === 'lldp' ? 'Name it announces (LLDP)' : 'No name yet'}
           </p>
         </div>
         <button type="button" onClick={onClose} className="text-slate-400 hover:text-white" aria-label="Close">
@@ -110,7 +110,7 @@ export default function EndpointPanel({
               value={name}
               maxLength={64}
               onChange={(ev) => setName(ev.target.value)}
-              placeholder={e.name_source === 'dns' ? e.name : 'Front desk phone'}
+              placeholder={e.name_source === 'dns' || e.name_source === 'lldp' ? e.name : 'Front desk phone'}
               className="min-w-0 flex-1 rounded-md border border-white/10 bg-slate-900/60 px-2 py-1 text-sm text-slate-200 focus:border-primary-500 focus:outline-none"
             />
             <button type="submit" disabled={saving || name.trim() === userName} className="btn-primary px-3 py-1 text-sm disabled:opacity-50">

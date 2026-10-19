@@ -47,7 +47,8 @@ export default function FindDevice() {
         setActive((a) => Math.max(a - 1, 0))
         break
       case 'Enter':
-        if (shown[active]) {
+        // Not while the results are still the previous query's.
+        if (settled && shown[active]) {
           ev.preventDefault()
           go(shown[active])
         }

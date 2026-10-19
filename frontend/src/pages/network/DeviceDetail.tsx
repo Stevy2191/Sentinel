@@ -358,7 +358,7 @@ export default function DeviceDetail() {
       )}
 
       {CONNECTED_TYPES.has(type) && (
-        <ConnectedSection deviceId={device.id} deviceName={device.name} canEdit={canEdit} highlight={searchParams.get('endpoint')} />
+        <ConnectedSection key={device.id} deviceId={device.id} deviceName={device.name} canEdit={canEdit} highlight={searchParams.get('endpoint')} />
       )}
 
       {deviceIsUPS && <UPSPanel deviceId={device.id} status={upsStatus} />}

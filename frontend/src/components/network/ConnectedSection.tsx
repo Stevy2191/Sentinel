@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { ArrowDown, ArrowUp } from 'lucide-react'
 import { endpointStale, useConnected, type Endpoint } from '@/hooks/useEndpoints'
 import { timeAgo } from '@/utils/network'
@@ -72,12 +73,15 @@ export default function ConnectedSection({
   const [filter, setFilter] = useState('')
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'port', desc: false })
   const ref = useRef<HTMLElement>(null)
+  // Each arrival from search is a new history entry: the same device
+  // searched again after its record was closed opens it again.
+  const arrival = useLocation().key
 
   useEffect(() => {
     if (!highlight) return
     setSelected(highlight)
     ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }, [highlight])
+  }, [highlight, arrival])
 
   const all = useMemo(() => {
     if (!view) return []
@@ -149,7 +153,7 @@ export default function ConnectedSection({
       {view && (all.length > 0 || view.aps.length > 0) && (
         <div className={`grid gap-3 ${selected ? 'lg:grid-cols-[minmax(0,1fr)_22rem]' : ''}`}>
           {mode === 'map' ? (
-            <ConnectedMap view={view} deviceName={deviceName} highlight={highlight} selected={selected} onSelect={setSelected} onShowList={() => setMode('list')} />
+            <ConnectedMap view={view} deviceName={deviceName} highlight={highlight} highlightKey={arrival} selected={selected} onSelect={setSelected} onShowList={() => setMode('list')} />
           ) : (
             <div className="card overflow-x-auto">
               <table className="w-full text-left text-sm">

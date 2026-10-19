@@ -24,7 +24,8 @@ export interface Endpoint {
   kind: EndpointKind
   ips: string[]
   name: string
-  name_source: 'user' | 'dns' | ''
+  /** Who named it: the user, reverse DNS, or the device itself over LLDP. */
+  name_source: 'user' | 'dns' | 'lldp' | ''
   how: EndpointHow
   via: string
   device_id: string | null

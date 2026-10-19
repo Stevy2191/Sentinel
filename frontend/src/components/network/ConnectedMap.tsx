@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import { endpointStale, endpointTitle, type APGroup, type BehindGroup, type ConnectedView, type Endpoint } from '@/hooks/useEndpoints'
 import { timeAgo } from '@/utils/network'
@@ -88,6 +89,7 @@ export default function ConnectedMap({
   view,
   deviceName,
   highlight,
+  highlightKey,
   selected,
   onSelect,
   onShowList,
@@ -95,19 +97,25 @@ export default function ConnectedMap({
   view: ConnectedView
   deviceName: string
   highlight: string | null
+  /** Changes on each arrival from search, so the same device searched
+   *  again is shown again. */
+  highlightKey: string
   selected: string | null
   onSelect: (mac: string) => void
   onShowList: () => void
 }) {
   const [focus, setFocus] = useState<Focus>(null)
+  const handled = useRef<string | null>(null)
 
-  // A searched-for wireless client opens its AP; a device behind an
+  // A searched-for wireless client opens its AP, once per arrival (the
+  // minute refresh must not pull the user back in); a device behind an
   // unmanaged switch only highlights the group.
   useEffect(() => {
-    if (!highlight) return
+    if (!highlight || handled.current === highlightKey) return
+    handled.current = highlightKey
     const ap = view.aps.find((g) => g.clients.some((c) => c.mac === highlight))
     if (ap) setFocus({ type: 'ap', ifIndex: ap.if_index })
-  }, [highlight, view.aps])
+  }, [highlight, highlightKey, view.aps])
 
   const ap = focus?.type === 'ap' ? view.aps.find((g) => g.if_index === focus.ifIndex) : undefined
   const group = focus?.type === 'behind' ? view.behind.find((g) => g.if_index === focus.ifIndex) : undefined
@@ -165,6 +173,14 @@ export default function ConnectedMap({
         >
           <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> {deviceName}
         </button>
+      )}
+      {ap?.ap_device_id && (
+        <Link
+          to={`/network/devices/${ap.ap_device_id}`}
+          className="absolute right-3 top-3 z-10 rounded-md border border-white/10 bg-slate-900/80 px-2 py-1 text-xs text-primary-400 hover:underline"
+        >
+          Open {ap.name || 'access point'} →
+        </Link>
       )}
       <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full min-w-[640px]" role="img" aria-label={`Devices connected to ${centreTitle}`}>
         {nodes.map(({ item, x, y }) => {
