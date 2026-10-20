@@ -17,8 +17,9 @@ interface Props {
   onClose: () => void
   onHide: () => void
   onKeep: () => void
-  onDelete: () => void
-  onChangePorts: () => void
+  /** A cable drawn by hand: the link itself, or a bundle's member. */
+  onDelete: (l: MapLink) => void
+  onChangePorts: (l: MapLink) => void
 }
 
 function sourceText(l: MapLink, devices: Map<string, MapDevice>): string {
@@ -75,12 +76,39 @@ function LastHour({ link }: { link: MapLink }) {
 /** A link's both ends, its traffic now and over the last hour, where it was
  *  found, and (for editors) what can be done with it. A bundle shows its
  *  cables instead of the ends, and no last hour (it would be one cable's). */
-export default function LinkPanel(p: Props) {
+// Change ports and Delete for a cable drawn by hand; Delete asks first.
+function ManualActions(p: { link: MapLink; busy: boolean; what: string; onDelete: (l: MapLink) => void; onChangePorts: (l: MapLink) => void }) {
   const [confirm, setConfirm] = useState(false)
+  return (
+    <>
+      <button type="button" className="btn-secondary" disabled={p.busy} onClick={() => p.onChangePorts(p.link)}>
+        Change ports
+      </button>
+      {confirm ? (
+        <span className="flex items-center gap-2 text-xs text-slate-300">
+          Delete this {p.what}?
+          <button type="button" className="rounded bg-red-600 px-2 py-1 text-white hover:bg-red-500" disabled={p.busy} onClick={() => p.onDelete(p.link)}>
+            Delete
+          </button>
+          <button type="button" className="text-slate-400 hover:text-white" onClick={() => setConfirm(false)}>
+            Cancel
+          </button>
+        </span>
+      ) : (
+        <button type="button" className="btn-secondary" onClick={() => setConfirm(true)}>
+          Delete
+        </button>
+      )}
+    </>
+  )
+}
+
+export default function LinkPanel(p: Props) {
   const { link: l, devices } = p
   const A = devices.get(l.a.device_id)
   const B = devices.get(l.b.device_id)
   const bundle = l.members ? bundleState(l, p.rates) : null
+  const manualMembers = p.canEdit && !!l.members?.some((m) => m.manual_id)
   const speed = bundle ? bundle.liveSpeed : l.speed_bps
   const dir = directional(l, bundle ? bundle.rate : p.rate, speed)
   const pct = (v: number | null) => (v == null || !speed ? '' : ` · ${((v / speed) * 100).toFixed(1)}%`)
@@ -135,6 +163,7 @@ export default function LinkPanel(p: Props) {
                 <th className="py-1 text-left font-normal">{A?.name}</th>
                 <th className="py-1 text-left font-normal">{B?.name}</th>
                 <th className="py-1 text-right font-normal">To {B?.name} / back</th>
+                {manualMembers && <th />}
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
@@ -149,6 +178,15 @@ export default function LinkPanel(p: Props) {
                     <td className={`py-1 text-right tabular-nums ${dn ? 'text-red-300' : ''}`}>
                       {dn ? 'down' : d.aToB == null && d.bToA == null ? '—' : `${rate(d.aToB ?? 0)} / ${rate(d.bToA ?? 0)}`}
                     </td>
+                    {manualMembers && (
+                      <td className="py-1 pl-2">
+                        {m.manual_id && (
+                          <div className="flex flex-wrap justify-end gap-1">
+                            <ManualActions link={m} busy={p.busy} what="cable" onDelete={p.onDelete} onChangePorts={p.onChangePorts} />
+                          </div>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 )
               })}
@@ -196,28 +234,7 @@ export default function LinkPanel(p: Props) {
           <button type="button" className="btn-secondary" disabled={p.busy} onClick={p.onHide}>
             Hide
           </button>
-          {l.manual_id && (
-            <>
-              <button type="button" className="btn-secondary" disabled={p.busy} onClick={p.onChangePorts}>
-                Change ports
-              </button>
-              {confirm ? (
-                <span className="flex items-center gap-2 text-xs text-slate-300">
-                  Delete this link?
-                  <button type="button" className="rounded bg-red-600 px-2 py-1 text-white hover:bg-red-500" disabled={p.busy} onClick={p.onDelete}>
-                    Delete
-                  </button>
-                  <button type="button" className="text-slate-400 hover:text-white" onClick={() => setConfirm(false)}>
-                    Cancel
-                  </button>
-                </span>
-              ) : (
-                <button type="button" className="btn-secondary" onClick={() => setConfirm(true)}>
-                  Delete
-                </button>
-              )}
-            </>
-          )}
+          {l.manual_id && <ManualActions link={l} busy={p.busy} what="link" onDelete={p.onDelete} onChangePorts={p.onChangePorts} />}
         </div>
       )}
     </div>

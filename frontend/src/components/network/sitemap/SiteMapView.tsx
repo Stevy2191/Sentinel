@@ -129,12 +129,12 @@ export default function SiteMapView(p: Props) {
         onClose={() => setSelected(null)}
         onHide={() => run(actions.setLinkHidden(selLink.key, true), () => setSelected(null))}
         onKeep={() => run(actions.keep(selLink.key))}
-        onDelete={() => selLink.manual_id && run(actions.deleteLink(selLink.manual_id), () => setSelected(null))}
-        onChangePorts={() =>
+        onDelete={(l) => l.manual_id && run(actions.deleteLink(l.manual_id), () => setSelected(null))}
+        onChangePorts={(l) =>
           setAdding({
-            changing: selLink.manual_id,
-            a: { device_id: selLink.a.device_id, if_index: selLink.a.if_index },
-            b: { device_id: selLink.b.device_id, if_index: selLink.b.if_index },
+            changing: l.manual_id,
+            a: { device_id: l.a.device_id, if_index: l.a.if_index },
+            b: { device_id: l.b.device_id, if_index: l.b.if_index },
             error: null,
           })
         }
