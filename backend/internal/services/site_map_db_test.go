@@ -194,9 +194,16 @@ func TestManualLinkLifecycle(t *testing.T) {
 	has := func(key string) bool {
 		m, err := svc.Snapshot(ctx, h.admin, h.site)
 		testdb.Must(t, err)
+		// The manual cable and the LLDP one join the same two devices, so
+		// they're drawn as a bundle: look among its members too.
 		for _, l := range m.Links {
 			if l.Key == key {
 				return true
+			}
+			for _, mem := range l.Members {
+				if mem.Key == key {
+					return true
+				}
 			}
 		}
 		return false
