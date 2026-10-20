@@ -28,9 +28,19 @@ export interface MapDevice {
   added: boolean
   /** End devices plugged into it (signed-in viewers, routers and switches). */
   connected?: number
+  /** A router's internet (WAN) ports; a public map leaves name and reason "". */
+  wan?: MapWAN[]
 }
 
-export type LinkSource = 'manual' | 'port_setting' | 'lldp' | 'guess'
+export interface MapWAN {
+  if_index: number
+  name: string
+  speed_bps: number
+  /** Why it's WAN ("Has a public address"), or "" when set by hand. */
+  reason: string
+}
+
+export type LinkSource = 'manual' | 'port_setting' | 'lldp' | 'cdp' | 'guess'
 
 export interface MapLink {
   key: string
@@ -46,6 +56,15 @@ export interface MapLink {
   threshold_pct: number
   /** Which end's port the traffic figures come from. */
   rate_end: 'a' | 'b' | ''
+  /**
+   * A bundle (a LAG, or parallel cables between the same two devices): each
+   * cable, oriented like the bundle and in A's port order. A bundle's key is
+   * "bundle:" + theirs, its speed their sum, and its traffic theirs, added
+   * up in the browser (bundleState): the traffic map carries member keys.
+   */
+  members?: MapLink[]
+  /** A bundle's LAG name at each end ("lag 1", "Po1"; "" not a LAG there); null or absent: not a LAG. */
+  lag?: { a: string; b: string } | null
 }
 
 export interface MapSnapshot {
@@ -72,6 +91,7 @@ export interface LinkRate {
 export interface MapTraffic {
   site_id: string
   at: string
+  /** By link key, a bundle's members each by their own, and routers' WAN ports by wanKey. */
   links: Record<string, LinkRate>
   /** Status of each device the fast poll looked at. */
   devices: Record<string, string>

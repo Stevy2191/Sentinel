@@ -186,10 +186,17 @@ export function layout(
 
 export type LinkColour = 'idle' | 'ok' | 'warn' | 'bad'
 
-/** The busier direction's utilisation against the port's busy threshold. */
-export function linkColour(u: number | null, thresholdPct: number): LinkColour {
-  if (u == null || u < 1) return 'idle'
-  if (u < thresholdPct / 2) return 'ok'
+/** Below this much traffic either way a link is drawn idle. */
+export const IDLE_BPS = 1e6
+
+/**
+ * linkColour: idle under 1 Mb/s the busier way (busiestBps), whatever the
+ * link's speed, then the busier direction's utilisation against the port's
+ * busy threshold. Without busiestBps, idle is under 1%.
+ */
+export function linkColour(u: number | null, thresholdPct: number, busiestBps?: number | null): LinkColour {
+  if (busiestBps != null ? busiestBps < IDLE_BPS : u == null || u < 1) return 'idle'
+  if (u == null || u < thresholdPct / 2) return 'ok'
   if (u < thresholdPct) return 'warn'
   return 'bad'
 }
@@ -212,13 +219,18 @@ export function flowSeconds(bps: number): number | null {
   return Math.max(0.5, 7 - 1.5 * Math.log10(mbps + 1))
 }
 
-/** Traffic each way along a link, and the busier way's utilisation. */
-export function directional(l: MapLink, r: LinkRate | undefined): { aToB: number | null; bToA: number | null; util: number | null } {
+/** Traffic each way along a link, and the busier way's utilisation of
+ *  speedBps (a bundle passes the speed of its members that are up). */
+export function directional(
+  l: MapLink,
+  r: LinkRate | undefined,
+  speedBps = l.speed_bps
+): { aToB: number | null; bToA: number | null; util: number | null } {
   if (!r || l.rate_end === '') return { aToB: null, bToA: null, util: null }
   // in arrives at the rate end's device.
   const [aToB, bToA] = l.rate_end === 'b' ? [r.in_bps, r.out_bps] : [r.out_bps, r.in_bps]
   const busiest = Math.max(aToB ?? 0, bToA ?? 0)
-  const util = l.speed_bps > 0 && (aToB != null || bToA != null) ? Math.round((busiest / l.speed_bps) * 1000) / 10 : null
+  const util = speedBps > 0 && (aToB != null || bToA != null) ? Math.round((busiest / speedBps) * 1000) / 10 : null
   return { aToB, bToA, util }
 }
 
@@ -324,4 +336,89 @@ export function ago(iso: string | null, now: number): string {
   const s = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000))
   if (s < 60) return `Updated ${s} s ago`
   return `Updated ${Math.floor(s / 60)} min ago`
+}
+
+/**
+ * bundleState is a link's traffic as one: a bundle's members added up, each
+ * turned to the bundle's way by its own rate end (the bundle's rate end is
+ * b, so in is a→b). oper_up is false only when every member is down; down
+ * counts the members whose port is; liveSpeed is the speed of those up,
+ * which utilisation is measured against. A single link is its own.
+ */
+export function bundleState(l: MapLink, rates: Record<string, LinkRate> | undefined): { rate: LinkRate; down: number; liveSpeed: number } {
+  if (!l.members?.length) {
+    return { rate: rates?.[l.key] ?? { in_bps: null, out_bps: null, oper_up: null, at: null }, down: 0, liveSpeed: l.speed_bps }
+  }
+  let aToB: number | null = null, bToA: number | null = null, at: string | null = null
+  let down = 0, known = 0, liveSpeed = 0
+  for (const m of l.members) {
+    const r = rates?.[m.key]
+    if (r?.oper_up === false) down++
+    else liveSpeed += m.speed_bps
+    if (r?.oper_up != null) known++
+    const d = directional(m, r)
+    if (d.aToB != null) aToB = (aToB ?? 0) + d.aToB
+    if (d.bToA != null) bToA = (bToA ?? 0) + d.bToA
+    if (r?.at && (!at || new Date(r.at) > new Date(at))) at = r.at
+  }
+  const operUp = known === 0 ? null : down < l.members.length
+  return { rate: { in_bps: aToB, out_bps: bToA, oper_up: operUp, at }, down, liveSpeed }
+}
+
+/** "10G", "1G", "2.5G", "100M"; "?" unknown. */
+function shortSpeed(bps: number): string {
+  if (!bps) return '?'
+  if (bps >= 1e9) return `${Number((bps / 1e9).toFixed(1))}G`
+  return `${Math.round(bps / 1e6)}M`
+}
+
+/** A bundle's badge: "LAG · 2 × 10G", "2 cables · 2 × 1G", "… · 1 of 2 down". */
+export function badgeText(l: MapLink, down: number): string {
+  const ms = l.members ?? []
+  const speeds = ms.map((m) => shortSpeed(m.speed_bps))
+  const same = speeds.every((s) => s === speeds[0])
+  const parts = [l.lag ? 'LAG' : `${ms.length} cables`, same ? `${ms.length} × ${speeds[0]}` : speeds.join(' + ')]
+  if (down > 0) parts.push(`${down} of ${ms.length} down`)
+  return parts.join(' · ')
+}
+
+/** The traffic key a router's WAN port comes under. */
+export function wanKey(deviceId: string, ifIndex: number): string {
+  return `wan:${deviceId}:${ifIndex}`
+}
+
+export const ZOOM_MIN = 0.15
+export const ZOOM_MAX = 2.5
+
+/**
+ * wheelAction is what one wheel event does to the camera. A pinch (ctrlKey,
+ * which is also Ctrl + wheel) zooms by exp(-deltaY × 0.01); a mouse wheel's
+ * notch (lines or pages, or a whole deltaY of 50 or more with no deltaX)
+ * zooms by exp(-deltaY × 0.001), about 10% a notch; anything else, a
+ * trackpad's two-finger scroll, pans. A line counts as 16 px and a page as
+ * pageHeight; each event's factor stays within 0.8–1.25.
+ */
+export function wheelAction(
+  e: { deltaX: number; deltaY: number; deltaMode: number; ctrlKey: boolean },
+  pageHeight: number
+): { kind: 'pan'; dx: number; dy: number } | { kind: 'zoom'; factor: number } {
+  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? pageHeight : 1
+  const dx = e.deltaX * unit, dy = e.deltaY * unit
+  const zoom = (f: number) => ({ kind: 'zoom' as const, factor: Math.round(Math.min(1.25, Math.max(0.8, f)) * 1e4) / 1e4 })
+  if (e.ctrlKey) return zoom(Math.exp(-dy * 0.01))
+  const notch = e.deltaMode !== 0 || (e.deltaX === 0 && Math.abs(e.deltaY) >= 50 && Number.isInteger(e.deltaY))
+  if (notch) return zoom(Math.exp(-dy * 0.001))
+  return { kind: 'pan', dx, dy }
+}
+
+/**
+ * routeKind picks how a tree link is drawn: a distribution switch's link to
+ * the first access switch under it drops straight down (chain), to the
+ * ones below that down a lane beside the column; an access switch's to the
+ * one hanging off it is a chain; everything else a curve.
+ */
+export function routeKind(upTier: Tier, loTier: Tier, child: boolean, loRow: number): 'curve' | 'lane' | 'chain' {
+  if (child && upTier === 'dist' && loTier === 'access') return loRow === 0 ? 'chain' : 'lane'
+  if (child && upTier === 'access' && loTier === 'access') return 'chain'
+  return 'curve'
 }
