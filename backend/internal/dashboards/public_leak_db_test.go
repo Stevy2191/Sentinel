@@ -47,6 +47,8 @@ func TestDBPublicLinkLeaksNothing(t *testing.T) {
 	// bundle), and the router's WAN port, whose reason a public map leaves out.
 	port2 := newPort(t, db, dev, 3, "Gi1/0/3", "")
 	gwPort2 := newPort(t, db, gw, 4, "eth3", "")
+	// An automatic role on a port the port grid shows: its reason names the far end.
+	testdb.Exec(t, db, `UPDATE device_interfaces SET role_source = 'auto', role_reason = 'Found by LLDP: hidden-core-7 port 49' WHERE id = ?`, port2)
 	testdb.Exec(t, db, `UPDATE device_interfaces SET role = 'uplink', neighbor_device_id = ?, neighbor_if_index = 3 WHERE id = ?`, dev, gwPort2)
 	gwWAN := newPort(t, db, gw, 13, "eth8", "")
 	testdb.Exec(t, db, `UPDATE device_interfaces SET role = 'wan', role_source = 'auto', role_reason = 'Default route via 203.0.113.77' WHERE id = ?`, gwWAN)
@@ -92,7 +94,7 @@ func TestDBPublicLinkLeaksNothing(t *testing.T) {
 	publish(t, db, dash, admin)
 
 	secrets := []string{"10.77.0.9", "10.77.0.50", "i/o timeout", "intranet.secret.test", "cannot reach", "call Bob", "connection refused",
-		"aa:bb:cc:dd:ee:ff", site.String(), dev.String(), ups.String(), gw.String(), "10.77.0.1", port.String(), mon.String(), agent.String(), incident.String(), port2.String(), gwPort2.String(), gwWAN.String(), "203.0.113.77"}
+		"aa:bb:cc:dd:ee:ff", site.String(), dev.String(), ups.String(), gw.String(), "10.77.0.1", port.String(), mon.String(), agent.String(), incident.String(), port2.String(), gwPort2.String(), gwWAN.String(), "203.0.113.77", "hidden-core-7"}
 
 	d, err := svc.Get(ctx, Viewer{UserID: admin, IsAdmin: true}, dash)
 	testdb.Must(t, err)

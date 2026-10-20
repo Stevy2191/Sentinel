@@ -17,13 +17,16 @@ func idFor(v Viewer, id uuid.UUID) *uuid.UUID {
 }
 
 // trimPort blanks what a public view must not see on a port: its ids, its
-// hardware address and the id of the device at its other end. Names,
-// aliases, status and traffic stay.
+// hardware address, the id of the device at its other end and why its role
+// was chosen (that names the far end). Names, aliases, role, status and
+// traffic stay.
 func trimPort(p *services.PortView) {
 	p.ID = uuid.Nil
 	p.DeviceID = uuid.Nil
 	p.MAC = ""
 	p.NeighborDeviceID = nil
+	p.RoleSource = ""
+	p.RoleReason = ""
 }
 
 // TrimPortForPublic blanks what a public view must not see on a port, as
