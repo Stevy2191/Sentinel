@@ -174,8 +174,15 @@ func isRouter(d models.Device) bool {
 	return d.DeviceTypeDetected == models.DeviceTypeRouter
 }
 
+// notDown matches a device's ports not known to be down. A LAG member that
+// goes down leaves the aggregator and the LLDP/CDP tables, but it's still
+// cabled to the same place: its membership and neighbours stay until it's
+// back up and the walks say otherwise.
+const notDown = "(oper_status IS NULL OR oper_status = 'up')"
+
 // writeLAG records which aggregator each port belongs to. A failed walk
-// leaves what's stored; a complete one rewrites every port of the device.
+// leaves what's stored; a complete one rewrites every port of the device
+// that isn't down.
 func (m *L2Monitor) writeLAG(ctx context.Context, d models.Device, t snmp.Target) {
 	dot3ad, ok := m.walk(ctx, d, t, l2.OIDDot3adAttachedAgg)
 	if !ok {
@@ -199,12 +206,12 @@ func (m *L2Monitor) writeLAG(ctx context.Context, d models.Device, t snmp.Target
 	}
 	members := l2.ParseLAG(dot3ad, stack, func(ix int) bool { return isLAG[ix] })
 	err := m.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&models.DeviceInterface{}).Where("device_id = ? AND lag_if_index IS NOT NULL", d.ID).
+		if err := tx.Model(&models.DeviceInterface{}).Where("device_id = ? AND lag_if_index IS NOT NULL AND "+notDown, d.ID).
 			Update("lag_if_index", nil).Error; err != nil {
 			return err
 		}
 		for member, agg := range members {
-			if err := tx.Model(&models.DeviceInterface{}).Where("device_id = ? AND if_index = ?", d.ID, member).
+			if err := tx.Model(&models.DeviceInterface{}).Where("device_id = ? AND if_index = ? AND "+notDown, d.ID, member).
 				Update("lag_if_index", agg).Error; err != nil {
 				return err
 			}
@@ -218,7 +225,8 @@ func (m *L2Monitor) writeLAG(ctx context.Context, d models.Device, t snmp.Target
 
 // writeCDP keeps the device's CDP neighbours beside its LLDP ones. Any
 // column failing leaves the stored rows; a complete walk (also an empty one,
-// from a device without CDP) drops the CDP rows it no longer lists.
+// from a device without CDP) drops the CDP rows it no longer lists, except
+// on ports that are down.
 func (m *L2Monitor) writeCDP(ctx context.Context, d models.Device, t snmp.Target, ifIndexes map[int]bool, now time.Time) {
 	cols := map[string][]snmp.PDU{}
 	for _, col := range []string{"3", "4", "6", "7", "8"} {
@@ -241,28 +249,44 @@ func (m *L2Monitor) writeCDP(ctx context.Context, d models.Device, t snmp.Target
 	}
 	m.upsert(ctx, d, "neighbors", rows, []string{"device_id", "if_index", "protocol", "chassis_id"},
 		[]string{"sys_name", "port_id", "port_descr", "address", "last_seen"})
-	if err := m.db.WithContext(ctx).Exec(`DELETE FROM l2.neighbors WHERE device_id = ? AND protocol = 'cdp' AND last_seen < ?`, d.ID, now).Error; err != nil {
+	if err := m.db.WithContext(ctx).Exec(`DELETE FROM l2.neighbors WHERE device_id = ? AND protocol = 'cdp' AND last_seen < ?
+		AND if_index NOT IN (SELECT if_index FROM device_interfaces WHERE device_id = ? AND NOT `+notDown+`)`, d.ID, now, d.ID).Error; err != nil {
 		m.logger.Printf("[l2] %s: dropping gone CDP neighbours: %v", d.Host, err)
 	}
 }
 
 // writeWAN records, per port of a router, whether a default route goes out
 // of it or it holds a public IPv4 address. Without the address table it
-// writes nothing; a failed route walk counts as no default route.
+// writes nothing; when neither route table answers, the ports a default
+// route went out of keep that evidence.
 func (m *L2Monitor) writeWAN(ctx context.Context, d models.Device, t snmp.Target) {
 	addrPDUs, ok := m.walk(ctx, d, t, l2.OIDIPAdEntIfIndex)
 	if !ok {
 		return
 	}
-	cidr, _ := m.walk(ctx, d, t, l2.OIDCidrRouteIfIndexDefault)
+	cidr, cidrOK := m.walk(ctx, d, t, l2.OIDCidrRouteIfIndexDefault)
 	var route []snmp.PDU
+	routesKnown := cidrOK && len(cidr) > 0
 	if len(cidr) == 0 {
-		route, _ = m.walk(ctx, d, t, l2.OIDRouteIfIndex)
+		var routeOK bool
+		route, routeOK = m.walk(ctx, d, t, l2.OIDRouteIfIndex)
+		routesKnown = routesKnown || routeOK
 	}
 	evidence := map[int]string{}
+	if !routesKnown {
+		var kept []int
+		if err := m.db.WithContext(ctx).Model(&models.DeviceInterface{}).Where("device_id = ? AND wan_evidence = ?", d.ID, models.WANEvidenceDefaultRoute).
+			Pluck("if_index", &kept).Error; err != nil {
+			m.logger.Printf("[l2] %s: listing default-route ports: %v", d.Host, err)
+			return
+		}
+		for _, ix := range kept {
+			evidence[ix] = models.WANEvidenceDefaultRoute
+		}
+	}
 	for ix, ips := range l2.ParseAddresses(addrPDUs) {
 		for _, ip := range ips {
-			if l2.IsPublicIPv4(ip) {
+			if l2.IsPublicIPv4(ip) && evidence[ix] == "" {
 				evidence[ix] = models.WANEvidencePublicAddress
 			}
 		}
@@ -354,7 +378,9 @@ func (m *L2Monitor) writeNeighbors(ctx context.Context, d models.Device, t snmp.
 	m.upsert(ctx, d, "neighbors", rows, []string{"device_id", "if_index", "protocol", "chassis_id"}, []string{"sys_name", "port_id", "port_descr", "caps", "last_seen"})
 	// A complete walk is the whole truth: a neighbour it no longer lists
 	// (an AP moved, a switch swapped for a PC) must stop classing its port.
-	if err := m.db.WithContext(ctx).Exec(`DELETE FROM l2.neighbors WHERE device_id = ? AND protocol = 'lldp' AND last_seen < ?`, d.ID, now).Error; err != nil {
+	// A port that's down keeps its neighbour (see notDown).
+	if err := m.db.WithContext(ctx).Exec(`DELETE FROM l2.neighbors WHERE device_id = ? AND protocol = 'lldp' AND last_seen < ?
+		AND if_index NOT IN (SELECT if_index FROM device_interfaces WHERE device_id = ? AND NOT `+notDown+`)`, d.ID, now, d.ID).Error; err != nil {
 		m.logger.Printf("[l2] %s: dropping gone neighbours: %v", d.Host, err)
 	}
 }

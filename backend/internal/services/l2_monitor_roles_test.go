@@ -201,3 +201,75 @@ func TestL2PollCallsAfterPoll(t *testing.T) {
 		t.Errorf("after-poll calls %v, want one for %s", calls, d.ID)
 	}
 }
+
+// A LAG member that goes down drops out of the LLDP table and the LAG; its
+// neighbour and LAG membership stay, so the bundle keeps both cables and
+// its role doesn't flap. A port that's up and gone from the walk still goes.
+func TestL2PollKeepsDownPortsNeighbours(t *testing.T) {
+	db := testdb.Open(t)
+	d := l2Device(t, db, 49, 50, 51, 66)
+	testdb.Exec(t, db, `UPDATE device_interfaces SET if_type = 161 WHERE device_id = ? AND if_index = 66`, d.ID)
+	testdb.Exec(t, db, `UPDATE device_interfaces SET oper_status = 'up' WHERE device_id = ?`, d.ID)
+	lldp, agg := oidL2LLDPRem, l2.OIDDot3adAttachedAgg
+	c := &fakeL2SNMP{rows: map[string][]snmp.PDU{
+		lldp + ".5": {p(lldp+".5.0.49.1", []byte{2, 0, 0, 0, 0, 1}), p(lldp+".5.0.50.2", []byte{2, 0, 0, 0, 0, 1}), p(lldp+".5.0.51.3", []byte{2, 0, 0, 0, 0, 2})},
+		lldp + ".9": {p(lldp+".9.0.49.1", []byte("core-sw")), p(lldp+".9.0.50.2", []byte("core-sw")), p(lldp+".9.0.51.3", []byte("KitchenAP"))},
+		agg:         {p(agg+".49", int64(66)), p(agg+".50", int64(66))},
+	}, errs: map[string]error{}}
+	m := NewL2Monitor(db, c)
+	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	m.now = func() time.Time { return now }
+	m.PollL2(context.Background(), d, snmp.Target{})
+
+	// 50 goes down; 51 is up but its AP moved away.
+	testdb.Exec(t, db, `UPDATE device_interfaces SET oper_status = 'down' WHERE device_id = ? AND if_index = 50`, d.ID)
+	c.rows[lldp+".5"] = c.rows[lldp+".5"][:1]
+	c.rows[lldp+".9"] = c.rows[lldp+".9"][:1]
+	c.rows[agg] = []snmp.PDU{p(agg+".49", int64(66)), p(agg+".50", int64(0))}
+	now = now.Add(6 * time.Minute)
+	m.PollL2(context.Background(), d, snmp.Target{})
+
+	var ports []int
+	testdb.Must(t, db.Raw(`SELECT if_index FROM l2.neighbors WHERE device_id = ? ORDER BY if_index`, d.ID).Scan(&ports).Error)
+	if len(ports) != 2 || ports[0] != 49 || ports[1] != 50 {
+		t.Errorf("neighbours on ports %v, want [49 50]: the down member kept, the up port with nothing on it dropped", ports)
+	}
+	if got := lagOf(t, db, d.ID); got[50] == nil || *got[50] != 66 {
+		t.Errorf("lag_if_index of the down member = %v, want 66", got[50])
+	}
+}
+
+// Route walks that time out say nothing about the default route: the port
+// it went out of keeps its evidence. Walks that answer with none clear it.
+func TestL2PollWANKeepsRouteWhenWalksFail(t *testing.T) {
+	db := testdb.Open(t)
+	d := asRouter(t, db, l2Device(t, db, 13, 58))
+	a, cidr, route := l2.OIDIPAdEntIfIndex, l2.OIDCidrRouteIfIndexDefault, l2.OIDRouteIfIndex
+	c := &fakeL2SNMP{rows: map[string][]snmp.PDU{
+		a:    {p(a+".10.99.1.1", int64(58))},
+		cidr: {p(cidr+".0.0.0.0.0.10.1.1.254", int64(13))},
+	}, errs: map[string]error{}}
+	m := NewL2Monitor(db, c)
+	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	m.now = func() time.Time { return now }
+	m.PollL2(context.Background(), d, snmp.Target{})
+	if got := wanEvidence(t, db, d.ID); got[13] != "default_route" {
+		t.Fatalf("wan_evidence = %v, want 13 default_route", got)
+	}
+
+	c.errs[cidr] = errors.New("timeout")
+	c.errs[route] = errors.New("timeout")
+	now = now.Add(6 * time.Minute)
+	m.PollL2(context.Background(), d, snmp.Target{})
+	if got := wanEvidence(t, db, d.ID); got[13] != "default_route" {
+		t.Errorf("both route walks timed out: wan_evidence = %v, want 13 still default_route", got)
+	}
+
+	c.errs = map[string]error{}
+	delete(c.rows, cidr)
+	now = now.Add(6 * time.Minute)
+	m.PollL2(context.Background(), d, snmp.Target{})
+	if got := wanEvidence(t, db, d.ID); got[13] != "" {
+		t.Errorf("no default route any more: wan_evidence = %v, want 13 ''", got)
+	}
+}

@@ -94,6 +94,11 @@ func Decide(in Input) []Change {
 		if p.RoleSource == SourceUser {
 			continue
 		}
+		// A port that's down has left LLDP, CDP, its LAG and the routes,
+		// but not its cable: it keeps an automatic role until it's back.
+		if !p.Up && p.RoleSource == SourceAuto {
+			continue
+		}
 		c := Change{IfIndex: p.IfIndex, Role: RoleAccess, Source: SourceDefault}
 		if reason, ok := wan[p.IfIndex]; ok {
 			c.Role, c.Source, c.Reason = RoleWAN, SourceAuto, reason

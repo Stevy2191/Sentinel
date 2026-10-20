@@ -101,3 +101,16 @@ func TestDecideNoChurn(t *testing.T) {
 	p.Role, p.RoleSource, p.RoleReason = "uplink", "auto", "Found by LLDP: B port 49"
 	one(t, Input{Ports: []Port{p}, Peers: []Peer{{IfIndex: 49, Protocol: "lldp", DeviceName: "B", PortText: "49", LastSeen: now}}, Now: now})
 }
+
+// A port that goes down drops out of LLDP, CDP, the LAG and the routing
+// table; until it's back up its automatic role stays.
+func TestDecideDownPortKeepsAutoRole(t *testing.T) {
+	up := port(49, "49")
+	up.Role, up.RoleSource, up.RoleReason = "uplink", "auto", "Found by LLDP: B port 49"
+	down := up
+	down.Up = false
+	wan := port(13, "eth9")
+	wan.Up, wan.Role, wan.RoleSource, wan.RoleReason = false, "wan", "auto", "Default route via this port"
+	one(t, Input{IsRouter: true, Ports: []Port{down, wan}, Now: now})
+	one(t, Input{Ports: []Port{up}, Now: now}, Change{IfIndex: 49, Role: "access", Source: "default"})
+}
