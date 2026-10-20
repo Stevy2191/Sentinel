@@ -21,7 +21,7 @@ Roadmap: `docs/superpowers/specs/2026-09-28-network-monitoring-roadmap.md`. Each
 | 3 | MIB library and custom metrics: upload/browse/test-walk MIBs, profiles, Cisco switch health, Health section, metric-rule alerts | Done (`dev`, 2026-10-02); follow-ups in `plans/2026-10-02-network-phase3-followups.md` |
 | 4 | Custom dashboards: grid editor, 11 widget types (incl. site power), sharing, fullscreen wall display, admin public links | Done (`dev`, 2026-10-03); follow-ups in `plans/2026-10-02-network-phase4-followups.md` |
 | 5 | Metric reports: a Metrics report type (ports, port roles, devices, sites), exact 95th percentiles, totals, previous-period comparison, scheduled and shared like the other reports | Done (`dev`, 2026-10-05); follow-ups in `plans/2026-10-03-network-phase5-followups.md` |
-| 6 | Live site maps (LLDP, SSE push) — needs phase 4 | **In progress**, in pieces: A back navigation (done), B find a device and switch maps (done, `dev`), B2 Cisco (pending), C site maps (done, `dev`), D org map |
+| 6 | Live site maps (LLDP, SSE push) — needs phase 4 | **In progress**, in pieces: A back navigation (done), B find a device and switch maps (done, `dev`), B2 Cisco (pending), C site maps (done, `dev`; then bundles and automatic port roles, done), D org map |
 | 7 | UniFi controller source | **Next** |
 
 Phase 7 is next; phase 6 is unblocked (it needed phase 4, which is done) and can follow. Where both sit against the tools and security track below is the owner's call.
@@ -74,7 +74,27 @@ Spec `specs/2026-10-19-monitoring-one-list-design.md`, plan `plans/2026-10-19-mo
 
 Spec `specs/2026-10-19-site-maps-design.md` (approved mockup in `specs/assets/2026-10-19-site-maps/`), plan `plans/2026-10-19-site-maps.md`, follow-ups `plans/2026-10-19-site-maps-followups.md`. Each site has a live map of its **routers and switches only** (the owner: "just a network structure topology … I don't need to see end points"), at `/network/sites/:id/map`, a card on the site page, a "Show on site map" link on router and switch pages, a wall display, a read-only public link (admins; stand-in ids, no addresses) and a `site_map` dashboard widget (Simple view). Links come from hand-drawn links, ports' Network link settings, LLDP (`internal/sitemap`) and MAC-table guesses (piece B's placement; dashed with a "?" until kept). While a map is watched, the ports at link ends are read every 10 s (`services/link_poller.go`) and pushed over SSE; nothing extra is stored. Migration `064_site_maps.sql`.
 
+## Site map bundles and automatic port roles
+
+Spec `specs/2026-10-19-site-map-bundles-design.md` (mockup in `specs/assets/2026-10-19-site-map-bundles/`), plan `plans/2026-10-19-site-map-bundles.md`. From a site map at work:
+- **Bundles.** Two or more cables between the same two devices (ports at both ends, not guesses) are drawn as one bundle: two rails, a bar across the member ports, and a badge ("LAG · 2 × 10G", "2 cables · 2 × 1G", amber with "1 of 2 down"). Clicking it lists every cable. A LAG's name comes from the switch (dot3ad). Hiding a bundle hides each cable. The API sends `members` and `lag`; traffic stays keyed by each cable and is added up in the browser (`services/site_map_bundles.go`, `utils/siteMap.ts` `bundleState`).
+- **The map.** The first switch under a distribution switch drops straight down. Idle is now under 1 Mb/s (was under 1%, which hid up to 100 Mb/s on a 10G link). Zoom is calmer: a trackpad's two fingers pan and its pinch zooms smoothly, and a mouse notch is about 10%. The camera no longer re-fits when the server re-sends the map or a panel opens. A router's WAN ports get a violet "Internet" tag with live traffic.
+- **Ports marked automatically** (`internal/portroles`, run after each 5-minute L2 poll). The poll now also reads CDP, LAG membership, and routers' default route and addresses. A port whose LLDP or CDP neighbour is one of your routers or switches (or a LAG member with one, or a hand-drawn map link's end) becomes a network link. A router's port that the default route goes out of, that has a public address, or that is named `wan1` becomes WAN. Each change gets a reason ("Found by LLDP: … port 49"). A port you set is never touched (`role_source = 'user'`, back-filled for every existing non-endpoint role). The port page's "Connects to" has a first option, Automatic, to hand a port back. Drawings frame network-link ports sky blue and WAN ports violet.
+- **Side effects, no code needed:** WAN ports' traffic reads Download/Upload the right way round, reports group ports by role, and endpoint placement skips network-link ports, all for ports nobody had marked by hand.
+- **Home-lab dry run** (a copy of the sandbox DB, before deploying): the back-fill marked Quantum-Gate eth10 and eth8 and QuantumLink 0/51 as yours, and the rules would change nothing. The other LLDP neighbours are an AP, a NAS and a PC, which stay endpoints.
+- Migration `065_site_map_bundles.sql`.
+
 ## To be checked by the owner
+
+### Site map bundles and automatic port roles (on the dev stack, port 3200; most of it at work)
+
+1. At work, the site map draws CORE-ES48-A ↔ CORE-ES48-B, CORE-ES48-A ↔ core-es48-c and LAB-ES48 ↔ LAB-USW48 each as one bundle with a "LAG · 2 × …" badge. Click one: the LAG names at both ends and a row per cable.
+2. Pull one cable of a LAG (or wait for one to drop): the badge turns amber, "1 of 2 down", and the panel says what it's running on.
+3. The USW under LAB-ES48 drops straight down from it, not round the left lane.
+4. Zoom in with the trackpad and move around: two fingers pan, a pinch zooms, and nothing jumps back after a few minutes or when you open a panel.
+5. The FortiGate shows an "Internet" tag with live ↓/↑. Hover it for why it's WAN.
+6. Within 5 minutes of the deploy, ports between switches are framed sky blue, with "Found by LLDP: …" on hover. At home nothing changes: your three hand-set ports stay yours.
+7. On a port page, "Connects to" → Automatic → Save hands it back to the rules.
 
 ### Site maps (on the dev stack, port 3200)
 
