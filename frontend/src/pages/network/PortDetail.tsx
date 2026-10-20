@@ -51,10 +51,11 @@ function connectsToNode(port: Port): ReactNode {
 }
 
 /** Role (with hints), the device on the other end of a Network link, and
- *  optionally its port; saved together on one Save button. */
+ *  optionally its port; saved together on one Save button. Automatic, the
+ *  first choice, leaves the role to the role rules (role: null). */
 function ConnectsToForm({ port, deviceId, siteId, onSaved }: { port: Port; deviceId: string; siteId: string | undefined; onSaved: () => void }) {
   const { updatePort, busy } = usePortActions()
-  const [role, setRole] = useState<PortRole>(port.role)
+  const [role, setRole] = useState<PortRole | 'auto'>(port.role_source === 'user' ? port.role : 'auto')
   const [neighborId, setNeighborId] = useState(port.neighbor_device_id ?? '')
   const [neighborIfIndex, setNeighborIfIndex] = useState(port.neighbor_if_index != null ? String(port.neighbor_if_index) : '')
   const [saved, setSaved] = useState(false)
@@ -67,11 +68,17 @@ function ConnectsToForm({ port, deviceId, siteId, onSaved }: { port: Port; devic
     setSaved(false)
     setError(null)
     try {
-      await updatePort(deviceId, port.if_index, {
-        role,
-        neighbor_device_id: role === 'uplink' && neighborId ? neighborId : null,
-        neighbor_if_index: role === 'uplink' && neighborId && neighborIfIndex ? Number(neighborIfIndex) : null,
-      })
+      await updatePort(
+        deviceId,
+        port.if_index,
+        role === 'auto'
+          ? { role: null }
+          : {
+              role,
+              neighbor_device_id: role === 'uplink' && neighborId ? neighborId : null,
+              neighbor_if_index: role === 'uplink' && neighborId && neighborIfIndex ? Number(neighborIfIndex) : null,
+            }
+      )
       setSaved(true)
       onSaved()
     } catch (err) {
@@ -87,7 +94,7 @@ function ConnectsToForm({ port, deviceId, siteId, onSaved }: { port: Port; devic
           value={role}
           disabled={busy}
           onChange={(e) => {
-            const r = e.target.value as PortRole
+            const r = e.target.value as PortRole | 'auto'
             setRole(r)
             if (r !== 'uplink') {
               setNeighborId('')
@@ -96,13 +103,20 @@ function ConnectsToForm({ port, deviceId, siteId, onSaved }: { port: Port; devic
           }}
           className={selectCls}
         >
+          <option value="auto">Automatic</option>
           {PORT_ROLES.map((r) => (
             <option key={r} value={r}>
               {PORT_ROLE_LABEL[r]}
             </option>
           ))}
         </select>
-        <span className="block max-w-[14rem] text-xs text-slate-500">{PORT_ROLE_HINT[role]}</span>
+        <span className="block max-w-[14rem] text-xs text-slate-500">
+          {role !== 'auto'
+            ? PORT_ROLE_HINT[role]
+            : port.role_source === 'auto'
+              ? `Found: ${PORT_ROLE_LABEL[port.role]} · ${port.role_reason}`
+              : `Nothing found: ${PORT_ROLE_LABEL.access}`}
+        </span>
       </label>
       {role === 'uplink' && (
         <>

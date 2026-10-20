@@ -223,6 +223,7 @@ export default function PortTable({ deviceId, ports, canEdit, inventoried, onCha
                         ) : (
                           <span className="text-slate-400">{PORT_ROLE_LABEL[p.role]}</span>
                         )}
+                        {p.role_source === 'auto' && <span className="ml-1 text-xs text-slate-500" title={p.role_reason}>· auto</span>}
                         {p.role === 'uplink' && p.neighbor_device_name && (
                           <p className="mt-0.5 truncate text-xs text-slate-500">
                             → {p.neighbor_device_name}

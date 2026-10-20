@@ -151,15 +151,15 @@ export interface SiteTraffic {
   east_west: EastWestPoint[]
 }
 
-/** PATCH body: absent = unchanged, null = back to the default. role has no
- *  "back to the default": absent is the only way to leave it unchanged. */
+/** PATCH body: absent = unchanged, null = back to the default (role: back to
+ *  automatic, for the role rules to decide). */
 export interface PortPatch {
   important?: boolean
   collect?: boolean | null
   util_threshold_pct?: number | null
   error_threshold_per_min?: number | null
   down_grace_seconds?: number | null
-  role?: PortRole
+  role?: PortRole | null
   neighbor_device_id?: string | null
   neighbor_if_index?: number | null
 }

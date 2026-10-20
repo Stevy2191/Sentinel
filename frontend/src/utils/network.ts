@@ -88,6 +88,24 @@ export const PORT_ROLE_HINT: Record<PortRole, string> = {
 
 export const PORT_ROLES: PortRole[] = ['access', 'uplink', 'wan']
 
+/**
+ * roleLine is what a port's popover says it connects to: "Network link to
+ * CORE-ES48-B · port 49" (or "Network link" with no neighbour set) or
+ * "Internet (WAN)", and under it why (the rules' reason, or "Set by you").
+ * null for an endpoint.
+ */
+export function roleLine(
+  p: Pick<PortView, 'role' | 'role_source' | 'role_reason' | 'neighbor_device_name' | 'neighbor_port_number' | 'neighbor_port_label'>
+): { text: string; sub: string } | null {
+  if (p.role === 'access') return null
+  let text = PORT_ROLE_LABEL[p.role]
+  if (p.role === 'uplink' && p.neighbor_device_name) {
+    text += ` to ${p.neighbor_device_name}`
+    if (p.neighbor_port_number != null) text += ` · port ${p.neighbor_port_label || p.neighbor_port_number}`
+  }
+  return { text, sub: p.role_source === 'user' ? 'Set by you' : p.role_reason }
+}
+
 /** "Port 51 · Uplink To Quantum Gate", or "Switch 2 · Port 12 · alias" for a
  *  stacked port (stack_unit > 0). */
 export function portTitle(p: { number: number; label?: string; alias?: string; stack_unit?: number }): string {

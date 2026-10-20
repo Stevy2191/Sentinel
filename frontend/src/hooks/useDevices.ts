@@ -96,6 +96,10 @@ export interface DeviceInterface {
   present: boolean
   connector_present: boolean | null
   role: PortRole
+  /** Who set the role: a person (user), the role rules (auto), or nobody yet (default). */
+  role_source: 'default' | 'user' | 'auto'
+  /** Why the rules gave it ("Found by LLDP: … port 49"); "" otherwise. */
+  role_reason: string
   neighbor_device_id: string | null
   neighbor_if_index: number | null
   stack_unit: number

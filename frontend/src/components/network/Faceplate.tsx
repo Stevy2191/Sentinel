@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject }
 import { createPortal } from 'react-dom'
 import type { FaceBlock, FacePort, PortView, UnitFaceplate } from '@/hooks/usePorts'
 import { formatSpeed } from '@/hooks/useDevices'
-import { busiestUtil, PORT_STATE, portState, portTitle, portTraffic, portTrafficText, type PortState } from '@/utils/network'
+import { busiestUtil, PORT_STATE, portState, portTitle, portTraffic, portTrafficText, roleLine, type PortState } from '@/utils/network'
 
 // RJ45 outline with the latch notch facing away from the other row, as on
 // the real switch: top-row notch at the bottom, bottom-row notch at the top.
@@ -133,8 +133,13 @@ function PortCell({
     setHovering(false)
     setFocused(false)
   }
+  // The same frames as the realistic drawings: sky for a network link,
+  // violet for the internet side. Drawn by a wrapper, since the RJ45 shape
+  // clips the button's own.
+  const frame = port?.role === 'uplink' ? '0 0 0 2px #38bdf8' : port?.role === 'wan' ? '0 0 0 2px #a78bfa' : undefined
   return (
     <>
+      <span className="inline-flex rounded-sm" data-role={port && port.role !== 'access' ? port.role : undefined} style={frame ? { boxShadow: frame } : undefined}>
       <button
         ref={ref}
         type="button"
@@ -152,6 +157,7 @@ function PortCell({
           <span className="absolute inset-x-0 bottom-0 bg-white/55" style={{ height: `${Math.min(100, Math.max(8, util))}%` }} />
         )}
       </button>
+      </span>
       {show && port && <PortPopover anchorRef={ref} port={port} state={state} onClose={close} />}
     </>
   )
@@ -215,6 +221,7 @@ export function PortPopover({
 
   const rows = portTraffic(port)
   const speed = port.oper_status === 'up' ? formatSpeed(port.speed_bps) : null
+  const role = roleLine(port)
 
   return createPortal(
     <div
@@ -234,6 +241,12 @@ export function PortPopover({
         {PORT_STATE[state].label}
         {speed && <span>&nbsp;· {speed}</span>}
       </p>
+      {role && (
+        <div className="mt-1">
+          <p className={role.text.startsWith('Internet') ? 'text-violet-300' : 'text-sky-300'}>{role.text}</p>
+          {role.sub && <p className="text-[10.5px] leading-snug text-slate-400">{role.sub}</p>}
+        </div>
+      )}
       {rows.length > 0 && (
         <dl className="mt-1.5 space-y-0.5 border-t border-white/10 pt-1.5">
           {rows.map((r) => (

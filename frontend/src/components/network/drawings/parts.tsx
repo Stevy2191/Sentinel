@@ -45,12 +45,15 @@ function PortHit({
   const detail = portTrafficText(port)
   const label = `${portTitle(port)}: ${PORT_STATE[state].label}${detail ? ` · ${detail}` : ''}`
   const selected = hit.selected === port.if_index
+  // A port (not a panel light) the rules or a person marked as a network
+  // link or the internet side gets a solid frame, never the alert's pulse.
+  const role = wave && port.role !== 'access' ? ` rf-role-${port.role}` : ''
   return (
     <>
       <button
         ref={ref}
         type="button"
-        className={`${className}${selected ? ' rf-sel' : ''}`}
+        className={`${className}${selected ? ' rf-sel' : ''}${role}`}
         style={style}
         aria-label={label}
         aria-pressed={selected}

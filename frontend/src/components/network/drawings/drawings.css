@@ -86,6 +86,11 @@
 
 /* selection and focus */
 .rf-sel { outline: 1.5px solid #38bdf8; outline-offset: 1px; }
+/* A network link's port gets a sky frame; the internet side's a violet one, with "WAN" under it. */
+.rf-role-uplink { box-shadow: 0 0 0 2px #38bdf8; }
+.rf-role-wan { box-shadow: 0 0 0 2px #a78bfa; }
+.rf-role-wan::after { content: 'WAN'; position: absolute; left: 50%; top: 100%; transform: translateX(-50%); margin-top: 3px;
+  font: 700 7px/1 Inter, system-ui, sans-serif; letter-spacing: 0.04em; color: #a78bfa; pointer-events: none; }
 .rf-jack:focus-visible, .rf-cage:focus-visible, .rf-lamp:focus-visible { outline: 2px solid #38bdf8; outline-offset: 1px; }
 
 /* the "not hearing from it" badge */
