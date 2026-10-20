@@ -122,6 +122,7 @@ export default function SiteMapView(p: Props) {
         link={selLink}
         devices={devices}
         rate={traffic?.links[selLink.key]}
+        rates={traffic?.links}
         canEdit={canEdit}
         isPublic={!!p.publicToken}
         busy={actions.busy}
@@ -242,7 +243,7 @@ export default function SiteMapView(p: Props) {
               onSelect={(s) => !adding && setSelected(s)}
               onMove={(positions) => run(actions.setPositions(positions))}
               onPick={pick}
-              fitKey={`${view}:${side ? 1 : 0}`}
+              fitKey={view}
             />
           )}
         </div>
@@ -251,11 +252,11 @@ export default function SiteMapView(p: Props) {
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
         <span>
           <i className="mr-1.5 inline-block h-1 w-5 rounded bg-slate-500 align-middle" />
-          idle
+          idle (under 1 Mb/s)
         </span>
         <span>
           <i className="mr-1.5 inline-block h-1 w-5 rounded bg-emerald-500 align-middle" />
-          under half the busy threshold
+          traffic, under half the busy threshold
         </span>
         <span>
           <i className="mr-1.5 inline-block h-1 w-5 rounded bg-amber-500 align-middle" />
@@ -264,6 +265,10 @@ export default function SiteMapView(p: Props) {
         <span>
           <i className="mr-1.5 inline-block h-1 w-5 rounded bg-red-500 align-middle" />
           at the busy threshold
+        </span>
+        <span>
+          <i className="mr-1.5 inline-block h-[7px] w-5 rounded-sm border-2 border-emerald-500 align-middle" />
+          LAG or parallel cables, as one
         </span>
         <span>dashed amber: guessed from a MAC table · dashed grey: device down · width: link speed</span>
       </div>

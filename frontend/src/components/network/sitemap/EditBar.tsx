@@ -20,7 +20,8 @@ export default function EditBar(p: Props) {
   const [open, setOpen] = useState<'hidden' | 'add' | null>(null)
   const [confirmReset, setConfirmReset] = useState(false)
   const hiddenCount = p.hiddenDevices.length + p.hiddenLinks.length
-  const linkName = (l: MapLink) => `${p.names.get(l.a.device_id) ?? '?'} ↔ ${p.names.get(l.b.device_id) ?? '?'}`
+  const linkName = (l: MapLink) =>
+    `${p.names.get(l.a.device_id) ?? '?'} ↔ ${p.names.get(l.b.device_id) ?? '?'}${l.members ? ` (${l.members.length} cables)` : ''}`
   return (
     <div className="relative flex flex-wrap items-center gap-2 rounded-lg border border-sky-700 bg-sky-950/30 px-3 py-2 text-sm" aria-label="Editing">
       <b className="font-medium text-white">Editing</b>

@@ -2,8 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useNavigate } from 'react-router-dom'
 import { Maximize, Minus, Plus } from 'lucide-react'
 import MapNode from '@/components/network/sitemap/MapNode'
-import MapLinks, { type LinkGeom } from '@/components/network/sitemap/MapLinks'
-import { LAYOUT, layout, routePath, type Placed } from '@/utils/siteMap'
+import MapLinks, { type LinkGeom, type WanGeom } from '@/components/network/sitemap/MapLinks'
+import { LAYOUT, ZOOM_MAX, ZOOM_MIN, layout, routeKind, routePath, wanKey, wheelAction, type Placed } from '@/utils/siteMap'
 import type { MapDevice, MapSnapshot, MapTraffic } from '@/types/siteMap'
 import '@/components/network/sitemap/sitemap.css'
 
@@ -25,7 +25,8 @@ interface Props {
    *  is every device's, so nothing else moves when the layout changes. */
   onMove?: (positions: { device_id: string; x: number; y: number }[]) => void
   onPick?: (deviceId: string, ifIndex: number | null) => void
-  /** Changes when the map should fit its box again. */
+  /** Changes when the map should fit its box again (the view, not a side
+   *  panel: opening one keeps the camera). */
   fitKey?: unknown
   /** No zoom buttons and no port links: the site card and the widget. */
   compact?: boolean
@@ -36,6 +37,7 @@ const GRID = 8
 /** Screen pixels a pointer may move and still count as a click. */
 const CLICK_SLOP = 5
 const snap = (v: number) => Math.round(v / GRID) * GRID
+const clampZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z))
 
 type Box = { left: number; top: number; right: number; bottom: number; cx: number }
 
@@ -52,6 +54,7 @@ export default function MapCanvas(p: Props) {
   const [tick, setTick] = useState(0)
   const [now, setNow] = useState(() => Date.now())
   const [geoms, setGeoms] = useState<Map<string, LinkGeom>>(new Map())
+  const [wanGeoms, setWanGeoms] = useState<WanGeom[]>([])
 
   useEffect(() => {
     const t = window.setInterval(() => setNow(Date.now()), 5000)
@@ -75,7 +78,16 @@ export default function MapCanvas(p: Props) {
   }, [p.map.devices, p.traffic])
   const links = useMemo(() => p.map.links.filter((l) => placed.has(l.a.device_id) && placed.has(l.b.device_id)), [p.map.links, placed])
 
+  // Fit again only when what's drawn changes size, not whenever a fresh copy
+  // of the same map arrives (the server re-sends it every 5 minutes and
+  // after every edit).
+  const boundsKey = `${bounds.minX},${bounds.minY},${bounds.maxX},${bounds.maxY}`
+  const boundsRef = useRef(bounds)
+  boundsRef.current = bounds
+  // The window size the camera was last fitted at (null: not fitted yet).
+  const fittedAt = useRef<string | null>(null)
   const fit = useCallback(() => {
+    const bounds = boundsRef.current
     const el = vp.current
     if (!el) return
     const w = el.clientWidth
@@ -84,14 +96,21 @@ export default function MapCanvas(p: Props) {
     const bw = bounds.maxX - bounds.minX
     const bh = bounds.maxY - bounds.minY
     const zoom = Math.min(w / bw, h / bh, 1.5)
+    fittedAt.current = `${window.innerWidth}x${window.innerHeight}`
     setCam({ zoom, x: (w - bw * zoom) / 2 - bounds.minX * zoom, y: Math.max(6, (h - bh * zoom) / 2) - bounds.minY * zoom })
-  }, [bounds])
+    // boundsKey stands for bounds, whose object changes with every map.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boundsKey])
 
   useLayoutEffect(() => fit(), [fit, p.fitKey])
   useEffect(() => {
     const el = vp.current
     if (!el) return
-    const ro = new ResizeObserver(() => fit())
+    // A resized window (or a wall display going fullscreen) re-frames the
+    // map; a side panel opening narrows the viewport but keeps the camera.
+    const ro = new ResizeObserver(() => {
+      if (fittedAt.current !== `${window.innerWidth}x${window.innerHeight}`) fit()
+    })
     ro.observe(el)
     return () => ro.disconnect()
   }, [fit])
@@ -153,14 +172,36 @@ export default function MapCanvas(p: Props) {
       const ub = boxOf(o.upper.device_id)
       const lb = boxOf(o.lower.device_id)
       if (!ub || !lb) continue
-      const a = portOf(o.upper.device_id, o.upper.if_index) ?? cardPoint(o.upper.device_id, 'down', o.l.key, ub)
-      const b = portOf(o.lower.device_id, o.lower.if_index) ?? cardPoint(o.lower.device_id, 'up', o.l.key, lb)
+      let a = portOf(o.upper.device_id, o.upper.if_index) ?? cardPoint(o.upper.device_id, 'down', o.l.key, ub)
+      let b = portOf(o.lower.device_id, o.lower.if_index) ?? cardPoint(o.lower.device_id, 'up', o.l.key, lb)
+      // A bundle leaves each drawing from a bar across its member ports,
+      // just outside the faceplate, one short stub per cable, then runs as
+      // one line from the bar's middle. On a card (no ports drawn) it is
+      // one slot, like a link.
+      const bars: string[] = []
+      const stubs: { key: string; d: string }[] = []
+      const members = o.l.members
+      if (members) {
+        const bar = (upper: boolean) => {
+          const box = upper ? ub : lb
+          const pts = members.flatMap((m) => {
+            const e = upper === o.aUpper ? m.a : m.b
+            const pt = portOf(e.device_id, e.if_index)
+            return pt ? [{ m, pt }] : []
+          })
+          if (pts.length < 2) return null
+          const xs = pts.map((x) => x.pt.x)
+          const y = upper ? box.bottom + 7 : box.top - 7
+          bars.push(`M${Math.min(...xs)},${y} L${Math.max(...xs)},${y}`)
+          for (const x of pts) stubs.push({ key: x.m.key, d: `M${x.pt.x},${x.pt.y} L${x.pt.x},${y}` })
+          return { x: (Math.min(...xs) + Math.max(...xs)) / 2, y }
+        }
+        a = bar(true) ?? a
+        b = bar(false) ?? b
+      }
       const up = placed.get(o.upper.device_id)!
       const lo = placed.get(o.lower.device_id)!
-      const child = lo.parent === up.id
-      let kind: 'curve' | 'lane' | 'chain' = 'curve'
-      if (child && up.tier === 'dist' && lo.tier === 'access') kind = 'lane'
-      else if (child && up.tier === 'access' && lo.tier === 'access') kind = 'chain'
+      const kind = routeKind(up.tier, lo.tier, lo.parent === up.id, lo.row)
       let outIndex = 0
       if (kind === 'lane') {
         const list = laneIndex.get(up.id) ?? []
@@ -169,11 +210,35 @@ export default function MapCanvas(p: Props) {
         laneIndex.set(up.id, list)
       }
       const lane = Math.min(ub.left, lb.left) - 12 - outIndex * LAYOUT.laneGap
-      const route = routePath(kind, a, b, { srcBottom: ub.bottom, lane, tgtTop: lb.top, outIndex })
-      out.set(o.l.key, { d: route.d, mid: route.mid, startsAtA: o.aUpper })
+      // A bundle's bar sits below the box: its route starts from there.
+      const srcBottom = members && a.y > ub.bottom ? a.y : ub.bottom
+      const route = routePath(kind, a, b, { srcBottom, lane, tgtTop: lb.top, outIndex })
+      out.set(o.l.key, { d: route.d, mid: route.mid, startsAtA: o.aUpper, bars: bars.join(' ') || undefined, stubs: stubs.length ? stubs : undefined })
     }
     setGeoms(out)
-  }, [links, placed, p.view, tick])
+
+    // A drawn router's Internet tags: a violet line from each tag to its WAN
+    // port, coming at it from below like a link's stub. On a card the tag
+    // carries its own short line.
+    const wan: WanGeom[] = []
+    // The map's devices, not the fast poll's statuses: traffic ticks don't re-measure.
+    for (const d of p.map.devices) {
+      const id = d.id
+      if (!d.wan?.length || !placed.has(id)) continue
+      const box = boxOf(id)
+      for (const w of d.wan) {
+        const tagEl = root.querySelector(`[data-node="${CSS.escape(id)}"] [data-wan-tag="${w.if_index}"]`)
+        const port = portOf(id, w.if_index)
+        if (!tagEl || !port || !box) continue
+        const t = rel(tagEl.getBoundingClientRect())
+        const ty = (t.top + t.bottom) / 2
+        const x0 = box.left - 10
+        const yb = box.bottom + 10
+        wan.push({ key: wanKey(id, w.if_index), d: `M${t.right},${ty} L${x0},${ty} L${x0},${yb} L${port.x},${yb} L${port.x},${port.y}` })
+      }
+    }
+    setWanGeoms(wan)
+  }, [links, placed, p.map.devices, p.view, tick])
 
   const relayout = useCallback(() => setTick((t) => t + 1), [])
 
@@ -214,7 +279,7 @@ export default function MapCanvas(p: Props) {
     if (g.kind === 'pinch' && pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()]
       const d = Math.hypot(a.x - b.x, a.y - b.y)
-      const zoom = Math.min(3, Math.max(0.1, (g.zoom * d) / g.d))
+      const zoom = clampZoom((g.zoom * d) / g.d)
       const r = vp.current!.getBoundingClientRect()
       const mx = g.mx - r.left
       const my = g.my - r.top
@@ -258,19 +323,24 @@ export default function MapCanvas(p: Props) {
   // The dropped place is shown until the saved map comes back.
   useEffect(() => setDrag(null), [p.map])
 
-  // The wheel zooms around the pointer. A native listener, not React's
-  // passive one, so it can keep the page from scrolling.
+  // A pinch or a mouse wheel's notch zooms around the pointer; a
+  // trackpad's two-finger scroll pans (wheelAction). A native listener, not
+  // React's passive one, so it can keep the page from scrolling.
   useEffect(() => {
     const el = vp.current
     if (!el || p.compact) return
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
+      const act = wheelAction(e, el.clientHeight)
+      if (act.kind === 'pan') {
+        setCam((c) => ({ ...c, x: c.x - act.dx, y: c.y - act.dy }))
+        return
+      }
       const r = el.getBoundingClientRect()
       const mx = e.clientX - r.left
       const my = e.clientY - r.top
-      const f = e.deltaY < 0 ? 1.12 : 1 / 1.12
       setCam((c) => {
-        const zoom = Math.min(3, Math.max(0.1, c.zoom * f))
+        const zoom = clampZoom(c.zoom * act.factor)
         return { zoom, x: mx - ((mx - c.x) * zoom) / c.zoom, y: my - ((my - c.y) * zoom) / c.zoom }
       })
     }
@@ -283,7 +353,7 @@ export default function MapCanvas(p: Props) {
     const mx = el.clientWidth / 2
     const my = el.clientHeight / 2
     setCam((c) => {
-      const zoom = Math.min(3, Math.max(0.1, c.zoom * f))
+      const zoom = clampZoom(c.zoom * f)
       return { zoom, x: mx - ((mx - c.x) * zoom) / c.zoom, y: my - ((my - c.y) * zoom) / c.zoom }
     })
   }
@@ -326,7 +396,16 @@ export default function MapCanvas(p: Props) {
             {label}
           </div>
         ))}
-        <MapLinks links={links} geoms={geoms} traffic={p.traffic} devices={devices} selected={selectedLink} now={now} onSelect={(key) => p.onSelect?.({ kind: 'link', id: key })} />
+        <MapLinks
+          links={links}
+          geoms={geoms}
+          wanGeoms={wanGeoms}
+          traffic={p.traffic}
+          devices={devices}
+          selected={selectedLink}
+          now={now}
+          onSelect={(key) => p.onSelect?.({ kind: 'link', id: key })}
+        />
         {[...placed.values()].map((pl) => {
           const d = devices.get(pl.id)
           if (!d) return null
@@ -341,6 +420,7 @@ export default function MapCanvas(p: Props) {
               editing={!!p.editing}
               selected={p.selected?.kind === 'device' && p.selected.id === pl.id}
               now={now}
+              traffic={p.traffic}
               onFold={() => p.onFold(pl.id)}
               onPort={(ix) => onPort(pl.id, ix)}
               onLayout={relayout}

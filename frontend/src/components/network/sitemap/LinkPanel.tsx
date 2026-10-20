@@ -2,13 +2,15 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { X } from 'lucide-react'
 import { useMetricsQuery } from '@/hooks/useMetrics'
-import { directional, endText, rate, speedText } from '@/utils/siteMap'
+import { bundleState, directional, endText, rate, speedText } from '@/utils/siteMap'
 import type { LinkRate, MapDevice, MapLink } from '@/types/siteMap'
 
 interface Props {
   link: MapLink
   devices: Map<string, MapDevice>
   rate: LinkRate | undefined
+  /** Every link's own figures: a bundle's members are read from here. */
+  rates?: Record<string, LinkRate>
   canEdit: boolean
   isPublic: boolean
   busy: boolean
@@ -25,6 +27,7 @@ function sourceText(l: MapLink, devices: Map<string, MapDevice>): string {
     if (s === 'manual') parts.push('Drawn by hand')
     else if (s === 'port_setting') parts.push('Set on the port (Network link)')
     else if (s === 'lldp') parts.push('Found by LLDP')
+    else if (s === 'cdp') parts.push('Found by CDP')
   }
   if (l.guess) {
     const [sw, other] = l.a.if_index != null ? [l.a, l.b] : [l.b, l.a]
@@ -70,14 +73,27 @@ function LastHour({ link }: { link: MapLink }) {
 }
 
 /** A link's both ends, its traffic now and over the last hour, where it was
- *  found, and (for editors) what can be done with it. */
+ *  found, and (for editors) what can be done with it. A bundle shows its
+ *  cables instead of the ends, and no last hour (it would be one cable's). */
 export default function LinkPanel(p: Props) {
   const [confirm, setConfirm] = useState(false)
   const { link: l, devices } = p
   const A = devices.get(l.a.device_id)
   const B = devices.get(l.b.device_id)
-  const dir = directional(l, p.rate)
-  const pct = (v: number | null) => (v == null || !l.speed_bps ? '' : ` · ${((v / l.speed_bps) * 100).toFixed(1)}%`)
+  const bundle = l.members ? bundleState(l, p.rates) : null
+  const speed = bundle ? bundle.liveSpeed : l.speed_bps
+  const dir = directional(l, bundle ? bundle.rate : p.rate, speed)
+  const pct = (v: number | null) => (v == null || !speed ? '' : ` · ${((v / speed) * 100).toFixed(1)}%`)
+  const portLink = (e: MapLink['a'], d: MapDevice | undefined) => {
+    const text = endText(e, d?.type)
+    return !p.isPublic && e.if_index != null ? (
+      <Link className="text-sky-400 hover:underline" to={`/network/devices/${e.device_id}/ports/${e.if_index}`}>
+        {text}
+      </Link>
+    ) : (
+      text
+    )
+  }
   const end = (e: MapLink['a'], d: MapDevice | undefined) => {
     const named = endText(e, d?.type)
     // A port shown by its number also gets its interface name, once.
@@ -93,15 +109,58 @@ export default function LinkPanel(p: Props) {
   return (
     <div className="space-y-3" aria-label="Link">
       <div className="flex items-center justify-between">
-        <h3 className="text-[15px] font-medium text-white">Link</h3>
+        <h3 className="text-[15px] font-medium text-white">{l.members ? (l.lag ? 'LAG' : 'Cables') : 'Link'}</h3>
         <button type="button" className="rounded p-1 text-slate-400 hover:text-white" onClick={p.onClose} aria-label="Close">
           <X className="h-4 w-4" />
         </button>
       </div>
-      <div className="flex flex-col gap-1">
-        {end(l.a, A)}
-        {end(l.b, B)}
-      </div>
+      {l.members && bundle ? (
+        <div className="space-y-2">
+          <p className="text-sm text-slate-200">
+            {A?.name} ↔ {B?.name}
+          </p>
+          <p className="text-xs text-slate-400">
+            {l.lag
+              ? `LAG: ${[l.lag.a && `${l.lag.a} on ${A?.name}`, l.lag.b && `${l.lag.b} on ${B?.name}`].filter(Boolean).join(' · ')}`
+              : `${l.members.length} cables, not a LAG (each runs on its own)`}
+          </p>
+          {bundle.down > 0 && (
+            <p className="rounded-md bg-amber-900/30 px-2 py-1.5 text-xs text-amber-200">
+              {bundle.down} of {l.members.length} cables down: running on {speedText(bundle.liveSpeed)} of {speedText(l.speed_bps)}
+            </p>
+          )}
+          <table className="w-full text-xs">
+            <thead className="text-slate-500">
+              <tr>
+                <th className="py-1 text-left font-normal">{A?.name}</th>
+                <th className="py-1 text-left font-normal">{B?.name}</th>
+                <th className="py-1 text-right font-normal">To {B?.name} / back</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {l.members.map((m) => {
+                const r = p.rates?.[m.key]
+                const d = directional(m, r)
+                const dn = r?.oper_up === false
+                return (
+                  <tr key={m.key} className="text-slate-300">
+                    <td className="py-1">{portLink(m.a, A)}</td>
+                    <td className="py-1">{portLink(m.b, B)}</td>
+                    <td className={`py-1 text-right tabular-nums ${dn ? 'text-red-300' : ''}`}>
+                      {dn ? 'down' : d.aToB == null && d.bToA == null ? '—' : `${rate(d.aToB ?? 0)} / ${rate(d.bToA ?? 0)}`}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1">
+          {end(l.a, A)}
+          {end(l.b, B)}
+        </div>
+      )}
       <dl className="divide-y divide-white/10 text-sm">
         <div className="flex justify-between py-1.5">
           <dt className="text-slate-400">Speed</dt>
@@ -120,7 +179,7 @@ export default function LinkPanel(p: Props) {
           <dd>{l.threshold_pct}%</dd>
         </div>
       </dl>
-      {!p.isPublic && l.rate_end !== '' && (
+      {!p.isPublic && l.rate_end !== '' && !l.members && (
         <div>
           <p className="mb-1 text-xs text-slate-400">Last hour</p>
           <LastHour link={l} />
