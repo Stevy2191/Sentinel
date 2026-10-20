@@ -108,12 +108,13 @@ export default function MapCanvas(p: Props) {
     if (!el) return
     // A resized window (or a wall display going fullscreen) re-frames the
     // map; a side panel opening narrows the viewport but keeps the camera.
+    // A widget has no panel and its tile resizes on its own: it always does.
     const ro = new ResizeObserver(() => {
-      if (fittedAt.current !== `${window.innerWidth}x${window.innerHeight}`) fit()
+      if (p.compact || fittedAt.current !== `${window.innerWidth}x${window.innerHeight}`) fit()
     })
     ro.observe(el)
     return () => ro.disconnect()
-  }, [fit])
+  }, [fit, p.compact])
 
   // Measure each link's ends in map units, after the nodes have drawn.
   useLayoutEffect(() => {
