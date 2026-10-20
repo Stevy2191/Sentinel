@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -587,6 +588,44 @@ func TestPublicSnapshotAliasesBundleMembers(t *testing.T) {
 	for _, k := range memberKeys {
 		if _, ok := pt.Links[k]; !ok {
 			t.Errorf("public traffic %v has no rate for member %s", pt.Links, k)
+		}
+	}
+}
+
+func TestDBSiteMapRouterWAN(t *testing.T) {
+	db := testdb.Open(t)
+	h := seedHomeMap(t, db)
+	testdb.Exec(t, db, `INSERT INTO device_interfaces (device_id, if_index, name, mac, if_type, speed_bps, present, role, role_source, role_reason)
+		VALUES (?, 13, 'eth8', 'e4:38:83:20:f5:ce', 6, 1000000000, true, 'wan', 'auto', 'Has a public address')`, h.gw)
+	// A switch port marked WAN isn't the internet on the map: only routers'.
+	testdb.Exec(t, db, `UPDATE device_interfaces SET role = 'wan' WHERE device_id = ? AND if_index = 5`, h.sw)
+	svc := newMapService(db)
+	m, err := svc.Snapshot(context.Background(), h.admin, h.site)
+	testdb.Must(t, err)
+	wan := map[uuid.UUID][]MapWAN{}
+	for _, d := range m.Devices {
+		wan[d.ID] = d.WAN
+	}
+	want := []MapWAN{{IfIndex: 13, Name: "eth8", SpeedBps: 1_000_000_000, Reason: "Has a public address"}}
+	if !reflect.DeepEqual(wan[h.gw], want) || wan[h.sw] != nil {
+		t.Errorf("WAN = router %+v, switch %+v; want %+v on the router only", wan[h.gw], wan[h.sw], want)
+	}
+	ps, _, err := svc.BoundPorts(context.Background(), h.site)
+	testdb.Must(t, err)
+	found := false
+	for _, p := range ps {
+		if p.DeviceID == h.gw && p.IfIndex == 13 {
+			found = p.LinkKey == wanKey(h.gw, 13) && p.LinkKey == "wan:"+h.gw.String()+":13" && p.InterfaceID != uuid.Nil
+		}
+	}
+	if !found {
+		t.Errorf("bound ports %+v, want Quantum-Gate 13 under wan:<id>:13", ps)
+	}
+	pub, err := svc.PublicSnapshot(context.Background(), h.site)
+	testdb.Must(t, err)
+	for _, d := range pub.Devices {
+		if len(d.WAN) > 0 && d.WAN[0] != (MapWAN{IfIndex: 13, SpeedBps: 1_000_000_000}) {
+			t.Errorf("public WAN = %+v, want no name or reason", d.WAN)
 		}
 	}
 }

@@ -43,6 +43,13 @@ func TestDBPublicLinkLeaksNothing(t *testing.T) {
 	testdb.Exec(t, db, `UPDATE device_interfaces SET role = 'uplink', neighbor_device_id = ?, neighbor_if_index = 1 WHERE id = ?`, dev, gwPort)
 	testdb.Exec(t, db, `UPDATE device_interfaces SET role = 'uplink', neighbor_device_id = ? WHERE id = ?`, ups, port)
 	testdb.Exec(t, db, `UPDATE devices SET device_type = 'ups' WHERE id = ?`, ups)
+	// A second cable between the switch and the router (so the map draws a
+	// bundle), and the router's WAN port, whose reason a public map leaves out.
+	port2 := newPort(t, db, dev, 3, "Gi1/0/3", "")
+	gwPort2 := newPort(t, db, gw, 4, "eth3", "")
+	testdb.Exec(t, db, `UPDATE device_interfaces SET role = 'uplink', neighbor_device_id = ?, neighbor_if_index = 3 WHERE id = ?`, dev, gwPort2)
+	gwWAN := newPort(t, db, gw, 13, "eth8", "")
+	testdb.Exec(t, db, `UPDATE device_interfaces SET role = 'wan', role_source = 'auto', role_reason = 'Default route via 203.0.113.77' WHERE id = ?`, gwWAN)
 	mon := newMonitor(t, db, admin, "Intranet", "https://intranet.secret.test/health")
 	agent := newAgent(t, db, "fileserver")
 	now := time.Now().UTC()
@@ -85,7 +92,7 @@ func TestDBPublicLinkLeaksNothing(t *testing.T) {
 	publish(t, db, dash, admin)
 
 	secrets := []string{"10.77.0.9", "10.77.0.50", "i/o timeout", "intranet.secret.test", "cannot reach", "call Bob", "connection refused",
-		"aa:bb:cc:dd:ee:ff", site.String(), dev.String(), ups.String(), gw.String(), "10.77.0.1", port.String(), mon.String(), agent.String(), incident.String()}
+		"aa:bb:cc:dd:ee:ff", site.String(), dev.String(), ups.String(), gw.String(), "10.77.0.1", port.String(), mon.String(), agent.String(), incident.String(), port2.String(), gwPort2.String(), gwWAN.String(), "203.0.113.77"}
 
 	d, err := svc.Get(ctx, Viewer{UserID: admin, IsAdmin: true}, dash)
 	testdb.Must(t, err)

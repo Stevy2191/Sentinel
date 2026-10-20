@@ -51,7 +51,21 @@ type MapDevice struct {
 	Y             *float64   `json:"y"`
 	Added         bool       `json:"added"`
 	Connected     *int       `json:"connected,omitempty"`
+	// WAN is a router's internet ports (role wan), drawn as an "Internet"
+	// tag; a public map leaves out their names and reasons.
+	WAN []MapWAN `json:"wan,omitempty"`
 }
+
+// MapWAN is one of a router's internet (WAN) ports.
+type MapWAN struct {
+	IfIndex  int    `json:"if_index"`
+	Name     string `json:"name"`
+	SpeedBps int64  `json:"speed_bps"`
+	Reason   string `json:"reason"`
+}
+
+// wanKey is the traffic key a router's WAN port is polled under.
+func wanKey(device uuid.UUID, ifIndex int) string { return fmt.Sprintf("wan:%s:%d", device, ifIndex) }
 
 // MapLink is one cable, or a bundle of them (Members: a LAG, or parallel
 // cables between the same two devices). RateEnd says which end's port the
@@ -183,6 +197,8 @@ type mapPortRow struct {
 	NeighborDeviceID *uuid.UUID
 	NeighborIfIndex  *int
 	LagIfIndex       *int
+	Role             string
+	RoleReason       string
 }
 
 // mapWorld is everything one site's map is built from.
@@ -252,7 +268,8 @@ func (s *SiteMapService) loadWith(ctx context.Context, siteID uuid.UUID, links b
 	var ports []mapPortRow
 	if err := db.Raw(`SELECT id, device_id, if_index, COALESCE(name, '') AS name, COALESCE(descr, '') AS descr,
 		COALESCE(alias, '') AS alias, COALESCE(mac, '') AS mac, COALESCE(if_type, 0) AS if_type, connector_present,
-		COALESCE(speed_bps, 0) AS speed_bps, util_threshold_pct, neighbor_device_id, neighbor_if_index, lag_if_index
+		COALESCE(speed_bps, 0) AS speed_bps, util_threshold_pct, neighbor_device_id, neighbor_if_index, lag_if_index,
+		role, role_reason
 		FROM device_interfaces WHERE device_id IN ? AND present`, ids).Scan(&ports).Error; err != nil {
 		return nil, fmt.Errorf("loading map ports: %w", err)
 	}
@@ -410,6 +427,18 @@ func (w *mapWorld) mapDevice(id uuid.UUID, public bool) MapDevice {
 		x, y := p.X, p.Y
 		out.X, out.Y = &x, &y
 	}
+	if d.Type == models.DeviceTypeRouter {
+		for e, p := range w.ports {
+			if e.DeviceID == id && p.Role == models.PortRoleWAN {
+				wan := MapWAN{IfIndex: e.IfIndex, SpeedBps: p.SpeedBps}
+				if !public {
+					wan.Name, wan.Reason = p.Name, p.RoleReason
+				}
+				out.WAN = append(out.WAN, wan)
+			}
+		}
+		sort.Slice(out.WAN, func(i, j int) bool { return out.WAN[i].IfIndex < out.WAN[j].IfIndex })
+	}
 	if !public {
 		out.Host, out.StatusDetail = d.Host, d.StatusDetail
 		if onMapType(d.Type) {
@@ -527,7 +556,8 @@ func (s *SiteMapService) PublicSnapshot(ctx context.Context, siteID uuid.UUID) (
 // BoundPorts is the rate-end port of each visible link, and of each cable
 // in a bundle, keyed by the cable's own key (what the fast poll reads while
 // the map is watched), and every device drawn on the map (whose statuses
-// each tick carries).
+// each tick carries). Visible routers' WAN ports are polled too, under
+// wanKey.
 func (s *SiteMapService) BoundPorts(ctx context.Context, siteID uuid.UUID) ([]BoundPort, []uuid.UUID, error) {
 	w, err := s.load(ctx, siteID)
 	if err != nil {
@@ -557,6 +587,12 @@ func (s *SiteMapService) BoundPorts(ctx context.Context, siteID uuid.UUID) ([]Bo
 		}
 		port := w.ports[sitemap.End{DeviceID: e.DeviceID, IfIndex: *e.IfIndex}]
 		out = append(out, BoundPort{DeviceID: e.DeviceID, IfIndex: *e.IfIndex, InterfaceID: port.ID, LinkKey: l.Key})
+	}
+	for _, d := range snap.Devices {
+		for _, wp := range d.WAN {
+			port := w.ports[sitemap.End{DeviceID: d.ID, IfIndex: wp.IfIndex}]
+			out = append(out, BoundPort{DeviceID: d.ID, IfIndex: wp.IfIndex, InterfaceID: port.ID, LinkKey: wanKey(d.ID, wp.IfIndex)})
+		}
 	}
 	return out, devices, nil
 }

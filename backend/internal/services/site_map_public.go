@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -121,6 +122,25 @@ func publicKey(siteID uuid.UUID, key string) string {
 	return sitemap.KeyOf(a, b)
 }
 
+// publicWANKey is a wanKey with its router's stand-in id; "" for anything
+// else.
+func publicWANKey(siteID uuid.UUID, key string) string {
+	rest, ok := strings.CutPrefix(key, "wan:")
+	if !ok {
+		return ""
+	}
+	k := strings.LastIndex(rest, ":")
+	if k < 0 {
+		return ""
+	}
+	id, err := uuid.Parse(rest[:k])
+	ix, err2 := strconv.Atoi(rest[k+1:])
+	if err != nil || err2 != nil || ix < 1 {
+		return ""
+	}
+	return wanKey(publicID(siteID, id), ix)
+}
+
 // aliasSnapshot swaps every id in a public map for its stand-in.
 func aliasSnapshot(m *MapSnapshot) {
 	site := m.SiteID
@@ -156,6 +176,8 @@ func PublicTraffic(siteID uuid.UUID, t MapTraffic) MapTraffic {
 	out := MapTraffic{At: t.At, Links: make(map[string]LinkRate, len(t.Links)), Devices: make(map[uuid.UUID]string, len(t.Devices))}
 	for k, r := range t.Links {
 		if pk := publicKey(siteID, k); pk != "" {
+			out.Links[pk] = r
+		} else if pk := publicWANKey(siteID, k); pk != "" {
 			out.Links[pk] = r
 		}
 	}
