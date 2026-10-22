@@ -3,10 +3,7 @@
 **Date:** 2026-10-19
 **Status:** mockup approved by the owner 2026-10-19 ("Looks good"). This document writes up what the mockup showed, plus the parts it couldn't show (collection, storage, rules).
 **Builds on:** `2026-10-19-site-maps-design.md` (piece C, on dev at 504c209).
-**Reference images** (`assets/2026-10-19-site-map-bundles/`):
-- `before.png`: the owner's screenshot of a work site after the site maps update.
-- `mockup.png`: the approved mockup, the same site with this design.
-- `mockup-member-down.png`: the mockup with one CORE-ES48-A ↔ core-es48-c cable down and its panel open.
+**Reference images:** the owner's screenshot of a work site after the site maps update, and the approved mockup of the same site with this design (one with a cable down and its panel open). Removed on 2026-10-22: they showed the owner's work network, and this repository is public.
 
 The mockup ran the real frontend with prototype changes, in a scratch copy (not committed). Its code is a guide, not the implementation: build each part test-first.
 

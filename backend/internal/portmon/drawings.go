@@ -69,7 +69,7 @@ var drawings = []Drawing{
 	{Key: DrawingES48750W, Ports: portRange(1, 52), product: regexp.MustCompile(`(?i)^EDGESWITCH 48 750W$`), pattern: regexp.MustCompile(`(?i)^ES-48-750W$`)},
 
 	// Waiting for the owner's photos: the work Ciscos' real port names
-	// (ifName, from the work install, 2026-10-21), for drawings to come.
+	// (ifName, read from real switches, 2026-10-21), for drawings to come.
 	// - C9300-24P: Gi1/0/1-24; network module Te1/1/1-8 in use (IOS-XE also
 	//   lists Gi1/1/1-4, Fo1/1/1-2 and Twe1/1/1-2, the other modules'
 	//   ports); Gi0/0 management; Ap1/0/1 (the app port).
