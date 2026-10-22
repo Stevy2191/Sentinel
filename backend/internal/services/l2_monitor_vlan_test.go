@@ -118,6 +118,40 @@ func TestL2PollAllVLANsFailReadsDefaultContext(t *testing.T) {
 	}
 }
 
+// A view or v3 group without the VLAN contexts answers them empty
+// (noSuchObject, authorizationError), not with an error: VLAN 1 still comes
+// from the default context.
+func TestL2PollEmptyVLANContextsReadDefaultContext(t *testing.T) {
+	db := testdb.Open(t)
+	d := l2Device(t, db, 3, 5, 78)
+	c := &fakeL2SNMP{rows: ciscoWalk(), contexts: map[string]map[string][]snmp.PDU{"pub@1": {}, "pub@20": {}}}
+	NewL2Monitor(db, c).PollL2(context.Background(), d, ciscoTarget)
+	if got, want := withoutTimes(sightingRows(t, db)), []sightingRow{{IfIndex: 3, VLAN: 0, MAC: "02:00:00:00:00:04"}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("sightings = %v, want %v", got, want)
+	}
+}
+
+// A switch that refuses community@vlan times out on each VLAN: after two
+// with none read, the rest aren't tried.
+func TestL2PollGivesUpOnRefusedVLANContexts(t *testing.T) {
+	db := testdb.Open(t)
+	d := l2Device(t, db, 3, 5, 78)
+	rows := ciscoWalk()
+	s, k := l2.OIDVtpVlanState, l2.OIDVtpVlanType
+	rows[s] = append(rows[s], p(s+".1.30", int64(1)))
+	rows[k] = append(rows[k], p(k+".1.30", int64(1)))
+	fail := map[string]error{oidL2Dot1dFdbPort: errors.New("timeout")}
+	ctx := map[string]map[string][]snmp.PDU{"pub@1": {}, "pub@20": {}, "pub@30": {}}
+	c := &fakeL2SNMP{rows: rows, contexts: ctx, ctxErrs: map[string]map[string]error{"pub@1": fail, "pub@20": fail, "pub@30": fail}}
+	NewL2Monitor(db, c).PollL2(context.Background(), d, ciscoTarget)
+	if slices.Contains(c.walked, "pub@30 "+oidL2Dot1dFdbPort) {
+		t.Error("tried VLAN 30 after VLANs 1 and 20 both failed")
+	}
+	if got := len(sightingRows(t, db)); got != 1 {
+		t.Errorf("%d sightings, want the default context's one", got)
+	}
+}
+
 func TestL2PollNoVLANTableReadsDefaultContext(t *testing.T) {
 	db := testdb.Open(t)
 	d := l2Device(t, db, 3, 5, 78)

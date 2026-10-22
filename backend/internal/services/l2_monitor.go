@@ -372,19 +372,28 @@ func (m *L2Monitor) writeSightings(ctx context.Context, d models.Device, t snmp.
 
 // readVLANs reads a Cisco's MAC table one VLAN at a time, each in its own
 // context: the default context holds VLAN 1's only, so VLAN 1 is read in its
-// context like the rest. It reports whether any VLAN was read; a VLAN whose
-// walk fails is skipped and keeps its stored rows.
+// context like the rest. It reports whether any VLAN gave rows; a VLAN whose
+// walk fails or is empty is skipped and keeps its stored rows. A switch that
+// refuses the contexts times out on each, so after two failures with no
+// VLAN read it stops trying until the next poll.
 func (m *L2Monitor) readVLANs(ctx context.Context, d models.Device, t snmp.Target, base map[int]int, add func([]l2.FDBEntry, map[int]int)) bool {
 	state, ok := m.walk(ctx, d, t, l2.OIDVtpVlanState)
 	if !ok || len(state) == 0 {
 		return false
 	}
 	kind, _ := m.walk(ctx, d, t, l2.OIDVtpVlanType)
-	read := false
+	read, failed := false, 0
 	for _, vlan := range l2.ParseVLANs(state, kind) {
 		vt := t.InVLAN(vlan)
 		port, ok := m.walk(ctx, d, vt, oidL2Dot1dFdbPort)
-		if !ok {
+		if !ok && !read {
+			if failed++; failed == 2 {
+				break
+			}
+		}
+		// Without the context (a view or v3 group that lacks it) the walk
+		// comes back empty rather than failing.
+		if !ok || len(port) == 0 {
 			continue
 		}
 		read = true
