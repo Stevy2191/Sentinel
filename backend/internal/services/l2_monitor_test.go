@@ -17,18 +17,35 @@ import (
 )
 
 // fakeL2SNMP answers walks from a table of roots; errs makes a root fail.
+// A walk made in a context listed in contexts (the target's v3 context, else
+// its community, such as "pub@20") answers from there and ctxErrs instead.
+// walked records each walk as "<context> <root>".
 type fakeL2SNMP struct {
-	rows  map[string][]snmp.PDU
-	errs  map[string]error
-	walks int
+	rows     map[string][]snmp.PDU
+	errs     map[string]error
+	contexts map[string]map[string][]snmp.PDU
+	ctxErrs  map[string]map[string]error
+	walks    int
+	walked   []string
 }
 
 func (f *fakeL2SNMP) Get(context.Context, snmp.Target, []string) ([]snmp.PDU, error) {
 	return nil, nil
 }
 
-func (f *fakeL2SNMP) Walk(_ context.Context, _ snmp.Target, root string) ([]snmp.PDU, error) {
+func (f *fakeL2SNMP) Walk(_ context.Context, t snmp.Target, root string) ([]snmp.PDU, error) {
 	f.walks++
+	key := t.Credential.Community
+	if t.Context != "" {
+		key = t.Context
+	}
+	f.walked = append(f.walked, key+" "+root)
+	if rows, ok := f.contexts[key]; ok {
+		if err := f.ctxErrs[key][root]; err != nil {
+			return nil, err
+		}
+		return rows[root], nil
+	}
 	if err := f.errs[root]; err != nil {
 		return nil, err
 	}

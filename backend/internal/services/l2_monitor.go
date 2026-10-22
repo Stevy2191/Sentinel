@@ -324,33 +324,73 @@ func bridgeToIfIndex(port int, base map[int]int, ifIndexes map[int]bool) int {
 	return 0
 }
 
+// writeSightings reads the MAC address table: Q-BRIDGE when the switch has
+// one, else a Cisco's one VLAN at a time, else the default context's dot1d.
 func (m *L2Monitor) writeSightings(ctx context.Context, d models.Device, t snmp.Target, base map[int]int, ifIndexes map[int]bool, now time.Time) {
-	var entries []l2.FDBEntry
-	if port, ok := m.walk(ctx, d, t, oidL2QFdbPort); ok && len(port) > 0 {
-		status, _ := m.walk(ctx, d, t, oidL2QFdbStatus)
-		entries = l2.ParseQBridgeFDB(port, status)
-	} else if ok {
-		if port, ok := m.walk(ctx, d, t, oidL2Dot1dFdbPort); ok && len(port) > 0 {
-			status, _ := m.walk(ctx, d, t, oidL2Dot1dFdbState)
-			entries = l2.ParseDot1dFDB(port, status)
-		}
-	}
 	seen := map[l2Sighting]bool{}
 	var rows []l2Sighting
-	for _, e := range entries {
-		ix := bridgeToIfIndex(e.BridgePort, base, ifIndexes)
-		if ix == 0 {
-			continue
+	add := func(entries []l2.FDBEntry, base map[int]int) {
+		for _, e := range entries {
+			ix := bridgeToIfIndex(e.BridgePort, base, ifIndexes)
+			if ix == 0 {
+				continue
+			}
+			key := l2Sighting{DeviceID: d.ID, IfIndex: ix, VLAN: e.VLAN, MAC: e.MAC}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			key.FirstSeen, key.LastSeen = now, now
+			rows = append(rows, key)
 		}
-		key := l2Sighting{DeviceID: d.ID, IfIndex: ix, VLAN: e.VLAN, MAC: e.MAC}
-		if seen[key] {
-			continue
+	}
+	if port, ok := m.walk(ctx, d, t, oidL2QFdbPort); ok && len(port) > 0 {
+		status, _ := m.walk(ctx, d, t, oidL2QFdbStatus)
+		add(l2.ParseQBridgeFDB(port, status), base)
+	} else if ok && !m.readVLANs(ctx, d, t, base, add) {
+		if port, ok := m.walk(ctx, d, t, oidL2Dot1dFdbPort); ok && len(port) > 0 {
+			status, _ := m.walk(ctx, d, t, oidL2Dot1dFdbState)
+			add(l2.ParseDot1dFDB(port, status), base)
 		}
-		seen[key] = true
-		key.FirstSeen, key.LastSeen = now, now
-		rows = append(rows, key)
 	}
 	m.upsert(ctx, d, "sightings", rows, []string{"device_id", "if_index", "vlan", "mac"}, []string{"last_seen"})
+}
+
+// readVLANs reads a Cisco's MAC table one VLAN at a time, each in its own
+// context: the default context holds VLAN 1's only, so VLAN 1 is read in its
+// context like the rest. It reports whether any VLAN was read; a VLAN whose
+// walk fails is skipped and keeps its stored rows.
+func (m *L2Monitor) readVLANs(ctx context.Context, d models.Device, t snmp.Target, base map[int]int, add func([]l2.FDBEntry, map[int]int)) bool {
+	state, ok := m.walk(ctx, d, t, l2.OIDVtpVlanState)
+	if !ok || len(state) == 0 {
+		return false
+	}
+	kind, _ := m.walk(ctx, d, t, l2.OIDVtpVlanType)
+	read := false
+	for _, vlan := range l2.ParseVLANs(state, kind) {
+		vt := t.InVLAN(vlan)
+		port, ok := m.walk(ctx, d, vt, oidL2Dot1dFdbPort)
+		if !ok {
+			continue
+		}
+		read = true
+		status, _ := m.walk(ctx, d, vt, oidL2Dot1dFdbState)
+		basePDUs, _ := m.walk(ctx, d, vt, oidL2BasePortIf)
+		// The VLAN's own table lists only its ports; the default context's
+		// fills in the rest (their numbering agrees).
+		vbase := l2.ParseBasePorts(basePDUs)
+		for bp, ix := range base {
+			if _, ok := vbase[bp]; !ok {
+				vbase[bp] = ix
+			}
+		}
+		entries := l2.ParseDot1dFDB(port, status)
+		for i := range entries {
+			entries[i].VLAN = vlan
+		}
+		add(entries, vbase)
+	}
+	return read
 }
 
 func (m *L2Monitor) writeNeighbors(ctx context.Context, d models.Device, t snmp.Target, base map[int]int, ifIndexes map[int]bool, now time.Time) {
