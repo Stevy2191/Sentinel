@@ -49,7 +49,7 @@ In `L2Monitor.writeSightings`:
 
 **The context:** `snmp.Target.InVLAN(vlan)`. v1/v2c: the community becomes `<community>@<vlan>`. v3: the context name becomes `vlan-<vlan>` (a new `Target.Context`, passed to gosnmp's `ContextName`).
 
-**Failures:** a VLAN whose port walk fails is skipped; its stored sightings are left alone, as with every other walk (rows are only upserted, never deleted, by the sightings write). A failed status walk keeps the entries (statuses are optional today). A failed base walk leaves the default context's base table to map through. When every VLAN's port walk fails (a community or v3 user without access to the VLAN contexts), the default context is read as today, so VLAN 1 is still found.
+**Failures:** a VLAN whose port walk fails is skipped; its stored sightings are left alone, as with every other walk (rows are only upserted, never deleted, by the sightings write). A failed status walk keeps the entries (statuses are optional today). A failed base walk leaves the default context's base table to map through. When no VLAN's port walk gives rows (a community or v3 user without access to the VLAN contexts, which usually answers them empty rather than failing), the default context is read as today, so VLAN 1 is still found. A switch that refuses `community@vlan` times out on each VLAN, so after two failures with no VLAN read the rest wait for the next poll. (Both from the final review, 2026-10-22.)
 
 **Old rows:** the dot1d rows stored so far have VLAN 0. They stop being refreshed and go with the 30-day purge.
 
