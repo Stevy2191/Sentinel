@@ -36,6 +36,11 @@ type PortInfo struct {
 	Uplink            bool
 	MonitoredAP       bool
 	MonitoredNeighbor bool
+	// SharedCDP: CDP from two or more devices and no LLDP neighbour, so a
+	// switch that doesn't speak either is in between (Neighbor is nil).
+	SharedCDP bool
+	// LAGLink: a LAG one of whose members is a link.
+	LAGLink bool
 }
 
 // Sighting is a MAC learned on a port, as of its last poll.
@@ -61,9 +66,10 @@ func (c PortClass) String() string {
 }
 
 // ClassifyPort classes a port: an AP first, then a link (a port link, the
-// uplink role, a monitored neighbour, an LLDP bridge or router), then more
-// than MaxEdgeMACs MACs with no LLDP neighbour (behind), else edge. A port
-// whose LLDP neighbour is neither bridge nor router is a host however many
+// uplink role, a monitored neighbour, a LAG with a link member, an LLDP or
+// CDP bridge or router), then behind when CDP from several devices crossed
+// it or it has more than MaxEdgeMACs MACs with no neighbour, else edge. A
+// port whose neighbour is neither bridge nor router is a host however many
 // MACs it shows (containers, VMs); so is an IP phone, which announces
 // bridge for its PC pass-through port.
 func ClassifyPort(info PortInfo, macsOnPort int) PortClass {
@@ -71,8 +77,10 @@ func ClassifyPort(info PortInfo, macsOnPort int) PortClass {
 	switch {
 	case info.MonitoredAP || (n != nil && n.Caps.AP()):
 		return PortAP
-	case info.LinkedTo || info.Uplink || info.MonitoredNeighbor:
+	case info.LinkedTo || info.Uplink || info.MonitoredNeighbor || info.LAGLink:
 		return PortLink
+	case info.SharedCDP:
+		return PortBehind
 	case n != nil && n.Caps.Phone() && !n.Caps.Router():
 		return PortEdge
 	case n != nil && (n.Caps.Bridge() || n.Caps.Router()):

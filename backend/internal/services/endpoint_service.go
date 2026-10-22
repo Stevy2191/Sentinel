@@ -141,6 +141,7 @@ type epPort struct {
 	MAC              string
 	Role             string
 	NeighborDeviceID *uuid.UUID
+	LagIfIndex       *int
 }
 
 type epDNS struct {
@@ -155,8 +156,9 @@ type world struct {
 	devices   map[uuid.UUID]epDevice
 	ports     map[l2.PortKey]epPort
 	sightings []l2Sighting
-	neighbors map[l2.PortKey]l2Neighbor
-	caps      map[string]l2.Caps // by chassis MAC
+	neighbors map[l2.PortKey]l2Neighbor   // the latest on each port
+	onPort    map[l2.PortKey][]l2Neighbor // all of them, oldest first
+	caps      map[string]l2.Caps          // by chassis MAC
 	arp       []l2ARP
 	arpByMAC  map[string][]l2ARP // newest first
 	lldpName  map[string]string  // LLDP system name by chassis MAC
@@ -176,7 +178,8 @@ type world struct {
 func (s *EndpointService) load(ctx context.Context, v Viewer) (*world, error) {
 	db := s.db.WithContext(ctx)
 	w := &world{visible: map[uuid.UUID]bool{}, devices: map[uuid.UUID]epDevice{}, ports: map[l2.PortKey]epPort{},
-		neighbors: map[l2.PortKey]l2Neighbor{}, caps: map[string]l2.Caps{}, dns: map[string]epDNS{}, names: map[string]string{}}
+		neighbors: map[l2.PortKey]l2Neighbor{}, onPort: map[l2.PortKey][]l2Neighbor{}, caps: map[string]l2.Caps{}, dns: map[string]epDNS{},
+		names: map[string]string{}}
 	sites, err := s.sites.List(ctx, v.UserID, v.IsAdmin)
 	if err != nil {
 		return nil, err
@@ -195,7 +198,7 @@ func (s *EndpointService) load(ctx context.Context, v Viewer) (*world, error) {
 	}
 	var ports []epPort
 	if err := db.Raw(`SELECT device_id, if_index, COALESCE(name, '') AS name, COALESCE(descr, '') AS descr,
-		COALESCE(alias, '') AS alias, COALESCE(mac, '') AS mac, role, neighbor_device_id FROM device_interfaces`).Scan(&ports).Error; err != nil {
+		COALESCE(alias, '') AS alias, COALESCE(mac, '') AS mac, role, neighbor_device_id, lag_if_index FROM device_interfaces`).Scan(&ports).Error; err != nil {
 		return nil, fmt.Errorf("loading interfaces: %w", err)
 	}
 	for _, p := range ports {
@@ -215,7 +218,9 @@ func (s *EndpointService) load(ctx context.Context, v Viewer) (*world, error) {
 			w.lldpName[n.ChassisID] = n.SysName
 		}
 		if n.IfIndex > 0 {
-			w.neighbors[l2.PortKey{Device: n.DeviceID, IfIndex: n.IfIndex}] = n // the latest wins
+			k := l2.PortKey{Device: n.DeviceID, IfIndex: n.IfIndex}
+			w.neighbors[k] = n // the latest wins
+			w.onPort[k] = append(w.onPort[k], n)
 		}
 	}
 	if err := db.Order("last_seen DESC").Find(&w.arp).Error; err != nil {
@@ -272,6 +277,59 @@ func (w *world) monitored(n l2Neighbor, self uuid.UUID) (epDevice, bool) {
 	return epDevice{}, false
 }
 
+// portInfo is what's known of a port's far end: its link and role, and its
+// neighbours, any of which can be a monitored AP, switch or router. The
+// neighbour it's classed by is its latest LLDP one, else its latest CDP one;
+// CDP from several devices and no LLDP means a switch that speaks neither
+// is in between, so none of them is (SharedCDP).
+func (w *world) portInfo(k l2.PortKey) l2.PortInfo {
+	var info l2.PortInfo
+	if p, ok := w.ports[k]; ok {
+		info.LinkedTo = p.NeighborDeviceID != nil
+		info.Uplink = p.Role == models.PortRoleUplink || p.Role == models.PortRoleWAN
+	}
+	var latest, lldp *l2Neighbor
+	cdp := map[string]bool{}
+	for i, n := range w.onPort[k] {
+		latest = &w.onPort[k][i]
+		if n.Protocol == "cdp" {
+			cdp[n.ChassisID] = true
+		} else {
+			lldp = latest
+		}
+		d, ok := w.monitored(n, k.Device)
+		switch {
+		case !ok:
+		case d.Type == models.DeviceTypeAccessPoint:
+			info.MonitoredAP = true
+			// Its name and page only for viewers of its own site.
+			if w.visible[d.SiteID] {
+				w.apNames[k], w.apDevice[k] = d.Name, d.ID
+			}
+		case d.Type == models.DeviceTypeSwitch || d.Type == models.DeviceTypeRouter:
+			info.MonitoredNeighbor = true
+		}
+	}
+	n := lldp
+	if n == nil && len(cdp) < 2 {
+		n = latest
+	}
+	info.SharedCDP = lldp == nil && len(cdp) >= 2
+	if n != nil {
+		info.Neighbor = &l2.Neighbor{LocalPort: n.IfIndex, ChassisID: n.ChassisID, PortID: n.PortID, PortDescr: n.PortDescr, SysName: n.SysName, Caps: l2.Caps(n.Caps)}
+		if _, named := w.apDevice[k]; !named {
+			w.apNames[k] = n.SysName
+		}
+	}
+	return info
+}
+
+// unknownBeyond is a port with nothing known of its far end but, perhaps,
+// that CDP crossed a switch there.
+func unknownBeyond(info l2.PortInfo) bool {
+	return info == (l2.PortInfo{}) || info == (l2.PortInfo{SharedCDP: true})
+}
+
 // place classes the ports and builds a record for every MAC seen.
 func (w *world) place() {
 	w.info, w.apNames, w.apDevice = map[l2.PortKey]l2.PortInfo{}, map[l2.PortKey]string{}, map[l2.PortKey]uuid.UUID{}
@@ -306,28 +364,25 @@ func (w *world) place() {
 		keys[k] = true
 	}
 	for k := range keys {
-		var info l2.PortInfo
-		if p, ok := w.ports[k]; ok {
-			info.LinkedTo = p.NeighborDeviceID != nil
-			info.Uplink = p.Role == models.PortRoleUplink || p.Role == models.PortRoleWAN
+		w.info[k] = w.portInfo(k)
+	}
+	// A LAG one of whose members is a link is a link too: the switch reports
+	// what it learned over the LAG on the aggregator, which has no neighbour
+	// of its own.
+	for k, p := range w.ports {
+		if p.LagIfIndex == nil || *p.LagIfIndex == 0 {
+			continue
 		}
-		if n, ok := w.neighbors[k]; ok {
-			info.Neighbor = &l2.Neighbor{LocalPort: n.IfIndex, ChassisID: n.ChassisID, PortID: n.PortID, PortDescr: n.PortDescr, SysName: n.SysName, Caps: l2.Caps(n.Caps)}
-			w.apNames[k] = n.SysName
-			if d, ok := w.monitored(n, k.Device); ok {
-				switch d.Type {
-				case models.DeviceTypeAccessPoint:
-					info.MonitoredAP = true
-					// Its name and page only for viewers of its own site.
-					if w.visible[d.SiteID] {
-						w.apNames[k], w.apDevice[k] = d.Name, d.ID
-					}
-				case models.DeviceTypeSwitch, models.DeviceTypeRouter:
-					info.MonitoredNeighbor = true
-				}
-			}
+		info, ok := w.info[k]
+		if !ok {
+			info = w.portInfo(k)
 		}
-		w.info[k] = info
+		if l2.ClassifyPort(info, 0) == l2.PortLink {
+			agg := l2.PortKey{Device: k.Device, IfIndex: *p.LagIfIndex}
+			ai := w.info[agg]
+			ai.LAGLink = true
+			w.info[agg] = ai
+		}
 	}
 	// A port that learns a monitored switch's or router's own MAC is a link
 	// to it, LLDP or not.
@@ -603,10 +658,11 @@ func (s *EndpointService) ForDevice(ctx context.Context, v Viewer, deviceID uuid
 			view.Endpoints = append(view.Endpoints, rec)
 		case e.How == "wireless" && aps[*e.IfIndex] != nil:
 			aps[*e.IfIndex].Clients = append(aps[*e.IfIndex].Clients, rec)
-		case e.How == "behind" && w.info[l2.PortKey{Device: deviceID, IfIndex: *e.IfIndex}] == (l2.PortInfo{}):
-			// Only a port classed by the MAC count alone (nothing known on
-			// its far end) is a group on the map; MACs behind a real link
-			// belong to the switch beyond it.
+		case e.How == "behind" && unknownBeyond(w.info[l2.PortKey{Device: deviceID, IfIndex: *e.IfIndex}]):
+			// Only a port classed by the MAC count alone, or by CDP that
+			// crossed an unknown switch (nothing known on its far end), is a
+			// group on the map; MACs behind a real link belong to the switch
+			// beyond it.
 			g := behind[*e.IfIndex]
 			if g == nil {
 				g = &BehindGroup{DeviceID: deviceID, IfIndex: *e.IfIndex, PortLabel: e.PortLabel, Count: e.Behind.Count}

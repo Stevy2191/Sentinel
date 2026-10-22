@@ -52,6 +52,24 @@ func fill(s []Sighting, p PortKey, n int) []Sighting {
 
 const mac = "e4:38:83:20:f5:cf"
 
+// CDP from several devices on one port crossed a switch that doesn't speak
+// it: never an edge port, however few MACs.
+func TestClassifyPortSharedCDP(t *testing.T) {
+	if got := ClassifyPort(PortInfo{SharedCDP: true}, 3); got != PortBehind {
+		t.Errorf("shared CDP, 3 MACs: got %v, want behind", got)
+	}
+	if got := ClassifyPort(PortInfo{SharedCDP: true, MonitoredNeighbor: true}, 3); got != PortLink {
+		t.Errorf("shared CDP with a monitored switch: got %v, want link", got)
+	}
+}
+
+// A Port-channel with a member that is a link is a link.
+func TestClassifyPortLAGLink(t *testing.T) {
+	if got := ClassifyPort(PortInfo{LAGLink: true}, 2); got != PortLink {
+		t.Errorf("got %v, want link", got)
+	}
+}
+
 func TestPlaceEdgeBeatsLink(t *testing.T) {
 	a5, b49 := PortKey{swA, 5}, PortKey{swB, 49}
 	s := []Sighting{{Port: b49, MAC: mac, LastSeen: t0.Add(time.Minute)}, {Port: a5, MAC: mac, VLAN: 10, LastSeen: t0}}

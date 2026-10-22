@@ -407,3 +407,71 @@ func TestDBEndpointsCDPNameWithoutDomainIsLink(t *testing.T) {
 		t.Errorf("placed %+v, want wired on the core's port 9", e)
 	}
 }
+
+// Two phones heard by CDP on one port: a switch that doesn't speak CDP is
+// in between, so what's learned there is behind it, and shown as a group.
+func TestDBEndpointsSharedCDPPortIsBehind(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	s := seedDevice(t, db, "HQ", "10.0.0.2")
+	seedPort(t, db, s.DeviceID, 4, "0/4", "")
+	for _, id := range []string{"SEP000000000001", "SEP000000000002"} {
+		testdb.Exec(t, db, `INSERT INTO l2.neighbors (device_id, if_index, chassis_id, protocol, sys_name, caps) VALUES (?, 4, ?, 'cdp', ?, 5)`, s.DeviceID, id, id)
+	}
+	macs := []string{"02:00:00:00:0d:11", "02:00:00:00:0d:12", "02:00:00:00:0d:13"}
+	for _, m := range macs {
+		sight(t, db, s.DeviceID, 4, m)
+	}
+	svc, v := newEndpoints(db, &fakeResolver{}), admin(t, db)
+	for _, m := range macs {
+		if e := one(t)(svc.Search(ctx, v, m)); e.How != "behind" || *e.IfIndex != 4 {
+			t.Errorf("%s placed %s on %d, want behind port 4", m, e.How, *e.IfIndex)
+		}
+	}
+	view, err := svc.ForDevice(ctx, v, s.DeviceID)
+	testdb.Must(t, err)
+	if len(view.Behind) != 1 || view.Behind[0].IfIndex != 4 || len(view.Behind[0].Endpoints) != 3 {
+		t.Errorf("behind groups = %+v, want port 4 with three", view.Behind)
+	}
+}
+
+// portChannel is switch S with Po1 (78) and its member 61.
+func portChannel(t *testing.T, db *gorm.DB) seeded {
+	t.Helper()
+	s := seedDevice(t, db, "HQ", "10.0.0.2")
+	seedPort(t, db, s.DeviceID, 61, "Te1/1/1", "")
+	seedPort(t, db, s.DeviceID, 78, "Po1", "")
+	testdb.Exec(t, db, `UPDATE device_interfaces SET if_type = 53, descr = 'Port-channel1' WHERE device_id = ? AND if_index = 78`, s.DeviceID)
+	testdb.Exec(t, db, `UPDATE device_interfaces SET lag_if_index = 78 WHERE device_id = ? AND if_index = 61`, s.DeviceID)
+	return s
+}
+
+// A switch reported the MAC on its Port-channel, whose member is cabled to
+// another switch (CDP, not monitored): the MAC is beyond that link.
+func TestDBEndpointsPortChannelMACsBeyondLink(t *testing.T) {
+	db := testdb.Open(t)
+	s := portChannel(t, db)
+	testdb.Exec(t, db, `INSERT INTO l2.neighbors (device_id, if_index, chassis_id, protocol, sys_name, caps) VALUES (?, 61, 'dist', 'cdp', 'dist', 40)`, s.DeviceID)
+	sight(t, db, s.DeviceID, 78, "02:00:00:00:0e:21")
+	if e := one(t)(newEndpoints(db, &fakeResolver{}).Search(context.Background(), admin(t, db), "02:00:00:00:0e:21")); e.How != "behind" {
+		t.Errorf("placed %s, want behind (beyond the Port-channel's link)", e.How)
+	}
+}
+
+// The member is a link only because a person said so.
+func TestDBEndpointsPortChannelUplinkMember(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	s := portChannel(t, db)
+	testdb.Exec(t, db, `UPDATE device_interfaces SET role = 'uplink', role_source = 'user' WHERE device_id = ? AND if_index = 61`, s.DeviceID)
+	sight(t, db, s.DeviceID, 78, "02:00:00:00:0e:21")
+	svc, v := newEndpoints(db, &fakeResolver{}), admin(t, db)
+	if e := one(t)(svc.Search(ctx, v, "02:00:00:00:0e:21")); e.How != "behind" {
+		t.Errorf("placed %s, want behind", e.How)
+	}
+	view, err := svc.ForDevice(ctx, v, s.DeviceID)
+	testdb.Must(t, err)
+	if len(view.Behind) != 0 || len(view.Endpoints) != 0 {
+		t.Errorf("S shows the Port-channel's MAC as its own: %+v", view)
+	}
+}
