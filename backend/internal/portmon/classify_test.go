@@ -6,6 +6,25 @@ import (
 	"testing"
 )
 
+// A Cisco Port-channel is ifType 53 (propVirtual), as are its SVIs and
+// stack ports.
+func TestIsAggregator(t *testing.T) {
+	for _, tc := range []struct {
+		i    IfInfo
+		want bool
+	}{
+		{IfInfo{Type: 161, Name: "lag 1"}, true},
+		{IfInfo{Type: 53, Name: "Po1", Descr: "Port-channel1"}, true},
+		{IfInfo{Type: 53, Name: "Vl20", Descr: "Vlan20"}, false},
+		{IfInfo{Type: 53, Name: "StackPort1", Descr: "StackPort1"}, false},
+		{IfInfo{Type: 6, Name: "Gi1/0/1", Descr: "GigabitEthernet1/0/1"}, false},
+	} {
+		if got := IsAggregator(tc.i); got != tc.want {
+			t.Errorf("IsAggregator(%+v) = %v, want %v", tc.i, got, tc.want)
+		}
+	}
+}
+
 func physicalIndexes(ifs []fixtureIf) []int {
 	var out []int
 	for _, f := range ifs {

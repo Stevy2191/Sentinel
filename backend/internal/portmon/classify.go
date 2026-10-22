@@ -1,6 +1,9 @@
 package portmon
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 // IfInfo is what classification needs to know about an interface.
 type IfInfo struct {
@@ -12,7 +15,10 @@ type IfInfo struct {
 	ConnectorPresent *bool
 }
 
-const ifTypeLAG = 161
+const (
+	ifTypeLAG         = 161
+	ifTypePropVirtual = 53
+)
 
 var ethernetTypes = map[int]bool{6: true, 62: true, 69: true, 117: true}
 
@@ -33,6 +39,15 @@ func IsVirtualName(name string) bool {
 
 // IsLAG reports a link aggregate.
 func IsLAG(i IfInfo) bool { return i.Type == ifTypeLAG }
+
+// IsAggregator reports a link aggregate for LAG membership and names: IsLAG,
+// or a Cisco Port-channel, which reports ifType 53 (propVirtual) like the
+// switch's VLAN interfaces and stack ports, so it's known by its description.
+// IsLAG itself stays ifType 161 only: it also decides which interfaces the
+// stats poll reads unless told otherwise.
+func IsAggregator(i IfInfo) bool {
+	return IsLAG(i) || (i.Type == ifTypePropVirtual && strings.HasPrefix(i.Descr, "Port-channel"))
+}
 
 // IsPhysical reports whether an interface is a port a cable plugs into. A
 // virtual name wins over anything the agent claims; otherwise

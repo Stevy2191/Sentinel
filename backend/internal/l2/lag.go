@@ -16,18 +16,18 @@ const (
 )
 
 // ParseLAG maps each LAG member's ifIndex to its aggregator's, from
-// dot3adAggPortAttachedAggID, or, when that names no aggregator at all,
-// from the active ifStackTable rows whose higher layer is a LAG.
+// dot3adAggPortAttachedAggID (LACP), then, for the aggregators that names
+// no member of (a Cisco's static and PAgP channels, or a device without
+// dot3ad), from the active ifStackTable rows whose higher layer is one.
 func ParseLAG(dot3ad, stack []snmp.PDU, isLAG func(ifIndex int) bool) map[int]int {
 	out := map[int]int{}
+	named := map[int]bool{}
 	for _, p := range dot3ad {
 		ix := index(p.OID, OIDDot3adAttachedAgg)
 		if n, ok := p.Number(); ok && len(ix) == 1 && n > 0 {
 			out[ix[0]] = int(n)
+			named[int(n)] = true
 		}
-	}
-	if len(out) > 0 {
-		return out
 	}
 	for _, p := range stack {
 		ix := index(p.OID, OIDIfStackStatus)
@@ -36,7 +36,7 @@ func ParseLAG(dot3ad, stack []snmp.PDU, isLAG func(ifIndex int) bool) map[int]in
 			continue
 		}
 		higher, lower := ix[0], ix[1]
-		if higher > 0 && lower > 0 && isLAG(higher) && !isLAG(lower) {
+		if _, taken := out[lower]; higher > 0 && lower > 0 && !named[higher] && !taken && isLAG(higher) && !isLAG(lower) {
 			out[lower] = higher
 		}
 	}

@@ -116,7 +116,7 @@ func (s *PortRoleService) ApplyErr(ctx context.Context, deviceID uuid.UUID) erro
 		}
 	}
 	for _, p := range ports {
-		if p.IfType == 161 {
+		if portmon.IsAggregator(portmon.IfInfo{Name: p.Name, Descr: p.Descr, Type: p.IfType}) {
 			in.LagNames[p.IfIndex] = p.Name
 		}
 		lag := 0

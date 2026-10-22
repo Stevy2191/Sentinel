@@ -70,6 +70,29 @@ func TestL2PollWritesLAGMembers(t *testing.T) {
 	}
 }
 
+// A Cisco's Port-channels are ifType 53: Po1 (LACP) from dot3ad, Po10
+// (static) from ifStack; the VLAN interface 200 is no aggregator.
+func TestL2PollWritesPortChannelMembers(t *testing.T) {
+	db := testdb.Open(t)
+	d := l2Device(t, db, 61, 62, 63, 78, 103, 200)
+	testdb.Exec(t, db, `UPDATE device_interfaces SET if_type = 6 WHERE device_id = ? AND if_index IN (61, 62, 63)`, d.ID)
+	for ix, descr := range map[int]string{78: "Port-channel1", 103: "Port-channel10", 200: "Vlan20"} {
+		testdb.Exec(t, db, `UPDATE device_interfaces SET if_type = 53, descr = ? WHERE device_id = ? AND if_index = ?`, descr, d.ID, ix)
+	}
+	agg, stack := l2.OIDDot3adAttachedAgg, l2.OIDIfStackStatus
+	c := &fakeL2SNMP{rows: map[string][]snmp.PDU{
+		agg:   {p(agg+".61", int64(78)), p(agg+".62", int64(78))},
+		stack: {p(stack+".103.63", int64(1)), p(stack+".200.61", int64(1))},
+	}}
+	NewL2Monitor(db, c).PollL2(context.Background(), d, snmp.Target{})
+	got := lagOf(t, db, d.ID)
+	for member, want := range map[int]int{61: 78, 62: 78, 63: 103} {
+		if got[member] == nil || *got[member] != want {
+			t.Errorf("port %d lag_if_index = %v, want %d", member, got[member], want)
+		}
+	}
+}
+
 func cdpRows(ifIndex string) map[string][]snmp.PDU {
 	c := l2.OIDCDPCache
 	return map[string][]snmp.PDU{

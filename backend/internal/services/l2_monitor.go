@@ -14,6 +14,7 @@ import (
 
 	"github.com/Stevy2191/Sentinel/backend/internal/l2"
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
+	"github.com/Stevy2191/Sentinel/backend/internal/portmon"
 	"github.com/Stevy2191/Sentinel/backend/internal/snmp"
 )
 
@@ -188,20 +189,33 @@ func (m *L2Monitor) writeLAG(ctx context.Context, d models.Device, t snmp.Target
 	if !ok {
 		return
 	}
-	var lags []int
-	if err := m.db.WithContext(ctx).Model(&models.DeviceInterface{}).Where("device_id = ? AND if_type = 161", d.ID).
-		Pluck("if_index", &lags).Error; err != nil {
+	var ports []struct {
+		IfIndex, IfType int
+		Descr           string
+	}
+	if err := m.db.WithContext(ctx).Raw(`SELECT if_index, COALESCE(if_type, 0) AS if_type, COALESCE(descr, '') AS descr
+		FROM device_interfaces WHERE device_id = ?`, d.ID).Scan(&ports).Error; err != nil {
 		m.logger.Printf("[l2] %s: listing LAGs: %v", d.Host, err)
 		return
 	}
 	isLAG := map[int]bool{}
-	for _, ix := range lags {
-		isLAG[ix] = true
+	for _, p := range ports {
+		if portmon.IsAggregator(portmon.IfInfo{Type: p.IfType, Descr: p.Descr}) {
+			isLAG[p.IfIndex] = true
+		}
+	}
+	// ifStack too when an aggregator has no LACP member (a static channel).
+	named := map[int]bool{}
+	for _, agg := range l2.ParseLAG(dot3ad, nil, nil) {
+		named[agg] = true
 	}
 	var stack []snmp.PDU
-	if len(l2.ParseLAG(dot3ad, nil, nil)) == 0 && len(lags) > 0 {
-		if stack, ok = m.walk(ctx, d, t, l2.OIDIfStackStatus); !ok {
-			return
+	for ix := range isLAG {
+		if !named[ix] {
+			if stack, ok = m.walk(ctx, d, t, l2.OIDIfStackStatus); !ok {
+				return
+			}
+			break
 		}
 	}
 	members := l2.ParseLAG(dot3ad, stack, func(ix int) bool { return isLAG[ix] })

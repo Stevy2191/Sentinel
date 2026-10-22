@@ -153,6 +153,20 @@ func TestDBPortRolesClear(t *testing.T) {
 	}
 }
 
+// A Cisco Port-channel (ifType 53) names its LAG as "lag 1" does.
+func TestDBPortRolesPortChannelName(t *testing.T) {
+	db := testdb.Open(t)
+	a, _ := rolesSite(t, db)
+	seedPort(t, db, a, 78, "Po1", "")
+	testdb.Exec(t, db, `UPDATE device_interfaces SET present = true, if_type = 53, descr = 'Port-channel1' WHERE device_id = ? AND if_index = 78`, a)
+	testdb.Exec(t, db, `UPDATE device_interfaces SET lag_if_index = 78 WHERE device_id = ? AND if_index IN (49, 50)`, a)
+	neighbour(t, db, a, 49, "B", "0/49")
+	NewPortRoleService(db).Apply(context.Background(), a)
+	if got, want := roleOf(t, db, a, 50), [3]string{"uplink", "auto", "Member of Po1 to B"}; got != want {
+		t.Errorf("A port 50 = %v, want %v", got, want)
+	}
+}
+
 func TestDBPortRolesLAGMember(t *testing.T) {
 	db := testdb.Open(t)
 	a, _ := rolesSite(t, db)
