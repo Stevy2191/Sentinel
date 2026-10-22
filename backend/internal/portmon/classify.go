@@ -42,11 +42,12 @@ func IsLAG(i IfInfo) bool { return i.Type == ifTypeLAG }
 
 // IsAggregator reports a link aggregate for LAG membership and names: IsLAG,
 // or a Cisco Port-channel, which reports ifType 53 (propVirtual) like the
-// switch's VLAN interfaces and stack ports, so it's known by its description.
-// IsLAG itself stays ifType 161 only: it also decides which interfaces the
-// stats poll reads unless told otherwise.
+// switch's VLAN interfaces and stack ports, so it's known by its description
+// ("Port-channel1"; NX-OS says "port-channel1"). IsLAG itself stays ifType
+// 161 only: it also decides which interfaces the stats poll reads unless
+// told otherwise.
 func IsAggregator(i IfInfo) bool {
-	return IsLAG(i) || (i.Type == ifTypePropVirtual && strings.HasPrefix(i.Descr, "Port-channel"))
+	return IsLAG(i) || (i.Type == ifTypePropVirtual && strings.HasPrefix(strings.ToLower(i.Descr), "port-channel"))
 }
 
 // IsPhysical reports whether an interface is a port a cable plugs into. A

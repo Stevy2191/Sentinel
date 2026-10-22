@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,6 +91,25 @@ func TestL2PollWritesPortChannelMembers(t *testing.T) {
 		if got[member] == nil || *got[member] != want {
 			t.Errorf("port %d lag_if_index = %v, want %d", member, got[member], want)
 		}
+	}
+}
+
+// An EdgeSwitch lists LAGs it doesn't use (ifType 161, no members): with
+// dot3ad naming the members of the one in use, ifStack isn't walked.
+func TestL2PollSkipsIfStackForUnusedLAGs(t *testing.T) {
+	db := testdb.Open(t)
+	d := l2Device(t, db, 49, 50, 66, 67)
+	testdb.Exec(t, db, `UPDATE device_interfaces SET if_type = 161 WHERE device_id = ? AND if_index IN (66, 67)`, d.ID)
+	agg := l2.OIDDot3adAttachedAgg
+	c := &fakeL2SNMP{rows: map[string][]snmp.PDU{agg: {p(agg+".49", int64(66)), p(agg+".50", int64(66))}}}
+	NewL2Monitor(db, c).PollL2(context.Background(), d, snmp.Target{})
+	for _, w := range c.walked {
+		if strings.HasSuffix(w, " "+l2.OIDIfStackStatus) {
+			t.Fatal("walked ifStack for LAGs that are only unused")
+		}
+	}
+	if got := lagOf(t, db, d.ID); got[49] == nil || *got[49] != 66 || got[50] == nil || *got[50] != 66 {
+		t.Errorf("lag_if_index = 49:%v 50:%v, want 66, 66", got[49], got[50])
 	}
 }
 

@@ -198,24 +198,27 @@ func (m *L2Monitor) writeLAG(ctx context.Context, d models.Device, t snmp.Target
 		m.logger.Printf("[l2] %s: listing LAGs: %v", d.Host, err)
 		return
 	}
-	isLAG := map[int]bool{}
+	isLAG, channel := map[int]bool{}, map[int]bool{}
 	for _, p := range ports {
-		if portmon.IsAggregator(portmon.IfInfo{Type: p.IfType, Descr: p.Descr}) {
-			isLAG[p.IfIndex] = true
+		if info := (portmon.IfInfo{Type: p.IfType, Descr: p.Descr}); portmon.IsAggregator(info) {
+			isLAG[p.IfIndex], channel[p.IfIndex] = true, !portmon.IsLAG(info)
 		}
 	}
-	// ifStack too when an aggregator has no LACP member (a static channel).
+	// ifStack too when dot3ad names no member at all, or a Cisco
+	// Port-channel has none (a static channel). The unused ifType-161 LAGs
+	// an EdgeSwitch lists beside the one in use don't need it.
 	named := map[int]bool{}
 	for _, agg := range l2.ParseLAG(dot3ad, nil, nil) {
 		named[agg] = true
 	}
-	var stack []snmp.PDU
+	need := len(named) == 0 && len(isLAG) > 0
 	for ix := range isLAG {
-		if !named[ix] {
-			if stack, ok = m.walk(ctx, d, t, l2.OIDIfStackStatus); !ok {
-				return
-			}
-			break
+		need = need || (channel[ix] && !named[ix])
+	}
+	var stack []snmp.PDU
+	if need {
+		if stack, ok = m.walk(ctx, d, t, l2.OIDIfStackStatus); !ok {
+			return
 		}
 	}
 	members := l2.ParseLAG(dot3ad, stack, func(ix int) bool { return isLAG[ix] })

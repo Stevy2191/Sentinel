@@ -15,6 +15,7 @@ func TestIsAggregator(t *testing.T) {
 	}{
 		{IfInfo{Type: 161, Name: "lag 1"}, true},
 		{IfInfo{Type: 53, Name: "Po1", Descr: "Port-channel1"}, true},
+		{IfInfo{Type: 53, Name: "Po1", Descr: "port-channel1"}, true}, // NX-OS
 		{IfInfo{Type: 53, Name: "Vl20", Descr: "Vlan20"}, false},
 		{IfInfo{Type: 53, Name: "StackPort1", Descr: "StackPort1"}, false},
 		{IfInfo{Type: 6, Name: "Gi1/0/1", Descr: "GigabitEthernet1/0/1"}, false},
