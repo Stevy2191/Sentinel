@@ -37,6 +37,11 @@ Key settings to configure:
   -base64 48`) that signs login sessions. If left unset, Sentinel generates a
   new one on every restart, which logs everyone out each time the container
   restarts — set it explicitly for anything beyond a quick local test.
+- `NOTIFICATION_SECRET_KEY` — encrypts the notification secrets Sentinel stores
+  (SMTP password, bot tokens, webhook URLs). Generate it the same way before the
+  first start and never change it. Left empty, the key is derived from
+  `JWT_SECRET`, and then adding one later makes the stored secrets unreadable.
+  `install.sh` generates it on a new install and keeps it when re-run.
 - `FRONTEND_PORT` — host port for the web UI (default `3000`; change if it's in use)
 - `BACKEND_PORT` — host port for the API (default `3001`)
 - `TIMEZONE` — your timezone (e.g. `America/Chicago`)

@@ -383,6 +383,123 @@ prompt_for_adminer() {
   echo
 }
 
+# random_secret → a random base64 string, for JWT_SECRET and the like.
+random_secret() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -base64 32
+  else
+    head -c 32 /dev/urandom | base64 2>/dev/null || date +%s%N | sha256sum | awk '{print $1}'
+  fi
+}
+
+# env_line KEY → the KEY=... line from the existing .env, verbatim, or nothing.
+# Secrets are carried into a re-written .env as these exact lines rather than
+# decoded and re-encoded, so whatever quoting they were written with survives.
+env_line() {
+  [ -f .env ] || return 0
+  grep -E "^$1=" .env | tail -n 1 || true
+}
+
+# env_line_set LINE → 0 if LINE assigns a non-empty value.
+env_line_set() {
+  case "${1#*=}" in
+    ''|'""'|"''") return 1 ;;
+  esac
+  return 0
+}
+
+# database_exists → 0 if this install's Postgres volume already exists, i.e.
+# a database may already hold secrets encrypted with the current key. When
+# the project name can't be read (docker-compose v1 does not print it), the
+# answer is "yes", the safe one.
+database_exists() {
+  local project
+  project=$($COMPOSE config --no-interpolate 2>/dev/null | sed -n 's/^name: //p' | head -n 1) || true
+  [ -n "$project" ] || return 0
+  docker volume inspect "${project}_postgres_data" >/dev/null 2>&1
+}
+
+# compose ARGS... → Docker Compose with the profile flags chosen in step 8.
+compose() {
+  # shellcheck disable=SC2086 # both are word lists ("docker compose", "--profile adminer")
+  $COMPOSE $PROFILE_FLAGS "$@"
+}
+
+# service_state SERVICE → ready, starting, unhealthy, restarting, exited,
+# created, crash-looping or missing. "ready" means running and, if the service
+# has a healthcheck, healthy.
+service_state() {
+  local cid inspected status health restarts
+  cid=$(compose ps -a -q "$1" 2>/dev/null | head -n 1) || true
+  if [ -z "$cid" ]; then echo missing; return; fi
+  inspected=$(docker inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} {{.RestartCount}}' "$cid" 2>/dev/null) || inspected="missing none 0"
+  read -r status health restarts <<<"$inspected"
+  if [ "$status" = running ] && { [ "$health" = healthy ] || [ "$health" = none ]; }; then
+    echo ready
+  elif [ "${restarts:-0}" -ge 2 ]; then
+    # Docker restarts a container whose process exits. Twice means it keeps
+    # failing (the backend already retries its database for a minute before
+    # giving up), and waiting longer will not change that.
+    echo crash-looping
+  elif [ "$status" = running ]; then
+    echo "$health"
+  else
+    echo "$status"
+  fi
+}
+
+# wait_for_services TIMEOUT SERVICE... → 0 once every SERVICE is ready, 1 if
+# the timeout passes first, or at once if a service has no container or keeps
+# crashing. Prints what it is still waiting on whenever that changes.
+wait_for_services() {
+  local timeout=$1 deadline svc state pending last=""
+  shift
+  deadline=$(( $(date +%s) + timeout ))
+  while :; do
+    pending=""
+    for svc in "$@"; do
+      state=$(service_state "$svc")
+      case "$state" in
+        missing|crash-looping) return 1 ;;
+        ready) ;;
+        *) pending="$pending $svc ($state)" ;;
+      esac
+    done
+    [ -z "$pending" ] && return 0
+    [ "$(date +%s)" -ge "$deadline" ] && return 1
+    if [ "$pending" != "$last" ]; then
+      info "  Waiting for:${pending}"
+      last="$pending"
+    fi
+    sleep 3
+  done
+}
+
+# report_stack_failure SERVICE... prints the stack's status, then for every
+# service that is not ready its last healthcheck result and log lines.
+report_stack_failure() {
+  local svc state cid
+  echo
+  err "Sentinel did not start cleanly."
+  info "${BOLD}Container status:${RESET}"
+  compose ps -a || true
+  for svc in "$@"; do
+    state=$(service_state "$svc")
+    [ "$state" = ready ] && continue
+    echo
+    info "${BOLD}${svc}: ${state}${RESET}"
+    cid=$(compose ps -a -q "$svc" 2>/dev/null | head -n 1) || true
+    if [ -n "$cid" ]; then
+      info "  Last healthcheck output:"
+      docker inspect --format '{{if .State.Health}}{{range .State.Health.Log}}{{println .Output}}{{end}}{{else}}(no healthcheck){{end}}' "$cid" 2>/dev/null \
+        | sed '/^[[:space:]]*$/d' | tail -n 2 | sed 's/^/    /' || true
+    fi
+    info "  Last log lines:"
+    compose logs --no-color --tail 30 "$svc" 2>&1 | sed 's/^/    /' || true
+  done
+  echo
+}
+
 # ---- 1. Banner ----
 cat <<BANNER
 ${CYAN}${BOLD}
@@ -430,14 +547,24 @@ if ! command -v git >/dev/null 2>&1; then
 fi
 ok "Git: $(git --version | awk '{print $3}')"
 
-# .env overwrite guard
+# .env overwrite guard. The secrets in an existing .env are kept, whatever the
+# answer: a new DB_PASSWORD does not change the password of a database that
+# already exists, a new JWT_SECRET signs everyone out, and a new encryption key
+# (NOTIFICATION_SECRET_KEY, or JWT_SECRET while that is unset) makes the
+# notification secrets already stored in the database unreadable.
+OLD_DB_PASSWORD_LINE=""; OLD_JWT_SECRET_LINE=""; OLD_NOTIFICATION_KEY_LINE=""
 if [ -f .env ]; then
   warn "A .env file already exists."
-  if ! read -r -p "Overwrite existing .env? (y/N) " OVERWRITE; then OVERWRITE="n"; fi
+  info "  Re-creating it keeps its secrets (DB_PASSWORD, JWT_SECRET and"
+  info "  NOTIFICATION_SECRET_KEY); every other setting is asked again."
+  if ! read -r -p "Re-create .env? (y/N) " OVERWRITE; then OVERWRITE="n"; fi
   case "${OVERWRITE:-n}" in
-    y|Y|yes|YES) info "Overwriting .env." ;;
+    y|Y|yes|YES) info "Re-creating .env." ;;
     *) fatal "Aborted; leaving existing .env in place." ;;
   esac
+  OLD_DB_PASSWORD_LINE=$(env_line DB_PASSWORD)
+  OLD_JWT_SECRET_LINE=$(env_line JWT_SECRET)
+  OLD_NOTIFICATION_KEY_LINE=$(env_line NOTIFICATION_SECRET_KEY)
 fi
 echo
 
@@ -468,30 +595,59 @@ prompt_for_adminer
 # ---- 4. Database password ----
 info "${BOLD}Database password${RESET} ${DIM}(min 12 characters)${RESET}"
 DB_PASSWORD=""
-while true; do
-  if ! read -r -s -p "Enter database password: " DB_PASSWORD; then echo; fatal "No input available; run install.sh from an interactive terminal."; fi; echo
-  if [ "${#DB_PASSWORD}" -lt 12 ]; then
-    err "Password too short (${#DB_PASSWORD} chars); need at least 12. Try again."
-    continue
-  fi
-  if ! read -r -s -p "Confirm database password: " DB_PASSWORD2; then echo; fatal "No input available; run install.sh from an interactive terminal."; fi; echo
-  if [ "$DB_PASSWORD" != "$DB_PASSWORD2" ]; then
-    err "Passwords do not match. Try again."
-    continue
-  fi
-  break
-done
-ok "Database password set."
+if env_line_set "$OLD_DB_PASSWORD_LINE"; then
+  DB_PASSWORD_LINE="$OLD_DB_PASSWORD_LINE"
+  ok "Keeping the database password from the existing .env."
+else
+  while true; do
+    if ! read -r -s -p "Enter database password: " DB_PASSWORD; then echo; fatal "No input available; run install.sh from an interactive terminal."; fi; echo
+    if [ "${#DB_PASSWORD}" -lt 12 ]; then
+      err "Password too short (${#DB_PASSWORD} chars); need at least 12. Try again."
+      continue
+    fi
+    if ! read -r -s -p "Confirm database password: " DB_PASSWORD2; then echo; fatal "No input available; run install.sh from an interactive terminal."; fi; echo
+    if [ "$DB_PASSWORD" != "$DB_PASSWORD2" ]; then
+      err "Passwords do not match. Try again."
+      continue
+    fi
+    break
+  done
+  DB_PASSWORD_LINE="DB_PASSWORD=$(env_quote "$DB_PASSWORD")"
+  ok "Database password set."
+fi
 echo
 
-# ---- 5. JWT secret ----
-info "${BOLD}Generating JWT secret...${RESET}"
-if command -v openssl >/dev/null 2>&1; then
-  JWT_SECRET=$(openssl rand -base64 32)
+# ---- 5. Secrets ----
+# Each is generated only when the existing .env does not already set it.
+info "${BOLD}Secrets${RESET}"
+if env_line_set "$OLD_JWT_SECRET_LINE"; then
+  JWT_SECRET_LINE="$OLD_JWT_SECRET_LINE"
+  JWT_SECRET_NEW=false
+  ok "Keeping JWT_SECRET from the existing .env."
 else
-  JWT_SECRET=$(head -c 32 /dev/urandom | base64 2>/dev/null || date +%s%N | sha256sum | awk '{print $1}')
+  JWT_SECRET_LINE="JWT_SECRET=$(env_quote "$(random_secret)")"
+  JWT_SECRET_NEW=true
+  ok "Generated JWT_SECRET: ••••••••••••••••"
 fi
-ok "Generated JWT secret: ••••••••••••••••"
+
+# NOTIFICATION_SECRET_KEY encrypts the notification secrets stored in the
+# database. While it is unset the backend derives that key from JWT_SECRET, so
+# adding one to an install that already has a database would make what it
+# stored unreadable. It is only safe to add when there is no database yet, or
+# when JWT_SECRET is new too (the derived key has changed anyway).
+if env_line_set "$OLD_NOTIFICATION_KEY_LINE"; then
+  NOTIFICATION_KEY_LINE="$OLD_NOTIFICATION_KEY_LINE"
+  ok "Keeping NOTIFICATION_SECRET_KEY from the existing .env."
+elif [ "$JWT_SECRET_NEW" = true ] || ! database_exists; then
+  NOTIFICATION_KEY_LINE="NOTIFICATION_SECRET_KEY=$(env_quote "$(random_secret)")"
+  ok "Generated NOTIFICATION_SECRET_KEY: ••••••••••••••••"
+else
+  NOTIFICATION_KEY_LINE="NOTIFICATION_SECRET_KEY=''"
+  warn "Leaving NOTIFICATION_SECRET_KEY unset: this install already has a database,"
+  warn "  and the notification secrets in it are encrypted with a key derived from"
+  warn "  JWT_SECRET. A new key would make them unreadable. The backend's startup"
+  warn "  note about the derived key is expected and harmless."
+fi
 echo
 
 # ---- 5b. User registration ----
@@ -561,7 +717,7 @@ if ! cat > "$ENV_TMP" <<ENV
 # backslash. Keep the quoting if you edit this file by hand.
 
 # Database
-DB_PASSWORD=$(env_quote "$DB_PASSWORD")
+${DB_PASSWORD_LINE}
 DB_PORT=$(env_quote "$PORT_DB")
 
 # Server
@@ -577,8 +733,12 @@ COMPOSE_PROFILES=$(env_quote "$COMPOSE_PROFILES")
 LOG_LEVEL='info'
 TIMEZONE=$(env_quote "$TIMEZONE")
 
-# Authentication
-JWT_SECRET=$(env_quote "$JWT_SECRET")
+# Authentication. Keep both secrets when editing this file: a new JWT_SECRET
+# signs everyone out, and a new NOTIFICATION_SECRET_KEY (or, while that is
+# empty, a new JWT_SECRET) makes the notification secrets stored in the
+# database unreadable. Re-running install.sh keeps them.
+${JWT_SECRET_LINE}
+${NOTIFICATION_KEY_LINE}
 REGISTRATION_ENABLED=$(env_quote "$REGISTRATION_ENABLED")
 
 # SMTP (email alerts)
@@ -664,10 +824,32 @@ case "${START_ANSWER:-y}" in
     info "Skipping startup. When ready, run: ${BOLD}${COMPOSE} ${PROFILE_FLAGS} up -d --build${RESET}"
     ;;
   *)
+    IFS=' ' read -r -a STACK_SERVICES <<<"$(compose config --services | tr '\n' ' ')"
     info "Building and starting containers (this may take a few minutes)..."
-    $COMPOSE $PROFILE_FLAGS up -d --build
+    # `up -d` waits for each service's dependencies to report healthy and gives
+    # up on the first one that does not. On a first start that is usually just
+    # slowness (the backend applies every migration before it answers), so
+    # wait for the database and backend to finish starting, then try once more.
+    STARTED=false
+    if compose up -d --build; then
+      STARTED=true
+    else
+      echo
+      warn "Docker Compose stopped before every service was up. On a first start this is"
+      warn "  usually the backend still applying database migrations. Waiting for it..."
+      if wait_for_services 300 postgres backend && compose up -d; then
+        STARTED=true
+      fi
+    fi
     echo
-    ok "Sentinel is starting."
+    info "Waiting for every service to report healthy..."
+    if [ "$STARTED" != true ] || ! wait_for_services 180 "${STACK_SERVICES[@]}"; then
+      report_stack_failure "${STACK_SERVICES[@]}"
+      info "Fix the problem above, then start the stack with: ${BOLD}${COMPOSE}${PROFILE_FLAGS:+ $PROFILE_FLAGS} up -d${RESET}"
+      info "Your settings are saved in .env; there is no need to run install.sh again."
+      fatal "Installation incomplete: Sentinel is not running."
+    fi
+    ok "Sentinel is up: every service is running and healthy."
     if [ "$HTTPS_MODE" = "caddy" ]; then
       if [ "$HTTPS_PORT" = "443" ]; then
         info "  Web UI:   ${BOLD}https://${DOMAIN}${RESET}"

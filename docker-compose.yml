@@ -37,11 +37,21 @@ services:
     healthcheck:
       # -U sentinel matches POSTGRES_USER above. pg_isready only tests whether
       # the server is accepting connections, so the role name is advisory.
-      test: ["CMD-SHELL", "pg_isready -U sentinel -d sentinel"]
+      #
+      # -h 127.0.0.1 makes the check use TCP, the way the backend connects.
+      # On a fresh volume the image first runs a temporary server that listens
+      # only on the Unix socket while it initialises the database, then
+      # restarts. A socket check passes during that window and marked the
+      # database healthy while the backend's connection was still refused.
+      #
+      # start_period: initialising a new data directory takes a few seconds on
+      # a fast disk and much longer on a slow one. A passing check ends the
+      # start period early, so a long one costs nothing on a fast machine.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U sentinel -d sentinel"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 60s
 
   backend:
     # `build` lets `docker compose up` build locally; `image` names the tag that
@@ -141,15 +151,20 @@ services:
     healthcheck:
       # Port 3001 and path /health are what the backend actually serves
       # (PORT above, and router.GET("/health") in cmd/sentinel/main.go).
-      # start_period covers migrations on first boot so a slow start is not
-      # counted as a failure.
       # 127.0.0.1 rather than localhost, for the same resolution reason as the
       # frontend check below.
+      #
+      # The backend only starts listening once every migration has run, which
+      # on a fresh database is all of them: a few seconds on a fast machine,
+      # well over a minute on a slow disk. The old 30s start period marked a
+      # first boot unhealthy, and `up` then refused to start the frontend.
+      # Failures inside start_period do not count and the first passing check
+      # ends it, so 180s only matters when the backend is genuinely slow.
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3001/health"]
       interval: 10s
       timeout: 5s
-      retries: 3
-      start_period: 30s
+      retries: 5
+      start_period: 180s
 
   frontend:
     build:

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { setDisplayTimezone } from '@/utils/formatters'
 
 export const DEFAULT_APP_NAME = 'Sentinel'
@@ -6,6 +6,9 @@ export const DEFAULT_APP_NAME = 'Sentinel'
 export const DEFAULT_CHECK_INTERVAL = 60
 /** Mirrors models.DefaultSLATargetPercent on the backend. */
 export const DEFAULT_SLA_TARGET = 99.9
+/** A failed read is retried after this long, doubling up to RETRY_MAX_MS. */
+const RETRY_FIRST_MS = 2000
+const RETRY_MAX_MS = 15000
 
 interface AppConfig {
   /** The instance's display name, as set in Settings → General. */
@@ -21,8 +24,8 @@ interface AppConfig {
   /** The IANA zone reports are rendered in, and that the UI displays times in.
    *  Undefined until the config loads, when the browser's zone is used. */
   reportTimezone: string | undefined
-  /** False until the first read completes. Callers that would otherwise flash
-   *  a wrong answer — "registration disabled" before we know — wait on this. */
+  /** False until the first read succeeds. Callers that would otherwise show a
+   *  wrong answer — "registration disabled" before we know — wait on this. */
   loaded: boolean
   /** Re-reads the config — call after an admin changes it. */
   refresh: () => Promise<void>
@@ -50,6 +53,11 @@ const AppConfigContext = createContext<AppConfig>({
  * Uses fetch rather than the api client so it carries no auth expectations and
  * cannot trigger the client's 401 handling on a page where being signed out is
  * the normal case.
+ *
+ * A failed read is retried until one succeeds, and `loaded` stays false until
+ * then. The sign-in page is often the first thing opened while the backend is
+ * still starting; treating that failure as an answer showed a fresh install's
+ * first visitor "registration disabled" and never asked again.
  */
 export function AppConfigProvider({ children }: { children: ReactNode }) {
   const [appName, setAppName] = useState(DEFAULT_APP_NAME)
@@ -59,47 +67,66 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
   const [defaultSLATarget, setDefaultSLATarget] = useState(DEFAULT_SLA_TARGET)
   const [reportTimezone, setReportTimezone] = useState<string | undefined>(undefined)
   const [loaded, setLoaded] = useState(false)
+  // Each refresh takes a new number; a response or retry from an older one
+  // is dropped, so a slow failed read cannot overwrite a newer good one.
+  const seq = useRef(0)
+  const retryTimer = useRef<ReturnType<typeof setTimeout>>()
 
+  // Resolves after the first attempt; retries continue in the background.
   const refresh = useCallback(async () => {
-    try {
-      const res = await fetch('/api/v1/auth/status')
-      const body = await res.json()
-      const data = body?.data ?? {}
-      // Fall back rather than render an empty wordmark if the field is missing,
-      // e.g. against an older backend.
-      setAppName(typeof data.app_name === 'string' && data.app_name.trim() ? data.app_name : DEFAULT_APP_NAME)
-      setRegistrationEnabled(Boolean(data.registration_enabled))
-      setSetupRequired(Boolean(data.setup_required))
-      setDefaultCheckInterval(
-        Number.isFinite(data.default_check_interval) && data.default_check_interval > 0
-          ? data.default_check_interval
-          : DEFAULT_CHECK_INTERVAL
-      )
-      setDefaultSLATarget(
-        Number.isFinite(data.default_sla_target) && data.default_sla_target >= 0
-          ? data.default_sla_target
-          : DEFAULT_SLA_TARGET
-      )
-      // Applied to the formatters immediately, so every timestamp on screen
-      // is in the same zone the server writes into reports.
-      const tz = typeof data.report_timezone === 'string' ? data.report_timezone : undefined
-      setReportTimezone(tz)
-      setDisplayTimezone(tz)
-    } catch {
-      // A failed probe leaves the defaults in place: the app still renders,
-      // just under its stock name with sign-up closed.
-      setAppName(DEFAULT_APP_NAME)
-      setRegistrationEnabled(false)
-      setSetupRequired(false)
-      setDefaultCheckInterval(DEFAULT_CHECK_INTERVAL)
-      setDefaultSLATarget(DEFAULT_SLA_TARGET)
-    } finally {
-      setLoaded(true)
+    clearTimeout(retryTimer.current)
+    const mine = ++seq.current
+
+    async function attempt(retryIn: number): Promise<void> {
+      try {
+        const res = await fetch('/api/v1/auth/status')
+        // A 502 from nginx while the backend starts is HTML; not an answer.
+        if (!res.ok) throw new Error(`auth status: HTTP ${res.status}`)
+        const body = await res.json()
+        if (mine !== seq.current) return
+        const data = body?.data ?? {}
+        // Fall back rather than render an empty wordmark if the field is missing,
+        // e.g. against an older backend.
+        setAppName(typeof data.app_name === 'string' && data.app_name.trim() ? data.app_name : DEFAULT_APP_NAME)
+        setRegistrationEnabled(Boolean(data.registration_enabled))
+        setSetupRequired(Boolean(data.setup_required))
+        setDefaultCheckInterval(
+          Number.isFinite(data.default_check_interval) && data.default_check_interval > 0
+            ? data.default_check_interval
+            : DEFAULT_CHECK_INTERVAL
+        )
+        setDefaultSLATarget(
+          Number.isFinite(data.default_sla_target) && data.default_sla_target >= 0
+            ? data.default_sla_target
+            : DEFAULT_SLA_TARGET
+        )
+        // Applied to the formatters immediately, so every timestamp on screen
+        // is in the same zone the server writes into reports.
+        const tz = typeof data.report_timezone === 'string' ? data.report_timezone : undefined
+        setReportTimezone(tz)
+        setDisplayTimezone(tz)
+        setLoaded(true)
+      } catch {
+        // Keep whatever is in place (the defaults, or the last good read) and
+        // try again shortly. The app still renders meanwhile; the sign-in page
+        // offers neither the sign-up link nor "registration disabled" until a
+        // read succeeds.
+        if (mine !== seq.current) return
+        retryTimer.current = setTimeout(() => {
+          void attempt(Math.min(retryIn * 2, RETRY_MAX_MS))
+        }, retryIn)
+      }
     }
+
+    await attempt(RETRY_FIRST_MS)
   }, [])
 
   useEffect(() => {
     void refresh()
+    return () => {
+      seq.current += 1
+      clearTimeout(retryTimer.current)
+    }
   }, [refresh])
 
   // The browser tab is part of the branding, so it follows the same name.

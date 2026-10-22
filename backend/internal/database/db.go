@@ -3,9 +3,11 @@
 package database
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"gorm.io/driver/postgres"
@@ -20,6 +22,18 @@ const (
 	connMaxLifetime = 5 * time.Minute
 )
 
+// Startup connection retry. The database is often not ready when the backend
+// starts: on a fresh install Postgres restarts once after initialising its
+// data directory, and after a host reboot Docker starts containers in no
+// particular order, so the "postgres" name may not even resolve yet. Rather
+// than exit on the first failure and rely on the restart policy, NewDB keeps
+// trying for connectWindow, doubling the wait between attempts up to
+// connectMaxDelay.
+const (
+	connectWindow   = 60 * time.Second
+	connectMaxDelay = 10 * time.Second
+)
+
 // Database wraps a GORM connection together with a logger, exposing lifecycle,
 // health, and migration helpers for the rest of the application.
 type Database struct {
@@ -31,8 +45,9 @@ type Database struct {
 // pooling. Configuration values are taken from the provided map when present,
 // otherwise from the corresponding environment variables (DB_HOST, DB_PORT,
 // DB_NAME, DB_USER, DB_PASSWORD, DB_SSL_MODE), with sensible development
-// defaults. It returns the *gorm.DB handle or an error if the connection
-// cannot be established.
+// defaults. A database that is not reachable yet is retried for up to
+// connectWindow, logging each failed attempt. It returns the *gorm.DB handle
+// or an error if no connection could be established in that time.
 func NewDB(config map[string]string) (*gorm.DB, error) {
 	host := lookup(config, "DB_HOST", "localhost")
 	port := lookup(config, "DB_PORT", "5432")
@@ -46,7 +61,13 @@ func NewDB(config map[string]string) (*gorm.DB, error) {
 		host, port, user, password, name, sslMode,
 	)
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	// gorm.Open pings the server, so an unreachable database fails here (and
+	// gorm closes the pool it opened) rather than on the first query.
+	open := func() (*gorm.DB, error) {
+		return gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	}
+	log.Printf("[database] connecting to postgres %s:%s/%s", host, port, name)
+	db, err := connectRetry(open, connectWindow, time.Now, time.Sleep)
 	if err != nil {
 		return nil, fmt.Errorf("opening postgres connection: %w", err)
 	}
@@ -61,6 +82,47 @@ func NewDB(config map[string]string) (*gorm.DB, error) {
 
 	log.Printf("[database] connected to postgres %s:%s/%s (sslmode=%s)", host, port, name, sslMode)
 	return db, nil
+}
+
+// connectRetry calls open until it succeeds or window has passed, waiting
+// 1s, 2s, 4s... (at most connectMaxDelay) between attempts. A server that
+// answers and refuses the login is not retried (see refusedLogin). The clock
+// and sleep are parameters so tests can run the window without waiting it out.
+func connectRetry(open func() (*gorm.DB, error), window time.Duration,
+	now func() time.Time, sleep func(time.Duration)) (*gorm.DB, error) {
+	deadline := now().Add(window)
+	delay := time.Second
+	for attempt := 1; ; attempt++ {
+		db, err := open()
+		if err == nil {
+			return db, nil
+		}
+		if refusedLogin(err) {
+			return nil, err
+		}
+		remaining := deadline.Sub(now())
+		if remaining <= 0 {
+			return nil, fmt.Errorf("database still unreachable after %s (%d attempts): %w", window, attempt, err)
+		}
+		wait := min(delay, remaining)
+		log.Printf("[database] attempt %d failed: %v; retrying in %s", attempt, err, wait)
+		sleep(wait)
+		delay = min(delay*2, connectMaxDelay)
+	}
+}
+
+// refusedLogin reports whether err is the server rejecting the credentials
+// (SQLSTATE class 28: wrong password, unknown role) or naming a database that
+// does not exist (3D000). Those are configuration errors that waiting will
+// not fix, so they surface at once rather than after the whole retry window.
+// pgx's *pgconn.PgError reports its code through SQLState.
+func refusedLogin(err error) bool {
+	var pgErr interface{ SQLState() string }
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	code := pgErr.SQLState()
+	return strings.HasPrefix(code, "28") || code == "3D000"
 }
 
 // New opens a connection via NewDB and returns a Database wrapper with an
