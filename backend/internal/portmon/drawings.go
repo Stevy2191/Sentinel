@@ -67,6 +67,17 @@ var drawings = []Drawing{
 	// owner's VSS pair has (2026-10-01).
 	{Key: DrawingC4500X16, Ports: portRange(1, 16), Modules: map[int][]int{2: portRange(1, 8)}, pattern: regexp.MustCompile(`(?i)^WS-C4500X-16`)},
 	{Key: DrawingES48750W, Ports: portRange(1, 52), product: regexp.MustCompile(`(?i)^EDGESWITCH 48 750W$`), pattern: regexp.MustCompile(`(?i)^ES-48-750W$`)},
+
+	// Waiting for the owner's photos: the work Ciscos' real port names
+	// (ifName, from the work install, 2026-10-21), for drawings to come.
+	// - C9300-24P: Gi1/0/1-24; network module Te1/1/1-8 in use (IOS-XE also
+	//   lists Gi1/1/1-4, Fo1/1/1-2 and Twe1/1/1-2, the other modules'
+	//   ports); Gi0/0 management; Ap1/0/1 (the app port).
+	// - WS-C2960CX-8PC-L: Gi0/1-12.
+	// - WS-C2960X-24PS-L: Gi1/0/1-28; Fa0 management.
+	// - WS-C2960X-48FPS-L: Gi1/0/1-52; Fa0 management.
+	// - WS-C2960X-48FPD-L: per stack unit N, GiN/0/1-50 and TeN/0/1-2 (a
+	//   two-unit stack at work); Fa0 management.
 }
 
 // productName is the part of sysDescr before its first comma, normalized:

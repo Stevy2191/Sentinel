@@ -21,7 +21,7 @@ Roadmap: `docs/superpowers/specs/2026-09-28-network-monitoring-roadmap.md`. Each
 | 3 | MIB library and custom metrics: upload/browse/test-walk MIBs, profiles, Cisco switch health, Health section, metric-rule alerts | Done (`dev`, 2026-10-02); follow-ups in `plans/2026-10-02-network-phase3-followups.md` |
 | 4 | Custom dashboards: grid editor, 11 widget types (incl. site power), sharing, fullscreen wall display, admin public links | Done (`dev`, 2026-10-03); follow-ups in `plans/2026-10-02-network-phase4-followups.md` |
 | 5 | Metric reports: a Metrics report type (ports, port roles, devices, sites), exact 95th percentiles, totals, previous-period comparison, scheduled and shared like the other reports | Done (`dev`, 2026-10-05); follow-ups in `plans/2026-10-03-network-phase5-followups.md` |
-| 6 | Live site maps (LLDP, SSE push) — needs phase 4 | **In progress**, in pieces: A back navigation (done), B find a device and switch maps (done, `dev`), B2 Cisco (pending), C site maps (done, `dev`; then bundles and automatic port roles, done), D org map |
+| 6 | Live site maps (LLDP, SSE push) — needs phase 4 | **In progress**, in pieces: A back navigation (done), B find a device and switch maps (done, `dev`), B2 Cisco (built on `feature/cisco-l2-b2`, not yet on `dev`), C site maps (done, `dev`; then bundles and automatic port roles, done), D org map |
 | 7 | UniFi controller source | **Next** |
 
 Phase 7 is next; phase 6 is unblocked (it needed phase 4, which is done) and can follow. Where both sit against the tools and security track below is the owner's call.
@@ -58,13 +58,13 @@ Spec `specs/2026-10-18-faceplate-model-layouts-design.md`, plan `plans/2026-10-1
 
 ## Realistic faceplates
 
-Spec `specs/2026-10-18-realistic-faceplates-design.md` (approved mockups in `specs/assets/2026-10-18-realistic-faceplates/`), plan `plans/2026-10-18-realistic-faceplates.md`. The UDM-SE, USW-Pro-48-PoE and ES-16-XG draw as their real front panels (Realistic | Simple on the device page; always realistic on dashboards), with the UDM-SE drive bay light from UCD-DISKIO-MIB (bay disk `sdb`). A device Sentinel can't hear from goes dark with a badge. UniFi consoles now number ports from 1 (`portmon/numbering.go`). Second batch (2026-10-18): the EdgeSwitch 8 150W, 24 250W, 48 500W (newer look) and 24 500W, 48 750W (older look), matched on the product name in sysDescr, since all report bare models like `UBNT-ES24`. The ES-48-750W's SFP+ pair is 49/50 (confirmed by the owner, 2026-10-18). Cisco: the Catalyst 4500-X-16 is drawn (module slot 2 empty or the 8-port SFP+ module; drawings now declare their module slots). Waiting on real port names and better photos: C9300-24P, WS-C2960CX-8PC-L, WS-C2960X-24PS-L, WS-C2960X-48FPD-L, WS-C2960X-48FPS-L (images in the owner's /home/sysadmin/images). More models: add a drawing in `frontend/src/components/network/drawings/` and a line in `backend/internal/portmon/drawings.go`. PoE on UniFi switches waits for network phase 7 (the switch reports no PoE over SNMP).
+Spec `specs/2026-10-18-realistic-faceplates-design.md` (approved mockups in `specs/assets/2026-10-18-realistic-faceplates/`), plan `plans/2026-10-18-realistic-faceplates.md`. The UDM-SE, USW-Pro-48-PoE and ES-16-XG draw as their real front panels (Realistic | Simple on the device page; always realistic on dashboards), with the UDM-SE drive bay light from UCD-DISKIO-MIB (bay disk `sdb`). A device Sentinel can't hear from goes dark with a badge. UniFi consoles now number ports from 1 (`portmon/numbering.go`). Second batch (2026-10-18): the EdgeSwitch 8 150W, 24 250W, 48 500W (newer look) and 24 500W, 48 750W (older look), matched on the product name in sysDescr, since all report bare models like `UBNT-ES24`. The ES-48-750W's SFP+ pair is 49/50 (confirmed by the owner, 2026-10-18). Cisco: the Catalyst 4500-X-16 is drawn (module slot 2 empty or the 8-port SFP+ module; drawings now declare their module slots). Waiting on better photos: C9300-24P, WS-C2960CX-8PC-L, WS-C2960X-24PS-L, WS-C2960X-48FPD-L, WS-C2960X-48FPS-L (images in the owner's /home/sysadmin/images); their real port names are recorded in `backend/internal/portmon/drawings.go` (B2, 2026-10-22). More models: add a drawing in `frontend/src/components/network/drawings/` and a line in `backend/internal/portmon/drawings.go`. PoE on UniFi switches waits for network phase 7 (the switch reports no PoE over SNMP).
 
 ## Find a device and switch maps (phase 6 piece B)
 
 Spec `specs/2026-10-18-find-device-switch-maps-design.md`, plan `plans/2026-10-18-find-device-switch-maps.md`. Every 5 minutes, each up device's MAC table (Q-BRIDGE, else dot1d), LLDP neighbours and ARP table are read into the `l2` schema (migration `063_l2.sql`; left out of config backups, kept 30 days). Each MAC is placed when read: on an edge port (wired), through an AP (wireless), behind a link port, or only in a router's ARP table. The top bar's **Find a device** searches name, IP, MAC (any notation) or maker; switch and router pages have a **Connected** section (Map | List) and open a device's record from `?endpoint=<mac>`. Users' names for devices are in `endpoint_names` (backed up, audited as `endpoint_named`). Makers come from the IEEE OUI list built in (`backend/internal/l2/oui.tsv.gz`).
 
-**Pending, B2 (Cisco):** per-VLAN MAC tables (community@vlan / SNMPv3 contexts) and CDP, after a read-only walk of a work Cisco. Until then Cisco switches show what their default context reports. The 8-MAC "behind" threshold and the 5-minute interval are first guesses, to tune on work data.
+**B2 (Cisco), on `feature/cisco-l2-b2`:** spec `specs/2026-10-22-cisco-l2-b2-design.md` (with what a read-only walk of LAB-C3850, BR-CORE-C9300 and BR-ACC-2960X showed on 2026-10-21), plan `plans/2026-10-22-cisco-l2-b2.md`. A Cisco's Q-BRIDGE is empty and its default context is VLAN 1's table only, so each operational VLAN (CISCO-VTP-MIB) is now read in its own context (`community@vlan`, or the v3 context `vlan-N`, built from the docs and untested: there is no v3 Cisco); a VLAN that fails keeps its rows, and when none can be read the default context is read as before. CDP: names match with or without the domain (CDP sends `HQ-CORE-C9300`, Sentinel knows `HQ-CORE-C9300.corp.example`), a reason shows the far port as that switch names it ("port Te1/1/6"), capabilities are read (a CDP switch is a link, a phone a phone), a port where CDP from several devices crossed a switch that doesn't speak it is behind, never edge, UniFi devices (all "UBNT") are told apart by address, and an IP device ID keeps its whole name. Port-channels (ifType 53, like SVIs) count as LAGs by their description, for membership (static and PAgP channels from ifStack) and names; one with a link member is a link, so MACs learned on it are placed beyond it. Port-channels' stats collection is unchanged (a follow-up if wanted). No migration. The 8-MAC "behind" threshold and the 5-minute interval are still first guesses, to tune on work data.
 
 ## Monitoring as one list
 
@@ -85,6 +85,17 @@ Spec `specs/2026-10-19-site-map-bundles-design.md` (mockup in `specs/assets/2026
 - Migration `065_site_map_bundles.sql`.
 
 ## To be checked by the owner
+
+### B2 Cisco (at work, on the work install, once `feature/cisco-l2-b2` is deployed)
+
+1. Within 5 minutes of the deploy, BR-CORE-C9300's Connected map lists endpoints on all its VLANs, not only VLAN 1. Search a PC's MAC: its VLAN shows.
+2. HQ-ACC1-2960X's, HQ-ACC2-2960X's and HQ-ACC3-2960X's Gi1/0/25 and HQ-ACC4-2960X's Gi1/0/48 are framed sky blue, "Found by CDP: HQ-CORE-C9300.corp.example port Te1/1/…" (or "Gi1/0/24" for the last).
+3. On the SO site map, BR-CORE-C9300 ↔ BR-ACC-2960X is one bundle, "LAG · 2 × 10G", Po1 at both ends.
+4. The C3850's Te1/1/4 no longer holds the phones as plugged in there: they show as behind it, or on the switch they're really on.
+5. A Cisco port with two UniFi APs behind it lists both in the port's neighbours.
+6. Port pages for BR-CORE-C9300's Te1/1/1–2 still say what you set by hand (they're yours; B2 never changes them).
+
+Also: the C3850's hostname was never set (its sysName is `Switch.corp.example`). Setting it keeps a CDP neighbour called just "Switch" from ever matching it.
 
 ### Site map bundles and automatic port roles (on the dev stack, port 3200; most of it at work)
 
