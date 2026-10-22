@@ -229,7 +229,7 @@ func (m *L2Monitor) writeLAG(ctx context.Context, d models.Device, t snmp.Target
 // on ports that are down.
 func (m *L2Monitor) writeCDP(ctx context.Context, d models.Device, t snmp.Target, ifIndexes map[int]bool, now time.Time) {
 	cols := map[string][]snmp.PDU{}
-	for _, col := range []string{"3", "4", "6", "7", "8"} {
+	for _, col := range []string{"3", "4", "6", "7", "8", "9"} {
 		pdus, ok := m.walk(ctx, d, t, l2.OIDCDPCache+"."+col)
 		if !ok {
 			return
@@ -239,16 +239,16 @@ func (m *L2Monitor) writeCDP(ctx context.Context, d models.Device, t snmp.Target
 	seen := map[[2]any]bool{}
 	var rows []l2Neighbor
 	for _, n := range l2.ParseCDP(cols) {
-		k := [2]any{n.IfIndex, n.DeviceID}
+		k := [2]any{n.IfIndex, n.Key}
 		if !ifIndexes[n.IfIndex] || seen[k] {
 			continue
 		}
 		seen[k] = true
-		rows = append(rows, l2Neighbor{DeviceID: d.ID, IfIndex: n.IfIndex, ChassisID: n.DeviceID, Protocol: "cdp", SysName: n.SysName,
-			PortID: n.Port, PortDescr: n.Platform, Address: n.Address, LastSeen: now})
+		rows = append(rows, l2Neighbor{DeviceID: d.ID, IfIndex: n.IfIndex, ChassisID: n.Key, Protocol: "cdp", SysName: n.SysName,
+			PortID: n.Port, PortDescr: n.Platform, Address: n.Address, Caps: int(n.Caps), LastSeen: now})
 	}
 	m.upsert(ctx, d, "neighbors", rows, []string{"device_id", "if_index", "protocol", "chassis_id"},
-		[]string{"sys_name", "port_id", "port_descr", "address", "last_seen"})
+		[]string{"sys_name", "port_id", "port_descr", "address", "caps", "last_seen"})
 	if err := m.db.WithContext(ctx).Exec(`DELETE FROM l2.neighbors WHERE device_id = ? AND protocol = 'cdp' AND last_seen < ?
 		AND if_index NOT IN (SELECT if_index FROM device_interfaces WHERE device_id = ? AND NOT `+notDown+`)`, d.ID, now, d.ID).Error; err != nil {
 		m.logger.Printf("[l2] %s: dropping gone CDP neighbours: %v", d.Host, err)

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -96,6 +97,39 @@ func TestL2PollWritesCDP(t *testing.T) {
 	}{3, "LAB-C3850.corp.example", "LAB-C3850", "GigabitEthernet1/0/1", "cisco WS-C3850-12S", "cdp", "10.20.0.5"}
 	if n != want {
 		t.Errorf("CDP neighbour = %+v, want %+v", n, want)
+	}
+}
+
+// CDP rows keep the capabilities they announced, and two UniFi devices on
+// one port ("UBNT" both) are two rows.
+func TestL2PollWritesCDPCapsAndUniFiApart(t *testing.T) {
+	db := testdb.Open(t)
+	d := l2Device(t, db, 5, 6)
+	c := l2.OIDCDPCache
+	rows := map[string][]snmp.PDU{}
+	for _, r := range []struct {
+		ix   string
+		addr []byte
+		id   string
+		caps byte
+	}{{"5.1", []byte{10, 0, 5, 1}, "UBNT", 0x10}, {"5.2", []byte{10, 0, 5, 2}, "UBNT", 0x10}, {"6.1", []byte{10, 0, 6, 1}, "SEP000000000001", 0x90}} {
+		rows[c+".3"] = append(rows[c+".3"], p(c+".3."+r.ix, int64(1)))
+		rows[c+".4"] = append(rows[c+".4"], p(c+".4."+r.ix, r.addr))
+		rows[c+".6"] = append(rows[c+".6"], p(c+".6."+r.ix, []byte(r.id)))
+		rows[c+".9"] = append(rows[c+".9"], p(c+".9."+r.ix, []byte{0, 0, 0, r.caps}))
+	}
+	NewL2Monitor(db, &fakeL2SNMP{rows: rows}).PollL2(context.Background(), d, snmp.Target{})
+	var got []struct {
+		ChassisID string
+		Caps      int
+	}
+	testdb.Must(t, db.Raw(`SELECT chassis_id, caps FROM l2.neighbors WHERE protocol = 'cdp' ORDER BY chassis_id`).Scan(&got).Error)
+	want := []struct {
+		ChassisID string
+		Caps      int
+	}{{"SEP000000000001", 0x05}, {"UBNT@10.0.5.1", 0x01}, {"UBNT@10.0.5.2", 0x01}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("CDP rows = %+v, want %+v", got, want)
 	}
 }
 
