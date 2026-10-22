@@ -80,6 +80,50 @@ func TestMatchDeviceBySysName(t *testing.T) {
 	}
 }
 
+var (
+	xID = uuid.MustParse("00000000-0000-0000-0000-0000000000d4")
+	yID = uuid.MustParse("00000000-0000-0000-0000-0000000000e5")
+	zID = uuid.MustParse("00000000-0000-0000-0000-0000000000f6")
+)
+
+// CDP sends a Cisco's name without its domain; Sentinel may know it with
+// one, and an LLDP neighbour the other way round.
+func TestMatchDeviceByNameWithoutDomain(t *testing.T) {
+	devices := []Device{{ID: xID, Name: "core.corp.example", SysName: "core.corp.example"}, {ID: yID, Name: "edge"}}
+	if id, ok := MatchNeighborDevice(Neighbor{DeviceID: swID, SysName: "core"}, devices, nil); !ok || id != xID {
+		t.Errorf("core = %v %v, want core.corp.example", id, ok)
+	}
+	if id, ok := MatchNeighborDevice(Neighbor{DeviceID: swID, SysName: "edge.corp.example"}, devices, nil); !ok || id != yID {
+		t.Errorf("edge.corp.example = %v %v, want edge", id, ok)
+	}
+}
+
+func TestMatchDeviceShortNameAmbiguous(t *testing.T) {
+	devices := []Device{{ID: xID, Name: "Switch.a.example"}, {ID: yID, Name: "Switch.b.example"}}
+	if id, ok := MatchNeighborDevice(Neighbor{DeviceID: swID, SysName: "Switch"}, devices, nil); ok {
+		t.Errorf("Switch matched %v, want no match (two devices are Switch)", id)
+	}
+}
+
+// The reporting device neither matches itself nor makes a match ambiguous.
+func TestMatchDeviceShortNameNotSelf(t *testing.T) {
+	devices := []Device{{ID: xID, Name: "Switch.corp.example"}, {ID: zID, Name: "Switch.other.example"}}
+	n := Neighbor{DeviceID: xID, SysName: "Switch"}
+	if id, ok := MatchNeighborDevice(n, devices, nil); !ok || id != zID {
+		t.Errorf("Switch = %v %v, want Switch.other.example", id, ok)
+	}
+	if id, ok := MatchNeighborDevice(n, devices[:1], nil); ok {
+		t.Errorf("Switch matched %v, want no match (only the reporter is Switch)", id)
+	}
+}
+
+func TestMatchDeviceIPNameNotShortened(t *testing.T) {
+	devices := []Device{{ID: xID, Name: "10.99.255.1"}}
+	if id, ok := MatchNeighborDevice(Neighbor{DeviceID: swID, SysName: "10"}, devices, nil); ok {
+		t.Errorf("10 matched %v, want no match", id)
+	}
+}
+
 func TestMatchDeviceByChassisMAC(t *testing.T) {
 	n := Neighbor{DeviceID: swID, IfIndex: 51, ChassisID: "e4:38:83:20:f5:c6"}
 	if id, ok := MatchNeighborDevice(n, homeDevices(), homePorts()); !ok || id != gwID {

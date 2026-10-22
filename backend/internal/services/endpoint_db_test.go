@@ -387,3 +387,23 @@ func TestPlacementsForSwitchMAC(t *testing.T) {
 		t.Error("a MAC nobody saw was placed")
 	}
 }
+
+// CDP names the core without the domain Sentinel knows it by: the access
+// switch's port to it is still a link, so a device learned on both is
+// placed on the core's own port.
+func TestDBEndpointsCDPNameWithoutDomainIsLink(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	acc := seedDevice(t, db, "HQ", "10.0.0.2")
+	core := seedDeviceInSite(t, db, acc.SiteID, "10.0.0.3")
+	testdb.Exec(t, db, `UPDATE devices SET name = 'core.corp.example', sys_name = 'core.corp.example', device_type = 'switch' WHERE id = ?`, core)
+	testdb.Exec(t, db, `INSERT INTO l2.neighbors (device_id, if_index, chassis_id, protocol, sys_name) VALUES (?, 4, 'core.corp.example', 'cdp', 'core')`, acc.DeviceID)
+	const mac = "02:00:00:00:0c:01"
+	sight(t, db, acc.DeviceID, 4, mac)
+	sight(t, db, core, 9, mac)
+	sight(t, db, core, 9, "02:00:00:00:0c:02") // the core's port is the busier one
+	e := one(t)(newEndpoints(db, &fakeResolver{}).Search(ctx, admin(t, db), mac))
+	if e.How != "wired" || e.DeviceID == nil || *e.DeviceID != core || *e.IfIndex != 9 {
+		t.Errorf("placed %+v, want wired on the core's port 9", e)
+	}
+}

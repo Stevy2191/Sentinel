@@ -153,6 +153,21 @@ func TestDBPortRolesClear(t *testing.T) {
 	}
 }
 
+// CDP sends B's name without the domain Sentinel knows it by, and its port
+// in long form; the reason shows B's own short name for the port.
+func TestDBPortRolesCDPWithoutDomain(t *testing.T) {
+	db := testdb.Open(t)
+	a, b := rolesSite(t, db)
+	testdb.Exec(t, db, `UPDATE devices SET name = 'B.corp.example', sys_name = 'B.corp.example' WHERE id = ?`, b)
+	testdb.Exec(t, db, `UPDATE device_interfaces SET descr = 'GigabitEthernet1/0/50' WHERE device_id = ? AND if_index = 50`, b)
+	testdb.Exec(t, db, `INSERT INTO l2.neighbors (device_id, if_index, chassis_id, protocol, sys_name, port_id, last_seen)
+		VALUES (?, 49, 'B.corp.example', 'cdp', 'B', 'GigabitEthernet1/0/50', now())`, a)
+	NewPortRoleService(db).Apply(context.Background(), a)
+	if got, want := roleOf(t, db, a, 49), [3]string{"uplink", "auto", "Found by CDP: B.corp.example port 0/50"}; got != want {
+		t.Errorf("A port 49 = %v, want %v", got, want)
+	}
+}
+
 // A Cisco Port-channel (ifType 53) names its LAG as "lag 1" does.
 func TestDBPortRolesPortChannelName(t *testing.T) {
 	db := testdb.Open(t)

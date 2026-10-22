@@ -135,7 +135,7 @@ func better(a, b Peer) bool {
 
 func peerReason(p Peer) string {
 	if p.Protocol == "cdp" {
-		return fmt.Sprintf("Found by CDP: %s %s", p.DeviceName, p.PortText)
+		return fmt.Sprintf("Found by CDP: %s port %s", p.DeviceName, p.PortText)
 	}
 	return fmt.Sprintf("Found by LLDP: %s port %s", p.DeviceName, p.PortText)
 }

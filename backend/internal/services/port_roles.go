@@ -161,8 +161,9 @@ func (s *PortRoleService) ApplyErr(ctx context.Context, deviceID uuid.UUID) erro
 
 // peers matches the device's neighbours to the user's routers and
 // switches, anywhere in the instance (a cable can join two sites), with the
-// far port as a reason shows it: its faceplate label for LLDP, the port as
-// sent for CDP.
+// far port as a reason shows it: its faceplate label for LLDP, its ifName
+// for CDP (which sends the long form, "TenGigabitEthernet1/1/6"); the port
+// as sent when it isn't found.
 func (s *PortRoleService) peers(ctx context.Context, self uuid.UUID, neighbors []struct {
 	IfIndex                                                  int
 	Protocol, ChassisID, SysName, PortID, PortDescr, Address string
@@ -206,24 +207,26 @@ func (s *PortRoleService) peers(ctx context.Context, self uuid.UUID, neighbors [
 			continue
 		}
 		text := n.PortID
-		if n.Protocol != "cdp" {
-			if _, loaded := farPorts[far]; !loaded {
-				var rows []rolePortRow
-				if err := db.Raw(`SELECT `+rolePortColumns+` FROM device_interfaces WHERE device_id = ? AND present`, far).Scan(&rows).Error; err != nil {
-					return nil, fmt.Errorf("loading the neighbour's ports: %w", err)
-				}
-				list := make([]sitemap.Port, 0, len(rows))
-				for _, r := range rows {
-					list = append(list, r.sitemapPort())
-				}
-				farPorts[far] = list
+		if _, loaded := farPorts[far]; !loaded {
+			var rows []rolePortRow
+			if err := db.Raw(`SELECT `+rolePortColumns+` FROM device_interfaces WHERE device_id = ? AND present`, far).Scan(&rows).Error; err != nil {
+				return nil, fmt.Errorf("loading the neighbour's ports: %w", err)
 			}
-			numbering := portmon.NumberingFor(byID[far].SysDescr)
-			if ix := sitemap.MatchNeighborPort(sn, far, farPorts[far], numbering); ix > 0 {
-				for _, fp := range farPorts[far] {
-					if fp.IfIndex == ix {
-						text = numbering.Label(fp.Name, fp.Descr, ix)
-					}
+			list := make([]sitemap.Port, 0, len(rows))
+			for _, r := range rows {
+				list = append(list, r.sitemapPort())
+			}
+			farPorts[far] = list
+		}
+		numbering := portmon.NumberingFor(byID[far].SysDescr)
+		if ix := sitemap.MatchNeighborPort(sn, far, farPorts[far], numbering); ix > 0 {
+			for _, fp := range farPorts[far] {
+				switch {
+				case fp.IfIndex != ix:
+				case n.Protocol != "cdp":
+					text = numbering.Label(fp.Name, fp.Descr, ix)
+				case fp.Name != "":
+					text = fp.Name
 				}
 			}
 		}

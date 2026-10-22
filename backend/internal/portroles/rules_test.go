@@ -30,7 +30,7 @@ func TestDecideLLDPPeer(t *testing.T) {
 
 func TestDecideCDPPeer(t *testing.T) {
 	one(t, Input{Ports: []Port{port(1, "Gi1/0/1")}, Peers: []Peer{{IfIndex: 1, Protocol: "cdp", DeviceName: "LAB-C3850", PortText: "Gi1/0/1", LastSeen: now}}, Now: now},
-		Change{IfIndex: 1, Role: "uplink", Source: "auto", Reason: "Found by CDP: LAB-C3850 Gi1/0/1"})
+		Change{IfIndex: 1, Role: "uplink", Source: "auto", Reason: "Found by CDP: LAB-C3850 port Gi1/0/1"})
 }
 
 func TestDecideStalePeerIgnored(t *testing.T) {

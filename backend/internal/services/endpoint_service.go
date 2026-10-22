@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/Stevy2191/Sentinel/backend/internal/l2"
 	"github.com/Stevy2191/Sentinel/backend/internal/models"
 	"github.com/Stevy2191/Sentinel/backend/internal/portmon"
+	"github.com/Stevy2191/Sentinel/backend/internal/sitemap"
 )
 
 var (
@@ -161,8 +163,9 @@ type world struct {
 	dns       map[string]epDNS
 	names     map[string]string
 
-	byMAC  map[string]uuid.UUID // monitored devices by interface MAC
-	byName map[string]uuid.UUID // and by lower-case name and sysName
+	byMAC   map[string]uuid.UUID   // monitored devices by interface MAC
+	byName  map[string]uuid.UUID   // and by lower-case name and sysName
+	byShort map[string][]uuid.UUID // and by those without their domains (shared)
 
 	info     map[l2.PortKey]l2.PortInfo
 	apNames  map[l2.PortKey]string
@@ -247,8 +250,9 @@ func (w *world) portLabel(k l2.PortKey) string {
 	return portmon.NumberingFor(w.devices[k.Device].Descr).Label(p.Name, p.Descr, k.IfIndex)
 }
 
-// monitored finds the monitored device an LLDP neighbour is, by its chassis
-// MAC or its system name.
+// monitored finds the monitored device an LLDP or CDP neighbour is, by its
+// chassis MAC or its system name, else by that name without its domain when
+// one other device has it (CDP sends a Cisco's name bare).
 func (w *world) monitored(n l2Neighbor, self uuid.UUID) (epDevice, bool) {
 	if id, ok := w.byMAC[n.ChassisID]; ok && id != self {
 		return w.devices[id], true
@@ -256,13 +260,22 @@ func (w *world) monitored(n l2Neighbor, self uuid.UUID) (epDevice, bool) {
 	if id, ok := w.byName[strings.ToLower(strings.TrimSpace(n.SysName))]; ok && id != self {
 		return w.devices[id], true
 	}
+	var others []uuid.UUID
+	for _, id := range w.byShort[strings.ToLower(sitemap.ShortName(n.SysName))] {
+		if id != self {
+			others = append(others, id)
+		}
+	}
+	if len(others) == 1 {
+		return w.devices[others[0]], true
+	}
 	return epDevice{}, false
 }
 
 // place classes the ports and builds a record for every MAC seen.
 func (w *world) place() {
 	w.info, w.apNames, w.apDevice = map[l2.PortKey]l2.PortInfo{}, map[l2.PortKey]string{}, map[l2.PortKey]uuid.UUID{}
-	w.byMAC, w.byName = map[string]uuid.UUID{}, map[string]uuid.UUID{}
+	w.byMAC, w.byName, w.byShort = map[string]uuid.UUID{}, map[string]uuid.UUID{}, map[string][]uuid.UUID{}
 	for _, p := range w.ports {
 		if m, ok := l2.NormalizeMAC(p.MAC); ok {
 			w.byMAC[m] = p.DeviceID
@@ -272,6 +285,9 @@ func (w *world) place() {
 		for _, n := range []string{d.Name, d.SysName} {
 			if n = strings.ToLower(strings.TrimSpace(n)); n != "" {
 				w.byName[n] = d.ID
+				if s := sitemap.ShortName(n); !slices.Contains(w.byShort[s], d.ID) {
+					w.byShort[s] = append(w.byShort[s], d.ID)
+				}
 			}
 		}
 	}

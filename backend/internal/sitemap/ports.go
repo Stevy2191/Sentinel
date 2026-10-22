@@ -1,6 +1,7 @@
 package sitemap
 
 import (
+	"net"
 	"regexp"
 	"strconv"
 	"strings"
@@ -19,9 +20,24 @@ func physical(p Port) bool {
 	return portmon.IsPhysical(portmon.IfInfo{Name: p.Name, Descr: p.Descr, Type: p.IfType, ConnectorPresent: p.ConnectorPresent})
 }
 
+// ShortName is a name without its domain ("core.corp.example" gives "core"),
+// to match a neighbour that sends one form to a device known by the other:
+// CDP sends a Cisco's name bare. An IP address is left whole.
+func ShortName(s string) string {
+	s = strings.TrimSpace(s)
+	if net.ParseIP(s) != nil {
+		return s
+	}
+	if i := strings.IndexByte(s, '.'); i > 0 {
+		return s[:i]
+	}
+	return s
+}
+
 // MatchNeighborDevice finds the map device an LLDP or CDP neighbour is: by
 // its chassis ID among the devices' interface MACs, else by its system name
-// against a device's sysName or name, ignoring case, else by the address it
+// against a device's sysName or name, ignoring case, else by those names
+// without their domains when only one device has it, else by the address it
 // sent against the host Sentinel polls the device on. The device reporting
 // the neighbour never matches itself.
 func MatchNeighborDevice(n Neighbor, devices []Device, ports []Port) (uuid.UUID, bool) {
@@ -44,6 +60,15 @@ func MatchNeighborDevice(n Neighbor, devices []Device, ports []Port) (uuid.UUID,
 			if strings.EqualFold(strings.TrimSpace(d.SysName), name) || strings.EqualFold(strings.TrimSpace(d.Name), name) {
 				return d.ID, true
 			}
+		}
+		short, found, count := ShortName(name), uuid.Nil, 0
+		for _, d := range devices {
+			if d.ID != n.DeviceID && (strings.EqualFold(ShortName(d.SysName), short) || strings.EqualFold(ShortName(d.Name), short)) {
+				found, count = d.ID, count+1
+			}
+		}
+		if count == 1 {
+			return found, true
 		}
 	}
 	if addr := strings.TrimSpace(n.Address); addr != "" {
