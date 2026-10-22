@@ -458,6 +458,47 @@ func TestDBEndpointsPortChannelMACsBeyondLink(t *testing.T) {
 	}
 }
 
+// A port hearing both a monitored switch and a monitored AP (an unmanaged
+// switch that passes LLDP on) leads to the switch; the AP is beyond it, so
+// the MACs learned there aren't its wireless clients.
+func TestDBEndpointsMonitoredSwitchOutranksAP(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	s := seedDevice(t, db, "HQ", "10.0.0.2")
+	seedPort(t, db, s.DeviceID, 4, "0/4", "")
+	ap := seedDeviceInSite(t, db, s.SiteID, "10.0.0.40")
+	testdb.Exec(t, db, `UPDATE devices SET name = 'OfficeAP', device_type = 'access_point' WHERE id = ?`, ap)
+	dist := seedDeviceInSite(t, db, s.SiteID, "10.0.0.3")
+	testdb.Exec(t, db, `UPDATE devices SET name = 'dist', device_type = 'switch' WHERE id = ?`, dist)
+	neighbor(t, db, s.DeviceID, 4, "02:00:00:00:0f:01", "dist", 0)
+	neighbor(t, db, s.DeviceID, 4, "02:00:00:00:0f:02", "OfficeAP", 0)
+	sight(t, db, s.DeviceID, 4, "02:00:00:00:0f:31")
+	svc, v := newEndpoints(db, &fakeResolver{}), admin(t, db)
+	if e := one(t)(svc.Search(ctx, v, "02:00:00:00:0f:31")); e.How == "wireless" {
+		t.Errorf("placed as OfficeAP's wireless client, want beyond the link to dist: %+v", e)
+	}
+	view, err := svc.ForDevice(ctx, v, s.DeviceID)
+	testdb.Must(t, err)
+	if len(view.APs) != 0 {
+		t.Errorf("port 4 shows as an AP: %+v", view.APs)
+	}
+}
+
+// A LAG member that learns a monitored switch's own MAC is a link, so its
+// Port-channel is one too.
+func TestDBEndpointsPortChannelMemberLearnsSwitchMAC(t *testing.T) {
+	db := testdb.Open(t)
+	s := portChannel(t, db)
+	core := seedDeviceInSite(t, db, s.SiteID, "10.0.0.3")
+	testdb.Exec(t, db, `UPDATE devices SET device_type = 'switch' WHERE id = ?`, core)
+	testdb.Exec(t, db, `INSERT INTO device_interfaces (device_id, if_index, name, mac) VALUES (?, 1, '0/1', '78:8a:20:00:00:99')`, core)
+	sight(t, db, s.DeviceID, 61, "78:8a:20:00:00:99")
+	sight(t, db, s.DeviceID, 78, "02:00:00:00:0e:21")
+	if e := one(t)(newEndpoints(db, &fakeResolver{}).Search(context.Background(), admin(t, db), "02:00:00:00:0e:21")); e.How != "behind" {
+		t.Errorf("placed %s, want behind (beyond the Port-channel's link)", e.How)
+	}
+}
+
 // The member is a link only because a person said so.
 func TestDBEndpointsPortChannelUplinkMember(t *testing.T) {
 	db := testdb.Open(t)

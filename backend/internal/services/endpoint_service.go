@@ -278,17 +278,19 @@ func (w *world) monitored(n l2Neighbor, self uuid.UUID) (epDevice, bool) {
 }
 
 // portInfo is what's known of a port's far end: its link and role, and its
-// neighbours, any of which can be a monitored AP, switch or router. The
-// neighbour it's classed by is its latest LLDP one, else its latest CDP one;
-// CDP from several devices and no LLDP means a switch that speaks neither
-// is in between, so none of them is (SharedCDP).
-func (w *world) portInfo(k l2.PortKey) l2.PortInfo {
-	var info l2.PortInfo
+// neighbours, any of which can be a monitored AP, switch or router. A
+// monitored switch or router among them is the far end (an AP heard too is
+// beyond it); else the port is classed by its latest LLDP neighbour, else
+// its latest CDP one. CDP from several devices and no LLDP means a switch
+// that speaks neither is in between, so none of them is (SharedCDP).
+// apName and apDevice are what an AP port shows for its AP: the neighbour's
+// name, or the monitored AP's name and id for viewers of its own site.
+func (w *world) portInfo(k l2.PortKey) (info l2.PortInfo, apName string, apDevice uuid.UUID) {
 	if p, ok := w.ports[k]; ok {
 		info.LinkedTo = p.NeighborDeviceID != nil
 		info.Uplink = p.Role == models.PortRoleUplink || p.Role == models.PortRoleWAN
 	}
-	var latest, lldp *l2Neighbor
+	var latest, lldp, sw *l2Neighbor
 	cdp := map[string]bool{}
 	for i, n := range w.onPort[k] {
 		latest = &w.onPort[k][i]
@@ -302,12 +304,11 @@ func (w *world) portInfo(k l2.PortKey) l2.PortInfo {
 		case !ok:
 		case d.Type == models.DeviceTypeAccessPoint:
 			info.MonitoredAP = true
-			// Its name and page only for viewers of its own site.
 			if w.visible[d.SiteID] {
-				w.apNames[k], w.apDevice[k] = d.Name, d.ID
+				apName, apDevice = d.Name, d.ID
 			}
 		case d.Type == models.DeviceTypeSwitch || d.Type == models.DeviceTypeRouter:
-			info.MonitoredNeighbor = true
+			info.MonitoredNeighbor, sw = true, latest
 		}
 	}
 	n := lldp
@@ -315,13 +316,16 @@ func (w *world) portInfo(k l2.PortKey) l2.PortInfo {
 		n = latest
 	}
 	info.SharedCDP = lldp == nil && len(cdp) >= 2
+	if sw != nil {
+		n, info.MonitoredAP, apName, apDevice = sw, false, "", uuid.Nil
+	}
 	if n != nil {
 		info.Neighbor = &l2.Neighbor{LocalPort: n.IfIndex, ChassisID: n.ChassisID, PortID: n.PortID, PortDescr: n.PortDescr, SysName: n.SysName, Caps: l2.Caps(n.Caps)}
-		if _, named := w.apDevice[k]; !named {
-			w.apNames[k] = n.SysName
+		if apDevice == uuid.Nil {
+			apName = n.SysName
 		}
 	}
-	return info
+	return info, apName, apDevice
 }
 
 // unknownBeyond is a port with nothing known of its far end but, perhaps,
@@ -364,24 +368,13 @@ func (w *world) place() {
 		keys[k] = true
 	}
 	for k := range keys {
-		w.info[k] = w.portInfo(k)
-	}
-	// A LAG one of whose members is a link is a link too: the switch reports
-	// what it learned over the LAG on the aggregator, which has no neighbour
-	// of its own.
-	for k, p := range w.ports {
-		if p.LagIfIndex == nil || *p.LagIfIndex == 0 {
-			continue
+		info, name, ap := w.portInfo(k)
+		w.info[k] = info
+		if info.Neighbor != nil || name != "" {
+			w.apNames[k] = name
 		}
-		info, ok := w.info[k]
-		if !ok {
-			info = w.portInfo(k)
-		}
-		if l2.ClassifyPort(info, 0) == l2.PortLink {
-			agg := l2.PortKey{Device: k.Device, IfIndex: *p.LagIfIndex}
-			ai := w.info[agg]
-			ai.LAGLink = true
-			w.info[agg] = ai
+		if ap != uuid.Nil {
+			w.apDevice[k] = ap
 		}
 	}
 	// A port that learns a monitored switch's or router's own MAC is a link
@@ -395,6 +388,24 @@ func (w *world) place() {
 		info := w.info[k]
 		info.MonitoredNeighbor = true
 		w.info[k] = info
+	}
+	// A LAG one of whose members is a link (by any of the rules above) is a
+	// link too: the switch reports what it learned over the LAG on the
+	// aggregator, which has no neighbour of its own.
+	for k, p := range w.ports {
+		if p.LagIfIndex == nil || *p.LagIfIndex == 0 {
+			continue
+		}
+		info, ok := w.info[k]
+		if !ok {
+			info, _, _ = w.portInfo(k)
+		}
+		if l2.ClassifyPort(info, 0) == l2.PortLink {
+			agg := l2.PortKey{Device: k.Device, IfIndex: *p.LagIfIndex}
+			ai := w.info[agg]
+			ai.LAGLink = true
+			w.info[agg] = ai
+		}
 	}
 
 	w.records = map[string]*Endpoint{}
