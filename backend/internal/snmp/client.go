@@ -24,13 +24,27 @@ type Credential struct {
 	PrivPassword string
 }
 
-// Target is one device to talk to.
+// Target is one device to talk to. Context is the SNMPv3 context name, ""
+// for the default one.
 type Target struct {
 	Host       string
 	Port       uint16
 	Credential Credential
 	Timeout    time.Duration
 	Retries    int
+	Context    string
+}
+
+// InVLAN is the target in one VLAN's context, where a Cisco answers that
+// VLAN's bridge tables: the community "community@vlan" on v1/v2c, the
+// context "vlan-N" on v3.
+func (t Target) InVLAN(vlan int) Target {
+	if t.Credential.Version == "3" {
+		t.Context = fmt.Sprintf("vlan-%d", vlan)
+	} else {
+		t.Credential.Community = fmt.Sprintf("%s@%d", t.Credential.Community, vlan)
+	}
+	return t
 }
 
 // PDU is one variable binding. OID has no leading dot. Value is []byte,
@@ -97,6 +111,7 @@ func buildGoSNMP(t Target) (*gosnmp.GoSNMP, error) {
 		Retries:        t.Retries,
 		MaxOids:        gosnmp.MaxOids,
 		MaxRepetitions: 25,
+		ContextName:    t.Context,
 	}
 	c := t.Credential
 	switch c.Version {

@@ -59,6 +59,34 @@ func TestBuildGoSNMP(t *testing.T) {
 	}
 }
 
+// A Cisco answers one VLAN's bridge tables in that VLAN's context:
+// community@vlan on v1/v2c, the context "vlan-N" on v3.
+func TestTargetInVLAN(t *testing.T) {
+	v2 := Target{Host: "10.0.0.2", Port: 161, Timeout: 3 * time.Second, Credential: Credential{Version: "2c", Community: "pub"}}
+	got := v2.InVLAN(20)
+	if got.Credential.Community != "pub@20" || got.Context != "" || got.Host != v2.Host || got.Port != v2.Port || got.Timeout != v2.Timeout {
+		t.Errorf("v2c in VLAN 20 = %+v", got)
+	}
+	if v2.Credential.Community != "pub" {
+		t.Errorf("the original's community became %q", v2.Credential.Community)
+	}
+	v3 := Target{Host: "10.0.0.2", Credential: Credential{Version: "3", Username: "u", Community: ""}}
+	if got := v3.InVLAN(20); got.Context != "vlan-20" || got.Credential.Community != "" || got.Credential.Username != "u" {
+		t.Errorf("v3 in VLAN 20 = %+v", got)
+	}
+}
+
+func TestBuildGoSNMPContextName(t *testing.T) {
+	v3 := Target{Host: "10.0.0.2", Context: "vlan-20", Credential: Credential{Version: "3", Username: "mon", AuthProtocol: "none", PrivProtocol: "none"}}
+	if g, err := buildGoSNMP(v3); err != nil || g.ContextName != "vlan-20" {
+		t.Fatalf("v3: context %q, %v", g.ContextName, err)
+	}
+	v2 := Target{Host: "10.0.0.2", Credential: Credential{Version: "2c", Community: "pub"}}
+	if g, err := buildGoSNMP(v2); err != nil || g.ContextName != "" {
+		t.Fatalf("v2c: context %q, %v", g.ContextName, err)
+	}
+}
+
 func TestToPDU(t *testing.T) {
 	for _, tc := range []struct {
 		in   gosnmp.SnmpPDU
